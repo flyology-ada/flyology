@@ -11,6 +11,9 @@ package body Flyology.Shared_Memory_Native is
    O_NOFOLLOW : constant C.int := 16#0002_0000#;
    FD_CLOEXEC : constant C.int := 1;
    O_ACCMODE  : constant C.int := 3;
+   SOL_SOCKET : constant C.int := 1;
+   SO_TYPE    : constant C.int := 3;
+   SO_ACCEPTCONN : constant C.int := 30;
    S_IFMT     : constant Interfaces.Unsigned_32 := 8#170000#;
    S_IFREG    : constant Interfaces.Unsigned_32 := 8#100000#;
 
@@ -210,11 +213,25 @@ package body Flyology.Shared_Memory_Native is
       Local : aliased C.int;
       Length : aliased C.unsigned := C.unsigned (C.int'Size / 8);
       Result : constant C.int :=
-        C_Getsockopt (Descriptor, 1, 3, Local'Address, Length'Access);
+        C_Getsockopt
+          (Descriptor, SOL_SOCKET, SO_TYPE, Local'Address, Length'Access);
    begin
       Value := Local;
       return Result;
    end Socket_Type;
+   function Socket_Accepting
+     (Descriptor : C.int; Value : out C.int) return C.int
+   is
+      Local  : aliased C.int;
+      Length : aliased C.unsigned := C.unsigned (C.int'Size / 8);
+      Result : constant C.int :=
+        C_Getsockopt
+          (Descriptor, SOL_SOCKET, SO_ACCEPTCONN,
+           Local'Address, Length'Access);
+   begin
+      Value := Local;
+      return Result;
+   end Socket_Accepting;
    function Local_Socket_Family
      (Descriptor : C.int; Family : out C.int) return C.int
    is

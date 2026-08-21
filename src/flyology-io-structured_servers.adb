@@ -51,6 +51,7 @@ package body Flyology.IO.Structured_Servers is
          end if;
          Serve_Started := True;
          Phase := Policy.Phase_After_Begin (Phase);
+         Accepting_Marked := False;
          Workers_Done := 0;
          Expected_Workers := Expected;
       end Begin_Serve;
@@ -59,6 +60,7 @@ package body Flyology.IO.Structured_Servers is
       begin
          New_Request := Policy.Stop_Is_New (Phase);
          Phase := Policy.Phase_After_Stop (Phase);
+         Accepting_Marked := False;
       end Request_Stop;
 
       entry Await_Stop when Phase = Stop_Requested is
@@ -68,6 +70,12 @@ package body Flyology.IO.Structured_Servers is
 
       function Stop_Was_Requested return Boolean is
         (Policy.Stop_Was_Requested (Phase));
+
+      procedure Mark_Accepting is
+      begin
+         Accepting_Marked :=
+           Policy.Accepting_After_Worker_Start (Phase);
+      end Mark_Accepting;
 
       procedure Handler_Started is
       begin
@@ -124,6 +132,7 @@ package body Flyology.IO.Structured_Servers is
             end if;
          end if;
          Phase := Policy.Phase_After_Stop (Phase);
+         Accepting_Marked := False;
       end Record_Failure;
 
       procedure Mark_Forced is
@@ -140,6 +149,7 @@ package body Flyology.IO.Structured_Servers is
               "structured server finished with live handlers";
          end if;
          Phase := Finished;
+         Accepting_Marked := False;
          Workers_Done := 0;
          Expected_Workers := 0;
       end Finish_Serve;
@@ -149,6 +159,7 @@ package body Flyology.IO.Structured_Servers is
          --  The task scope has joined before Serve's outer cleanup guard
          --  finalizes, so no worker can publish after this reset.
          Phase := Finished;
+         Accepting_Marked := False;
          Active := 0;
          Workers_Done := 0;
          Expected_Workers := 0;
@@ -164,6 +175,8 @@ package body Flyology.IO.Structured_Servers is
       function Read_Snapshot return Snapshot is
         (Running               =>
            Policy.Snapshot_Running (Serve_Started, Phase),
+         Accepting             =>
+           Policy.Snapshot_Accepting (Accepting_Marked, Phase),
          Shutdown_Requested    => Policy.Snapshot_Shutdown (Phase),
          Forced_Cancellation   => Forced,
          Active_Handlers       => Active,
@@ -504,6 +517,7 @@ package body Flyology.IO.Structured_Servers is
                for Index in Workers'Range loop
                   Workers (Index).Start;
                end loop;
+               Item.State.Mark_Accepting;
                Test_Hooks.Barrier (3);
                if Item.State.Stop_Was_Requested then
                   Stop_Accepting;

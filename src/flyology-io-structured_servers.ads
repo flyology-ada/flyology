@@ -54,6 +54,8 @@ package Flyology.IO.Structured_Servers is
 
    --  Atomic lifecycle snapshot returned by Current.
    --  @field Running Serve is active or draining
+   --  @field Accepting Listener ownership and handler activation completed,
+   --     and shutdown has not stopped admission
    --  @field Shutdown_Requested Admission has been stopped
    --  @field Forced_Cancellation Drain timeout required handler cancellation
    --  @field Active_Handlers Handlers currently processing a connection
@@ -67,6 +69,7 @@ package Flyology.IO.Structured_Servers is
    --  @field First_Failure Origin of the first failure
    type Snapshot is record
       Running              : Boolean;
+      Accepting            : Boolean;
       Shutdown_Requested   : Boolean;
       Forced_Cancellation  : Boolean;
       Active_Handlers      : Natural;
@@ -158,6 +161,8 @@ private
       function Stop_Was_Requested return Boolean;
 
       procedure Handler_Started;
+      --  @exclude Internal readiness publication.
+      procedure Mark_Accepting;
       procedure Handler_Completed
         (Cancelled : Boolean;
          Failed    : Boolean);
@@ -175,6 +180,7 @@ private
    private
       Phase                 : Run_Phase := Idle;
       Serve_Started         : Boolean := False;
+      Accepting_Marked      : Boolean := False;
       Active                : Natural := 0;
       Accepted              : Natural := 0;
       Completed             : Natural := 0;

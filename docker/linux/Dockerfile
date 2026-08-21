@@ -35,6 +35,11 @@ ARG GPRBUILD_VERSION=26.0.1
 WORKDIR /toolchain
 RUN alr --non-interactive toolchain \
       --select gnat_native=${GNAT_VERSION} gprbuild=${GPRBUILD_VERSION}
+RUN alr index --reset-community \
+    && alr index \
+      --add=git+https://github.com/flyology-ada/alire-index.git \
+      --name=flyology \
+      --before=community
 
 WORKDIR /workspace
 COPY . .

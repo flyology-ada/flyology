@@ -52,6 +52,17 @@ is
    is
      (Serve_Started and then Phase in Serving | Stop_Requested);
 
+   function Accepting_After_Worker_Start
+     (Phase : Run_Phase) return Boolean
+   is
+     (Phase = Serving);
+
+   function Snapshot_Accepting
+     (Was_Marked : Boolean;
+      Phase      : Run_Phase) return Boolean
+   is
+     (Was_Marked and then Phase = Serving);
+
    function Snapshot_Shutdown (Phase : Run_Phase) return Boolean is
      (Phase in Stop_Requested | Finished);
 end Flyology.Structured_Server_Policy;

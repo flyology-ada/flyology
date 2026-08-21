@@ -97,6 +97,8 @@ private package Flyology.Shared_Memory_Native with Preelaborate is
      (Target : System.Address; Length : C.size_t) return C.int;
 
    function Socket_Type (Descriptor : C.int; Value : out C.int) return C.int;
+   function Socket_Accepting
+     (Descriptor : C.int; Value : out C.int) return C.int;
    function Local_Socket_Family
      (Descriptor : C.int; Family : out C.int) return C.int;
    function Peer_Socket_Family

@@ -8,7 +8,10 @@
  * This file exists where a direct fixed-signature Ada import would have to
  * reproduce target-dependent C semantics: struct stat and sockaddr field
  * layouts, variadic fcntl commands, the header-selected Linux memfd syscall,
- * and cmsghdr alignment and traversal expressed by the CMSG_* macros.
+ * cmsghdr alignment and traversal expressed by the CMSG_* macros, and the
+ * Darwin proc_pidfdinfo socket layout needed because XNU does not expose its
+ * SO_ACCEPTCONN state through getsockopt. Linux imports getsockopt directly
+ * from Ada and does not retain a C wrapper for that fixed-signature call.
  *
  * The ancillary receive leaf is consequently longer than the other wrappers.
  * It makes exactly one recvmsg call, bounds every kernel-supplied control
@@ -38,6 +41,8 @@
 #if defined(__linux__)
 #include <linux/memfd.h>
 #include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <libproc.h>
 #endif
 
 #ifndef MSG_CMSG_CLOEXEC
@@ -161,6 +166,22 @@ int flyology_shm_getpeername_family(int descriptor, int *family)
         ? (int)address.ss_family : -1;
     return result;
 }
+
+#if defined(__APPLE__)
+int flyology_shm_socket_accepting(int descriptor, int *accepting)
+{
+    struct socket_fdinfo info;
+    int amount = proc_pidfdinfo(getpid(), descriptor,
+                                PROC_PIDFDSOCKETINFO,
+                                &info, sizeof(info));
+    if (amount != (int)sizeof(info)) {
+        if (amount >= 0) errno = EIO;
+        return -1;
+    }
+    *accepting = (info.psi.soi_options & SO_ACCEPTCONN) != 0;
+    return 0;
+}
+#endif
 
 long flyology_shm_send_fd_once(int socket_fd, int descriptor)
 {
