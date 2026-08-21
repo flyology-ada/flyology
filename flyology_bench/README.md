@@ -27,7 +27,8 @@ The initial API provides:
   configurable coverage and resample count;
 - Tukey mild and severe outlier diagnostics without silently dropping samples;
 - optional measured timestamp-cost subtraction, disabled by default;
-- persisted raw-sample baselines with compatibility fingerprints;
+- atomically published raw-sample baselines with exact compatibility
+  fingerprints and CI regression gates;
 - host/toolchain metadata and optional strict Linux or advisory Darwin thread
   placement;
 - selectable wall-time, CPU-time, RSS, fault, context-switch, storage-I/O,
@@ -773,13 +774,76 @@ is worse than a failed one.
 The maintained example enables the interference watch only when
 `FLYOLOGY_BENCH_INTERFERENCE=1`, mirroring how it gates the preflight.
 
-Wall-clock timing is the default for Flyology waits and cross-task work.
-`Flyology_Bench.Baselines` persists raw samples and refuses a regression
-comparison when the clock backend or environment fingerprint differs. Its
-default fingerprint contains OS, architecture, and GNAT version; callers should
-add CPU policy, compiler switches, revision, and other locally relevant state.
-Direct paired `Compare` is preferable whenever both implementations can run in
-one process.
+## Saved baseline gates
+
+`Flyology_Bench.Baselines.Save` records an explicitly named baseline artifact.
+The version 2 artifact keeps the exact benchmark identity, environment
+fingerprint, clock backend, independent-comparison contract, and every retained
+time sample. It has a checksum and commit footer. `Load` rejects missing
+fields, duplicate fields and samples, unsupported versions, malformed or
+out-of-range values, incomplete samples, trailing data, and checksum failures
+with a specific `Baseline_Format_Error` message.
+
+`Save` writes a unique temporary artifact in the destination directory. It
+flushes the complete file before an atomic POSIX `rename` publishes it. A
+process failure before publication cannot truncate the earlier baseline. A
+filesystem's power-loss guarantee for the containing directory remains a host
+property. Record mode is a separate call: `Evaluate_Gate` only reads the
+artifact and never updates it, including after a rejected run.
+
+```ada
+Flyology_Bench.Baselines.Save
+  ("build/integer_mix.baseline",
+   "integer_mix",
+   Result,
+   Fingerprint => Full_Environment_Identity);
+
+Gate := Flyology_Bench.Baselines.Evaluate_Gate
+  ("build/integer_mix.baseline",
+   "integer_mix",
+   Current,
+   Fingerprint => Full_Environment_Identity,
+   Policy => Flyology_Bench.Baselines.Fail_Closed_Gate_Policy);
+
+Flyology_Bench.Reporters.Put_Gate_JSON (Gate);
+if Flyology_Bench.Baselines.Rejected (Gate) then
+   Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+end if;
+```
+
+The gate uses the existing independent circular-block bootstrap of
+arithmetic-mean ratios. A regression rejects only when the complete 95%
+confidence interval establishes a slowdown beyond
+`Practical_Threshold_Percent`. Improvement, practical equivalence, and
+inconclusive results remain distinct. `Permissive_Gate_Policy` reports missing,
+invalid, incompatible, and inconclusive results without rejecting.
+`Fail_Closed_Gate_Policy` rejects all four conditions. A caller can derive a
+policy that fails closed for the artifact and environment but reports an
+inconclusive statistical result.
+
+Benchmark name, environment fingerprint, and clock backend comparisons are
+exact. The gate does not compare samples after any mismatch. The default
+fingerprint contains OS, architecture, and GNAT version. Add CPU policy,
+compiler switches, revision, and all other locally relevant state. Direct
+paired `Compare` remains preferable whenever both implementations can run in
+one process because it preserves the collection schedule's pairing.
+
+The maintained example separates recording from checking and maps rejection to
+`Ada.Command_Line.Failure`:
+
+```sh
+./examples/bin/baseline_gate record build/integer_mix.baseline
+./examples/bin/baseline_gate check  build/integer_mix.baseline
+FLYOLOGY_BENCH_OUTPUT=csv  ./examples/bin/baseline_gate check build/integer_mix.baseline
+FLYOLOGY_BENCH_OUTPUT=json ./examples/bin/baseline_gate check build/integer_mix.baseline
+```
+
+The console, CSV, and newline-delimited JSON gate reporters retain the status,
+policy decision, compatibility issue, confidence interval, threshold, and
+reason. Aggregation across a suite can use `Rejected` for the final process
+status while counting each `Gate_Status` separately. A baseline gate compares
+one named reference with one current run. Longer histories, dashboards,
+commit-range runners, and change-point detection are separate facilities.
 
 `Flyology_Bench.Host_Control.Pin_Current_Thread` is the low-level primitive
 under `Config.Placement`. Placement cannot by itself control frequency
