@@ -2,6 +2,7 @@ with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.File_Watch_Native;
 with Flyology.File_Watch_Test_Hooks;
+with Flyology.Operations.Drivers;
 with Flyology.Time_Math;
 
 package body Flyology.IO.File_Watches is
@@ -11,18 +12,19 @@ package body Flyology.IO.File_Watches is
 
    use type Ada.Real_Time.Time;
    use type Interfaces.C.int;
+   use type Flyology.Operations.Terminal_Outcome;
    use type Native.Handle;
 
    procedure Free is new Ada.Unchecked_Deallocation
      (Watch_Record, Watch_Record_Access);
 
    function Take_Pending
-     (Item : in out Watcher; Result : out File_Event) return Boolean;
-   procedure Pump (Item : in out Watcher);
+     (Item : in out Watcher'Class; Result : out File_Event) return Boolean;
+   procedure Pump (Item : in out Watcher'Class);
    procedure Release_All (Item : in out Watcher; Success : out Boolean);
 
    function Take_Pending
-     (Item : in out Watcher; Result : out File_Event) return Boolean
+     (Item : in out Watcher'Class; Result : out File_Event) return Boolean
    is
       Position : Watch_Record_Access := Item.First;
    begin
@@ -38,7 +40,7 @@ package body Flyology.IO.File_Watches is
       return False;
    end Take_Pending;
 
-   procedure Pump (Item : in out Watcher) is
+   procedure Pump (Item : in out Watcher'Class) is
       Events : Native.Raw_Event_Array (1 .. Native_Batch_Capacity);
       Count  : Natural;
    begin
@@ -93,6 +95,145 @@ package body Flyology.IO.File_Watches is
          end if;
       end loop;
    end Pump;
+
+   procedure Start_Scoped_Next
+     (Item      : not null access Watcher'Class;
+      Timeout   : Duration;
+      Operation : in out Next_Operation)
+   is
+   begin
+      Operation.Item := Item.all'Unchecked_Access;
+      Operation.Result := (Watch => No_Watch, Changes => No_Changes);
+      Operation.Outcome := Timed_Out;
+      Operation.Failure := No_Failure;
+      Flyology.Operations.Drivers.Start (Operation);
+
+      if not Is_Open (Item.all) or else Item.Count = 0 then
+         Operation.Failure := State_Failure;
+         Flyology.Operations.Drivers.Complete
+           (Operation, Flyology.Operations.Failed);
+      elsif Take_Pending (Item.all, Operation.Result) then
+         Operation.Outcome := Ready;
+         Flyology.Operations.Drivers.Complete
+           (Operation, Flyology.Operations.Succeeded);
+      elsif Timeout = 0.0 then
+         Flyology.Operations.Drivers.Complete
+           (Operation, Flyology.Operations.Succeeded);
+      else
+         if Timeout > 0.0 then
+            Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
+         end if;
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Operation, Item.Native_Source, False);
+      end if;
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
+   end Start_Scoped_Next;
+
+   procedure Next
+     (Item      : not null access Watcher'Class;
+      Timeout   : Duration := Infinite;
+      Operation : in out Next_Operation)
+   is
+   begin
+      Start_Scoped_Next (Item, Timeout, Operation);
+   end Next;
+
+   function Next
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Watcher'Class;
+      Timeout : Duration := Infinite) return Next_Operation
+   is
+   begin
+      return Result : Next_Operation (Set) do
+         Start_Scoped_Next (Item, Timeout, Result);
+      end return;
+   end Next;
+
+   overriding procedure Drive
+     (Item  : in out Next_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      case Event is
+         when Flyology.Operations.Start_Operation =>
+            raise Program_Error with "watcher operation was already started";
+         when Flyology.Operations.Source_Ready =>
+            declare
+               Available : Boolean;
+            begin
+               begin
+                  Pump (Item.Item.all);
+                  Available := Take_Pending (Item.Item.all, Item.Result);
+                  if not Available then
+                     Flyology.Operations.Drivers.Arm_Readiness
+                       (Item, Item.Item.Native_Source, False);
+                  end if;
+               exception
+                  when others =>
+                     Item.Failure := Drain_Failure;
+                     Flyology.Operations.Drivers.Complete
+                       (Item, Flyology.Operations.Failed);
+                     return;
+               end;
+               if Available then
+                  Item.Outcome := Ready;
+                  Flyology.Operations.Drivers.Complete
+                    (Item, Flyology.Operations.Succeeded);
+               end if;
+            end;
+         when Flyology.Operations.Deadline_Reached =>
+            Item.Outcome := Timed_Out;
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+         when Flyology.Operations.Dependency_Changed =>
+            raise Program_Error with
+              "watcher operation received a dependency event";
+      end case;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Next_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   procedure Finish
+     (Operation : in out Next_Operation;
+      Result    : out File_Event;
+      Outcome   : out Wait_Outcome)
+   is
+      Terminal : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Saved_Result : constant File_Event := Operation.Result;
+      Saved_Outcome : constant Wait_Outcome := Operation.Outcome;
+      Failure : constant Watch_Failure := Operation.Failure;
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Terminal is
+         when Flyology.Operations.Succeeded =>
+            Result := Saved_Result;
+            Outcome := Saved_Outcome;
+         when Flyology.Operations.Cancelled =>
+            raise Flyology.Operations.Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            case Failure is
+               when State_Failure =>
+                  raise Device_Error with
+                    "cannot wait on a closed or empty file watcher";
+               when Drain_Failure =>
+                  raise Device_Error with "file watcher event draining failed";
+               when No_Failure =>
+                  raise Device_Error with "file watcher operation failed";
+            end case;
+      end case;
+   end Finish;
 
    procedure Open (Item : in out Watcher) is
    begin

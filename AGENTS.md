@@ -150,7 +150,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
-  arrays and ownership-transferring unique buffers. A
+  arrays and ownership-transferring unique buffers, plus nonrecursive file
+  watcher `Next`. A
   successful scoped accept owns the accepted descriptor until typed `Finish`
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
@@ -160,6 +161,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   operation and one lazily created completion wake source per set. Transient
   kernel submission pressure queues those nodes without failing the operation;
   queued cancellation terminalizes without submitting the borrowed buffer.
+  Scoped watcher waits borrow the serialized watcher and use its existing
+  readiness descriptor; interruption composes as a separate readiness
+  operation. Recursive watcher reconciliation remains caller-lane metadata
+  work and is not yet an operation-producing overload.
   Keep native synchronous file calls direct; do not imply that the scoped file
   overload is concurrent on a native task until a native completion engine
   exists.

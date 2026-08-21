@@ -1,4 +1,5 @@
 with Ada.Exceptions;
+with Ada.Directories;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
@@ -6,6 +7,7 @@ with Flyology;
 with Flyology.Buffers;
 with Flyology.IO;
 with Flyology.IO.Files;
+with Flyology.IO.File_Watches;
 with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
@@ -37,6 +39,7 @@ procedure Operations_Smoke is
    --  Files.Write_At (array)                    Successes (2)           lightweight
    --  Files.Read_At (owned buffer)              Successes (2)           lightweight
    --  Files.Write_At (owned buffer)             Successes (2)           lightweight
+   --  File_Watches.Next                         Success, All             both
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
@@ -44,6 +47,9 @@ procedure Operations_Smoke is
    use type Flyology.Execution_Model;
    use type Flyology.IO.Sockets.Address_Family;
    use type Flyology.IO.Sockets.Port;
+   use type Flyology.IO.File_Watches.Change_Set;
+   use type Flyology.IO.File_Watches.Watch_Id;
+   use type Flyology.IO.Wait_Outcome;
    use type Flyology.Operations.Terminal_Outcome;
    use type Interfaces.C.int;
 
@@ -1257,6 +1263,148 @@ procedure Operations_Smoke is
             raise;
       end;
       Check (Passed, "Internet connect operation overload gates failed");
+
+      declare
+         package Watches renames Flyology.IO.File_Watches;
+         Path : constant String :=
+           (if Model = Flyology.Lightweight_Task
+            then "/tmp/flyology_operations_watch_lightweight.dat"
+            else "/tmp/flyology_operations_watch_native.dat");
+         Watcher : aliased Watches.Watcher (1);
+         Id : Watches.Watch_Id;
+         Text : Ada.Text_IO.File_Type;
+      begin
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         Ada.Text_IO.Create (Text, Ada.Text_IO.Out_File, Path);
+         Ada.Text_IO.Put (Text, "before");
+         Ada.Text_IO.Close (Text);
+         Watches.Open (Watcher);
+         Id := Watches.Add (Watcher, Path);
+
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (3);
+            Change : aliased Watches.Next_Operation :=
+              Watches.Next (Set'Access, Watcher'Access, 1.0);
+            Alarm : Flyology.IO.Timers.Timer_Operation :=
+              Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
+            Ready : Flyology.Operations.Gate_Operation :=
+              Flyology.Operations.Wait_For_Success
+                (Set'Access, [Ref (Change)]);
+            Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Event : Watches.File_Event;
+            Outcome : Flyology.IO.Wait_Outcome;
+         begin
+            Ada.Text_IO.Open (Text, Ada.Text_IO.Append_File, Path);
+            Ada.Text_IO.Put (Text, " after");
+            Ada.Text_IO.Close (Text);
+            while not Flyology.Operations.Is_Terminal (Ready) loop
+               Flyology.Operations.Wait_Some (Set, Batch);
+            end loop;
+            Flyology.Operations.Finish (Ready, Matches);
+            Watches.Finish (Change, Event, Outcome);
+            Passed := Passed
+              and then Matches.Count = 1
+              and then Outcome = Flyology.IO.Ready
+              and then Event.Watch = Id
+              and then Event.Changes /= Watches.No_Changes;
+            Flyology.Operations.Cancel (Alarm);
+            begin
+               Flyology.IO.Timers.Finish (Alarm);
+            exception
+               when Flyology.Operations.Operation_Cancelled =>
+                  null;
+            end;
+         end;
+
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Probe : Watches.Next_Operation (Set'Access);
+            Event : Watches.File_Event;
+            Outcome : Flyology.IO.Wait_Outcome;
+            Cancelled : Boolean := False;
+         begin
+            Watches.Next (Watcher'Access, 0.0, Probe);
+            Flyology.Operations.Wait_All (Set);
+            Watches.Finish (Probe, Event, Outcome);
+            Passed := Passed and then Outcome = Flyology.IO.Timed_Out;
+
+            Watches.Next (Watcher'Access, Flyology.IO.Infinite, Probe);
+            Flyology.Operations.Cancel (Probe);
+            Flyology.Operations.Wait_All (Set);
+            begin
+               Watches.Finish (Probe, Event, Outcome);
+            exception
+               when Flyology.Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+
+         --  Pending finalization removes the descriptor source and releases
+         --  the slot before the same set starts a replacement operation.
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Event : Watches.File_Event;
+            Outcome : Flyology.IO.Wait_Outcome;
+         begin
+            declare
+               Abandoned : Watches.Next_Operation :=
+                 Watches.Next
+                   (Set'Access, Watcher'Access, Flyology.IO.Infinite);
+               pragma Unreferenced (Abandoned);
+            begin
+               null;
+            end;
+            declare
+               Replacement : Watches.Next_Operation :=
+                 Watches.Next (Set'Access, Watcher'Access, 0.0);
+            begin
+               Flyology.Operations.Wait_All (Set);
+               Watches.Finish (Replacement, Event, Outcome);
+               Passed := Passed and then Outcome = Flyology.IO.Timed_Out;
+            end;
+         end;
+
+         Watches.Close (Watcher);
+
+         --  Invalid watcher state is retained as a failed member and raised
+         --  only by the provider-specific Finish operation.
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Failed : Watches.Next_Operation :=
+              Watches.Next (Set'Access, Watcher'Access, 0.0);
+            Event : Watches.File_Event;
+            Outcome : Flyology.IO.Wait_Outcome;
+            Raised : Boolean := False;
+         begin
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed
+              and then Flyology.Operations.Outcome (Failed) =
+                Flyology.Operations.Failed;
+            begin
+               Watches.Finish (Failed, Event, Outcome);
+            exception
+               when Flyology.IO.Device_Error =>
+                  Raised := True;
+            end;
+            Passed := Passed and then Raised;
+         end;
+         Ada.Directories.Delete_File (Path);
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (Text) then
+               Ada.Text_IO.Close (Text);
+            end if;
+            Watches.Close (Watcher);
+            if Ada.Directories.Exists (Path) then
+               Ada.Directories.Delete_File (Path);
+            end if;
+            raise;
+      end;
+      Check (Passed, "file watcher operation overload gates failed");
 
       if Model = Flyology.Lightweight_Task then
          declare
