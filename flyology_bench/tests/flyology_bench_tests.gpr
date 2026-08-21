@@ -8,7 +8,8 @@ project Flyology_Bench_Tests is
       "flyology_bench-internal_statistics_smoke.adb",
       "custom_metrics_smoke.adb",
       "baseline_gate_smoke.adb",
-      "sweeps_smoke.adb");
+      "sweeps_smoke.adb",
+      "suite_smoke.adb");
    for Object_Dir use "obj";
    for Exec_Dir use "bin";
    for Create_Missing_Dirs use "True";
