@@ -4217,6 +4217,19 @@ package body Flyology_Bench is
      (Result : Measurement) return Custom_Metric_Count is
      (if Result.Custom_Data.Data = null then 0 else Result.Custom_Data.Data.Count);
 
+   function Primary_Timing_Axis
+     (Result : Measurement) return Custom_Metric_Count is
+   begin
+      for Position in 1 .. Custom_Metric_Total (Result) loop
+         if Custom_Metric_Is_Primary_Timing
+              (Result, Custom_Metric_Index (Position))
+         then
+            return Custom_Metric_Count (Position);
+         end if;
+      end loop;
+      return 0;
+   end Primary_Timing_Axis;
+
    function Custom_Metric_Name
      (Result : Measurement; Axis : Custom_Metric_Index) return String is
    begin

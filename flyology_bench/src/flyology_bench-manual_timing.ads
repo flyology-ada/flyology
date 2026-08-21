@@ -4,7 +4,8 @@
 --  Static adapter for a caller-completed alternate timing source. The batch
 --  must synchronize all measured work before returning Elapsed; asynchronous
 --  submission latency is not device execution time. Harness wall time remains
---  the calibration, budget, interference, and progress clock.
+--  the calibration, budget, interference, and progress clock. Each Measure
+--  invocation owns its adapter state, so one generic instance is reentrant.
 generic
    Source_Name : String;
    Unit : String;
@@ -19,8 +20,10 @@ generic
 package Flyology_Bench.Manual_Timing is
    --  Measure batches using equal harness-wall calibration. The completed
    --  alternate elapsed value is retained as custom axis "primary_time" and
-   --  divided by the exact logical-operation count. No wall timer cost is
-   --  subtracted from it.
+   --  divided by the exact logical-operation count. Its reported resolution
+   --  is divided by the same count. Existing custom axes and their provider
+   --  remain active; the timer consumes one free registry slot. No wall timer
+   --  cost is subtracted from it.
    procedure Measure
      (Config : Configuration := Default_Configuration;
       Result : out Measurement);

@@ -485,7 +485,12 @@ same contract to adjacent paired batches. Both use equal harness-wall slices;
 there is currently no equal-alternate-time calibration mode. Compact console
 output places the declared primary timer first with its source and resolution,
 then labels harness wall time as calibration; paired output identifies which
-axes-table verdict belongs to the primary timer.
+axes-table verdict belongs to the primary timer. Each adapter invocation owns
+its mutable bridge state and may run concurrently through the same generic
+instance. A configured custom provider remains active and the timer consumes
+one free registry slot. Reported resolution is divided by the exact retained
+iteration denominator; paired schemas retain separate reference and contender
+resolutions when equal-wall calibration selects different counts.
 
 Use the versioned `Put_Extended_Metrics_CSV` and
 `Put_Extended_Comparison_Metrics_CSV` schemas, or the corresponding NDJSON

@@ -220,10 +220,10 @@ package Flyology_Bench is
       Unsupported_Event,
       Counter_Resources_Unavailable,
       Probe_Failed,
+      Metric_Partially_Collected,
       Counter_Reset,
       Invalid_Value,
-      Conversion_Overflow,
-      Metric_Partially_Collected);
+      Conversion_Overflow);
 
    --  Attribution boundary of a metric.
    --  @enum Batch_Wall_Clock Monotonic elapsed time surrounding the batch.
@@ -1168,6 +1168,11 @@ package Flyology_Bench is
    --  @param Result Completed measurement.
    --  @return Registered custom axis count.
    function Custom_Metric_Total
+     (Result : Measurement) return Custom_Metric_Count;
+   --  Locate the declared primary alternate timer.
+   --  @param Result Completed measurement.
+   --  @return Its one-based custom axis, or zero when none was declared.
+   function Primary_Timing_Axis
      (Result : Measurement) return Custom_Metric_Count;
    --  Return a custom axis's stable identity.
    --  @param Result Completed measurement.
