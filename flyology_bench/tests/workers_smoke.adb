@@ -34,6 +34,14 @@ procedure Workers_Smoke is
    pragma Import
      (C, PID_Exists, "flyology_bench_worker_test_pid_exists");
 
+   function Ignore_SIGCHLD return C.int;
+   pragma Import
+     (C, Ignore_SIGCHLD, "flyology_bench_worker_test_ignore_sigchld");
+
+   function Restore_SIGCHLD return C.int;
+   pragma Import
+     (C, Restore_SIGCHLD, "flyology_bench_worker_test_restore_sigchld");
+
    Fixture : constant String :=
      Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_WORKER_FIXTURE");
    Test_Directory : constant String :=
@@ -179,6 +187,11 @@ begin
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
              "mismatched measurement seed was accepted");
       W.Run
+        (Fixture, "wrong-metrics", W.Ordinary_Measurement, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "measurement metric set mismatch was accepted");
+      W.Run
         (Fixture, "wrong-counts", W.Paired_Comparison, Base,
          Default_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
@@ -276,6 +289,34 @@ begin
              "aborted worker parent did not finish cleanup");
       Check (PID_Exists (Child_Pid) = 0,
              "parent interruption left its worker alive or unreaped");
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Env : constant W.Environment := W.Create_Environment;
+      Restored : C.int;
+   begin
+      Check (Ignore_SIGCHLD = 0,
+             "cannot install the external-reaper fixture");
+      begin
+         W.Run
+           (Fixture, "ordinary", W.Ordinary_Measurement, Base,
+            Default_Launch, Env, Results);
+      exception
+         when others =>
+            Restored := Restore_SIGCHLD;
+            Check (Restored = 0,
+                   "cannot restore SIGCHLD after worker exception");
+            raise;
+      end;
+      Check (Restore_SIGCHLD = 0,
+             "cannot restore SIGCHLD after the external-reaper fixture");
+      Check (W.Outcome (Results (1)) = W.Parent_IO_Failure,
+             "externally reaped worker was not classified as parent I/O");
+      Check
+        (Ada.Strings.Fixed.Index (W.Reason (Results (1)), "external reaper")
+           /= 0,
+         "externally reaped worker did not report lost ownership");
    end;
 
    declare
