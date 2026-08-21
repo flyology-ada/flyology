@@ -1543,6 +1543,110 @@ entries are ready together the lowest index wins. The fixed limit of 32 keeps
 per-fiber scheduler storage predictable and is intended for protocol engines,
 not as a replacement for ownership-aware connection APIs.
 
+`Flyology.Operations` adds a bounded scoped-operation layer without replacing
+the synchronous API. A caller declares one `Completion_Set` and limited
+operation objects that refer to it. Additive operation-producing overloads
+cover raw descriptor readiness, monotonic timers, raw stream-socket receive and
+send operations, buffer-owning socket operations, and completion-driven
+positional file reads and writes. Initiation does not create a helper task,
+per-operation stack, callback thread, or steady-state heap allocation.
+
+`Wait_Some` returns all newly terminal operations observed in a batch; its
+counted overload and `Wait_At_Least` wait for a requested number of terminal
+operations. `Wait_All` waits until none remain pending. `Wait_For_Success`
+waits for one successful operation, while `Wait_For_Successes` accepts a
+success count. Both success gates return when their threshold is reached or can
+no longer be reached.
+
+The same wait names also have function overloads that return a limited
+`Gate_Operation`. A gate consumes one set slot and is otherwise an ordinary
+operation: it can be observed by a later gate, appears in completion batches,
+has a terminal outcome, and is consumed with `Finish`. `Wait_Some` and
+`Wait_All` gates count every terminal member outcome. `Wait_For_Success` and
+`Wait_For_Successes` gates count only successful members and fail as soon as
+their threshold becomes impossible. Gate construction takes fixed
+generation-stamped value references to already-started operations or gates in
+the same set. Those references contain no Ada access value, do not extend an
+operation or set lifetime, and naturally make the construction graph acyclic.
+A member result remains retained until every observing gate terminalizes.
+Cancelling a gate detaches only that observer; it does not cancel its members.
+
+Every started operation should normally reach exactly one provider-specific
+`Finish`. That call releases the set slot, commits outputs such as `Last` or a
+unique buffer's readable length, and raises the provider's retained exception.
+Gate `Finish` returns the member identities in its stable scheduler snapshot.
+If gate `Finish` raises `Operation_Cancelled`, its `out` batch is undefined, as
+for any Ada `out` parameter on exceptional return. Explicit `Consume` discards
+a terminal provider result when no outputs or exception are wanted. Leaving an
+operation's scope without either call is safe but exceptional: finalization
+cancels and drains pending work, discards any retained result, and releases the
+slot. A terminal result otherwise continues occupying capacity.
+
+Cancellation terminalizes the current readiness and timer providers
+immediately. Socket providers run one nonblocking step on the owner task after
+each readiness notification. A submitted file operation uses a caller-owned
+runtime request node and does not become terminal until the kernel has
+relinquished its borrowed array. File operations currently require a
+lightweight owner; the existing synchronous file procedures remain lane-neutral.
+The completion set creates one shared wake pipe lazily when its first external
+file completion is started, rather than one descriptor per operation.
+
+Fresh operations are limited build-in-place function results. `Rearm` takes an
+existing consumed readiness or timer operation as `in out`; it is separate so
+an initiating call never silently reads an `out` object's prior state. Array and
+socket actuals passed through explicit access parameters must outlive the
+operation and remain untouched while it is pending. The unique-buffer socket
+overloads retain the owning handle but enter its data callback only for an
+immediate nonblocking socket step, so a callback view never escapes. Scope exit
+requests cancellation and drains providers with kernel-owned buffers before
+releasing the operation slot.
+
+Provider libraries implement an owner-stack driver, not an `Arm` function in
+their user API. Their operation-producing overload constructs a typed root
+operation and calls `Flyology.Operations.Drivers.Start`. Each `Drive`
+invocation performs a bounded immediate step, then arms readiness or a
+deadline, waits for its external completion source, or publishes a terminal
+outcome. `Drive` never calls a blocking synchronous API and never runs on the
+scheduler stack. `Request_Cancellation` removes observational waits immediately
+or starts a cancel-and-drain transition for retained kernel input.
+
+The eager operation-producing overloads are roots, not the provider composition
+ABI. Starting a socket operation in an HTTP operation's caller-owned set would
+create a second peer slot and report the socket completion independently. A
+provider therefore factors its implementation into an embeddable state record
+with a bounded immediate `Step`. The standalone socket operation owns that
+record, and an HTTP operation can instead own the same record beside its parser,
+framing state, and transfer cursors. Only the outermost operation registers a
+completion-set slot and rearms the source requested by the step. This flattens
+composition without a helper task, nested wait, second stack, or duplicate I/O
+policy.
+
+The executable provider-by-gate matrix is in
+[`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,
+lifecycle, generation, capacity, and threshold cases are in
+[`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb).
+
+| Scoped operation-producing overload | First-class gate coverage | Lanes |
+| --- | --- | --- |
+| descriptor `Wait` | counted `Wait_Some`, `Wait_All` | native and lightweight |
+| `Timers.Sleep_For` | nested some/success/all | native and lightweight |
+| `Timers.Sleep_Until` | nested some/success/all | native and lightweight |
+| socket array `Receive` | success quorum | native and lightweight |
+| socket array `Receive_Exactly` | all and failed success | native and lightweight |
+| socket array `Send` | success | native and lightweight |
+| socket array `Send_All` | all | native and lightweight |
+| unique-buffer socket `Receive` | all | native and lightweight |
+| unique-buffer socket `Send` | all | native and lightweight |
+| unique-buffer socket `Send_All` | all | native and lightweight |
+| positional file `Read_At` | all | lightweight; empty and rejection cases native |
+| positional file `Write_At` | success quorum | lightweight; empty and rejection cases native |
+
+The same programs cover cancellation, timeout, EOF, zero-length operations,
+descriptor-direction fan-out, failed success thresholds, terminal-before-gate
+construction, nested and fanned-out gates, stale and cross-set references,
+slot reuse, implicit finalization, initiation rollback, ascending stable
+batches, the 32-slot dependency-mask boundary, and one-shot `Finish` behavior.
+
 Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
 exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path
 returns ordinary would-block and interrupted results to Ada instead of raising
@@ -2425,7 +2529,7 @@ end;
 A snapshot reports thread startup state and whether the group is dedicated or
 reserved; total and thread-pinned members; members in ready, waiting, running,
 migrating, and finished states;
-active timer, descriptor, interrupt-enabled, and file waits; file submissions queued behind kernel
+active timer, descriptor, interrupt-enabled, and file-operation waits; file submissions queued behind kernel
 backpressure; timer-only dormancy candidates and their usable stack bytes; and
 lifetime cold-stack state and advice outcomes; dispatch, poll-batch,
 delivered-event, GNARL-wakeup, and migration-in/out counters; and the loop's
@@ -2435,7 +2539,9 @@ kernel-owned buffer are outside its stack. Wait categories overlap: for
 example, a
 descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
-has a cancellation or shutdown wake source. `Pending_File_Submissions` is the subset of `File_Waits` not yet
+has a cancellation or shutdown wake source. `File_Waits` counts operations,
+including several scoped file operations owned by one task.
+`Pending_File_Submissions` is the subset of synchronous file waits not yet
 accepted by the bounded kernel queue.
 
 `Uptime_Nanoseconds` and `Idle_Nanoseconds` describe the group's event loop

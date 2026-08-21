@@ -1,5 +1,6 @@
 with GNAT.OS_Lib;
 with System;
+with System.OS_Constants;
 
 package body Flyology.Wake_Sources is
    package C renames Interfaces.C;
@@ -133,7 +134,39 @@ package body Flyology.Wake_Sources is
       end loop;
    end Consume;
 
+   procedure Consume_All (Item : in out Source) is
+      type Byte_Array is array (Positive range <>) of C.unsigned_char;
+      Buffer : aliased Byte_Array (1 .. 256);
+      Result : C.long;
+      Consumed : Boolean := False;
+   begin
+      if Item.Read_End < 0 then
+         raise Program_Error with "cannot consume absent wake source";
+      end if;
+      loop
+         Result := Read
+           (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
+         if Result > 0 then
+            Consumed := True;
+         elsif Result = 0 then
+            raise Program_Error with "cannot consume wake source";
+         elsif GNAT.OS_Lib.Errno = 4 then
+            null;
+         elsif GNAT.OS_Lib.Errno = System.OS_Constants.EAGAIN then
+            exit;
+         else
+            raise Program_Error with "cannot consume wake source";
+         end if;
+      end loop;
+      if not Consumed then
+         raise Program_Error with "cannot consume empty wake source";
+      end if;
+   end Consume_All;
+
    function Descriptor (Item : Source) return C.int is (Item.Read_End);
+
+   function Signal_Descriptor (Item : Source) return C.int is
+     (Item.Write_End);
 
    procedure Release (Item : in out Source) is
       Ignored : C.int;

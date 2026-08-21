@@ -1,4 +1,5 @@
 with Interfaces.C;
+with Flyology.Operations;
 
 --  Supplies readiness primitives shared by lightweight and native tasks.
 --
@@ -49,6 +50,20 @@ package Flyology.IO with Preelaborate is
    --  Caller-indexed set passed to Wait_Any.
    type Wait_Request_Array is array (Positive range <>) of Wait_Request;
 
+   --  Bounded list of caller indexes that became ready in one wait. Only
+   --  Indexes (1 .. Count) are defined. Indexes are reported in ascending
+   --  caller-index order.
+   type Wait_Index_Array is array (Positive range <>) of Positive;
+   --  Batch of caller indexes observed ready by one Wait_Some call.
+   --  @field Capacity Maximum number of indexes in the batch
+   --  @field Count Number of defined entries in Indexes
+   --  @field Indexes Ready indexes from the caller's request array
+   type Wait_Batch (Capacity : Natural) is record
+      Count   : Natural := 0;
+      Indexes : Wait_Index_Array (1 .. Capacity) :=
+        (others => Positive'First);
+   end record;
+
    --  Maximum number of descriptors in one allocation-free Wait_Any call.
    Max_Wait_Requests : constant := 32;
 
@@ -85,6 +100,23 @@ package Flyology.IO with Preelaborate is
       Timeout  : Duration := Infinite) return Natural
      with Pre => Requests'Length <= Max_Wait_Requests;
 
+   --  Wait until at least one request is ready, then report the requests
+   --  observed ready by the terminal zero-time probe. A readiness event that
+   --  disappears before that probe is still reported. Empty input and timeout
+   --  return an empty batch. Completed.Capacity must equal Requests'Length.
+   --  Duplicate requests remain distinct caller indexes.
+   --  @param Requests At most Max_Wait_Requests readiness requests
+   --  @param Completed Ready caller indexes
+   --  @param Timeout Deadline interval in seconds
+   --  @exception Device_Error A descriptor is invalid or polling fails
+   procedure Wait_Some
+     (Requests  : Wait_Request_Array;
+      Completed : out Wait_Batch;
+      Timeout   : Duration := Infinite)
+     with Pre =>
+       Requests'Length <= Max_Wait_Requests
+       and then Completed.Capacity = Requests'Length;
+
    --  Wait for FD or any readable interrupt source. Interrupt
    --  descriptors are neither read nor closed. Timeout and lane behavior
    --  match Wait; one deadline spans native EINTR retries.
@@ -101,5 +133,56 @@ package Flyology.IO with Preelaborate is
       Timeout     : Duration := Infinite;
       Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
      with Pre => Interrupts'Length < Max_Wait_Requests;
+
+   --  Scoped readiness operation associated with one completion set. Calling
+   --  the operation-producing Wait overload below records the request without
+   --  waiting. The completion set must outlive the operation.
+   type Readiness_Operation is
+     new Flyology.Operations.Operation with private;
+
+   --  Construct and start one readiness operation in place.
+   --  @param Set Completion set that owns the operation slot
+   --  @param FD Valid descriptor to observe
+   --  @param Condition Requested readiness condition
+   --  @return Started limited readiness operation
+   function Wait
+     (Set       : not null access Flyology.Operations.Completion_Set'Class;
+      FD        : Descriptor;
+      Condition : Wait_Kind) return Readiness_Operation;
+
+   --  Restart a previously consumed readiness operation.
+   --  @param FD Valid descriptor to observe
+   --  @param Condition Requested readiness condition
+   --  @param Operation Previously consumed operation state
+   procedure Rearm
+     (FD        : Descriptor;
+      Condition : Wait_Kind;
+      Operation : in out Readiness_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal readiness operation. Cancellation raises the common
+   --  scoped-operation cancellation exception.
+   --  @param Operation Terminal readiness operation to consume
+   --  @exception Device_Error The readiness provider failed
+   procedure Finish (Operation : in out Readiness_Operation)
+     with Pre => Flyology.Operations.Is_Terminal (Operation);
+
+private
+   type Readiness_Operation is
+     new Flyology.Operations.Operation with null record;
+
+   --  @exclude
+   --  @param Item Readiness operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Readiness_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Readiness operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Readiness_Operation);
 
 end Flyology.IO;

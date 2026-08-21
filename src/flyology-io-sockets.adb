@@ -2,11 +2,13 @@ with Ada.Real_Time;
 with Ada.Strings;
 with Ada.Strings.Fixed;
 with Flyology.Socket_Policy;
+with Flyology.Operations.Drivers;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with GNAT.OS_Lib;
 with System;
 with System.Atomic_Primitives;
+with System.Storage_Elements;
 
 package body Flyology.IO.Sockets is
 
@@ -16,7 +18,11 @@ package body Flyology.IO.Sockets is
    use type Interfaces.C.unsigned;
    use type Interfaces.C.unsigned_char;
    use type Flyology.Socket_Policy.Error_Kind;
+   use type Flyology.Socket_Policy.IO_Error_Action;
+   use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Terminal_Outcome;
    use type System.Address;
+   use System.Storage_Elements;
 
    package Atomics renames System.Atomic_Primitives;
    use type Atomics.uint32;
@@ -2100,6 +2106,400 @@ package body Flyology.IO.Sockets is
    begin
       Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
    end Send_All;
+
+   procedure Start_Scoped
+     (Item        : in out Socket_Operation'Class;
+      Kind        : Scoped_IO_Kind;
+      Socket      : not null access Socket_Type;
+      Array_Item  : access Ada.Streams.Stream_Element_Array;
+      Buffer_Item : access Flyology.Buffers.Unique_Buffer;
+      Timeout     : Duration)
+   is
+   begin
+      Prepare (Socket.all);
+      Item.Kind := Kind;
+      Item.Socket := Socket.all'Unchecked_Access;
+      Item.Array_Item :=
+        (if Array_Item = null
+         then null
+         else Array_Item.all'Unchecked_Access);
+      Item.Buffer_Item :=
+        (if Buffer_Item = null
+         then null
+         else Buffer_Item.all'Unchecked_Access);
+      Item.Cursor :=
+        (if Array_Item = null then 1 else Array_Item.all'First);
+      Item.Transferred := 0;
+      Item.Error_Code := 0;
+      Item.Failure := No_Failure;
+      Flyology.Operations.Drivers.Start (Item);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Item),
+         Flyology.Operations.Start_Operation);
+   end Start_Scoped;
+
+   overriding procedure Drive
+     (Item  : in out Socket_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      procedure Fail
+        (Reason : Scoped_Failure;
+         Error  : Interfaces.C.int := 0)
+      is
+      begin
+         Item.Failure := Reason;
+         Item.Error_Code := Error;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      end Fail;
+
+      procedure Attempt
+        (Data_First : Ada.Streams.Stream_Element_Offset;
+         Data_Last  : Ada.Streams.Stream_Element_Offset;
+         Address    : System.Address)
+      is
+         Sending : constant Boolean :=
+           Item.Kind in Send_One | Send_Complete |
+             Buffer_Send_One | Buffer_Send_Complete;
+         Complete_All : constant Boolean :=
+           Item.Kind in Receive_Exact | Send_Complete |
+             Buffer_Send_Complete;
+         First : constant Ada.Streams.Stream_Element_Offset :=
+           (if Complete_All then Item.Cursor else Data_First);
+         Count : Natural;
+         Error : aliased Interfaces.C.int := 0;
+         Result : Interfaces.C.long;
+         Result_Address : System.Address;
+      begin
+         if First > Data_Last then
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+            return;
+         end if;
+         Count := Natural (Data_Last - First + 1);
+         Result_Address := Address
+           + System.Storage_Elements.Storage_Offset
+               (First - Data_First);
+         loop
+            if Sending then
+               Result := C_Send
+                 (Item.Socket.Value,
+                  Result_Address,
+                  Interfaces.C.size_t (Count),
+                  Error'Access);
+            else
+               Result := C_Receive
+                 (Item.Socket.Value,
+                  Result_Address,
+                  Interfaces.C.size_t (Count),
+                  Error'Access);
+            end if;
+            exit when Result >= 0
+              or else Flyology.Socket_Policy.Classify_IO_Error
+                (Policy_Error_Kind (Error)) /=
+                  Flyology.Socket_Policy.Retry_Operation;
+         end loop;
+
+         if Result < 0 then
+            case Flyology.Socket_Policy.Classify_IO_Error
+              (Policy_Error_Kind (Error))
+            is
+               when Flyology.Socket_Policy.Wait_For_Ready =>
+                  Flyology.Operations.Drivers.Arm_Readiness
+                    (Item, Item.Socket.Value, Sending);
+               when Flyology.Socket_Policy.Retry_Operation =>
+                  raise Program_Error with
+                    "socket driver retained an interrupted result";
+               when Flyology.Socket_Policy.Fail_Operation =>
+                  Fail (Socket_Failure, Error);
+            end case;
+            return;
+         end if;
+
+         if Result > 0 then
+            Item.Transferred := Item.Transferred + Natural (Result);
+         end if;
+         if not Complete_All then
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+         elsif Result = 0 then
+            Fail
+              ((if Sending
+                then No_Progress_Failure
+                else Peer_Closed_Failure));
+         else
+            Item.Cursor := First
+              + Ada.Streams.Stream_Element_Offset (Result);
+            if Item.Cursor > Data_Last then
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Succeeded);
+            else
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Item.Socket.Value, Sending);
+            end if;
+         end if;
+      end Attempt;
+
+      procedure Borrow_Writable
+        (Data   : in out Ada.Streams.Stream_Element_Array;
+         Length : in out Natural)
+      is
+         pragma Unreferenced (Length);
+      begin
+         Attempt
+           (Data'First,
+            Data'Last,
+            (if Data'Length = 0
+             then System.Null_Address
+             else Data (Data'First)'Address));
+      end Borrow_Writable;
+
+      procedure Borrow_Readable
+        (Data : Ada.Streams.Stream_Element_Array)
+      is
+      begin
+         Attempt
+           (Data'First,
+            Data'Last,
+            (if Data'Length = 0
+             then System.Null_Address
+             else Data (Data'First)'Address));
+      end Borrow_Readable;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Fail (Deadline_Failure);
+      elsif Item.Array_Item /= null then
+         Attempt
+           (Item.Array_Item.all'First,
+            Item.Array_Item.all'Last,
+            (if Item.Array_Item.all'Length = 0
+             then System.Null_Address
+             else Item.Array_Item.all
+               (Item.Array_Item.all'First)'Address));
+      elsif Item.Buffer_Item /= null then
+         case Item.Kind is
+            when Buffer_Receive_One =>
+               Flyology.Buffers.With_Writable_Data
+                 (Item.Buffer_Item.all, Borrow_Writable'Access);
+            when Buffer_Send_One | Buffer_Send_Complete =>
+               Flyology.Buffers.With_Readable_Data
+                 (Item.Buffer_Item.all, Borrow_Readable'Access);
+            when others =>
+               raise Program_Error with "invalid socket buffer operation";
+         end case;
+      else
+         raise Program_Error with "socket operation has no buffer";
+      end if;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Socket_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Operation
+   is
+   begin
+      return Result : Receive_Operation (Set) do
+         Start_Scoped
+           (Result, Receive_One, Socket, Item, null, Timeout);
+      end return;
+   end Receive;
+
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Exactly_Operation
+   is
+   begin
+      return Result : Receive_Exactly_Operation (Set) do
+         Start_Scoped
+           (Result, Receive_Exact, Socket, Item, null, Timeout);
+      end return;
+   end Receive_Exactly;
+
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_Operation
+   is
+   begin
+      return Result : Send_Operation (Set) do
+         Start_Scoped (Result, Send_One, Socket, Item, null, Timeout);
+      end return;
+   end Send;
+
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_All_Operation
+   is
+   begin
+      return Result : Send_All_Operation (Set) do
+         Start_Scoped
+           (Result, Send_Complete, Socket, Item, null, Timeout);
+      end return;
+   end Send_All;
+
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Receive_Operation
+   is
+   begin
+      return Result : Buffer_Receive_Operation (Set) do
+         Start_Scoped
+           (Result, Buffer_Receive_One, Socket, null, Item, Timeout);
+      end return;
+   end Receive;
+
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_Operation
+   is
+   begin
+      return Result : Buffer_Send_Operation (Set) do
+         Start_Scoped
+           (Result, Buffer_Send_One, Socket, null, Item, Timeout);
+      end return;
+   end Send;
+
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_All_Operation
+   is
+   begin
+      return Result : Buffer_Send_All_Operation (Set) do
+         Start_Scoped
+           (Result, Buffer_Send_Complete, Socket, null, Item, Timeout);
+      end return;
+   end Send_All;
+
+   procedure Finish_Common
+     (Operation : in out Socket_Operation'Class)
+   is
+      Outcome : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Scoped_Failure := Operation.Failure;
+      Error   : constant Interfaces.C.int := Operation.Error_Code;
+      Sending : constant Boolean :=
+        Operation.Kind in Send_One | Send_Complete |
+          Buffer_Send_One | Buffer_Send_Complete;
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Outcome is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Flyology.Operations.Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            case Failure is
+               when Deadline_Failure =>
+                  raise Timeout_Error with "socket operation timed out";
+               when Peer_Closed_Failure =>
+                  raise Device_Error with
+                    "socket closed while receiving";
+               when No_Progress_Failure =>
+                  raise Device_Error with
+                    "socket closed while sending";
+               when Socket_Failure =>
+                  Raise_Error ((if Sending then "send" else "recv"), Error);
+               when No_Failure =>
+                  raise Device_Error with "socket operation failed";
+            end case;
+      end case;
+   end Finish_Common;
+
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+   begin
+      Last := Operation.Array_Item.all'First - 1;
+      if Operation.Transferred > 0 then
+         Last := Operation.Array_Item.all'First
+           + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
+      end if;
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Receive_Exactly_Operation) is
+   begin
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Send_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+   begin
+      Last := Operation.Array_Item.all'First - 1;
+      if Operation.Transferred > 0 then
+         Last := Operation.Array_Item.all'First
+           + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
+      end if;
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Send_All_Operation) is
+   begin
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Buffer_Receive_Operation;
+      Received  : out Natural)
+   is
+      procedure Commit
+        (Data   : in out Ada.Streams.Stream_Element_Array;
+         Length : in out Natural)
+      is
+         pragma Unreferenced (Data);
+      begin
+         Length := Operation.Transferred;
+      end Commit;
+   begin
+      Received := Operation.Transferred;
+      if Flyology.Operations.Outcome (Operation) =
+        Flyology.Operations.Succeeded
+      then
+         Flyology.Buffers.With_Writable_Data
+           (Operation.Buffer_Item.all, Commit'Access);
+      end if;
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Buffer_Send_Operation;
+      Sent      : out Natural)
+   is
+   begin
+      Sent := Operation.Transferred;
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Buffer_Send_All_Operation) is
+   begin
+      Finish_Common (Operation);
+   end Finish;
 
    procedure Accept_Internal
      (Server     : Socket_Type;

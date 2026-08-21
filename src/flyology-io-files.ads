@@ -1,7 +1,9 @@
 with Ada.Streams;
 with Flyology.Buffers;
 with Flyology.Cancellation;
+with Flyology.Operations;
 with Interfaces.C;
+private with System;
 
 --  Provides positional file I/O with lane-specific blocking behavior.
 --
@@ -36,6 +38,71 @@ package Flyology.IO.Files is
    type Open_Mode is (Read_Only, Write_Only, Read_Write);
    --  Nonnegative byte position used by positional reads and writes.
    type File_Offset is range 0 .. Interfaces.C.long_long'Last;
+
+   --  Common limited base for completion-driven positional file operations.
+   --  Concrete operations borrow an aliased array until Finish consumes the
+   --  terminal result. Scoped file operations currently require a lightweight
+   --  owner; the existing synchronous overloads remain available in both
+   --  lanes.
+   type File_Operation is
+     abstract new Flyology.Operations.Operation with private;
+   --  Scoped completion-driven positional read.
+   type Read_Operation is new File_Operation with private;
+   --  Scoped completion-driven positional write.
+   type Write_Operation is new File_Operation with private;
+
+   --  Start one completion-driven positional read without parking the owner.
+   --  Set, File, and Item must outlive the returned operation. Item is
+   --  exclusively borrowed until Finish or finalization drains cancellation.
+   --  @param Set Completion set that owns the operation slot
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline; negative means none
+   --  @return Started limited read operation
+   function Read_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Flyology.IO.Infinite) return Read_Operation;
+
+   --  Start one completion-driven positional write without parking the owner.
+   --  A terminal cancellation does not roll back bytes already written.
+   --  Set, File, and Item must outlive the returned operation, and Item must
+   --  not be changed until Finish or finalization drains cancellation.
+   --  @param Set Completion set that owns the operation slot
+   --  @param File Open descriptor permitting writes
+   --  @param Offset Starting byte position
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline; negative means none
+   --  @return Started limited write operation
+   function Write_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Flyology.IO.Infinite) return Write_Operation;
+
+   --  Consume a terminal positional read and publish its Last value.
+   --  @param Operation Terminal read operation
+   --  @param Last Last element read, or Item'First - 1 at end of file
+   --  @exception Device_Error Submission or completion failed
+   --  @exception Operation_Cancelled Cancellation reached terminal state
+   --  @exception Timeout_Error Deadline cancellation reached terminal state
+   procedure Finish
+     (Operation : in out Read_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume a terminal positional write and publish its Last value.
+   --  @param Operation Terminal write operation
+   --  @param Last Last element written, or Item'First - 1 when none
+   --  @exception Device_Error Submission or completion failed
+   --  @exception Operation_Cancelled Cancellation reached terminal state
+   --  @exception Timeout_Error Deadline cancellation reached terminal state
+   procedure Finish
+     (Operation : in out Write_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
 
    --  Open Path directly on the calling lane. Create adds the platform create
    --  flag and Truncate truncates an existing file. Truncate is invalid with
@@ -197,4 +264,57 @@ package Flyology.IO.Files is
 private
    type File_Descriptor is new Interfaces.C.int;
    Invalid_File : constant File_Descriptor := -1;
+
+   Async_File_Node_Version : constant Interfaces.C.unsigned := 1;
+   Async_File_Unused       : constant Interfaces.C.int := 0;
+   Async_File_Submitted    : constant Interfaces.C.int := 1;
+   Async_File_Cancelling   : constant Interfaces.C.int := 2;
+   Async_File_Terminal     : constant Interfaces.C.int := 3;
+
+   type Async_File_Node is record
+      Version          : Interfaces.C.unsigned := Async_File_Node_Version;
+      State            : Interfaces.C.int := Async_File_Unused with Atomic;
+      Owner            : System.Address := System.Null_Address;
+      Descriptor       : Interfaces.C.int := Interfaces.C.int (-1);
+      Buffer           : System.Address := System.Null_Address;
+      Length           : Interfaces.C.size_t := 0;
+      Offset           : Interfaces.C.long_long := 0;
+      For_Write        : Interfaces.C.int := 0;
+      Signal_FD        : Interfaces.C.int := Interfaces.C.int (-1);
+      Result           : Interfaces.C.long_long := 0;
+      Error_Code       : Interfaces.C.int := 0;
+      Cancelled        : Interfaces.C.int := 0;
+      Cancel_Requested : Interfaces.C.int := 0;
+   end record with Convention => C;
+
+   type Scoped_File_Failure is
+     (No_Failure,
+      Submission_Failure,
+      Completion_Failure,
+      Deadline_Failure,
+      Wrong_Lane_Failure);
+
+   type File_Operation is
+     abstract new Flyology.Operations.Operation with record
+      Node        : aliased Async_File_Node;
+      Buffer_First : Ada.Streams.Stream_Element_Offset := 1;
+      Buffer_Length : Natural := 0;
+      Failure     : Scoped_File_Failure := No_Failure;
+      Timed_Out   : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item File operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out File_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item File operation to cancel and drain
+   overriding procedure Request_Cancellation
+     (Item : in out File_Operation);
+
+   type Read_Operation is new File_Operation with null record;
+   type Write_Operation is new File_Operation with null record;
 end Flyology.IO.Files;

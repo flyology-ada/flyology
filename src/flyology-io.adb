@@ -1,6 +1,7 @@
 with GNAT.OS_Lib;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
+with Flyology.Operations.Drivers;
 with System.OS_Constants;
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_IO_Testing;
@@ -10,6 +11,7 @@ package body Flyology.IO is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type Flyology.Operations.Driver_Event;
    use type C.short;
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
    use type Interfaces.Integer_64;
@@ -287,6 +289,75 @@ package body Flyology.IO is
       Timeout  : Duration := Infinite) return Natural is
      (Wait_Any_Internal (Requests, Timeout, False));
 
+   procedure Wait_Some
+     (Requests  : Wait_Request_Array;
+      Completed : out Wait_Batch;
+      Timeout   : Duration := Infinite)
+   is
+      Selected : Natural;
+   begin
+      Completed.Count := 0;
+      Completed.Indexes := (others => Positive'First);
+      if Requests'Length = 0 then
+         return;
+      end if;
+
+      Selected := Wait_Any_Internal (Requests, Timeout, False);
+      if Selected = 0 then
+         return;
+      end if;
+
+      declare
+         Poll_Items : Poll_Descriptor_Array (1 .. Requests'Length);
+         Ready      : array (Requests'Range) of Boolean := (others => False);
+         Position   : Positive := Poll_Items'First;
+         Result     : C.int;
+      begin
+         Ready (Selected) := True;
+         for Index in Requests'Range loop
+            if Requests (Index).FD < 0 then
+               raise Device_Error with "invalid descriptor";
+            end if;
+            Poll_Items (Position) :=
+              (FD              => Requests (Index).FD,
+               Events          =>
+                 (if Requests (Index).Condition = For_Read
+                  then POLLIN else POLLOUT),
+               Returned_Events => 0);
+            Position := Position + 1;
+         end loop;
+
+         Result := Poll
+           (Poll_Items'Address, C.unsigned (Poll_Items'Length), 0);
+         if Result < 0
+           and then C.int (GNAT.OS_Lib.Errno) /=
+             C.int (System.OS_Constants.EINTR)
+         then
+            raise Device_Error with "readiness batch probe failed";
+         elsif Result > 0 then
+            Position := Poll_Items'First;
+            for Index in Requests'Range loop
+               if Poll_Items (Position).Returned_Events /= 0 then
+                  if Natural (Poll_Items (Position).Returned_Events)
+                    / Natural (POLLNVAL) mod 2 = 1
+                  then
+                     raise Device_Error with "invalid descriptor";
+                  end if;
+                  Ready (Index) := True;
+               end if;
+               Position := Position + 1;
+            end loop;
+         end if;
+
+         for Index in Requests'Range loop
+            if Ready (Index) then
+               Completed.Count := Completed.Count + 1;
+               Completed.Indexes (Completed.Count) := Index;
+            end if;
+         end loop;
+      end;
+   end Wait_Some;
+
    function Wait_Interruptibly
      (FD          : Descriptor;
       Condition   : Wait_Kind;
@@ -322,5 +393,66 @@ package body Flyology.IO is
          end if;
       end;
    end Wait_Interruptibly;
+
+   function Wait
+     (Set       : not null access Flyology.Operations.Completion_Set'Class;
+      FD        : Descriptor;
+      Condition : Wait_Kind) return Readiness_Operation
+   is
+   begin
+      return Result : Readiness_Operation (Set) do
+         Flyology.Operations.Drivers.Start (Result);
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Result, FD, Condition = For_Write);
+      end return;
+   end Wait;
+
+   procedure Rearm
+     (FD        : Descriptor;
+      Condition : Wait_Kind;
+      Operation : in out Readiness_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Start (Operation);
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Operation, FD, Condition = For_Write);
+   end Rearm;
+
+   overriding procedure Drive
+     (Item  : in out Readiness_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      if Event /= Flyology.Operations.Source_Ready then
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      else
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Succeeded);
+      end if;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Readiness_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   procedure Finish (Operation : in out Readiness_Operation) is
+      Result : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Result is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Flyology.Operations.Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            raise Device_Error with "readiness operation failed";
+      end case;
+   end Finish;
 
 end Flyology.IO;

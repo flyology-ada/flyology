@@ -207,6 +207,8 @@ project Flyology is
             "flyology-io-timers.ads",
             "flyology-timer_set_policy.ads",
             "flyology-memory_regions.ads",
+            "flyology-operations.ads",
+            "flyology-operations-drivers.ads",
             "flyology-shared_memory.ads",
             "flyology-shared_memory-segments.ads",
             "flyology-shared_memory-unix_sockets.ads",

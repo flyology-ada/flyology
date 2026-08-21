@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Streams;
 with Flyology.Buffers;
+with Flyology.Operations;
 with Interfaces.C;
 
 --  Owns Flyology's portable socket, Internet-address, and endpoint types.
@@ -695,6 +696,157 @@ package Flyology.IO.Sockets is
      with Pre => Flyology.Buffers.Has_Buffer (Item)
        and then Interrupts'Length < Max_Wait_Requests;
 
+   --  Common limited base for scoped stream operations. Concrete operations
+   --  borrow an aliased socket and buffer until Finish consumes their result.
+   type Socket_Operation is
+     abstract new Flyology.Operations.Operation with private;
+   --  Scoped one-step stream receive.
+   type Receive_Operation is new Socket_Operation with private;
+   --  Scoped stream receive that fills its array.
+   type Receive_Exactly_Operation is new Socket_Operation with private;
+   --  Scoped one-step stream send.
+   type Send_Operation is new Socket_Operation with private;
+   --  Scoped stream send that transfers its complete array.
+   type Send_All_Operation is new Socket_Operation with private;
+   --  Scoped receive into a uniquely owned buffer.
+   type Buffer_Receive_Operation is new Socket_Operation with private;
+   --  Scoped one-step send from a uniquely owned buffer.
+   type Buffer_Send_Operation is new Socket_Operation with private;
+   --  Scoped complete send from a uniquely owned buffer.
+   type Buffer_Send_All_Operation is new Socket_Operation with private;
+
+   --  Start one nonblocking receive operation. Socket and Item must outlive
+   --  the returned operation. Item is exclusively borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Operation;
+
+   --  Start a nonblocking operation that fills Item. The operation rearms
+   --  read readiness after partial progress.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer to fill
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited exact-receive operation
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Exactly_Operation;
+
+   --  Start one nonblocking partial send operation. Item is read-only while
+   --  borrowed even though its access value designates a variable array.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_Operation;
+
+   --  Start a nonblocking operation that sends all of Item.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited complete-send operation
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_All_Operation;
+
+   --  Start one receive into an acquired unique buffer. The driver enters the
+   --  buffer's writable callback only for each immediate socket step and does
+   --  not retain the callback view. Finish commits the new readable length.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited unique-buffer receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Receive_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start one partial send from an acquired unique buffer.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited unique-buffer send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start a complete send from an acquired unique buffer.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited complete unique-buffer send operation
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_All_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Consume one terminal partial receive and publish its Last value.
+   --  @param Operation Terminal receive operation
+   --  @param Last Last received element, or Item'First - 1 on closure
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal exact receive.
+   --  @param Operation Terminal exact-receive operation
+   procedure Finish (Operation : in out Receive_Exactly_Operation);
+
+   --  Consume one terminal partial send and publish its Last value.
+   --  @param Operation Terminal send operation
+   --  @param Last Last sent element, or Item'First - 1 when none
+   procedure Finish
+     (Operation : in out Send_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal complete send.
+   --  @param Operation Terminal complete-send operation
+   procedure Finish (Operation : in out Send_All_Operation);
+
+   --  Consume one unique-buffer receive and commit its readable length.
+   --  @param Operation Terminal unique-buffer receive operation
+   --  @param Received Number of received bytes; zero on closure
+   procedure Finish
+     (Operation : in out Buffer_Receive_Operation;
+      Received  : out Natural);
+
+   --  Consume one partial unique-buffer send.
+   --  @param Operation Terminal unique-buffer send operation
+   --  @param Sent Number of bytes sent
+   procedure Finish
+     (Operation : in out Buffer_Send_Operation;
+      Sent      : out Natural);
+
+   --  Consume one complete unique-buffer send.
+   --  @param Operation Terminal complete unique-buffer send operation
+   procedure Finish (Operation : in out Buffer_Send_All_Operation);
+
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
    --  interruptible backoff.
@@ -791,4 +943,48 @@ private
       Value       : Interfaces.C.int := -1;
       Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;
    end record;
+
+   type Scoped_IO_Kind is
+     (Receive_One,
+      Receive_Exact,
+      Send_One,
+      Send_Complete,
+      Buffer_Receive_One,
+      Buffer_Send_One,
+      Buffer_Send_Complete);
+   type Scoped_Failure is
+     (No_Failure, Socket_Failure, Deadline_Failure,
+      Peer_Closed_Failure, No_Progress_Failure);
+
+   type Socket_Operation is
+     abstract new Flyology.Operations.Operation with record
+      Kind        : Scoped_IO_Kind := Receive_One;
+      Socket      : access Socket_Type := null;
+      Array_Item  : access Ada.Streams.Stream_Element_Array := null;
+      Buffer_Item : access Flyology.Buffers.Unique_Buffer := null;
+      Cursor      : Ada.Streams.Stream_Element_Offset := 1;
+      Transferred : Natural := 0;
+      Error_Code  : Interfaces.C.int := 0;
+      Failure     : Scoped_Failure := No_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Socket operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Socket_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Socket operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Socket_Operation);
+
+   type Receive_Operation is new Socket_Operation with null record;
+   type Receive_Exactly_Operation is new Socket_Operation with null record;
+   type Send_Operation is new Socket_Operation with null record;
+   type Send_All_Operation is new Socket_Operation with null record;
+   type Buffer_Receive_Operation is new Socket_Operation with null record;
+   type Buffer_Send_Operation is new Socket_Operation with null record;
+   type Buffer_Send_All_Operation is new Socket_Operation with null record;
 end Flyology.IO.Sockets;

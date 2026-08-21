@@ -1,5 +1,6 @@
 with Ada.Calendar;
 with Ada.Real_Time;
+with Flyology.Operations;
 private with Flyology.Timer_Set_Policy;
 
 --  Exposes lane-neutral timer waits through standard Ada delay semantics.
@@ -75,6 +76,43 @@ package Flyology.IO.Timers is
    --  Sleep_For.
    --  @param Deadline Absolute Ada.Real_Time deadline
    procedure Sleep_Until (Deadline : Ada.Real_Time.Time);
+
+   --  Scoped timer operation associated with one heterogeneous completion
+   --  set. The set must outlive the operation.
+   type Timer_Operation is
+     new Flyology.Operations.Operation with private;
+
+   --  Construct and start one relative timer operation in place.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Interval Relative delay in seconds
+   --  @return Started limited timer operation
+   function Sleep_For
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Interval : Duration) return Timer_Operation;
+
+   --  Construct and start one absolute timer operation in place.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Deadline Absolute Ada.Real_Time deadline
+   --  @return Started limited timer operation
+   function Sleep_Until
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Deadline : Ada.Real_Time.Time) return Timer_Operation;
+
+   --  Restart a previously consumed timer operation.
+   --  @param Interval Relative delay in seconds
+   --  @param Operation Previously consumed timer operation
+   procedure Rearm
+     (Interval  : Duration;
+      Operation : in out Timer_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal timer operation.
+   --  @param Operation Terminal timer operation to consume
+   --  @exception Device_Error The timer provider failed
+   procedure Finish (Operation : in out Timer_Operation)
+     with Pre => Flyology.Operations.Is_Terminal (Operation);
 
    --  Arm or reschedule one slot. A deadline at or before the next clock
    --  sample is returned by the next Wait_Next without an additional sleep.
@@ -192,6 +230,21 @@ package Flyology.IO.Timers is
    with Pre => Backstep_Tolerance >= 0.0;
 
 private
+   type Timer_Operation is
+     new Flyology.Operations.Operation with null record;
+
+   --  @exclude
+   --  @param Item Timer operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Timer_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Timer operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Timer_Operation);
+
    type Timer_Set (Capacity : Positive) is limited record
       State : Flyology.Timer_Set_Policy.Timer_State (Capacity);
    end record;

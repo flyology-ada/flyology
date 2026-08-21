@@ -1,7 +1,7 @@
 with GNAT.OS_Lib;
 with Flyology.File_Open_Policy;
 with Flyology.File_Timeout_Policy;
-with System;
+with Flyology.Operations.Drivers;
 with System.OS_Constants;
 
 package body Flyology.IO.Files is
@@ -45,6 +45,27 @@ package body Flyology.IO.Files is
       Error_Code  : access C.int;
       Cancelled   : access C.int) return C.int;
    pragma Import (C, Event_File_IO, "flyology_runtime_file_io");
+
+   function Start_Async_File
+     (Node        : System.Address;
+      Node_Size   : C.size_t;
+      Descriptor  : C.int;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Offset      : C.long_long;
+      For_Write   : C.int;
+      Signal_FD   : C.int) return C.int;
+   pragma Import
+     (C, Start_Async_File, "flyology_runtime_start_async_file");
+
+   function Cancel_Async_File
+     (Node      : System.Address;
+      Node_Size : C.size_t) return C.int;
+   pragma Import
+     (C, Cancel_Async_File, "flyology_runtime_cancel_async_file");
+
+   Async_File_Node_Size : constant C.size_t :=
+     C.size_t (Async_File_Node'Size / System.Storage_Unit);
 
    function Current_Errno return C.int is
      (C.int (GNAT.OS_Lib.Errno));
@@ -121,6 +142,265 @@ package body Flyology.IO.Files is
          Raise_IO_Error ("close", Current_Errno);
       end if;
    end Close;
+
+   procedure Rearm_Completion (Item : in out File_Operation'Class) is
+      Read_Descriptor   : C.int;
+      Signal_Descriptor : C.int;
+   begin
+      Flyology.Operations.Drivers.Completion_Source
+        (Item, Read_Descriptor, Signal_Descriptor);
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Item, Read_Descriptor, False);
+   end Rearm_Completion;
+
+   procedure Publish_File_Terminal
+     (Item : in out File_Operation'Class)
+   is
+   begin
+      if Item.Node.State /= Async_File_Terminal then
+         Rearm_Completion (Item);
+      elsif Item.Node.Cancelled /= 0 then
+         if Item.Timed_Out then
+            Item.Failure := Deadline_Failure;
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
+         else
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Cancelled);
+         end if;
+      elsif Item.Node.Error_Code /= 0
+        or else Item.Node.Result < 0
+        or else Item.Node.Result > C.long_long (Item.Buffer_Length)
+      then
+         Item.Failure := Completion_Failure;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      else
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Succeeded);
+      end if;
+   end Publish_File_Terminal;
+
+   procedure Start_Scoped_File
+     (Item       : in out File_Operation'Class;
+      File       : File_Descriptor;
+      Offset     : File_Offset;
+      Buffer     : System.Address;
+      First      : Ada.Streams.Stream_Element_Offset;
+      Length     : Natural;
+      For_Write  : Boolean;
+      Timeout    : Duration)
+   is
+      Read_Descriptor   : C.int := -1;
+      Signal_Descriptor : C.int := -1;
+      Status            : C.int;
+   begin
+      Item.Node.Version := Async_File_Node_Version;
+      Item.Node.State := Async_File_Unused;
+      Item.Node.Owner := System.Null_Address;
+      Item.Node.Descriptor := -1;
+      Item.Node.Buffer := System.Null_Address;
+      Item.Node.Length := 0;
+      Item.Node.Offset := 0;
+      Item.Node.For_Write := 0;
+      Item.Node.Signal_FD := -1;
+      Item.Node.Result := 0;
+      Item.Node.Error_Code := 0;
+      Item.Node.Cancelled := 0;
+      Item.Node.Cancel_Requested := 0;
+      Item.Buffer_First := First;
+      Item.Buffer_Length := Length;
+      Item.Failure := No_Failure;
+      Item.Timed_Out := False;
+
+      Flyology.Operations.Drivers.Start (Item);
+      if Length = 0 then
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Succeeded);
+         return;
+      elsif not Flyology.IO.Is_Lightweight_Task then
+         Item.Failure := Wrong_Lane_Failure;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+         return;
+      end if;
+
+      Flyology.Operations.Drivers.Completion_Source
+        (Item, Read_Descriptor, Signal_Descriptor);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
+      end if;
+      Status := Start_Async_File
+        (Item.Node'Address,
+         Async_File_Node_Size,
+         C.int (File),
+         Buffer,
+         C.size_t (Length),
+         C.long_long (Offset),
+         Boolean'Pos (For_Write),
+         Signal_Descriptor);
+      if Status /= 0 then
+         Item.Failure := Submission_Failure;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      else
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Item, Read_Descriptor, False);
+      end if;
+   end Start_Scoped_File;
+
+   overriding procedure Drive
+     (Item  : in out File_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Status : C.int;
+   begin
+      case Event is
+         when Flyology.Operations.Start_Operation =>
+            raise Program_Error with "file operation was already submitted";
+         when Flyology.Operations.Source_Ready =>
+            Publish_File_Terminal (Item);
+         when Flyology.Operations.Deadline_Reached =>
+            Item.Timed_Out := True;
+            Status := Cancel_Async_File
+              (Item.Node'Address, Async_File_Node_Size);
+            if Status /= 0 then
+               --  Do not release the borrow on a rejected cancellation. The
+               --  original completion remains the only safe terminal event.
+               Rearm_Completion (Item);
+            else
+               Publish_File_Terminal (Item);
+            end if;
+         when Flyology.Operations.Dependency_Changed =>
+            raise Program_Error with
+              "file operation received a dependency event";
+      end case;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out File_Operation)
+   is
+      Status : C.int;
+   begin
+      if Item.Node.State = Async_File_Unused then
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Cancelled);
+         return;
+      end if;
+      Status := Cancel_Async_File (Item.Node'Address, Async_File_Node_Size);
+      if Status = 0 and then Item.Node.State = Async_File_Terminal then
+         Publish_File_Terminal (Item);
+      end if;
+   end Request_Cancellation;
+
+   function Read_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Flyology.IO.Infinite) return Read_Operation
+   is
+      Address : constant System.Address :=
+        (if Item.all'Length = 0
+         then System.Null_Address
+         else Item.all (Item.all'First)'Address);
+   begin
+      return Result : Read_Operation (Set) do
+         Start_Scoped_File
+           (Result,
+            File,
+            Offset,
+            Address,
+            Item.all'First,
+            Item.all'Length,
+            False,
+            Timeout);
+      end return;
+   end Read_At;
+
+   function Write_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Flyology.IO.Infinite) return Write_Operation
+   is
+      Address : constant System.Address :=
+        (if Item.all'Length = 0
+         then System.Null_Address
+         else Item.all (Item.all'First)'Address);
+   begin
+      return Result : Write_Operation (Set) do
+         Start_Scoped_File
+           (Result,
+            File,
+            Offset,
+            Address,
+            Item.all'First,
+            Item.all'Length,
+            True,
+            Timeout);
+      end return;
+   end Write_At;
+
+   procedure Finish_Common (Operation : in out File_Operation'Class) is
+      Outcome : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Scoped_File_Failure := Operation.Failure;
+      Error   : constant C.int := Operation.Node.Error_Code;
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Outcome is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            case Failure is
+               when Deadline_Failure =>
+                  raise Timeout_Error with "file operation timed out";
+               when Wrong_Lane_Failure =>
+                  raise Device_Error with
+                    "scoped file operations require a lightweight task";
+               when Submission_Failure =>
+                  Raise_IO_Error ("file submission", Error);
+               when Completion_Failure =>
+                  Raise_IO_Error ("file completion", Error);
+               when No_Failure =>
+                  raise Device_Error with "file operation failed";
+            end case;
+      end case;
+   end Finish_Common;
+
+   procedure Finish
+     (Operation : in out Read_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+      Result : constant C.long_long := Operation.Node.Result;
+      First  : constant Ada.Streams.Stream_Element_Offset :=
+        Operation.Buffer_First;
+   begin
+      Finish_Common (Operation);
+      Last :=
+        (if Result = 0
+         then First - 1
+         else First + Ada.Streams.Stream_Element_Offset (Result) - 1);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Write_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+      Result : constant C.long_long := Operation.Node.Result;
+      First  : constant Ada.Streams.Stream_Element_Offset :=
+        Operation.Buffer_First;
+   begin
+      Finish_Common (Operation);
+      Last :=
+        (if Result = 0
+         then First - 1
+         else First + Ada.Streams.Stream_Element_Offset (Result) - 1);
+   end Finish;
 
    procedure Native_Read
      (File       : File_Descriptor;

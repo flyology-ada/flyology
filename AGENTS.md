@@ -103,6 +103,53 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   lane. A lightweight call suspends only its task; a native call may block only
   its pthread. Preserve `out` values, exceptions, retry deadlines, and ownership
   semantics across both paths.
+- Scoped operation overloads are additive. Keep the synchronous overload and
+  implement both forms through the same provider state machine when that
+  provider has been converted. The scoped form must not create a helper task,
+  task stack, callback thread, or steady-state heap allocation.
+- Use a function that returns a limited operation when the operation is the one
+  natural result and build-in-place initialization is clear. Use an `out`
+  operation parameter when a procedure produces fresh caller-owned operation
+  state or several outputs. Use `in out` only when initiation reads and mutates
+  established request state, such as an explicit rearm or restart. Keep every
+  other formal mode semantic: immutable and borrowed inputs are `in`, writable
+  buffers or transferred ownership are `in out`, and values produced without
+  reading their prior state are `out`.
+- A scoped operation is limited and belongs to one bounded completion set. The
+  set must outlive every associated operation. A pending operation retains all
+  borrowed actual parameters until terminal completion. Scope exit, abort, and
+  cancellation must cancel and drain any provider that can retain kernel or
+  runtime references before operation or buffer storage is reclaimed.
+- A first-class wait gate is a regular scoped operation and consumes one set
+  slot. It observes a fixed nonempty snapshot of generation-stamped operations
+  or earlier gates in the same set. References are values without Ada access
+  components and must not outlive their set. Retain each observed terminal
+  member until all dependent gates terminalize; gate cancellation detaches only
+  the observer. Terminal gates count every outcome, while success gates fail as
+  soon as their threshold is impossible. Gate propagation is a bounded stable
+  scheduler cut and must not allocate, poll, or wake the owner per edge.
+- Resolve every started operation once with its provider-specific `Finish` in
+  normal code. `Finish` commits outputs, reports the retained provider error,
+  and releases capacity. `Consume` is explicit result discard. Controlled
+  finalization is only the cancel/drain/discard safety net. An `out` result from
+  a `Finish` that raises is undefined under normal Ada copy-out rules.
+- Scoped provider drivers run only on the owner task stack. `Start` reserves a
+  root operation's set slot; each bounded `Drive` step must arm readiness or a
+  deadline, retain an external-completion source, or publish one terminal
+  outcome. Operation-producing overloads are eager roots, not the provider
+  composition ABI. A higher-level provider must not start a lower-level root
+  in the caller's set and then wait for it inside `Drive`. Factor each provider
+  into an embeddable state record with a bounded immediate `Step`; standalone
+  and higher-level operations both own and drive that record, while only the
+  outermost operation is registered in the set. A driver must not call a
+  blocking synchronous wrapper, invoke user code on the scheduler stack, or
+  release a kernel-owned buffer before terminal completion.
+- Current scoped providers cover descriptor readiness, timers, raw stream
+  socket arrays, unique-buffer socket operations, and lightweight positional
+  file arrays. The file provider uses one caller-owned runtime node per
+  operation and one lazily created completion wake source per set. Keep native
+  synchronous file calls direct; do not imply that the scoped file overload is
+  concurrent on a native task until a native completion engine exists.
 - TLS provider choice is per connection through the provider-neutral SPI.
   OpenSSL is an optional dynamically loaded provider. Provider steps must never
   block: return `Want_Read` or `Want_Write` and let Flyology wait for readiness.

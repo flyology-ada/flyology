@@ -114,6 +114,15 @@ procedure Wake_Source_State_Model is
          "two Consumes did not remove two signals");
       Expect_Consume_Error (Item, "a twice-consumed source");
 
+      for Signal_Number in 1 .. 32 loop
+         Wake_Sources.Signal (Item);
+      end loop;
+      Wake_Sources.Consume_All (Item);
+      Require
+        (not Flyology.IO.Wait (First_FD, Flyology.IO.For_Read, 0.0),
+         "Consume_All left a coalesced signal readable");
+      Expect_Consume_Error (Item, "a source drained by Consume_All");
+
       Wake_Sources.Release (Item);
       Require
         (Wake_Sources.Descriptor (Item) = Flyology.IO.Invalid_Descriptor,

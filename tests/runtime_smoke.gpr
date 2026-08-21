@@ -119,6 +119,8 @@ project Runtime_Smoke is
       "memory_regions_smoke.adb",
       "observability_native_smoke.adb",
       "observability_smoke.adb",
+      "operations_smoke.adb",
+      "operation_gates_smoke.adb",
       "poller_policy_smoke.adb",
       "pool_growth_smoke.adb",
       "pool_reduction_claim_smoke.adb",
