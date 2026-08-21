@@ -46,7 +46,7 @@ package Flyology_Bench is
 
    --  Number of bootstrap distributions drawn for each reported interval.
    --  The upper bound keeps analysis time and temporary storage bounded.
-   subtype Bootstrap_Resample_Count is Positive range 100 .. 100_000;
+   subtype Bootstrap_Resample_Count is Positive range 100 .. 10_000;
 
    --  Index into the raw samples retained by a measurement.
    subtype Sample_Index is Positive range 1 .. Sample_Count'Last;
@@ -705,6 +705,8 @@ package Flyology_Bench is
    --  Warm, calibrate, and measure one statically bound operation.
    --  @param Config Measurement policy.
    --  @param Result Collected raw samples and summary statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Measure
      (Config : Configuration := Default_Configuration;
       Result : out Measurement);
@@ -716,6 +718,8 @@ package Flyology_Bench is
    --  perform exactly Iterations logical operations before returning.
    --  @param Config Measurement policy.
    --  @param Result Collected raw samples and summary statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Measure_Batched
      (Config : Configuration := Default_Configuration;
       Result : out Measurement);
@@ -732,6 +736,8 @@ package Flyology_Bench is
    --  propagated.
    --  @param Config Measurement policy.
    --  @param Result Collected raw samples and summary statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Measure_With_Hooks
      (Config : Configuration := Default_Configuration;
       Result : out Measurement);
@@ -748,6 +754,8 @@ package Flyology_Bench is
    --  measured operation.
    --  @param Config Measurement policy.
    --  @param Result Collected raw samples and summary statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Measure_Result_Batched
      (Config : Configuration := Default_Configuration;
       Result : out Measurement);
@@ -761,6 +769,8 @@ package Flyology_Bench is
    --  timed slices are the default; Shared_Iterations can require one count.
    --  @param Config Shared measurement policy.
    --  @param Result Paired measurements and relative statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Compare
      (Config : Configuration := Default_Configuration;
       Result : out Comparison);
@@ -774,6 +784,8 @@ package Flyology_Bench is
    --  pairs. Each batch must perform exactly Iterations logical operations.
    --  @param Config Shared measurement policy.
    --  @param Result Paired measurements and relative statistics.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Compare_Batched
      (Config : Configuration := Default_Configuration;
       Result : out Comparison);
@@ -791,6 +803,8 @@ package Flyology_Bench is
    --  Sampling progress identifies each implementation separately.
    --  @param Config Shared measurement policy.
    --  @param Result Multi-way measurements and comparisons against case one.
+   --  @exception Constraint_Error Config requests more than the bounded
+   --  bootstrap analysis work.
    procedure Compare_Many
      (Config : Configuration := Default_Configuration;
       Result : out Multi_Comparison);

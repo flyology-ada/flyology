@@ -150,6 +150,8 @@ package Flyology_Bench.Recording is
    --  @param Item Registered identity to copy.
    --  @param Result Deep result snapshot.
    --  @exception Invalid_Benchmark Item does not belong to Object.
+   --  @exception Constraint_Error Retained data requests more than the bounded
+   --  bootstrap analysis work.
    procedure Snapshot
      (Object : Recorder;
       Item   : Benchmark;
@@ -326,7 +328,9 @@ package Flyology_Bench.Recording is
    --  @param Random_Seed Deterministic bootstrap seed.
    --  @param Confidence_Level_Percent Central interval coverage in percent.
    --  @param Bootstrap_Resamples Number of bootstrap distributions to draw.
-   --  @exception Constraint_Error Practical_Threshold_Percent is negative.
+   --  @exception Constraint_Error Practical_Threshold_Percent is negative or
+   --  the retained distributions request more than the bounded bootstrap
+   --  analysis work.
    procedure Compare_Independent
      (Reference : Recorded_Measurement;
       Contender : Recorded_Measurement;

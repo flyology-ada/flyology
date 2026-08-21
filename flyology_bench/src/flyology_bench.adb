@@ -9,6 +9,7 @@ with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Flyology_Bench.Host_Control;
 with Flyology_Bench.Host_Lock;
+with Flyology_Bench.Internal_Statistics;
 with Flyology_Bench.Internal_Probes.Counters;
 
 package body Flyology_Bench is
@@ -18,11 +19,19 @@ package body Flyology_Bench is
 
    use type Interfaces.Unsigned_64;
 
-   type Float_Array is array (Positive range <>) of Long_Float;
+   subtype Float_Array is Internal_Statistics.Float_Array;
+
+   procedure Sort (Values : in out Float_Array)
+     renames Internal_Statistics.Sort;
+
+   function Percentile
+     (Ordered : Float_Array;
+      Fraction : Long_Float) return Long_Float
+     renames Internal_Statistics.Percentile;
 
    function Lower_Tail
-     (Confidence : Confidence_Percentage) return Long_Float is
-     ((100.0 - Long_Float (Confidence)) / 200.0);
+     (Confidence : Confidence_Percentage) return Long_Float
+     renames Internal_Statistics.Lower_Tail;
 
    procedure Free_Metric_Store is new Ada.Unchecked_Deallocation
      (Metric_Store, Metric_Store_Access);
@@ -61,6 +70,32 @@ package body Flyology_Bench is
       end loop;
       return False;
    end Has_Any;
+
+   function Requested_Metric_Count (Config : Configuration) return Natural is
+      Result : Natural := 0;
+   begin
+      for Axis in Metric_Axis loop
+         if Config.Metrics (Axis) then
+            Result := Result + 1;
+         end if;
+      end loop;
+      return Result;
+   end Requested_Metric_Count;
+
+   procedure Validate_Bootstrap_Work
+     (Config         : Configuration;
+      Interval_Count : Natural;
+      Context        : String)
+   is
+      Work : Internal_Statistics.Bootstrap_Work_Count := 0;
+   begin
+      Internal_Statistics.Add_Bootstrap_Work
+        (Total     => Work,
+         Samples   => Natural (Config.Samples),
+         Resamples => Config.Bootstrap_Resamples,
+         Intervals => Interval_Count * (1 + Requested_Metric_Count (Config)),
+         Context   => Context);
+   end Validate_Bootstrap_Work;
 
    function Resource_Metrics_Requested (Config : Configuration) return Boolean
    is
@@ -1352,38 +1387,6 @@ package body Flyology_Bench is
       end loop;
    end Await_CPU_Quiescence;
 
-   procedure Sort (Values : in out Float_Array) is
-   begin
-      for Index in Values'First + 1 .. Values'Last loop
-         declare
-            Value    : constant Long_Float := Values (Index);
-            Position : Positive := Index;
-         begin
-            while Position > Values'First
-              and then Values (Position - 1) > Value
-            loop
-               Values (Position) := Values (Position - 1);
-               Position := Position - 1;
-            end loop;
-            Values (Position) := Value;
-         end;
-      end loop;
-   end Sort;
-
-   function Percentile
-     (Ordered : Float_Array;
-      Fraction : Long_Float) return Long_Float
-   is
-      Position : constant Long_Float :=
-        Long_Float (Ordered'First)
-        + Fraction * Long_Float (Ordered'Length - 1);
-      Lower    : constant Positive := Positive (Long_Float'Floor (Position));
-      Upper    : constant Positive := Positive (Long_Float'Ceiling (Position));
-      Weight   : constant Long_Float := Position - Long_Float (Lower);
-   begin
-      return Ordered (Lower) * (1.0 - Weight) + Ordered (Upper) * Weight;
-   end Percentile;
-
    procedure Characterize_Clock
      (Backend             : out Natural;
       Nominal_Resolution  : out Long_Float;
@@ -2081,6 +2084,7 @@ package body Flyology_Bench is
       end Increase_Batch;
 
    begin
+      Validate_Bootstrap_Work (Config, 1, "measurement");
       Result := (others => <>);
       Result.Sample_Total := Config.Samples;
       Result.Confidence_Level_Value := Config.Confidence_Level_Percent;
@@ -2385,6 +2389,7 @@ package body Flyology_Bench is
       end Adjust_Timer_Cost;
 
    begin
+      Validate_Bootstrap_Work (Config, 3, "paired comparison");
       Result := (others => <>);
       Notify (Config, Starting);
       Prepare_Environment (Config, Watch, Lock);
@@ -2991,6 +2996,8 @@ package body Flyology_Bench is
          raise Constraint_Error with
            "multi-way comparison requires two to sixteen cases";
       end if;
+      Validate_Bootstrap_Work
+        (Config, 2 * Count - 1, "multi-way comparison");
       Result := (others => <>);
       Result.Case_Total := Comparison_Case_Count (Count);
       Result.Schedule_Policy := Config.Shootout_Scheduling;

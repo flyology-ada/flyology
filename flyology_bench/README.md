@@ -245,12 +245,23 @@ contender-first ratio groups. These diagnostics flag drift; they do not prove a
 particular physical cause.
 
 `Confidence_Level_Percent` defaults to 95.0 and accepts 50.0 through 99.9.
-`Bootstrap_Resamples` defaults to 2,000 and accepts 100 through 100,000. Both
+`Bootstrap_Resamples` defaults to 2,000 and accepts 100 through 10,000. Both
 are fields of the runner and recording configurations; recorded independent
 comparisons and saved-baseline comparisons accept the same bounded settings as
 parameters. A wider interval or more resamples increases analysis work but
 does not collect additional workload samples. Results retain the settings, and
 console, CSV, and JSON reporters identify them alongside each interval.
+
+One public analysis call may draw at most 100,000,000 source samples across
+all of its bootstrap intervals. Runner preflight counts every requested axis
+because it may be available when collection completes; recorded snapshots and
+independent comparisons count the axes and valid samples actually retained.
+Saved-baseline comparisons count both distributions. A configuration above
+the ceiling raises `Constraint_Error` instead of silently reducing its
+resample count, so retained settings and reporter metadata always describe the
+calculation that was performed. Runner preflight happens before warmup or timed
+work begins. The work-product ceiling also prevents multiplication overflow
+when several individually bounded settings are combined.
 
 `Practical_Threshold_Percent` defaults to one percent. A verdict is
 `Contender_Faster` or `Reference_Faster` only when the entire confidence
@@ -451,6 +462,9 @@ run. Fields whose meaning excludes a value use a subtype that excludes it:
 `Confidence_Percentage`, and `Bootstrap_Resample_Count`. A literal outside a
 bound is a compile-time diagnostic; a computed one raises `Constraint_Error`
 at the assignment or aggregate that produced it, naming the offending line.
+The bootstrap work-product ceiling is a separate call-level rule because it
+combines sample count, resample count, analysis shape, and available or
+requested axes.
 
 Each optional policy takes its `Enabled` flag, and `Interference` also its
 `Response`, as a discriminant, so a policy's settings exist only while they

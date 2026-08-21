@@ -2,10 +2,10 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Characters.Latin_1;
-with Ada.Containers.Generic_Array_Sort;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
+with Flyology_Bench.Internal_Statistics;
 with Flyology_Bench.Internal_Probes.Counters;
 with Flyology_Bench.Internal_Probes.Sessions;
 
@@ -16,8 +16,8 @@ package body Flyology_Bench.Recording is
    use type Interfaces.Unsigned_64;
 
    function Lower_Tail
-     (Confidence : Confidence_Percentage) return Long_Float is
-     ((100.0 - Long_Float (Confidence)) / 200.0);
+     (Confidence : Confidence_Percentage) return Long_Float
+     renames Internal_Statistics.Lower_Tail;
 
    function To_Fixed (Value : String) return Fixed_Name is
       Result : Fixed_Name;
@@ -139,26 +139,15 @@ package body Flyology_Bench.Recording is
       return State;
    end Next_Random;
 
-   type Float_Array is array (Positive range <>) of Long_Float;
+   subtype Float_Array is Internal_Statistics.Float_Array;
 
-   procedure Sort is new Ada.Containers.Generic_Array_Sort
-     (Index_Type   => Positive,
-      Element_Type => Long_Float,
-      Array_Type   => Float_Array);
+   procedure Sort (Values : in out Float_Array)
+     renames Internal_Statistics.Sort;
 
    function Percentile
      (Ordered : Float_Array;
       P       : Long_Float) return Long_Float
-   is
-      Position : constant Long_Float :=
-        Long_Float (Ordered'First) + P * Long_Float (Ordered'Length - 1);
-      Lower    : constant Positive := Positive (Long_Float'Floor (Position));
-      Upper    : constant Positive := Positive (Long_Float'Ceiling (Position));
-      Fraction : constant Long_Float := Position - Long_Float (Lower);
-   begin
-      return Ordered (Lower)
-        + Fraction * (Ordered (Upper) - Ordered (Lower));
-   end Percentile;
+     renames Internal_Statistics.Percentile;
 
    protected body Sample_Store is
       procedure Begin_Span is
@@ -480,7 +469,18 @@ package body Flyology_Bench.Recording is
      (Recorded_Sample_Array, Recorded_Sample_Array_Access);
 
    procedure Analyze (Result : in out Recorded_Measurement) is
+      Work : Internal_Statistics.Bootstrap_Work_Count := 0;
    begin
+      for Axis in Metric_Axis loop
+         if Result.Valid_Counts (Axis) > 0 then
+            Internal_Statistics.Add_Bootstrap_Work
+              (Total     => Work,
+               Samples   => Result.Valid_Counts (Axis),
+               Resamples => Result.Bootstrap_Resample_Total,
+               Intervals => 1,
+               Context   => "recorded measurement");
+         end if;
+      end loop;
       for Axis in Metric_Axis loop
          if Result.Valid_Counts (Axis) > 0 then
             declare
@@ -1306,11 +1306,27 @@ package body Flyology_Bench.Recording is
       Confidence_Level_Percent : Confidence_Percentage := 95.0;
       Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000) is
       Wall : Metric_Comparison_Result;
+      Work : Internal_Statistics.Bootstrap_Work_Count := 0;
    begin
       if Practical_Threshold_Percent < 0.0 then
          raise Constraint_Error with
            "practical comparison threshold must not be negative";
       end if;
+      for Axis in Metric_Axis loop
+         if Reference.Statuses (Axis) = Metric_Collected
+           and then Contender.Statuses (Axis) = Metric_Collected
+           and then Reference.Valid_Counts (Axis) > 0
+           and then Contender.Valid_Counts (Axis) > 0
+         then
+            Internal_Statistics.Add_Bootstrap_Work
+              (Total     => Work,
+               Samples   => Reference.Valid_Counts (Axis)
+                 + Contender.Valid_Counts (Axis),
+               Resamples => Bootstrap_Resamples,
+               Intervals => 1,
+               Context   => "recorded independent comparison");
+         end if;
+      end loop;
       Result := (others => <>);
       Result.Reference_Label := Reference.Label;
       Result.Contender_Label := Contender.Label;
