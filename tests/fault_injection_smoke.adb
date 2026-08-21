@@ -19,11 +19,13 @@ with Interfaces.C;
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
    use type Interfaces.Unsigned_64;
    use type Interfaces.C.int;
+   use type Flyology.Operations.Terminal_Outcome;
 
    package Dormancy renames Flyology.Dormancy;
    package IO renames Flyology.IO;
@@ -388,9 +390,12 @@ procedure Fault_Injection_Smoke is
       end Writer;
 
       task body Writer is
-         Data : aliased Ada.Streams.Stream_Element_Array := [1, 2, 3, 4];
+         Data : aliased Ada.Streams.Stream_Element_Array :=
+           [1 => 1, 2 => 2, 3 => 3, 4 => 4];
          Last : Ada.Streams.Stream_Element_Offset;
       begin
+         --  A transiently full submission queue must retain the operation and
+         --  eventually publish its ordinary completion.
          declare
             Set : aliased Operations.Completion_Set (1);
             Write : Files.Write_Operation :=
@@ -402,6 +407,9 @@ procedure Fault_Injection_Smoke is
             Passed := Last = Data'Last;
          end;
 
+         --  Cancellation of a queued write must terminalize the operation
+         --  before its borrowed source buffer can leave scope.
+         Fault_Control.Reset;
          Fault_Control.Arm
            (Fault_Control.File_Submission_Full, Count => 1_000_000);
          declare
@@ -419,6 +427,159 @@ procedure Fault_Injection_Smoke is
                   Cancelled := True;
             end;
             Passed := Passed and then Cancelled;
+         end;
+
+         --  Reads use the same queued-node cancellation path, but retain a
+         --  writable borrow and distinct Finish result.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 4 => 0];
+            Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+            Cancelled : Boolean := False;
+         begin
+            Operations.Cancel (Read);
+            Operations.Wait_All (Set);
+            begin
+               Files.Finish (Read, Last);
+            exception
+               when Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+
+         --  A deadline on a definitely queued request must be retained as a
+         --  provider failure and reported only by Finish.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 4, Data'Access, 0.01);
+            Timed_Out : Boolean := False;
+         begin
+            Operations.Wait_All (Set);
+            Passed := Passed
+              and then Operations.Outcome (Write) = Operations.Failed;
+            begin
+               Files.Finish (Write, Last);
+            exception
+               when IO.Timeout_Error =>
+                  Timed_Out := True;
+            end;
+            Passed := Passed and then Timed_Out;
+         end;
+
+         --  Leaving a queued operation's inner scope exercises controlled
+         --  cancel-and-drain. Reusing the capacity-one set proves that the
+         --  abandoned operation released its slot and runtime node.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 4 => 0];
+         begin
+            declare
+               Abandoned : Files.Read_Operation :=
+                 Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+               pragma Unreferenced (Abandoned);
+            begin
+               null;
+            end;
+            Fault_Control.Reset;
+            declare
+               Replacement : Files.Read_Operation :=
+                 Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+            begin
+               Operations.Wait_All (Set);
+               Files.Finish (Replacement, Last);
+               Passed := Passed
+                 and then Last = Input'Last
+                 and then Input = Data;
+            end;
+         end;
+
+         --  Invalid initiation is a deterministic submission failure. The
+         --  set wait reports terminal state; the provider exception remains
+         --  retained until Finish.
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Failed_Write : Files.Write_Operation :=
+              Files.Write_At
+                (Set'Access, Files.Invalid_File, 0, Data'Access, 1.0);
+            Failed : Boolean := False;
+         begin
+            Operations.Wait_All (Set);
+            Passed := Passed
+              and then Operations.Outcome (Failed_Write) = Operations.Failed;
+            begin
+               Files.Finish (Failed_Write, Last);
+            exception
+               when IO.Device_Error =>
+                  Failed := True;
+            end;
+            Passed := Passed and then Failed;
+         end;
+
+         --  EOF and a short positional read are successful terminal results,
+         --  with Last retaining the synchronous overload's arithmetic.
+         declare
+            Set : aliased Operations.Completion_Set (2);
+            Short_Data : aliased Ada.Streams.Stream_Element_Array :=
+              [3 .. 8 => 0];
+            EOF_Data : aliased Ada.Streams.Stream_Element_Array :=
+              [5 .. 8 => 0];
+            Short_Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 2, Short_Data'Access, 1.0);
+            EOF_Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 100, EOF_Data'Access, 1.0);
+            Short_Last, EOF_Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            Operations.Wait_All (Set);
+            Files.Finish (Short_Read, Short_Last);
+            Files.Finish (EOF_Read, EOF_Last);
+            Passed := Passed
+              and then Short_Last = Short_Data'First + 1
+              and then Short_Data (3 .. 4) = Data (3 .. 4)
+              and then EOF_Last = EOF_Data'First - 1;
+         end;
+
+         --  Repeated full-capacity batches exercise one shared completion
+         --  source with the maximum number of file operation slots. This
+         --  catches stale wake counts surviving a completed batch and reuse.
+         declare
+            Capacity : constant Positive := 32;
+            Set : aliased Operations.Completion_Set (Capacity);
+            subtype Scoped_Write is Files.Write_Operation (Set'Access);
+            type Write_Array is array (Positive range <>) of Scoped_Write;
+            Writes : Write_Array (1 .. Capacity);
+            One_Byte : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+         begin
+            for Round in 1 .. 16 loop
+               One_Byte (1) :=
+                 Ada.Streams.Stream_Element (Round mod 251);
+               for Index in Writes'Range loop
+                  Files.Write_At
+                    (File,
+                     Files.File_Offset (128 + Index - 1),
+                     One_Byte'Access,
+                     1.0,
+                     Writes (Index));
+               end loop;
+               Operations.Wait_All (Set);
+               for Index in Writes'Range loop
+                  Files.Finish (Writes (Index), Last);
+                  Passed := Passed and then Last = One_Byte'Last;
+               end loop;
+            end loop;
          end;
       exception
          when others =>
