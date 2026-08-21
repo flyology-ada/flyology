@@ -5,6 +5,7 @@ with Ada.Streams;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Sockets;
+with Flyology.Operations;
 with Flyology.Wake_Sources;
 with Flyology_Config;
 with Interfaces.C;
@@ -247,6 +248,68 @@ procedure Unix_Stream_Socket_Smoke is
    procedure Run_Native is new Run_Round (Flyology.Native_Task);
    procedure Run_Lightweight is new Run_Round (Flyology.Lightweight_Task);
 
+   generic
+      Model : Flyology.Execution_Model;
+   procedure Check_Scoped_Round;
+
+   procedure Check_Scoped_Round is
+      Passed : Boolean := False with Atomic;
+   begin
+      declare
+         task Worker is
+            pragma Task_Info (Model);
+         end Worker;
+
+         task body Worker is
+            Listener, Client : aliased Sockets.Socket_Type;
+            Accepted : Sockets.Socket_Type;
+         begin
+            Remove_Path;
+            Open_Listener (Listener);
+            Sockets.Create_Unix_Stream_Socket (Client);
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (3);
+               Acceptance : aliased Sockets.Unix_Accept_Operation :=
+                 Sockets.Accept_Connection
+                   (Set'Access, Listener'Access, 1.0);
+               Connection : aliased Sockets.Connect_Operation :=
+                 Sockets.Connect (Set'Access, Client'Access, Path, 1.0);
+               Both : Flyology.Operations.Gate_Operation :=
+                 Flyology.Operations.Wait_For_Successes
+                   (Set'Access,
+                    [Flyology.Operations.Reference (Acceptance),
+                     Flyology.Operations.Reference (Connection)],
+                    2);
+               Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+            begin
+               Flyology.Operations.Wait_All (Set);
+               Flyology.Operations.Finish (Both, Batch);
+               Sockets.Finish (Connection);
+               Sockets.Finish (Acceptance, Accepted);
+               Passed := Sockets.Is_Open (Accepted) and then Batch.Count = 2;
+            end;
+            Close_If_Open (Accepted);
+            Close_If_Open (Client);
+            Close_If_Open (Listener);
+            Remove_Path;
+         exception
+            when others =>
+               Close_If_Open (Accepted);
+               Close_If_Open (Client);
+               Close_If_Open (Listener);
+               Remove_Path;
+         end Worker;
+      begin
+         null;
+      end;
+      pragma Assert (Passed);
+   end Check_Scoped_Round;
+
+   procedure Check_Native_Scoped_Round is new
+     Check_Scoped_Round (Flyology.Native_Task);
+   procedure Check_Lightweight_Scoped_Round is new
+     Check_Scoped_Round (Flyology.Lightweight_Task);
+
    procedure Check_Missing_Path is
       Socket : Sockets.Socket_Type;
       Failed : Boolean := False;
@@ -323,6 +386,7 @@ procedure Unix_Stream_Socket_Smoke is
             Listener    : Sockets.Socket_Type;
             Fillers     : Socket_Array (1 .. 8);
             Probe       : Sockets.Socket_Type;
+            Scoped_Probe : aliased Sockets.Socket_Type;
             Wake        : Flyology.Wake_Sources.Source;
             Last        : Natural := 0;
             Timed_Out   : Boolean := False;
@@ -364,8 +428,29 @@ procedure Unix_Stream_Socket_Smoke is
             end;
             pragma Assert (Interrupted);
             Flyology.Wake_Sources.Consume (Wake);
-
             Close_If_Open (Probe);
+
+            --  The scoped overload uses a retry-timer phase for the same
+            --  Linux EAGAIN queue-full state and retains timeout for Finish.
+            Sockets.Create_Unix_Stream_Socket (Scoped_Probe);
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Connection : Sockets.Connect_Operation :=
+                 Sockets.Connect
+                   (Set'Access, Scoped_Probe'Access, Path, 0.030);
+               Scoped_Timed_Out : Boolean := False;
+            begin
+               Flyology.Operations.Wait_All (Set);
+               begin
+                  Sockets.Finish (Connection);
+               exception
+                  when Flyology.IO.Timeout_Error =>
+                     Scoped_Timed_Out := True;
+               end;
+               pragma Assert (Scoped_Timed_Out);
+            end;
+
+            Close_If_Open (Scoped_Probe);
             for Index in 1 .. Last loop
                Close_If_Open (Fillers (Index));
             end loop;
@@ -375,6 +460,7 @@ procedure Unix_Stream_Socket_Smoke is
          exception
             when others =>
                Close_If_Open (Probe);
+               Close_If_Open (Scoped_Probe);
                for Index in 1 .. Last loop
                   Close_If_Open (Fillers (Index));
                end loop;
@@ -453,6 +539,9 @@ begin
 
    Run_Lightweight;
    Remove_Path;
+
+   Check_Native_Scoped_Round;
+   Check_Lightweight_Scoped_Round;
 
    Check_Listener_Replacement;
    Check_Native_Connect_Deadline;

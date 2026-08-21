@@ -727,6 +727,8 @@ package Flyology.IO.Sockets is
    --  Scoped acceptance of one Internet-stream connection. A successful
    --  operation owns the accepted socket until typed Finish transfers it.
    type Accept_Operation is new Socket_Operation with private;
+   --  Scoped acceptance of one Unix-stream connection.
+   type Unix_Accept_Operation is new Socket_Operation with private;
 
    --  Start one nonblocking receive operation. Socket and Item must outlive
    --  the returned operation. Item is exclusively borrowed until Finish.
@@ -1013,6 +1015,29 @@ package Flyology.IO.Sockets is
       Timeout   : Duration := Infinite;
       Operation : in out Connect_Operation);
 
+   --  Start one Unix-stream connection attempt.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open unconnected Unix-stream socket
+   --  @param Server Validated destination pathname copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited connect operation
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Server  : Unix_Path;
+      Timeout : Duration := Infinite) return Connect_Operation;
+
+   --  Start or restart one Unix-stream connection attempt.
+   --  @param Socket Aliased open unconnected Unix-stream socket
+   --  @param Server Validated destination pathname copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed connect operation
+   procedure Connect
+     (Socket    : not null access Socket_Type;
+      Server    : Unix_Path;
+      Timeout   : Duration := Infinite;
+      Operation : in out Connect_Operation);
+
    --  Start one Internet-stream accept. Server remains borrowed until Finish;
    --  the accepted socket and peer endpoint are retained by the operation.
    --  @param Set Completion set that owns the operation slot
@@ -1032,6 +1057,26 @@ package Flyology.IO.Sockets is
      (Server    : not null access Socket_Type;
       Timeout   : Duration := Infinite;
       Operation : in out Accept_Operation);
+
+   --  Start one Unix-stream accept. The result type distinguishes this
+   --  overload from the Internet form with the same familiar parameters.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Server Aliased open Unix-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited Unix accept operation
+   function Accept_Connection
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Server  : not null access Socket_Type;
+      Timeout : Duration := Infinite) return Unix_Accept_Operation;
+
+   --  Start or restart one Unix-stream accept in an established object.
+   --  @param Server Aliased open Unix-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed Unix accept operation
+   procedure Accept_Connection
+     (Server    : not null access Socket_Type;
+      Timeout   : Duration := Infinite;
+      Operation : in out Unix_Accept_Operation);
 
    --  Consume one terminal partial receive and publish its Last value.
    --  @param Operation Terminal receive operation
@@ -1103,6 +1148,15 @@ package Flyology.IO.Sockets is
      (Operation : in out Accept_Operation;
       Socket    : in out Socket_Type;
       Address   : out Endpoint)
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
+
+   --  Consume one successful Unix-stream accept and transfer ownership.
+   --  @param Operation Terminal Unix accept operation
+   --  @param Socket Closed target that receives the accepted socket
+   procedure Finish
+     (Operation : in out Unix_Accept_Operation;
+      Socket    : in out Socket_Type)
      with Pre => not Is_Open (Socket),
           Post => Is_Open (Socket);
 
@@ -1214,7 +1268,9 @@ private
       Datagram_Receive,
       Datagram_Send,
       Connect_Internet,
-      Accept_Internet);
+      Connect_Unix,
+      Accept_Internet,
+      Accept_Unix);
    type Scoped_Failure is
      (No_Failure, Socket_Failure, Deadline_Failure,
       Peer_Closed_Failure, No_Progress_Failure,
@@ -1268,7 +1324,11 @@ private
       Event : Flyology.Operations.Driver_Event);
 
    type Connect_Operation is new Socket_Operation with record
-      Destination : Endpoint := No_Endpoint;
+      Destination      : Endpoint := No_Endpoint;
+      Unix_Destination : Unix_Path;
+      Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Timeout          : Duration := Infinite;
+      Retry_Due        : Boolean := False;
    end record;
 
    --  @exclude
@@ -1286,16 +1346,21 @@ private
    --  @param Item Accepted-socket owner to close during finalization
    overriding procedure Finalize (Item : in out Socket_Owner);
 
-   type Accept_Operation is new Socket_Operation with record
+   type Accept_State is record
       Accepted         : Socket_Owner;
       Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout          : Duration := Infinite;
       Pressure_Backoff : Duration := 0.001;
       Retry_Due        : Boolean := False;
+      Decode_Address   : Boolean := True;
       Peer_Family      : aliased Interfaces.C.unsigned_char := 0;
       Peer_Address     : aliased IPv6_Octets := (others => 0);
       Peer_Port        : aliased Interfaces.C.unsigned := 0;
       Peer_Scope       : aliased Interfaces.C.unsigned := 0;
+   end record;
+
+   type Accept_Operation is new Socket_Operation with record
+      State : aliased Accept_State;
    end record;
 
    --  @exclude
@@ -1303,6 +1368,17 @@ private
    --  @param Event Driver event to process
    overriding procedure Drive
      (Item  : in out Accept_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Unix_Accept_Operation is new Socket_Operation with record
+      State : aliased Accept_State;
+   end record;
+
+   --  @exclude
+   --  @param Item Unix accept operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Unix_Accept_Operation;
       Event : Flyology.Operations.Driver_Event);
 
    type Receive_Operation is new Socket_Operation with null record;
