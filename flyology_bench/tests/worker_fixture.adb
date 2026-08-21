@@ -9,6 +9,7 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench;
 with Flyology_Bench.Workers;
+with Flyology_Bench.Workers.Test_Support;
 with Interfaces;
 with Interfaces.C;
 with System;
@@ -16,6 +17,7 @@ with System;
 procedure Worker_Fixture is
    package C renames Interfaces.C;
    use type C.int;
+   use type C.long;
    use type Flyology_Bench.Workers.Result_Kind;
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
@@ -51,6 +53,9 @@ procedure Worker_Fixture is
    pragma Import
      (C, Descriptor_Open,
       "flyology_bench_worker_test_descriptor_open");
+
+   function Getpid return C.int;
+   pragma Import (C, Getpid, "getpid");
 
    function C_Write
      (Descriptor : C.int;
@@ -102,6 +107,18 @@ procedure Worker_Fixture is
    begin
       null;
    end Write_Raw;
+
+   procedure Flood_Output is
+      Chunk : aliased constant String (1 .. 8_192) := [others => 'x'];
+      Wrote : C.long;
+   begin
+      loop
+         Wrote := C_Write (1, Chunk'Address, C.size_t (Chunk'Length));
+         if Wrote < 0 then
+            return;
+         end if;
+      end loop;
+   end Flood_Output;
 
    Request : Flyology_Bench.Workers.Worker_Request;
    Config  : Flyology_Bench.Configuration;
@@ -173,7 +190,11 @@ begin
    end if;
    Flyology_Bench.Workers.Announce_Ready (Request);
 
-   if Ada.Strings.Unbounded.To_String (Name) = "nonzero" then
+   if Ada.Strings.Unbounded.To_String (Name) = "long-exception" then
+      Flyology_Bench.Workers.Return_Benchmark_Exception
+        (Request, "fixture", String'(1 .. 20_000 => 'm'));
+      return;
+   elsif Ada.Strings.Unbounded.To_String (Name) = "nonzero" then
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    elsif Ada.Strings.Unbounded.To_String (Name) = "invalid" then
@@ -194,6 +215,22 @@ begin
    elsif Ada.Strings.Unbounded.To_String (Name) = "diagnostics" then
       for Index in 1 .. 100 loop
          Ada.Text_IO.Put (String'(1 .. 1_000 => 'x'));
+      end loop;
+   elsif Ada.Strings.Unbounded.To_String (Name) = "diagnostics-timeout" then
+      Flood_Output;
+      return;
+   elsif Ada.Strings.Unbounded.To_String (Name) = "parent-abort" then
+      declare
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Create
+           (File, Ada.Text_IO.Out_File,
+            Ada.Environment_Variables.Value ("WORKER_PID_FILE"));
+         Ada.Text_IO.Put_Line (File, C.int'Image (Getpid));
+         Ada.Text_IO.Close (File);
+      end;
+      loop
+         delay 1.0;
       end loop;
    elsif Ada.Strings.Unbounded.To_String (Name) = "environment" then
       Ada.Text_IO.Put_Line
@@ -218,6 +255,9 @@ begin
       declare
          Result : Flyology_Bench.Measurement;
       begin
+         if Ada.Strings.Unbounded.To_String (Name) = "wrong-result-seed" then
+            Config.Random_Seed := Config.Random_Seed + 1;
+         end if;
          Measure_One (Config, Result);
          Flyology_Bench.Workers.Return_Result (Request, Result);
          if Ada.Strings.Unbounded.To_String (Name) = "trailing" then
@@ -229,6 +269,10 @@ begin
          Result : Flyology_Bench.Comparison;
       begin
          Compare_One (Config, Result);
+         if Ada.Strings.Unbounded.To_String (Name) = "wrong-counts" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Comparison_Counts
+              (Result);
+         end if;
          Flyology_Bench.Workers.Return_Result (Request, Result);
       end;
    end if;

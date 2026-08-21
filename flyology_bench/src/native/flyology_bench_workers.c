@@ -30,8 +30,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-_Static_assert(sizeof(pid_t) <= sizeof(int), "pid_t must fit the Ada ABI");
-_Static_assert(sizeof(ssize_t) <= sizeof(long), "ssize_t must fit the Ada ABI");
+_Static_assert(sizeof(pid_t) == sizeof(int), "pid_t must match the Ada ABI");
+_Static_assert(sizeof(ssize_t) == sizeof(long), "ssize_t must match the Ada ABI");
 
 enum { RESULT_DESCRIPTOR = 3, FIRST_CLOSED_DESCRIPTOR = 4 };
 
@@ -86,7 +86,7 @@ static int make_pipe(int descriptors[2])
     return 0;
 }
 
-static int set_nonblocking(int descriptor)
+int flyology_bench_worker_set_nonblocking(int descriptor)
 {
     int flags = fcntl(descriptor, F_GETFL);
     if (flags < 0) return -1;
@@ -216,18 +216,9 @@ done:
         (void)close(result_pipe[1]); result_pipe[1] = -1;
         (void)close(output_pipe[1]); output_pipe[1] = -1;
         (void)close(error_pipe[1]); error_pipe[1] = -1;
-        if (set_nonblocking(result_pipe[0]) < 0 ||
-            set_nonblocking(output_pipe[0]) < 0 ||
-            set_nonblocking(error_pipe[0]) < 0) {
-            int saved = errno;
-            (void)kill(-*pid, SIGKILL);
-            (void)waitpid((pid_t)*pid, NULL, 0);
-            result = saved;
-        } else {
-            parent_descriptors[0] = result_pipe[0]; result_pipe[0] = -1;
-            parent_descriptors[1] = output_pipe[0]; output_pipe[0] = -1;
-            parent_descriptors[2] = error_pipe[0]; error_pipe[0] = -1;
-        }
+        parent_descriptors[0] = result_pipe[0]; result_pipe[0] = -1;
+        parent_descriptors[1] = output_pipe[0]; output_pipe[0] = -1;
+        parent_descriptors[2] = error_pipe[0]; error_pipe[0] = -1;
     }
     close_pair(result_pipe);
     close_pair(output_pipe);

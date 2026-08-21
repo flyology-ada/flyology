@@ -10,6 +10,7 @@ extern int flyology_bench_worker_errno_interrupted(void);
 extern int flyology_bench_worker_errno_would_block(void);
 extern int flyology_bench_worker_errno_no_process(void);
 extern int flyology_bench_worker_errno_permission(void);
+extern int flyology_bench_worker_set_nonblocking(int descriptor);
 
 int main(void)
 {
@@ -19,5 +20,6 @@ int main(void)
     if (flyology_bench_worker_errno_would_block() <= 0) return 4;
     if (flyology_bench_worker_errno_no_process() <= 0) return 5;
     if (flyology_bench_worker_errno_permission() <= 0) return 6;
+    if (flyology_bench_worker_set_nonblocking(-1) != -1) return 7;
     return 0;
 }

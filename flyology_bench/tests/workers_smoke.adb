@@ -1,10 +1,12 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
+with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
+with Ada.Task_Identification;
 with Flyology_Bench;
 with Flyology_Bench.Workers;
 with GNAT.OS_Lib;
@@ -141,6 +143,16 @@ begin
              "invalid worker configuration was not classified");
 
       W.Run
+        (Fixture, "long-exception", W.Ordinary_Measurement, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Benchmark_Exception,
+             "bounded benchmark exception was not classified");
+      Check
+        (W.Reason (Results (1))'Length
+           = 7 + 2 + W.Maximum_Result_Message_Length,
+         "benchmark exception was not truncated to its envelope bound");
+
+      W.Run
         (Fixture, "nonzero", W.Ordinary_Measurement, Base,
          Default_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Nonzero_Exit,
@@ -160,6 +172,17 @@ begin
       Expect_Malformed ("wrong-version");
       Expect_Malformed ("wrong-identity");
       Expect_Malformed ("trailing");
+
+      W.Run
+        (Fixture, "wrong-result-seed", W.Ordinary_Measurement, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "mismatched measurement seed was accepted");
+      W.Run
+        (Fixture, "wrong-counts", W.Paired_Comparison, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "inconsistent comparison counts were accepted");
    end;
 
    declare
@@ -191,6 +214,68 @@ begin
          Timeout_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Startup_Timeout,
              "startup timeout was not classified");
+
+      W.Run
+        (Fixture, "diagnostics-timeout", W.Ordinary_Measurement, Base,
+         Timeout_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Execution_Timeout,
+             "continuous diagnostics postponed the worker deadline");
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Pid_File : constant String := Test_Directory & "/parent-abort.pid";
+      function Prepare_Pid_File return Boolean is
+      begin
+         if Ada.Directories.Exists (Pid_File) then
+            Ada.Directories.Delete_File (Pid_File);
+         end if;
+         return True;
+      end Prepare_Pid_File;
+      Pid_File_Prepared : constant Boolean := Prepare_Pid_File;
+      pragma Unreferenced (Pid_File_Prepared);
+      function Parent_Abort_Environment return W.Environment is
+         Result : W.Environment := W.Create_Environment;
+      begin
+         W.Add (Result, "WORKER_PID_FILE", Pid_File);
+         return Result;
+      end Parent_Abort_Environment;
+      Env : constant W.Environment := Parent_Abort_Environment;
+      Launch : constant W.Launch_Configuration :=
+        (Default_Launch with delta Total_Timeout => 10.0);
+
+      task Runner;
+      task body Runner is
+      begin
+         W.Run
+           (Fixture, "parent-abort", W.Ordinary_Measurement, Base,
+            Launch, Env, Results);
+      end Runner;
+
+      Child_Pid : C.int := -1;
+   begin
+      for Attempt in 1 .. 200 loop
+         exit when Ada.Directories.Exists (Pid_File);
+         delay 0.010;
+      end loop;
+      Check (Ada.Directories.Exists (Pid_File),
+             "parent-interruption fixture did not publish its PID");
+      declare
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_File);
+         Child_Pid := C.int'Value (Ada.Text_IO.Get_Line (File));
+         Ada.Text_IO.Close (File);
+      end;
+      Ada.Task_Identification.Abort_Task (Runner'Identity);
+      for Attempt in 1 .. 200 loop
+         exit when Runner'Terminated;
+         delay 0.010;
+      end loop;
+      Check (Runner'Terminated,
+             "aborted worker parent did not finish cleanup");
+      Check (PID_Exists (Child_Pid) = 0,
+             "parent interruption left its worker alive or unreaped");
    end;
 
    declare
@@ -266,9 +351,9 @@ begin
    end;
 
    declare
-      Reserved_FD : GNAT.OS_Lib.File_Descriptor :=
+      Reserved_FD : constant GNAT.OS_Lib.File_Descriptor :=
         GNAT.OS_Lib.Open_Read ("/dev/null", GNAT.OS_Lib.Binary);
-      FD : GNAT.OS_Lib.File_Descriptor :=
+      FD : constant GNAT.OS_Lib.File_Descriptor :=
         GNAT.OS_Lib.Open_Read ("/dev/null", GNAT.OS_Lib.Binary);
       Results : W.Worker_Result_Array (1 .. 1);
       Env : W.Environment := W.Create_Environment;
@@ -360,6 +445,35 @@ begin
            (Fixture, "ordinary", W.Ordinary_Measurement, Base,
             Default_Launch, Large, Results);
       end Total_Overflow;
+      procedure Long_Host_Lock_Path is
+         Results : W.Worker_Result_Array (1 .. 1);
+         Env : constant W.Environment := W.Create_Environment;
+         Config : constant Flyology_Bench.Configuration :=
+           (Base with delta
+              Host_Lock =>
+                (Enabled => True,
+                 Path => US.To_Unbounded_String
+                   (String'(1 .. W.Maximum_Host_Lock_Path_Length + 1 => 'p')),
+                 Timeout => 0.0,
+                 Poll_Interval => 0.010,
+                 Require_Machine_Scope => False));
+      begin
+         W.Run
+           (Fixture, "ordinary", W.Ordinary_Measurement, Config,
+            Default_Launch, Env, Results);
+      end Long_Host_Lock_Path;
+      procedure Long_Progress_Name is
+         Results : W.Worker_Result_Array (1 .. 1);
+         Env : constant W.Environment := W.Create_Environment;
+         Config : constant Flyology_Bench.Configuration :=
+           (Base with delta
+              Progress_Name => US.To_Unbounded_String
+                (String'(1 .. W.Maximum_Progress_Name_Length + 1 => 'n')));
+      begin
+         W.Run
+           (Fixture, "ordinary", W.Ordinary_Measurement, Config,
+            Default_Launch, Env, Results);
+      end Long_Progress_Name;
    begin
       Expect_Configuration_Error ("duplicate environment", Duplicate'Access);
       Expect_Configuration_Error ("invalid environment name", Invalid_Name'Access);
@@ -371,6 +485,10 @@ begin
         ("environment add/remove conflict", Add_Remove_Conflict'Access);
       Expect_Configuration_Error
         ("total environment overflow", Total_Overflow'Access);
+      Expect_Configuration_Error
+        ("overlong host-lock path", Long_Host_Lock_Path'Access);
+      Expect_Configuration_Error
+        ("overlong progress name", Long_Progress_Name'Access);
    end;
 
    Ada.Text_IO.Put_Line ("flyology_bench fresh workers: PASS");

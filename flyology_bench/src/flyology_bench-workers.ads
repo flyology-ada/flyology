@@ -30,6 +30,16 @@ package Flyology_Bench.Workers is
    Maximum_Environment_Value_Length : constant := 16_384;
    --  Largest complete environment including terminators.
    Maximum_Environment_Bytes : constant := 65_536;
+   --  Largest encoded benchmark configuration carried in internal argv.
+   Maximum_Configuration_Bytes : constant := 16_384;
+   --  Largest host-lock path carried to a worker.
+   Maximum_Host_Lock_Path_Length : constant := 4_096;
+   --  Largest progress identity carried to a worker.
+   Maximum_Progress_Name_Length : constant := 512;
+   --  Largest exception identity carried in a result envelope.
+   Maximum_Exception_Name_Length : constant := 4_096;
+   --  Largest exception or configuration message carried in an envelope.
+   Maximum_Result_Message_Length : constant := 16_384;
    --  Largest retained diagnostic stream.
    Maximum_Diagnostic_Bytes : constant := 1_048_576;
    --  Largest repetition request accepted by one Run call.

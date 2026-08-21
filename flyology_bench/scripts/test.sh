@@ -157,6 +157,7 @@ cc_command=${CC:-cc}
 "$work_dir/workers_abi_probe"
 for symbol in \
   flyology_bench_worker_spawn \
+  flyology_bench_worker_set_nonblocking \
   flyology_bench_worker_observe_exit \
   flyology_bench_worker_status_exited
 do
