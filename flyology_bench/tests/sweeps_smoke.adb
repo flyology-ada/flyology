@@ -189,6 +189,11 @@ procedure Sweeps_Smoke is
       Work_For     => Point_Work,
       Run_Point    => Measure_A);
 
+   procedure Run_Paired_Budgeted is new Sweeps.Compare_Sweep
+     (Select_Point => Select_Slow_First,
+      Work_For     => Point_Work,
+      Run_Point    => Compare_AB);
+
    Points : Sweeps.Point_Set (Maximum_Points => 3);
    Config : constant Flyology_Bench.Configuration :=
      (Warmup_Time             => 0.0,
@@ -586,6 +591,9 @@ begin
    declare
       Budget_Config : Flyology_Bench.Configuration := Config;
       Budget_Result : Sweeps.Ordinary_Sweep_Result (3);
+      Final_Points : Sweeps.Point_Set (1);
+      Final_Ordinary : Sweeps.Ordinary_Sweep_Result (1);
+      Final_Paired : Sweeps.Paired_Sweep_Result (1);
    begin
       Budget_Config.Maximum_Sampling_Time := 0.001;
       Run_Budgeted
@@ -603,6 +611,42 @@ begin
       Check
         (not Sweeps.Work_Available (Sweeps.Element (Budget_Result, 2)),
          "budget-skipped point acquired fabricated work");
+
+      Final_Points.Append
+        (Sweeps.Point (Sweeps.Count_Parameter, 1, "final-budget"));
+      Run_Budgeted
+        ("algorithms/final_budget",
+         Final_Points,
+         Budget_Config,
+         (Failure => Sweeps.Stop_On_Point_Failure,
+          Budget  => Sweeps.Whole_Sweep_Budget,
+          Mode    => Sweeps.Collect_Measurements),
+         Final_Ordinary);
+      Check
+        (Sweeps.Length (Final_Ordinary) = 1
+         and then Sweeps.Status (Sweeps.Element (Final_Ordinary, 1))
+           = Sweeps.Point_Budget_Exhausted,
+         "final ordinary budget exhaustion was not retained");
+      Check
+        (not Sweeps.Stopped_Early (Final_Ordinary),
+         "final ordinary budget exhaustion reported unattempted points");
+
+      Run_Paired_Budgeted
+        ("algorithms/final_budget",
+         Final_Points,
+         Budget_Config,
+         (Failure => Sweeps.Stop_On_Point_Failure,
+          Budget  => Sweeps.Whole_Sweep_Budget,
+          Mode    => Sweeps.Collect_Measurements),
+         Final_Paired);
+      Check
+        (Sweeps.Length (Final_Paired) = 1
+         and then Sweeps.Status (Sweeps.Element (Final_Paired, 1))
+           = Sweeps.Point_Budget_Exhausted,
+         "final paired budget exhaustion was not retained");
+      Check
+        (not Sweeps.Stopped_Early (Final_Paired),
+         "final paired budget exhaustion reported unattempted points");
 
       Run_Ordinary
         ("algorithms/dry",
