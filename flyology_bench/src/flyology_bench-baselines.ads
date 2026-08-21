@@ -40,6 +40,8 @@ package Flyology_Bench.Baselines is
    --  @param Confidence_Level_Percent Central interval coverage in percent.
    --  @param Bootstrap_Resamples Number of bootstrap distributions to draw.
    --  @return Compatibility, interval, change, and verdict.
+   --  @exception Constraint_Error Compatible samples request more than the
+   --  bounded bootstrap analysis work.
    function Compare
      (Saved      : Baseline;
       Current    : Measurement;

@@ -263,6 +263,7 @@ procedure Flyology_Bench_Smoke is
       Progress            => null,
       Progress_Name       => <>);
    First  : Flyology_Bench.Measurement;
+   Maximum_Resample_Result : Flyology_Bench.Measurement;
    Second : Flyology_Bench.Measurement;
    Compared : Flyology_Bench.Comparison;
    Shared_Compared : Flyology_Bench.Comparison;
@@ -381,7 +382,7 @@ begin
       "default statistical settings changed");
    declare
       Too_Low : Long_Float := 49.9 with Volatile;
-      Too_Many : Positive := 100_001 with Volatile;
+      Too_Many : Positive := 10_001 with Volatile;
    begin
       begin
          declare
@@ -406,6 +407,37 @@ begin
          when Constraint_Error => null;
       end;
    end;
+   declare
+      Before   : constant Natural := Counter;
+      Rejected : Boolean := False;
+      Discarded : Flyology_Bench.Measurement;
+   begin
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              Samples => 1_000,
+              Bootstrap_Resamples => 10_000,
+              Metrics => [others => True]),
+            Discarded);
+      exception
+         when Constraint_Error => Rejected := True;
+      end;
+      Check (Rejected, "oversized bootstrap workload was accepted");
+      Check (Counter = Before,
+             "bootstrap workload was rejected after benchmark execution");
+   end;
+   Operation_Benchmark
+     ((Config with delta
+        Warmup_Time => 0.0,
+        Measurement_Time => 0.001,
+        Samples => 10,
+        Metrics => Flyology_Bench.Time_Metrics,
+        Scheduler_Probe => null,
+        Bootstrap_Resamples => 10_000),
+      Maximum_Resample_Result);
+   Check
+     (Flyology_Bench.Bootstrap_Resamples (Maximum_Resample_Result) = 10_000,
+      "maximum bootstrap resample count was not retained");
    Operation_Benchmark
      ((Config with delta
         CPU_Quiescence =>
@@ -1162,9 +1194,13 @@ begin
    Ada.Text_IO.Put_Line (Machine_Output_Begin);
    Flyology_Bench.Reporters.Put_CSV_Header;
    Flyology_Bench.Reporters.Put_CSV ("volatile_increment", First);
+   Flyology_Bench.Reporters.Put_CSV
+     ("maximum_resamples", Maximum_Resample_Result);
    Flyology_Bench.Reporters.Put_Metrics_CSV_Header;
    Flyology_Bench.Reporters.Put_Metrics_CSV ("volatile_increment", First);
    Flyology_Bench.Reporters.Put_JSON ("volatile_increment", First);
+   Flyology_Bench.Reporters.Put_JSON
+     ("maximum_resamples", Maximum_Resample_Result);
    Flyology_Bench.Reporters.Put_Comparison_CSV_Header;
    Flyology_Bench.Reporters.Put_Comparison_CSV
      ("one_increment", "two_increments", Compared);
