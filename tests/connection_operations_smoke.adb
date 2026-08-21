@@ -334,6 +334,142 @@ procedure Connection_Operations_Smoke is
          Sockets.Close_Socket (Peer);
       end;
 
+      --  TLS upgrade is itself a first-class operation. Provider setup is
+      --  eager, while WANT_WRITE/WANT_READ handshake progress composes with
+      --  an ordinary timer and success gate without exposing TLS internals.
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Item : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Backend : aliased Provider.Provider;
+      begin
+         Provider.Reset_State_Telemetry;
+         Provider.Set_Script
+           (Backend, Provider.Handshake_Operation,
+            [1 => (TLS.Want_Write, Provider.Preserve_Output, 0),
+             2 => (TLS.Want_Read, Provider.Preserve_Output, 0),
+             3 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         --  The scripted provider does not consume transport bytes, so keep
+         --  read readiness persistent for its WANT_READ step.
+         Sockets.Send_All (Peer, [1 => 97]);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (3);
+            Secure : aliased Connection_TLS.Upgrade_Operation :=
+              Connection_TLS.Upgrade
+                (Set'Access,
+                 Item'Access,
+                 Backend'Access,
+                 TLS.Server,
+                 "",
+                 Timeout => 1.0);
+            Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+              Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
+            First : Flyology.Operations.Gate_Operation :=
+              Flyology.Operations.Wait_For_Success
+                (Set'Access, [Ref (Secure), Ref (Alarm)]);
+            Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+         begin
+            loop
+               exit when Flyology.Operations.Is_Terminal (First);
+               Flyology.Operations.Wait_Some (Set, Batch);
+            end loop;
+            Flyology.Operations.Finish (First, Matches);
+            Connection_TLS.Finish (Secure);
+            Passed := Passed
+              and then Matches.Count = 1
+              and then Connections.Is_Open (Item);
+            if Flyology.Operations.Is_Active (Alarm) then
+               Flyology.Operations.Cancel (Alarm);
+            end if;
+            begin
+               Flyology.IO.Timers.Finish (Alarm);
+            exception
+               when Flyology.Operations.Operation_Cancelled => null;
+            end;
+         end;
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  Provider setup failure is retained until typed Finish and happens
+      --  before the transport transition, so the plaintext connection remains
+      --  usable. This also exercises the reusable initiating overload.
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Item : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Backend : aliased Provider.Provider;
+         Failed_At_Finish : Boolean := False;
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Secure : Connection_TLS.Upgrade_Operation (Set'Access);
+      begin
+         Provider.Set_Available (Backend, False);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         Connection_TLS.Upgrade
+           (Item'Access, Backend'Access, TLS.Server, "",
+            Timeout => 1.0, Operation => Secure);
+         Flyology.Operations.Wait_All (Set);
+         begin
+            Connection_TLS.Finish (Secure);
+         exception
+            when TLS.TLS_Error => Failed_At_Finish := True;
+         end;
+         Passed := Passed
+           and then Failed_At_Finish
+           and then Connections.Is_Open (Item);
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  Timeout and explicit cancellation after a session is installed must
+      --  both drain provider state and close the now-non-plaintext connection.
+      for Cancel_Explicitly in Boolean loop
+         declare
+            Manager : aliased Connections.Server (Capacity => 1);
+            Item : aliased Connections.Connection (Manager'Access);
+            Socket, Peer : Sockets.Socket_Type;
+            Backend : aliased Provider.Provider;
+            Saw_Expected : Boolean := False;
+         begin
+            Provider.Set_Script
+              (Backend, Provider.Handshake_Operation,
+               [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+            Sockets.Create_Socket_Pair (Socket, Peer);
+            Connections.Take (Manager, Socket, Item);
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Secure : Connection_TLS.Upgrade_Operation :=
+                 Connection_TLS.Upgrade
+                   (Set'Access, Item'Access, Backend'Access, TLS.Server, "",
+                    Timeout =>
+                      (if Cancel_Explicitly
+                       then Flyology.IO.Infinite
+                       else 0.005));
+            begin
+               if Cancel_Explicitly then
+                  Flyology.Operations.Cancel (Secure);
+               end if;
+               Flyology.Operations.Wait_All (Set);
+               begin
+                  Connection_TLS.Finish (Secure);
+               exception
+                  when Connections.Operation_Cancelled =>
+                     Saw_Expected := Cancel_Explicitly;
+                  when Flyology.IO.Timeout_Error =>
+                     Saw_Expected := not Cancel_Explicitly;
+               end;
+            end;
+            Passed := Passed
+              and then Saw_Expected
+              and then not Connections.Is_Open (Item);
+            Sockets.Close_Socket (Peer);
+         end;
+      end loop;
+
       --  The same operation types transparently drive an upgraded TLS
       --  transport. WANT_WRITE from receive and WANT_READ from send select
       --  the opposite descriptor direction; partial TLS progress reschedules

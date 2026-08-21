@@ -1684,7 +1684,7 @@ generic channel rows are in
 | unique-buffer socket `Receive` | all | native and lightweight |
 | unique-buffer socket `Send` | all | native and lightweight |
 | unique-buffer socket `Send_All` | all | native and lightweight |
-| high-level Connection `Receive`, `Receive_Exactly`, and `Send_All` | success and all, including TLS transport | native and lightweight |
+| high-level Connection `Receive`, `Receive_Exactly`, `Send_All`, and TLS `Upgrade` | success and all, including handshake WANT_READ/WANT_WRITE | native and lightweight |
 | socket array `Receive_Datagram` | success quorum and all | native and lightweight |
 | socket array `Send_Datagram` | success quorum and all | native and lightweight |
 | Internet-stream socket `Connect` | success quorum and all | native and lightweight |
@@ -1720,7 +1720,7 @@ must not wrap the synchronous call inside `Drive`.
 
 | Remaining primitive | Decision | Reason |
 | --- | --- | --- |
-| high-level connection admission and TLS `Upgrade`/`Shutdown` | add later | Admission, handshake, and close-notify have useful terminal results and existing nonblocking readiness steps; the current high-level data operations already work after TLS upgrade. |
+| high-level connection admission and TLS `Shutdown` | add later | Admission and close-notify have useful terminal results and existing nonblocking readiness steps; scoped `Upgrade` and the high-level data operations compose today. |
 | wall-clock `Wait_Until` and `Timer_Set.Wait_Next` | add later | Both return useful terminal observations. Their providers must retain the wall-clock source or the timer-set arm state instead of calling the synchronous waits from `Drive`; ordinary monotonic timer roots already compose today. |
 | cancellation-token `Await_Request` | add later | A token already has retained one-shot state and a readiness source, so a typed no-result operation can hide the descriptor adapter and compose directly with gates. |
 | DNS `Resolve` and `Resolve_Using` | add later | A resolver operation can compose its bounded UDP/TCP attempts and retain the address result; calling the synchronous resolver from a driver would nest waits. |
@@ -1989,6 +1989,12 @@ exclusive lease, advances its descriptor generation so already-queued
 plaintext operations are cancelled, creates a provider session over the same
 descriptor, and performs the handshake under one deadline. Later `Receive`,
 `Receive_Exactly`, and `Send_All` calls use TLS transparently.
+
+The additive scoped overload returns an `Upgrade_Operation` in a completion
+set. Provider-session creation is still an eager initiation step, while lease
+waiting and every handshake `Want_Read` or `Want_Write` step compose with
+timers, gates, and other operations. Provider, timeout, and cancellation
+failures are retained until `Flyology.IO.Connections.TLS.Finish`.
 
 Plaintext fallback is a protocol decision made before calling `Upgrade`. Once
 the transport enters its upgrade state, provider setup failure, handshake

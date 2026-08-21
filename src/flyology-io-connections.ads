@@ -375,6 +375,7 @@ private
       procedure Start_Operation
         (Generation   : not null access Descriptor_Generation;
          State        : not null access Operation_State;
+         FD           : out Flyology.IO.Descriptor;
          Lease_Source : out Flyology.IO.Descriptor;
          Close_Source : out Flyology.IO.Descriptor;
          Owner        : out Server_Access);
@@ -456,7 +457,10 @@ private
    end record;
 
    type Scoped_IO_Kind is
-     (Receive_One, Receive_Complete, Send_Complete);
+     (Receive_One,
+      Receive_Complete,
+      Send_Complete,
+      Upgrade_TLS_Transport);
    type Scoped_IO_Failure is
      (No_Failure,
       State_Failure,
@@ -600,6 +604,8 @@ private
       Owner                : Server_Access := null;
       FD                   : Descriptor := Invalid_Descriptor;
       Transport            : Transport_Kind := No_Transport;
+      Pending_TLS_Session  : Flyology.IO.TLS.Session_Access := null;
+      Upgrade_Started      : aliased Boolean := False;
       Failure              : Scoped_IO_Failure := No_Failure;
    end record;
 
@@ -614,6 +620,29 @@ private
    --  @param Item Connection operation to cancel and release
    overriding procedure Request_Cancellation
      (Item : in out Connection_Operation);
+
+   --  @exclude
+   --  Start a high-level TLS upgrade. Factory is invoked synchronously before
+   --  this procedure returns, while its captured caller actuals are live.
+   --  @param Operation Fresh or consumed upgrade operation
+   --  @param Item Open plaintext admitted connection
+   --  @param Factory Provider-specific session factory
+   --  @param Timeout Shared lease-and-handshake deadline
+   --  @param Token Optional cancellation source
+   procedure Start_Scoped_TLS_Upgrade
+     (Operation : in out Connection_Operation'Class;
+      Item      : not null access Connection'Class;
+      Factory   : not null access function
+        (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
+      Timeout   : Duration;
+      Token     : access Cancellation_Token);
+
+   --  @exclude
+   --  Consume a terminal connection-family operation and raise its retained
+   --  provider result using the familiar synchronous exception class.
+   --  @param Item Terminal connection-family operation
+   procedure Finish_Connection_Operation
+     (Item : in out Connection_Operation'Class);
 
    type Receive_Operation is new Connection_Operation with null record;
    type Receive_Exactly_Operation is

@@ -1,8 +1,105 @@
 with Flyology.IO.TLS;
 with Flyology.IO.TLS.ALPN;
+with Flyology.Operations;
 
 --  Adds ownership-preserving TLS to an admitted connection.
 package Flyology.IO.Connections.TLS is
+
+   --  First-class ownership-preserving TLS upgrade. Provider setup is an
+   --  eager bounded initiation step; lease acquisition and every handshake
+   --  WANT_READ/WANT_WRITE step compose through the owning completion set.
+   type Upgrade_Operation is new Connection_Operation with private;
+
+   --  Start a core TLS upgrade without suspending the owner task. Item and
+   --  Backend are borrowed through provider setup; Item remains borrowed until
+   --  typed Finish or finalization. Any failure after the transport transition
+   --  closes Item, matching the synchronous Upgrade contract.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Open plaintext admitted connection
+   --  @param Backend Initialized TLS provider
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Verified client DNS name or empty server name
+   --  @param Timeout Shared lease, setup, and handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited TLS upgrade operation
+   function Upgrade
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Item        : not null access Connection'Class;
+      Backend     : not null access Flyology.IO.TLS.Provider'Class;
+      Side        : Flyology.IO.TLS.Role;
+      Server_Name : String;
+      Timeout     : Duration := Infinite;
+      Token       : access Cancellation_Token := null)
+      return Upgrade_Operation;
+
+   --  Start or restart a core TLS upgrade in an established operation object.
+   --  @param Item Open plaintext admitted connection
+   --  @param Backend Initialized TLS provider
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Verified client DNS name or empty server name
+   --  @param Timeout Shared lease, setup, and handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed upgrade operation
+   procedure Upgrade
+     (Item        : not null access Connection'Class;
+      Backend     : not null access Flyology.IO.TLS.Provider'Class;
+      Side        : Flyology.IO.TLS.Role;
+      Server_Name : String;
+      Timeout     : Duration := Infinite;
+      Token       : access Cancellation_Token := null;
+      Operation   : in out Upgrade_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start an ALPN-capable TLS upgrade. Protocols is consumed during eager
+   --  provider setup and need not outlive initiation; all other behavior
+   --  matches the core scoped Upgrade.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Open plaintext admitted connection
+   --  @param Backend Initialized ALPN-capable provider
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Verified client DNS name or empty server name
+   --  @param Protocols Ordered client offer or an empty list
+   --  @param Timeout Shared lease, setup, and handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited TLS upgrade operation
+   function Upgrade
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Item        : not null access Connection'Class;
+      Backend     : not null access Flyology.IO.TLS.ALPN.Provider'Class;
+      Side        : Flyology.IO.TLS.Role;
+      Server_Name : String;
+      Protocols   : Flyology.IO.TLS.ALPN.Protocol_List;
+      Timeout     : Duration := Infinite;
+      Token       : access Cancellation_Token := null)
+      return Upgrade_Operation;
+
+   --  Start or restart an ALPN-capable TLS upgrade.
+   --  @param Item Open plaintext admitted connection
+   --  @param Backend Initialized ALPN-capable provider
+   --  @param Side Client or server handshake role
+   --  @param Server_Name Verified client DNS name or empty server name
+   --  @param Protocols Ordered client offer or an empty list
+   --  @param Timeout Shared lease, setup, and handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed upgrade operation
+   procedure Upgrade
+     (Item        : not null access Connection'Class;
+      Backend     : not null access Flyology.IO.TLS.ALPN.Provider'Class;
+      Side        : Flyology.IO.TLS.Role;
+      Server_Name : String;
+      Protocols   : Flyology.IO.TLS.ALPN.Protocol_List;
+      Timeout     : Duration := Infinite;
+      Token       : access Cancellation_Token := null;
+      Operation   : in out Upgrade_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal TLS upgrade, raising its retained familiar error.
+   --  @param Operation Terminal TLS upgrade operation
+   procedure Finish (Operation : in out Upgrade_Operation);
 
    --  Replace Item's plaintext transport with a provider session and complete
    --  its TLS handshake over the same socket. Item retains its admission
@@ -105,5 +202,8 @@ package Flyology.IO.Connections.TLS is
      (Item    : in out Connection;
       Timeout : Duration := Infinite;
       Token   : access Cancellation_Token := null);
+
+private
+   type Upgrade_Operation is new Connection_Operation with null record;
 
 end Flyology.IO.Connections.TLS;

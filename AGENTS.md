@@ -151,8 +151,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
   arrays and ownership-transferring unique buffers, high-level connection data
-  operations over plaintext or TLS, nonrecursive and recursive file-watcher
-  `Next`, and retained task-result `Wait`. Recursive `Next` is a disclosed
+  operations over plaintext or TLS, high-level connection TLS `Upgrade`,
+  nonrecursive and recursive file-watcher `Next`, and retained task-result
+  `Wait`. Recursive `Next` is a disclosed
   exception to the immediate-step rule: after its hidden watcher child becomes
   ready, its owner-stack driver performs capacity-bounded directory discovery
   and registration metadata calls before the parent terminalizes. Those calls
