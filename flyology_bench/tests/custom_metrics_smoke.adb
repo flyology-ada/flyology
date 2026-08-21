@@ -206,6 +206,89 @@ procedure Custom_Metrics_Smoke is
       Reference_Batch => Fake_Reference,
       Contender_Batch => Fake_Contender);
 
+   Ordered_Call : Natural := 0;
+   Ordered_Value : Long_Float := 0.0;
+   procedure Ordered_Probe
+     (Snapshot : in out Flyology_Bench.Custom_Snapshot) is
+   begin
+      Snapshot := [others => (Status => Flyology_Bench.Metric_Not_Requested,
+                              others => <>)];
+      Snapshot (1) :=
+        (Status => Flyology_Bench.Metric_Collected,
+         Counter_Value => 0, Sample_Value => Ordered_Value);
+   end Ordered_Probe;
+   procedure Ordered_Batch (Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      Ordered_Call := Ordered_Call + 1;
+      Ordered_Value := (if Ordered_Call mod 2 = 0 then 0.0 else 10.0);
+      for Index in 1 .. Iterations loop
+         Dummy := Dummy + Long_Long_Integer (Index);
+      end loop;
+   end Ordered_Batch;
+   procedure Ordered_Measure is new Flyology_Bench.Measure_Batched
+     (Ordered_Batch);
+
+   Threshold_Value : Long_Float := 100.0;
+   Threshold_Contender_Call : Natural := 0;
+   procedure Threshold_Probe
+     (Snapshot : in out Flyology_Bench.Custom_Snapshot) is
+   begin
+      Snapshot := [others => (Status => Flyology_Bench.Metric_Not_Requested,
+                              others => <>)];
+      Snapshot (1) :=
+        (Status => Flyology_Bench.Metric_Collected,
+         Counter_Value => 0, Sample_Value => Threshold_Value);
+   end Threshold_Probe;
+   procedure Threshold_Reference
+     (Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      Threshold_Value := 100.0;
+      for Index in 1 .. Iterations loop
+         Dummy := Dummy + Long_Long_Integer (Index);
+      end loop;
+   end Threshold_Reference;
+   procedure Threshold_Contender
+     (Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      Threshold_Contender_Call := Threshold_Contender_Call + 1;
+      Threshold_Value :=
+        (if Threshold_Contender_Call mod 2 = 0 then 100.5 else 101.5);
+      for Index in 1 .. Iterations loop
+         Dummy := Dummy + Long_Long_Integer (Index);
+      end loop;
+   end Threshold_Contender;
+   procedure Threshold_Compare is new Flyology_Bench.Compare_Batched
+     (Threshold_Reference, Threshold_Contender);
+
+   Failure_Status : Flyology_Bench.Metric_Availability :=
+     Flyology_Bench.Probe_Failed;
+   procedure Failure_Probe
+     (Snapshot : in out Flyology_Bench.Custom_Snapshot) is
+   begin
+      Snapshot := [others => (Status => Flyology_Bench.Metric_Not_Requested,
+                              others => <>)];
+      Snapshot (1) :=
+        (Status => Failure_Status, Counter_Value => 0, Sample_Value => 0.0);
+   end Failure_Probe;
+   procedure Failure_Reference
+     (Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      Failure_Status := Flyology_Bench.Counter_Reset;
+      for Index in 1 .. Iterations loop
+         Dummy := Dummy + Long_Long_Integer (Index);
+      end loop;
+   end Failure_Reference;
+   procedure Failure_Contender
+     (Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      Failure_Status := Flyology_Bench.Probe_Failed;
+      for Index in 1 .. Iterations loop
+         Dummy := Dummy + Long_Long_Integer (Index);
+      end loop;
+   end Failure_Contender;
+   procedure Failure_Compare is new Flyology_Bench.Compare_Batched
+     (Failure_Reference, Failure_Contender);
+
    function Base return Flyology_Bench.Configuration is
       Result : Flyology_Bench.Configuration := Flyology_Bench.Default_Configuration;
    begin
@@ -229,6 +312,7 @@ procedure Custom_Metrics_Smoke is
    Measured : Flyology_Bench.Measurement;
    Failed_Measured : Flyology_Bench.Measurement;
    Compared : Flyology_Bench.Comparison;
+   Failed_Compared : Flyology_Bench.Comparison;
    Multi : Flyology_Bench.Multi_Comparison;
    Item : Flyology_Bench.Metric_Comparison_Result;
 begin
@@ -344,6 +428,46 @@ begin
             and then Item.Verdict = Flyology_Bench.Metric_Diagnostic,
           "signed or zero custom samples did not use absolute comparison");
 
+   Config := Base;
+   Config.Samples := 16;
+   Flyology_Bench.Register_Custom_Metric
+     (Config.Custom_Metrics, "ordered_sample", "units/batch",
+      Flyology_Bench.Caller_Defined_Window,
+      Flyology_Bench.Unattributable, Flyology_Bench.Diagnostic,
+      Semantics => Flyology_Bench.Absolute_Sample,
+      Normalization => Flyology_Bench.Per_Batch,
+      Comparison => Flyology_Bench.Absolute);
+   Flyology_Bench.Set_Custom_Probe
+     (Config.Custom_Metrics, Ordered_Probe'Unrestricted_Access);
+   Ordered_Measure (Config, Measured);
+   Check
+     (Flyology_Bench.Custom_Metric_Statistics
+        (Measured, 1).Confidence_Low = 5.0
+      and then Flyology_Bench.Custom_Metric_Statistics
+        (Measured, 1).Confidence_High = 5.0,
+      "custom block bootstrap did not retain chronological sample order");
+
+   Config := Base;
+   Config.Samples := 25;
+   Config.Practical_Threshold_Percent := 1.0;
+   Flyology_Bench.Register_Custom_Metric
+     (Config.Custom_Metrics, "threshold_metric", "units/batch",
+      Flyology_Bench.Caller_Defined_Window,
+      Flyology_Bench.Unattributable, Flyology_Bench.Lower_Is_Better,
+      Semantics => Flyology_Bench.Absolute_Sample,
+      Normalization => Flyology_Bench.Per_Batch);
+   Flyology_Bench.Set_Custom_Probe
+     (Config.Custom_Metrics, Threshold_Probe'Unrestricted_Access);
+   Threshold_Compare (Config, Compared);
+   Item := Flyology_Bench.Compare_Custom_Metric (Compared, 1);
+   Check
+     (Item.Available
+      and then Item.Confidence_Low > 0.0
+      and then Item.Confidence_Low < 1.0
+      and then Item.Confidence_High > 1.0
+      and then Item.Verdict = Flyology_Bench.Metric_Inconclusive,
+      "custom relative verdict did not require clearing the practical threshold");
+
    Fake_Timer.Measure (Base, Measured);
    Check (Flyology_Bench.Custom_Metric_Sample (Measured, 1, 1) = 3.5,
           "manual timer conversion or normalization is wrong");
@@ -354,6 +478,9 @@ begin
           "manual timing source identity was lost");
    Check (Flyology_Bench.Metric_Available (Measured, Flyology_Bench.Wall_Time),
           "harness wall time disappeared under alternate timing");
+   Flyology_Bench.Reporters.Put_Console
+     ("manual timer", Measured, Style => Flyology_Bench.Reporters.Plain,
+      Include_Telemetry => False);
 
    Invalid_Timer.Measure (Base, Measured);
    Check (Flyology_Bench.Custom_Metric_Status (Measured, 1)
@@ -370,6 +497,24 @@ begin
           "manual timing paired comparison is not iteration-normalized");
    Check (Item.Verdict = Flyology_Bench.Reference_Better,
           "manual timing direction was not retained");
+   Flyology_Bench.Reporters.Put_Comparison_Console
+     ("old timer", "new timer", Compared,
+      Style => Flyology_Bench.Reporters.Plain);
+
+   Config := Base;
+   Flyology_Bench.Register_Custom_Metric
+     (Config.Custom_Metrics, "failed_pair", "units/batch",
+      Flyology_Bench.Caller_Defined_Window,
+      Flyology_Bench.Unattributable, Flyology_Bench.Diagnostic,
+      Semantics => Flyology_Bench.Absolute_Sample,
+      Normalization => Flyology_Bench.Per_Batch,
+      Comparison => Flyology_Bench.Absolute);
+   Flyology_Bench.Set_Custom_Probe
+     (Config.Custom_Metrics, Failure_Probe'Unrestricted_Access);
+   Failure_Compare (Config, Failed_Compared);
+   Flyology_Bench.Reporters.Put_Comparison_Console
+     ("failed old", "failed new", Failed_Compared,
+      Style => Flyology_Bench.Reporters.Plain);
 
    --  These rows are checked structurally by scripts/test.sh.
    Ada.Text_IO.Put_Line ("-- custom machine output begin --");
@@ -385,6 +530,10 @@ begin
      ("old", "new", Compared);
    Flyology_Bench.Reporters.Put_Comparison_Metrics_NDJSON
      ("old", "new", Compared);
+   Flyology_Bench.Reporters.Put_Extended_Comparison_Metrics_CSV
+     ("failed old", "failed new", Failed_Compared);
+   Flyology_Bench.Reporters.Put_Comparison_Metrics_NDJSON
+     ("failed old", "failed new", Failed_Compared);
    Ada.Text_IO.Put_Line ("-- custom machine output end --");
 
    declare
