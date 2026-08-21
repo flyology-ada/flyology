@@ -2173,6 +2173,7 @@ package body Flyology.IO.Sockets is
          Error : aliased Interfaces.C.int := 0;
          Result : Interfaces.C.long;
          Result_Address : System.Address;
+         Retry_Attempt : Natural := 0;
       begin
          if First > Data_Last then
             Flyology.Operations.Drivers.Complete
@@ -2197,10 +2198,22 @@ package body Flyology.IO.Sockets is
                   Interfaces.C.size_t (Count),
                   Error'Access);
             end if;
-            exit when Result >= 0
-              or else Flyology.Socket_Policy.Classify_IO_Error
-                (Policy_Error_Kind (Error)) /=
-                  Flyology.Socket_Policy.Retry_Operation;
+            exit when Result >= 0;
+            declare
+               Action : constant Flyology.Socket_Policy.IO_Error_Action :=
+                 Flyology.Socket_Policy.Classify_IO_Error
+                   (Policy_Error_Kind (Error));
+            begin
+               exit when Action /= Flyology.Socket_Policy.Retry_Operation;
+               Retry_Attempt := Retry_Attempt + 1;
+               if not Flyology.Socket_Policy.Retry_IO_Immediately
+                 (Retry_Attempt)
+               then
+                  Flyology.Operations.Drivers.Arm_Readiness
+                    (Item, Item.Socket.Value, Sending);
+                  return;
+               end if;
+            end;
          end loop;
 
          if Result < 0 then

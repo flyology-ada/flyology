@@ -23,6 +23,14 @@ is
       Other_Error);
 
    type IO_Error_Action is (Wait_For_Ready, Retry_Operation, Fail_Operation);
+   Immediate_IO_Retry_Limit : constant Positive := 16;
+
+   function Retry_IO_Immediately (Attempt : Positive) return Boolean
+   with
+     Global => null,
+     Post =>
+       Retry_IO_Immediately'Result =
+         (Attempt < Immediate_IO_Retry_Limit);
    type Connect_Error_Action is (Wait_For_Connection, Connected, Fail_Connect);
    type Post_Accept_Failure_Stage is
      (Peer_Address_Decode, Descriptor_Configuration);

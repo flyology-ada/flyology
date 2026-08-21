@@ -3,6 +3,7 @@ with Flyology.Wake_Sources;
 
 package body Flyology.Operations.Drivers is
    use type Interfaces.C.int;
+   use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
 
    function Pending_Slot
@@ -29,6 +30,24 @@ package body Flyology.Operations.Drivers is
    begin
       Register (Item);
    end Start;
+
+   procedure Rollback_Start (Item : in out Operation'Class) is
+      Id : constant Operation_Id := Pending_Slot (Item);
+      Slot : Slot_Record renames Item.Set.Slots (Id);
+   begin
+      if Slot.Dependents /= 0 then
+         raise Operation_Error with
+           "operation initiation already has dependent gates";
+      end if;
+      Slot.State := Idle;
+      Slot.Source := No_Source;
+      Slot.Descriptor := -1;
+      Slot.For_Write := False;
+      Slot.Deadline := Duration'Last;
+      Slot.Has_Deadline := False;
+      Slot.Result := Succeeded;
+      Slot.Reported := False;
+   end Rollback_Start;
 
    procedure Arm_Readiness
      (Item       : in out Operation'Class;

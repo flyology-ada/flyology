@@ -416,6 +416,12 @@ package body Flyology.IO is
       Flyology.Operations.Drivers.Start (Operation);
       Flyology.Operations.Drivers.Arm_Readiness
         (Operation, FD, Condition = For_Write);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
    end Rearm;
 
    overriding procedure Drive

@@ -132,6 +132,12 @@ package body Flyology.IO.Timers is
    begin
       Flyology.Operations.Drivers.Start (Operation);
       Flyology.Operations.Drivers.Arm_Deadline (Operation, Interval);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
    end Rearm;
 
    overriding procedure Drive

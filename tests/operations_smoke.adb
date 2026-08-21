@@ -297,6 +297,42 @@ procedure Operations_Smoke is
       end;
       Check (Passed, "readiness initiation rollback failed");
 
+      --  A failed Rearm is transactional: it leaves the consumed operation
+      --  idle so the same capacity-one slot and operation can be reused.
+      declare
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Ready : Flyology.IO.Readiness_Operation :=
+           Flyology.IO.Wait
+             (Set'Access,
+              Flyology.IO.Sockets.Native_Descriptor (Right_1),
+              Flyology.IO.For_Write);
+         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+         Rejected : Boolean := False;
+      begin
+         Flyology.Operations.Wait_Some (Set, Batch);
+         Flyology.IO.Finish (Ready);
+         begin
+            Flyology.IO.Rearm
+              (Flyology.IO.Invalid_Descriptor,
+               Flyology.IO.For_Read,
+               Ready);
+         exception
+            when Flyology.Operations.Operation_Error =>
+               Rejected := True;
+         end;
+         Passed := Passed
+           and then Rejected
+           and then not Flyology.Operations.Is_Active (Ready)
+           and then not Flyology.Operations.Is_Terminal (Ready);
+         Flyology.IO.Rearm
+           (Flyology.IO.Sockets.Native_Descriptor (Right_1),
+            Flyology.IO.For_Write,
+            Ready);
+         Flyology.Operations.Wait_Some (Set, Batch);
+         Flyology.IO.Finish (Ready);
+      end;
+      Check (Passed, "readiness Rearm rollback failed");
+
       --  First-class gates use the same operation lifecycle and can depend on
       --  provider operations or earlier gates. Both immediate timers expire
       --  in one scheduler batch, so every composed gate observes the same cut.

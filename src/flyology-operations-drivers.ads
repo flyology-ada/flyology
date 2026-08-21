@@ -14,6 +14,13 @@ package Flyology.Operations.Drivers with Preelaborate is
    --  @exception Operation_Error Item already has a pending or terminal value
    procedure Start (Item : in out Operation'Class);
 
+   --  Return a just-started operation to its reusable idle state when provider
+   --  preparation fails before any external source or kernel request retains
+   --  it. This is the exception rollback path for explicit Rearm operations.
+   --  @param Item Pending operation whose initiation did not publish effects
+   --  @exception Operation_Error Item is stale or not pending
+   procedure Rollback_Start (Item : in out Operation'Class);
+
    --  Arm one descriptor source. A later readiness event invokes Drive on the
    --  owning task's stack. The descriptor owner must outlive the operation.
    --  @param Item Pending operation to arm
