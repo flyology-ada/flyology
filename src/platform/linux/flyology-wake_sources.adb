@@ -46,7 +46,11 @@ package body Flyology.Wake_Sources is
       loop
          Result := Write (Item.Write_End, Byte'Address, 1);
          exit when Result >= 0;
-         if GNAT.OS_Lib.Errno /= 4 then
+         if GNAT.OS_Lib.Errno = System.OS_Constants.EAGAIN then
+            --  The nonblocking pipe is already readable. Signals coalesce,
+            --  so a full pipe has achieved the notification contract.
+            exit;
+         elsif GNAT.OS_Lib.Errno /= 4 then
             raise Program_Error with "cannot signal cancellation wake source";
          end if;
       end loop;

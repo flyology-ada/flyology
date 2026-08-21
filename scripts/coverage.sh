@@ -113,6 +113,7 @@ observability_native_smoke
 observability_smoke
 operations_smoke
 operation_gates_smoke
+channel_operations_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
 process_exec_child_smoke

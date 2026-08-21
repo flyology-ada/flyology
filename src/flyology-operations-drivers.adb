@@ -103,6 +103,13 @@ package body Flyology.Operations.Drivers is
         Flyology.Wake_Sources.Signal_Descriptor (Item.Set.Wake);
    end Completion_Source;
 
+   procedure Signal_Completion (Item : in out Operation'Class) is
+      Id : constant Operation_Id := Pending_Slot (Item);
+      pragma Unreferenced (Id);
+   begin
+      Flyology.Wake_Sources.Signal (Item.Set.Wake);
+   end Signal_Completion;
+
    procedure Complete
      (Item   : in out Operation'Class;
       Result : Terminal_Outcome)

@@ -317,6 +317,7 @@ unix_stream_socket_smoke
 buffer_channel_cancel_smoke
 buffers_smoke
 channel_reentrancy_child
+channel_operations_smoke
 channel_retention_smoke
 closed_descriptor_wait_smoke
 connection_admission_smoke

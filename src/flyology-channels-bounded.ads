@@ -1,3 +1,6 @@
+with Flyology.Operations;
+with System;
+
 --  A bounded FIFO channel with terminal close and drain semantics.
 --
 --  The channel owns no task and allocates no storage after elaboration.
@@ -28,6 +31,9 @@ package Flyology.Channels.Bounded is
 
    --  Raised by a timed Send or Receive whose deadline expires first.
    Timeout_Error : exception;
+   --  Raised by Finish after a scoped channel operation is cancelled.
+   Operation_Cancelled : exception renames
+     Flyology.Operations.Operation_Cancelled;
 
    --  Result of a nonblocking send attempt.
    --  @enum Item_Sent The value was appended
@@ -98,6 +104,7 @@ package Flyology.Channels.Bounded is
       --  @return Current close, buffer, and waiter counts
       function Current return Snapshot;
    private
+      procedure Signal_Scoped;
       Buffer : Element_Array (1 .. Capacity) :=
         (others => Empty_Value);  --  Circular FIFO storage
       Head   : Positive := 1;  --  Next element to receive
@@ -132,4 +139,104 @@ package Flyology.Channels.Bounded is
       Value   : out Element_Type;
       Timeout : Duration);
 
+   --  First-class send operation using the synchronous channel barrier. A
+   --  pending operation owns its copied value until Finish or finalization.
+   type Send_Operation is new Flyology.Operations.Operation with private;
+   --  First-class receive operation using the synchronous channel barrier. A
+   --  completed operation owns its received value until Finish or
+   --  finalization.
+   type Receive_Operation is new Flyology.Operations.Operation with private;
+
+   --  Start a send without suspending the owner task. Value is copied into the
+   --  operation before this call returns, so the source actual need not remain
+   --  alive. Negative Timeout is unlimited and zero is an immediate attempt.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Value Value copied into the pending operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Channel;
+      Value   : Element_Type;
+      Timeout : Duration := -1.0) return Send_Operation;
+
+   --  Start or restart a send in an established operation object.
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Value Value copied into the pending operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh or consumed send operation
+   procedure Send
+     (Item      : not null access Channel;
+      Value     : Element_Type;
+      Timeout   : Duration := -1.0;
+      Operation : in out Send_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a receive without suspending the owner task. The received value is
+   --  retained by the operation and copied out only by Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Channel;
+      Timeout : Duration := -1.0) return Receive_Operation;
+
+   --  Start or restart a receive in an established operation object.
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh or consumed receive operation
+   procedure Receive
+     (Item      : not null access Channel;
+      Timeout   : Duration := -1.0;
+      Operation : in out Receive_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal send. Channel close and timeout reproduce the
+   --  synchronous exceptions; cancellation raises Operation_Cancelled.
+   --  @param Operation Terminal send operation
+   procedure Finish (Operation : in out Send_Operation);
+
+   --  Consume a terminal receive and copy out its value.
+   --  @param Operation Terminal receive operation
+   --  @param Value Received value on success
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Value     : out Element_Type);
+
+private
+   type Scoped_Kind is (Scoped_Send, Scoped_Receive);
+   type Scoped_Failure is
+     (No_Failure, Channel_Closed_Failure, Timeout_Failure, Driver_Failure);
+
+   type Channel_Operation is
+     abstract new Flyology.Operations.Operation with record
+      Item            : access Channel := null;
+      Kind            : Scoped_Kind := Scoped_Receive;
+      Value           : Element_Type := Empty_Value;
+      Next            : System.Address := System.Null_Address;
+      Subscribed      : Boolean := False;
+      Failure         : Scoped_Failure := No_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Channel operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Channel_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Channel operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Channel_Operation);
+
+   type Send_Operation is new Channel_Operation with null record;
+   type Receive_Operation is new Channel_Operation with null record;
 end Flyology.Channels.Bounded;

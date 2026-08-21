@@ -56,6 +56,13 @@ package Flyology.Operations.Drivers with Preelaborate is
       Read_Descriptor   : out Interfaces.C.int;
       Signal_Descriptor : out Interfaces.C.int);
 
+   --  Signal the shared completion source previously established for Item.
+   --  This is the producer side of Completion_Source for an Ada provider that
+   --  retains a caller-owned operation node rather than a raw descriptor.
+   --  The operation and its completion set must still be alive.
+   --  @param Item Pending externally completed operation to notify
+   procedure Signal_Completion (Item : in out Operation'Class);
+
    --  Publish one terminal outcome. The provider must release every runtime,
    --  kernel, descriptor, and buffer reference before this call.
    --  @param Item Pending operation to terminalize

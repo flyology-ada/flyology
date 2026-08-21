@@ -1551,6 +1551,9 @@ socket operations, Internet and Unix-stream connection attempts and accepts,
 buffer-owning stream operations, and completion-driven positional file reads
 and writes over aliased arrays or ownership-transferred unique buffers, plus
 nonrecursive file-watcher `Next` and retained task-result `Wait`.
+Instances of `Flyology.Channels.Bounded` likewise add operation-producing
+`Send` and `Receive` overloads without changing their protected entries or
+nonblocking calls.
 Initiation does not create a helper task,
 per-operation stack, callback thread, or steady-state heap allocation.
 
@@ -1642,7 +1645,9 @@ synthetic third-party-provider example is
 The executable provider-by-gate matrix is in
 [`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,
 lifecycle, generation, capacity, and threshold cases are in
-[`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb).
+[`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb), and the
+generic channel rows are in
+[`tests/channel_operations_smoke.adb`](tests/channel_operations_smoke.adb).
 
 | Scoped operation-producing overload | First-class gate coverage | Lanes |
 | --- | --- | --- |
@@ -1668,11 +1673,14 @@ lifecycle, generation, capacity, and threshold cases are in
 | owned-buffer file `Write_At` | success quorum | lightweight; ownership-return rejection native |
 | file-watcher `Next` | success and all | native and lightweight |
 | task-result `Wait` | success and all | native and lightweight |
+| bounded-channel `Send` and `Receive` | success and all | native and lightweight |
 
 The same programs cover cancellation, timeout, EOF, zero-length stream and
 datagram operations, datagram metadata and source selection, retained connect
 failure, accept timeout and cancellation, Unix queue-saturation retry,
 abandoned accepted-socket and watcher-wait cleanup, retained-monitor fan-out,
+same-channel receive fan-out, pending send capacity wakeup, channel close,
+channel timeout, cancellation, and subscription cleanup,
 descriptor-direction fan-out, failed success thresholds, terminal-before-gate
 construction, nested and fanned-out gates, stale and cross-set references,
 slot reuse, implicit finalization, initiation rollback, ascending stable

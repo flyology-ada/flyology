@@ -152,6 +152,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   accepts, unique-buffer stream operations, and lightweight positional file
   arrays and ownership-transferring unique buffers, plus nonrecursive file
   watcher `Next` and retained task-result `Wait`. A
+  `Flyology.Channels.Bounded` instance also provides scoped `Send` and
+  `Receive`: initiation uses attempt, caller-owned subscription, and recheck
+  so channel state cannot change in a lost-wake gap. Subscription storage is
+  intrusive and address-bucketed per generic instance; the protected channel
+  API exposes no separate arm hook. A pending send owns its copied element,
+  while a successful receive retains its element until typed `Finish`.
   successful scoped accept owns the accepted descriptor until typed `Finish`
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
