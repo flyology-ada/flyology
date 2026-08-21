@@ -264,7 +264,6 @@ package body Flyology_Bench.Scaling is
       end if;
 
       Result.Selected := Best;
-      Result.Diagnostics (Best).Selected := True;
       if Best_RMS > Maximum_RMS_Log_Residual
         or else Result.Diagnostics (Best).R_Squared < Minimum_R_Squared
       then
@@ -275,6 +274,7 @@ package body Flyology_Bench.Scaling is
          Result.State := Poor_Model_Identifiability;
       else
          Result.State := Scaling_Available;
+         Result.Diagnostics (Best).Selected := True;
       end if;
       return Result;
    exception
