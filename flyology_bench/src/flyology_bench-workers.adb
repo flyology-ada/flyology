@@ -475,18 +475,6 @@ package body Flyology_Bench.Workers is
       end;
    end Hex_Decode;
 
-   function Parse_Hex_U64 (Value : String) return U64 is
-      Result : U64 := 0;
-   begin
-      if Value'Length /= 16 then
-         raise Protocol_Error with "invalid worker hash length";
-      end if;
-      for Element of Value loop
-         Result := Interfaces.Shift_Left (Result, 4) or U64 (Hex_Value (Element));
-      end loop;
-      return Result;
-   end Parse_Hex_U64;
-
    function Derive_Seed
      (Parent_Seed : Long_Long_Integer;
       Repetition : Positive) return Long_Long_Integer
@@ -1243,7 +1231,17 @@ package body Flyology_Bench.Workers is
          Classified := Classified + Amount;
       end Add_Classified;
    begin
-      if Value.Random_Seed_Value /= Expected_Config.Random_Seed then
+      if Value.Sample_Total > Expected_Config.Samples
+        or else
+          (Expected_Config.Maximum_Sampling_Time = 0.0
+           and then Value.Sample_Total /= Expected_Config.Samples)
+      then
+         raise Protocol_Error with
+           "worker measurement sample count differs from its configuration";
+      elsif Value.Iterations > Expected_Config.Maximum_Iterations then
+         raise Protocol_Error with
+           "worker measurement iteration count exceeds its configuration";
+      elsif Value.Random_Seed_Value /= Expected_Config.Random_Seed then
          raise Protocol_Error with "worker measurement seed mismatch";
       elsif not Measurement_Statistics_Consistent (Value) then
          raise Protocol_Error with
@@ -1429,6 +1427,8 @@ package body Flyology_Bench.Workers is
       Put_U64 (Frame_Body, Request.Environment_Fingerprint_Hash);
       Put_U64 (Frame_Body, Request.Configuration_Hash);
       Put_Natural (Frame_Body, Environment_Mode'Pos (Request.Policy_Value));
+      Put_Natural (Frame_Body, Locale_Policy'Pos (Request.Locale_Value));
+      Put_Natural (Frame_Body, Timezone_Policy'Pos (Request.Timezone_Value));
    end Put_Common;
 
    procedure Write_Frame (Frame : U32; Frame_Body : Buffer) is
@@ -1522,7 +1522,7 @@ package body Flyology_Bench.Workers is
       Result : Worker_Request;
       Version : Positive;
    begin
-      if not Worker_Mode or else Ada.Command_Line.Argument_Count /= 8 then
+      if not Worker_Mode or else Ada.Command_Line.Argument_Count /= 9 then
          raise Protocol_Error with "invalid internal worker invocation";
       end if;
       Version := Parse_Positive
@@ -1533,7 +1533,7 @@ package body Flyology_Bench.Workers is
       end if;
       declare
          Config_Bytes : constant String := Hex_Decode
-           (Prefix_Value (Ada.Command_Line.Argument (7), "--config="),
+           (Prefix_Value (Ada.Command_Line.Argument (6), "--config="),
             Maximum_Configuration_Bytes);
          Identity_Bytes : constant String := Hex_Decode
            (Prefix_Value (Ada.Command_Line.Argument (2), "--identity="),
@@ -1552,8 +1552,6 @@ package body Flyology_Bench.Workers is
                  (Ada.Command_Line.Argument (4), "--repetition=")));
          Result.Seed_Value := Parse_Integer
            (Prefix_Value (Ada.Command_Line.Argument (5), "--seed="));
-         Result.Environment_Hash := Parse_Hex_U64
-           (Prefix_Value (Ada.Command_Line.Argument (6), "--environment="));
          Result.Config_Value := Decode_Configuration
            (Config_Bytes, Default_Configuration);
          if Result.Config_Value.Random_Seed /= Result.Seed_Value then
@@ -1564,15 +1562,20 @@ package body Flyology_Bench.Workers is
          Result.Policy_Value := Environment_Mode'Val
            (Parse_Positive
               (Prefix_Value
-                 (Ada.Command_Line.Argument (8), "--environment-policy=")) - 1);
+                 (Ada.Command_Line.Argument (7), "--environment-policy=")) - 1);
+         Result.Locale_Value := Locale_Policy'Val
+           (Parse_Positive
+              (Prefix_Value
+                 (Ada.Command_Line.Argument (8), "--locale-policy=")) - 1);
+         Result.Timezone_Value := Timezone_Policy'Val
+           (Parse_Positive
+              (Prefix_Value
+                 (Ada.Command_Line.Argument (9), "--timezone-policy=")) - 1);
       end;
       declare
          Current : constant Environment_Vectors.Vector := Current_Environment;
       begin
-         if Fingerprint (Current) /= Result.Environment_Hash then
-            raise Protocol_Error with
-              "worker environment fingerprint mismatch";
-         end if;
+         Result.Environment_Hash := Fingerprint (Current);
          Result.Environment_Fingerprint_Hash := Public_Fingerprint (Current);
       end;
       return Result;
@@ -1921,7 +1924,9 @@ package body Flyology_Bench.Workers is
       Expected_Env      : U64;
       Expected_Env_Fingerprint : U64;
       Expected_Config_Hash : U64;
-      Expected_Policy   : Environment_Mode) is
+      Expected_Policy   : Environment_Mode;
+      Expected_Locale   : Locale_Policy;
+      Expected_Timezone : Timezone_Policy) is
       Found_Identity : constant String :=
         Get_String (Data, Cursor, Maximum_Identity_Length);
       Found_Kind : constant Result_Kind := Result_Kind'Val
@@ -1934,6 +1939,10 @@ package body Flyology_Bench.Workers is
       Found_Config : constant U64 := Get_U64 (Data, Cursor);
       Found_Policy : constant Environment_Mode := Environment_Mode'Val
         (Get_Natural (Data, Cursor));
+      Found_Locale : constant Locale_Policy := Locale_Policy'Val
+        (Get_Natural (Data, Cursor));
+      Found_Timezone : constant Timezone_Policy := Timezone_Policy'Val
+        (Get_Natural (Data, Cursor));
    begin
       if Found_Identity /= Expected_Identity
         or else Found_Kind /= Expected_Kind
@@ -1943,6 +1952,8 @@ package body Flyology_Bench.Workers is
         or else Found_Env_Fingerprint /= Expected_Env_Fingerprint
         or else Found_Config /= Expected_Config_Hash
         or else Found_Policy /= Expected_Policy
+        or else Found_Locale /= Expected_Locale
+        or else Found_Timezone /= Expected_Timezone
       then
          raise Protocol_Error with "worker result identity or metadata mismatch";
       end if;
@@ -1995,6 +2006,8 @@ package body Flyology_Bench.Workers is
       Expected_Env_Fingerprint : U64;
       Expected_Config_Hash : U64;
       Expected_Policy   : Environment_Mode;
+      Expected_Locale   : Locale_Policy;
+      Expected_Timezone : Timezone_Policy;
       Complete          : out Boolean) is
       Cursor : aliased Natural := Data'First;
       Frame : U32;
@@ -2030,7 +2043,8 @@ package body Flyology_Bench.Workers is
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
          Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy);
+         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+         Expected_Timezone);
       if Get_U64 (Data, Body_Cursor) /= Completion_Marker
         or else Body_Cursor /= Last + 1
       then
@@ -2050,6 +2064,8 @@ package body Flyology_Bench.Workers is
       Expected_Env_Fingerprint : U64;
       Expected_Config_Hash : U64;
       Expected_Policy   : Environment_Mode;
+      Expected_Locale   : Locale_Policy;
+      Expected_Timezone : Timezone_Policy;
       Target            : in out Worker_Result) is
       Cursor : aliased Natural := Data'First;
       Frame : U32;
@@ -2069,7 +2085,8 @@ package body Flyology_Bench.Workers is
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
          Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy);
+         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+         Expected_Timezone);
       if Get_U64 (Data, Body_Cursor) /= Completion_Marker
         or else Body_Cursor /= Last + 1
       then
@@ -2084,7 +2101,8 @@ package body Flyology_Bench.Workers is
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
          Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy);
+         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+         Expected_Timezone);
       Status := Envelope_Status'Val (Get_Natural (Data, Body_Cursor));
       Found_Kind := Result_Kind'Val (Get_Natural (Data, Body_Cursor));
       if Found_Kind /= Expected_Kind then
@@ -2164,6 +2182,8 @@ package body Flyology_Bench.Workers is
       Environment_Hash : U64;
       Environment_Fingerprint_Hash : U64;
       Environment_Policy_Value : Environment_Mode;
+      Environment_Locale_Value : Locale_Policy;
+      Environment_Timezone_Value : Timezone_Policy;
       Rep             : Positive;
       Target          : out Worker_Result)
    is
@@ -2210,6 +2230,8 @@ package body Flyology_Bench.Workers is
       Target.Seed_Value := Seed_Value;
       Target.Environment_Fingerprint_Hash := Environment_Fingerprint_Hash;
       Target.Policy_Value := Environment_Policy_Value;
+      Target.Locale_Value := Environment_Locale_Value;
+      Target.Timezone_Value := Environment_Timezone_Value;
       Config_Value.Random_Seed := Seed_Value;
       Config_Bytes := US.To_Unbounded_String
         (Encode_Configuration (Config_Value));
@@ -2233,13 +2255,21 @@ package body Flyology_Bench.Workers is
            ("--seed=" & Ada.Strings.Fixed.Trim
               (Long_Long_Integer'Image (Seed_Value), Ada.Strings.Both));
          Argument_Values.Append
-           ("--environment=" & Hex (Environment_Hash));
-         Argument_Values.Append
            ("--config=" & Hex_Encode (US.To_String (Config_Bytes)));
          Argument_Values.Append
            ("--environment-policy=" & Ada.Strings.Fixed.Trim
               (Positive'Image
                  (Environment_Mode'Pos (Environment_Policy_Value) + 1),
+               Ada.Strings.Both));
+         Argument_Values.Append
+           ("--locale-policy=" & Ada.Strings.Fixed.Trim
+              (Positive'Image
+                 (Locale_Policy'Pos (Environment_Locale_Value) + 1),
+               Ada.Strings.Both));
+         Argument_Values.Append
+           ("--timezone-policy=" & Ada.Strings.Fixed.Trim
+              (Positive'Image
+                 (Timezone_Policy'Pos (Environment_Timezone_Value) + 1),
                Ada.Strings.Both));
          Adopter.Start
            (Process, Executable_Path, Argument_Values, Environment_List,
@@ -2289,7 +2319,8 @@ package body Flyology_Bench.Workers is
                  (US.To_String (Result_Data), Identity_Value, Expected_Kind,
                   Rep, Seed_Value, Environment_Hash,
                   Environment_Fingerprint_Hash, Config_Hash,
-                  Environment_Policy_Value, Ready);
+                  Environment_Policy_Value, Environment_Locale_Value,
+                  Environment_Timezone_Value, Ready);
                if Ready then
                   Ready_Time := Ada.Real_Time.Clock;
                   Target.Setup_Time :=
@@ -2463,7 +2494,8 @@ package body Flyology_Bench.Workers is
               (US.To_String (Result_Data), Identity_Value, Expected_Kind,
                Rep, Seed_Value, Config_Value, Environment_Hash,
                Environment_Fingerprint_Hash, Config_Hash,
-               Environment_Policy_Value, Target);
+               Environment_Policy_Value, Environment_Locale_Value,
+               Environment_Timezone_Value, Target);
          exception
             when Error : Protocol_Error =>
                Target.Outcome_Value := Malformed_Protocol;
@@ -2584,7 +2616,8 @@ package body Flyology_Bench.Workers is
          Run_Repetition
            (US.To_String (Full_Executable), US.To_String (Full_Directory),
             Has_Directory, Identity, Kind, Config, Launch, Entries, Env_Hash,
-            Env_Fingerprint_Hash, Env.Selected_Mode, Offset + 1,
+            Env_Fingerprint_Hash, Env.Selected_Mode, Env.Selected_Locale,
+            Env.Selected_Timezone, Offset + 1,
             Results (Results'First + Offset));
       end loop;
    end Run;
@@ -2609,6 +2642,12 @@ package body Flyology_Bench.Workers is
      (Hex (Result.Environment_Fingerprint_Hash));
    function Environment_Policy (Result : Worker_Result) return Environment_Mode is
      (Result.Policy_Value);
+   function Environment_Locale_Policy
+     (Result : Worker_Result) return Locale_Policy is
+     (Result.Locale_Value);
+   function Environment_Timezone_Policy
+     (Result : Worker_Result) return Timezone_Policy is
+     (Result.Timezone_Value);
    function Exit_Code (Result : Worker_Result) return Natural is
      (Result.Exit_Code_Value);
    function Terminating_Signal (Result : Worker_Result) return Natural is

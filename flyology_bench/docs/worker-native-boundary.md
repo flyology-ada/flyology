@@ -22,8 +22,10 @@ state, starts a new process group, exposes one-shot nonblocking setup and
 header-defined errno values, and reports wait-status observations. It has no
 child cleanup decision, timeout arithmetic, retry loop, environment policy,
 protocol parser, classification policy, or lifecycle state machine. Ada
-validates and builds `argv`/`envp` and
-adopts the returned PID and descriptors inside an abort-deferred protected
+validates and builds `argv`/`envp`; no exact environment-value digest is placed
+in `argv`. The worker computes that digest after `exec` and sends it through the
+dedicated result endpoint for parent comparison. Ada adopts the returned PID
+and descriptors inside an abort-deferred protected
 action. Ada then owns monotonic deadlines, bounded drain turns, process-group
 signals, retrying reap, result validation, and outcome classification.
 Detected loss of waitable-child ownership through an external reaper is an Ada

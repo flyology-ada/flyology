@@ -489,10 +489,14 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   Fresh workers use `posix_spawn`, execute one exact registered case per
   process, and retain process repetitions separately from within-worker
   samples. Host controls and metric sessions belong in the measuring worker;
-  parent spawn/setup time never enters per-operation samples. The parent must
-  retain exclusive child-reaping ownership. Detected loss of that ownership
-  disarms the PID guard and fails without signaling a potentially reused
-  identity; a concurrent external reaper violates the exclusion contract.
+  parent spawn/setup time never enters per-operation samples. The parent
+  compares the worker-computed exact environment digest from the private
+  result channel; never place a value-derived digest in process arguments or
+  reports. Worker results retain the effective mode, locale, and timezone
+  policies. The parent must retain exclusive child-reaping ownership. Detected
+  loss of that ownership disarms the PID guard and fails without signaling a
+  potentially reused identity; a concurrent external reaper violates the
+  exclusion contract.
 - `proof/`: SPARK-only development crate plus runtime, debug, and benchmark
   policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and

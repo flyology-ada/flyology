@@ -1135,13 +1135,15 @@ workers are insufficient for an across-worker interval.
 standard temporary-directory variables. Locale and timezone variables require
 the explicit `Preserve_Locale` and `Preserve_Timezone` policies. `Inherit_Mode`
 copies the complete parent environment and is an explicit opt-in. `Add` and
-`Remove` apply exact bounded changes. The result reports the selected policy
-and a stable hash of the effective variable-name set. Values are deliberately
-excluded, so a shared report cannot be used to test guesses for an inherited
-credential. The name-set hash is compatibility metadata, not an authentication
-mechanism; two environments that differ only in values have the same reported
-fingerprint. The internal parent/worker check still covers exact values but is
-not exposed through `Worker_Result`.
+`Remove` apply exact bounded changes. The result reports the selected mode,
+locale policy, timezone policy, and a stable hash of the effective
+variable-name set. Values are deliberately excluded, so a shared report cannot
+be used to test guesses for an inherited credential. The name-set hash is
+compatibility metadata, not an authentication mechanism; two environments that
+differ only in values have the same reported fingerprint. For the internal
+exact-value check, the worker computes a separate digest and returns it through
+the dedicated result channel for comparison by the parent. That digest is not
+placed in process arguments or exposed through `Worker_Result`.
 
 The working directory is inherited under `Inherit_Directory` or resolved and
 validated before spawn under `Use_Directory`. The child inherits only standard
@@ -1174,8 +1176,9 @@ Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
 configuration that cannot fit before spawning. Failure reasons are truncated
 to their published envelope limits. A worker that needs to retain the full text
 writes it to the separately bounded standard-error capture. The parent also
-rejects result seeds, metric presence and availability, and sample-derived
-counts that disagree with the requested worker configuration and metadata.
+rejects result seeds, sample and iteration counts, metric presence and
+availability, and sample-derived statistics that disagree with the requested
+worker configuration and metadata.
 
 Host-lock acquisition, placement, quiescence, interference observation, and
 metric-session setup occur inside the worker that measures. Spawn and setup

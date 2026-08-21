@@ -19,6 +19,8 @@ procedure Workers_Smoke is
 
    use type W.Worker_Outcome;
    use type W.Result_Kind;
+   use type W.Locale_Policy;
+   use type W.Timezone_Policy;
    use type Flyology_Bench.Host_Lock_Outcome;
    use type Flyology_Bench.Metric_Availability;
    use type Flyology_Bench.Metric_Set;
@@ -160,13 +162,27 @@ begin
    declare
       Results : W.Worker_Result_Array (1 .. 1);
       Env : constant W.Environment := W.Create_Environment;
-      procedure Expect_Malformed (Name : String) is
+      Exact_Samples : constant Flyology_Bench.Configuration :=
+        (Base with delta
+           Maximum_Sampling_Time => 0.0,
+           Samples => Flyology_Bench.Sample_Count'Succ
+             (Flyology_Bench.Sample_Count'First));
+      One_Iteration : constant Flyology_Bench.Configuration :=
+        (Base with delta Maximum_Iterations => 1);
+      procedure Expect_Malformed
+        (Name            : String;
+         Reason_Fragment : String := "") is
       begin
          W.Run
            (Fixture, Name, W.Ordinary_Measurement, Base,
             Default_Launch, Env, Results);
          Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
                 Name & " worker protocol was accepted");
+         Check
+           (Reason_Fragment'Length = 0
+            or else Ada.Strings.Fixed.Index
+              (W.Reason (Results (1)), Reason_Fragment) /= 0,
+            Name & " did not exercise its intended protocol check");
       end Expect_Malformed;
    begin
       W.Run
@@ -210,9 +226,9 @@ begin
 
       Expect_Malformed ("malformed");
       Expect_Malformed ("truncated");
-      Expect_Malformed ("oversized");
-      Expect_Malformed ("wrong-version");
-      Expect_Malformed ("wrong-identity");
+      Expect_Malformed ("oversized", "oversized");
+      Expect_Malformed ("wrong-version", "version");
+      Expect_Malformed ("wrong-identity", "identity");
       Expect_Malformed ("trailing");
 
       W.Run
@@ -235,6 +251,22 @@ begin
          Default_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
              "inconsistent environment report was accepted");
+      W.Run
+        (Fixture, "wrong-sample-count", W.Ordinary_Measurement,
+         Exact_Samples, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index
+           (W.Reason (Results (1)), "sample count") /= 0,
+         "measurement sample-count mismatch was accepted");
+      W.Run
+        (Fixture, "wrong-iteration-count", W.Ordinary_Measurement,
+         One_Iteration, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index
+           (W.Reason (Results (1)), "iteration count") /= 0,
+         "measurement iteration-count mismatch was accepted");
       W.Run
         (Fixture, "wrong-counts", W.Paired_Comparison, Base,
          Default_Launch, Env, Results);
@@ -429,6 +461,10 @@ begin
       Inherited_Env : constant W.Environment :=
         W.Create_Environment (W.Inherit_Mode);
       Removed_Env : W.Environment := W.Create_Environment (W.Inherit_Mode);
+      Preserved_Env : constant W.Environment :=
+        W.Create_Environment
+          (Locale => W.Preserve_Locale,
+           Timezone => W.Preserve_Timezone);
       Launch : constant W.Launch_Configuration :=
         (Default_Launch with delta
            Directory => W.Use_Directory,
@@ -469,6 +505,17 @@ begin
         (W.Environment_Fingerprint (Results (1))
            = US.To_String (First_Fingerprint),
          "reported environment fingerprint depends on variable values");
+
+      W.Run
+        (Fixture, "environment", W.Ordinary_Measurement, Base, Launch,
+         Preserved_Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Normal_Result
+         and then W.Environment_Locale_Policy (Results (1))
+           = W.Preserve_Locale
+         and then W.Environment_Timezone_Policy (Results (1))
+           = W.Preserve_Timezone,
+         "effective locale or timezone policy was not retained");
 
       W.Run
         (Fixture, "environment", W.Ordinary_Measurement, Base,
