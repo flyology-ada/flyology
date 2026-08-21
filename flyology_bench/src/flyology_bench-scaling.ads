@@ -64,7 +64,8 @@ package Flyology_Bench.Scaling is
    --  Diagnostics for one fixed candidate model.
    --  @field Model Candidate family.
    --  @field Available Whether its basis and arithmetic were valid.
-   --  @field Selected Whether it has the smallest accepted residual.
+   --  @field Selected Whether this is the accepted model of an available
+   --  analysis. Rejected analyses have no selected diagnostic.
    --  @field Coefficient Fitted multiplier in y = coefficient times f(n).
    --  @field Nominal_Exponent Polynomial exponent, excluding logarithmic terms.
    --  @field R_Squared Goodness of fit in log-observation space.
@@ -105,7 +106,10 @@ package Flyology_Bench.Scaling is
      (Result : Empirical_Scaling_Analysis) return Boolean;
    --  Return the lowest-residual candidate.
    --  @param Result Empirical analysis.
-   --  @return Selected candidate; inspect Status before interpreting it.
+   --  @return Lowest-residual candidate when fitting reached model comparison;
+   --  otherwise the default candidate. Rejected analyses leave every
+   --  diagnostic's Selected field false, so inspect Status before interpreting
+   --  this value.
    function Selected_Model
      (Result : Empirical_Scaling_Analysis) return Scaling_Model;
    --  Return one candidate's complete diagnostics.

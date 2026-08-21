@@ -101,6 +101,22 @@ procedure Sweeps_Smoke is
      (Reference_Operation => Operation_A,
       Contender_Operation => Operation_B);
 
+   procedure Measure_Then_Fail
+     (Config : Flyology_Bench.Configuration;
+      Result : out Flyology_Bench.Measurement) is
+   begin
+      Measure_A (Config, Result);
+      raise Program_Error with "measurement failed after writing output";
+   end Measure_Then_Fail;
+
+   procedure Compare_Then_Fail
+     (Config : Flyology_Bench.Configuration;
+      Result : out Flyology_Bench.Comparison) is
+   begin
+      Compare_AB (Config, Result);
+      raise Program_Error with "comparison failed after writing output";
+   end Compare_Then_Fail;
+
    procedure Run_Ordinary is new Sweeps.Measure_Sweep
      (Select_Point => Choose_Point,
       Work_For     => Point_Work,
@@ -115,6 +131,16 @@ procedure Sweeps_Smoke is
      (Select_Point => Choose_Point,
       Work_For     => Display_Work,
       Run_Point    => Measure_A);
+
+   procedure Run_Output_Failing_Measurement is new Sweeps.Measure_Sweep
+     (Select_Point => Choose_Point,
+      Work_For     => Point_Work,
+      Run_Point    => Measure_Then_Fail);
+
+   procedure Run_Output_Failing_Comparison is new Sweeps.Compare_Sweep
+     (Select_Point => Choose_Point,
+      Work_For     => Point_Work,
+      Run_Point    => Compare_Then_Fail);
 
    procedure Select_Maybe_Fail (Item : Sweeps.Parameter_Point) is
    begin
@@ -320,6 +346,9 @@ begin
    begin
       Check (not Sweeps.Available (Missing), "empty measurement became rate");
       Check
+        (Sweeps.Availability (Missing) = Sweeps.Wall_Time_Unavailable,
+         "default measurement reported the wrong availability state");
+      Check
         (Sweeps.Availability (Overflow) = Sweeps.Throughput_Overflow,
          "rate overflow became available");
       Check
@@ -328,6 +357,57 @@ begin
       Check
         (Sweeps.Wall_Time_Available (Overflow),
          "valid wall summary was lost when work-rate arithmetic overflowed");
+   end;
+
+   declare
+      Failure_Points : Sweeps.Point_Set (1);
+      Measurement_Failure : Sweeps.Ordinary_Sweep_Result (1);
+      Comparison_Failure : Sweeps.Paired_Sweep_Result (1);
+   begin
+      Failure_Points.Append
+        (Sweeps.Point (Sweeps.Count_Parameter, 1, "write-then-fail"));
+      Run_Output_Failing_Measurement
+        ("failures/output/measurement",
+         Failure_Points,
+         Config,
+         Result => Measurement_Failure);
+      Check
+        (Sweeps.Status (Sweeps.Element (Measurement_Failure, 1))
+         = Sweeps.Point_Measurement_Failed,
+         "write-then-fail measurement status");
+      Check
+        (not Sweeps.Collection_Available
+           (Sweeps.Element (Measurement_Failure, 1)),
+         "failed measurement became collected");
+      Check
+        (Flyology_Bench.Median_Nanoseconds
+           (Sweeps.Data (Sweeps.Element (Measurement_Failure, 1))) = 0.0,
+         "failed measurement retained partial output");
+
+      Run_Output_Failing_Comparison
+        ("failures/output/comparison",
+         Failure_Points,
+         Config,
+         Result => Comparison_Failure);
+      Check
+        (Sweeps.Status (Sweeps.Element (Comparison_Failure, 1))
+         = Sweeps.Point_Measurement_Failed,
+         "write-then-fail comparison status");
+      Check
+        (not Sweeps.Collection_Available
+           (Sweeps.Element (Comparison_Failure, 1)),
+         "failed comparison became collected");
+      declare
+         Reset_Pair : constant Flyology_Bench.Comparison :=
+           Sweeps.Data (Sweeps.Element (Comparison_Failure, 1));
+      begin
+         Check
+           (Flyology_Bench.Median_Nanoseconds
+              (Flyology_Bench.Reference_Measurement (Reset_Pair)) = 0.0
+            and then Flyology_Bench.Median_Nanoseconds
+              (Flyology_Bench.Contender_Measurement (Reset_Pair)) = 0.0,
+            "failed comparison retained partial output");
+      end;
    end;
 
    Run_Ordinary
@@ -591,6 +671,10 @@ begin
            (Scaling.Selected_Model (Linear_Fit) = Scaling.Linear_Model,
             "linear model not selected");
          Check
+           (Scaling.Diagnostic
+              (Linear_Fit, Scaling.Linear_Model).Selected,
+            "available analysis lost selected diagnostic");
+         Check
            (Close
               (Scaling.Diagnostic
                  (Linear_Fit, Scaling.Linear_Model).Coefficient,
@@ -615,6 +699,14 @@ begin
          Check
            (Scaling.Status (Bad_Fit) = Scaling.No_Adequate_Model,
             "inadequate data accepted");
+         for Model in Scaling.Scaling_Model loop
+            Check
+              (not Scaling.Diagnostic (Bad_Fit, Model).Selected,
+               "inadequate analysis marked a model selected");
+            Check
+              (not Scaling.Diagnostic (Ambiguous_Fit, Model).Selected,
+               "ambiguous analysis marked a model selected");
+         end loop;
          Check
            (Scaling.Status (Scaling.Analyze (Too_Short))
             = Scaling.Too_Few_Distinct_Points,
@@ -680,6 +772,7 @@ begin
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_CSV_Header;
          Reporters.Put_Scaling_CSV ("group/case", Linear_Fit);
+         Reporters.Put_Scaling_CSV ("group/inadequate", Bad_Fit);
          Reporters.Put_Scaling_CSV ("group/empty", Empty_Fit);
          Reporters.Put_NDJSON ("group/case,""escaped""", Ordinary);
          Reporters.Put_NDJSON ("group/failure", Failure_Result);
@@ -688,6 +781,7 @@ begin
          Reporters.Put_Comparison_NDJSON
            ("group/case", "existing", "candidate", Paired);
          Reporters.Put_Scaling_NDJSON ("group/case", Linear_Fit);
+         Reporters.Put_Scaling_NDJSON ("group/inadequate", Bad_Fit);
          Reporters.Put_Scaling_NDJSON ("group/empty", Empty_Fit);
          Ada.Text_IO.Put_Line ("-- sweep machine output end --");
       end;

@@ -612,6 +612,12 @@ if command -v jq >/dev/null 2>&1; then
       and (.models | length) == 6)
     and any(.[];
       .type == "empirical_scaling"
+      and .benchmark == "group/inadequate"
+      and .status == "no_adequate_model"
+      and .selected_model == null
+      and all(.models[]; .selected == false))
+    and any(.[];
+      .type == "empirical_scaling"
       and .benchmark == "group/empty"
       and .status == "too_few_distinct_points"
       and .parameter_kind == null

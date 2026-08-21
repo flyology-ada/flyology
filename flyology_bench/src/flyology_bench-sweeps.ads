@@ -175,7 +175,9 @@ package Flyology_Bench.Sweeps is
       Mean_Confidence_Low_NS   : Long_Float;
       Mean_Confidence_High_NS  : Long_Float) return Throughput_Summary;
 
-   --  Derive throughput from a completed wall measurement.
+   --  Derive throughput from a completed wall measurement. A default
+   --  measurement reports Wall_Time_Unavailable rather than an invalid wall
+   --  summary.
    --  @param Amount Exact work per logical operation.
    --  @param Result Completed or default measurement.
    --  @return Available or explicitly unavailable rate summary.
@@ -377,11 +379,13 @@ package Flyology_Bench.Sweeps is
    function Failure_Message (Result : Paired_Point_Result) return String;
    --  Return ordinary measurement storage.
    --  @param Result Point result.
-   --  @return Completed or default measurement according to Collection_Available.
+   --  @return Completed measurement when Collection_Available is true;
+   --  otherwise a reset default measurement, including after runner failure.
    function Data (Result : Ordinary_Point_Result) return Measurement;
    --  Return paired comparison storage.
    --  @param Result Point result.
-   --  @return Completed or default comparison according to Collection_Available.
+   --  @return Completed comparison when Collection_Available is true;
+   --  otherwise a reset default comparison, including after runner failure.
    function Data (Result : Paired_Point_Result) return Comparison;
    --  Return ordinary wall-derived throughput.
    --  @param Result Point result.
