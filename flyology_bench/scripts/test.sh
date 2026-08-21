@@ -48,6 +48,18 @@ grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
 cat "$work_dir/gate-smoke.out"
 "$crate_root/tests/bin/sweeps_smoke" >"$work_dir/sweeps.out"
 cat "$work_dir/sweeps.out"
+if ! grep -q 'throughput availability' "$work_dir/sweeps.out" \
+  || ! grep -q 'throughput_available' "$work_dir/sweeps.out" \
+  || ! grep -q 'KiB' "$work_dir/sweeps.out" \
+  || ! grep -q 'kitems' "$work_dir/sweeps.out" \
+  || ! grep -q 'Mrecords' "$work_dir/sweeps.out" \
+  || ! grep -Eq '[KMGTPE]iB/s' "$work_dir/sweeps.out" \
+  || ! grep -Eq 'point_setup_failed.*wall_time_unavailable' \
+       "$work_dir/sweeps.out"
+then
+  printf '%s\n' "sweep console lost availability or configured work scaling" >&2
+  exit 1
+fi
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
 "$crate_root/examples/bin/custom_metrics" >"$work_dir/custom-example.out"
@@ -56,6 +68,8 @@ grep -q '"timer_role":"primary_alternate"' "$work_dir/custom-example.out"
 "$crate_root/examples/bin/sweep_comparison" >"$work_dir/sweep-example.out"
 if ! grep -q '^empirical paired sweep sorting/in_place ' \
   "$work_dir/sweep-example.out" \
+  || ! grep -q 'reference rate availability' "$work_dir/sweep-example.out" \
+  || ! grep -q 'throughput_available' "$work_dir/sweep-example.out" \
   || [ "$(grep -c '^empirical scaling sorting/in_place/' \
        "$work_dir/sweep-example.out")" -ne 2 ]
 then
@@ -408,6 +422,13 @@ then
   printf '%s\n' "sweep CSV did not preserve escaped suite case identity" >&2
   exit 1
 fi
+if ! grep -q 'throughput_availability' "$work_dir/sweeps.csv" \
+  || ! grep -q 'reference_throughput_availability' "$work_dir/sweeps.csv" \
+  || ! grep -q 'contender_throughput_availability' "$work_dir/sweeps.csv"
+then
+  printf '%s\n' "sweep CSV lost exact throughput availability columns" >&2
+  exit 1
+fi
 
 # At least one long-form metric section must exist, otherwise the checks above
 # would pass over latency-only output.
@@ -543,12 +564,15 @@ if command -v jq >/dev/null 2>&1; then
       and .sample_semantics == "per_operation_batch_mean"
       and .collection_available == true
       and .available == true
+      and .throughput.availability == "throughput_available"
       and .throughput.direction == "higher_is_better")
     and any(.[];
       .type == "sweep_point"
       and .result_kind == "paired_comparison"
       and .collection_available == true
       and (.paired_verdict | type) == "string"
+      and .reference.throughput_availability == "throughput_available"
+      and .contender.throughput_availability == "throughput_available"
       and .reference.operations_ci_low != null
       and .contender.work_ci_high != null)
     and any(.[];
@@ -561,6 +585,7 @@ if command -v jq >/dev/null 2>&1; then
       and .status == "point_setup_failed"
       and (.failure | contains("bad, \"point\""))
       and .median_elapsed_ns == null
+      and .throughput.availability == "wall_time_unavailable"
       and .throughput.operations_per_second == null)
     and any(.[];
       .type == "sweep_point"
@@ -592,7 +617,10 @@ if command -v jq >/dev/null 2>&1; then
       and .parameter_kind == null
       and .range_available == false
       and .minimum_input == null
-      and .maximum_input == null)
+      and .maximum_input == null
+      and any(.models[]; .model == "linear" and .nominal_exponent == 1)
+      and any(.models[]; .model == "quadratic" and .nominal_exponent == 2)
+      and any(.models[]; .model == "cubic" and .nominal_exponent == 3))
   ' "$work_dir/sweeps.jsonl" >/dev/null \
     || { printf '%s\n' "sweep JSON/schema integration failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
