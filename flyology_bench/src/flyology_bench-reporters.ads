@@ -163,7 +163,8 @@ package Flyology_Bench.Reporters is
       Result         : Comparison;
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
-   --  Print the versioned built-in/custom comparison schema.
+   --  Print the versioned built-in/custom comparison schema, including
+   --  distinct reference and contender resolutions.
    --  @param File Destination text file.
    procedure Put_Extended_Comparison_Metrics_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
@@ -177,7 +178,8 @@ package Flyology_Bench.Reporters is
       Contender_Name : String;
       Result         : Comparison;
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
-   --  Emit one JSON object per built-in or custom paired axis.
+   --  Emit one JSON object per built-in or custom paired axis, including
+   --  distinct reference and contender resolutions.
    --  @param Reference_Name Reference benchmark identity.
    --  @param Contender_Name Contender benchmark identity.
    --  @param Result Completed paired comparison.
