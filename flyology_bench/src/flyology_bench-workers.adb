@@ -27,7 +27,10 @@ package body Flyology_Bench.Workers is
    use type C.long;
    use type CS.chars_ptr;
 
-   Worker_Marker : constant String := "--flyology-bench-worker=1";
+   Worker_Marker : constant String :=
+     "--flyology-bench-worker="
+     & Ada.Strings.Fixed.Trim
+       (Positive'Image (Protocol_Version), Ada.Strings.Both);
    Result_FD     : constant C.int := 3;
    Maximum_Protocol_Bytes : constant := 4 * 1_024 * 1_024;
    Maximum_Drain_Bytes_Per_Pass : constant := 64 * 1_024;
@@ -896,6 +899,18 @@ package body Flyology_Bench.Workers is
       return Hash (US.To_String (Data));
    end Fingerprint;
 
+   function Public_Fingerprint
+     (Entries : Environment_Vectors.Vector) return U64
+   is
+      Data : Buffer;
+   begin
+      for Variable of Entries loop
+         US.Append (Data, US.To_String (Variable.Name));
+         Put_U8 (Data, 0);
+      end loop;
+      return Hash (US.To_String (Data));
+   end Public_Fingerprint;
+
    procedure Put_Metric_Summary
      (Data : in out Buffer; Value : Metric_Summary) is
    begin
@@ -1211,11 +1226,11 @@ package body Flyology_Bench.Workers is
    end Get_Comparison;
 
    procedure Validate_Measurement_Result
-     (Value         : Measurement;
-      Expected_Seed : Long_Long_Integer;
-      Expected_Metrics : Metric_Set)
+     (Value           : Measurement;
+      Expected_Config : Configuration)
    is
       Count : constant Natural := Natural (Value.Sample_Total);
+      Report : Environment_Report renames Value.Environment_Data;
       Classified : Natural := 0;
       Any_Metric_Expected : Boolean := False;
 
@@ -1228,15 +1243,31 @@ package body Flyology_Bench.Workers is
          Classified := Classified + Amount;
       end Add_Classified;
    begin
-      if Value.Random_Seed_Value /= Expected_Seed then
+      if Value.Random_Seed_Value /= Expected_Config.Random_Seed then
          raise Protocol_Error with "worker measurement seed mismatch";
+      elsif not Measurement_Statistics_Consistent (Value) then
+         raise Protocol_Error with
+           "worker measurement statistics disagree with its raw samples";
+      elsif Report.Mean_Foreign_CPU_Percent < 0.0
+        or else Report.Peak_Foreign_CPU_Percent
+          < Report.Mean_Foreign_CPU_Percent
+        or else Report.Paused_Nanoseconds < 0.0
+        or else Report.Contaminated_Samples > Report.Observed_Samples
+        or else
+          (Expected_Config.Interference.Enabled
+           and then Report.Retaken_Samples
+             > Expected_Config.Interference.Maximum_Retakes)
+      then
+         raise Protocol_Error with
+           "worker environment report is internally inconsistent";
       end if;
       Add_Classified (Value.Outlier_Total.Low_Severe);
       Add_Classified (Value.Outlier_Total.Low_Mild);
       Add_Classified (Value.Outlier_Total.High_Mild);
       Add_Classified (Value.Outlier_Total.High_Severe);
       for Axis in Metric_Axis loop
-         Any_Metric_Expected := Any_Metric_Expected or Expected_Metrics (Axis);
+         Any_Metric_Expected :=
+           Any_Metric_Expected or Expected_Config.Metrics (Axis);
       end loop;
       if Any_Metric_Expected /= (Value.Metric_Data.Data /= null) then
          raise Protocol_Error with
@@ -1248,7 +1279,7 @@ package body Flyology_Bench.Workers is
                Store : Metric_Store renames Value.Metric_Data.Data.all;
                Summary : Metric_Summary renames Store.Summaries (Axis);
             begin
-               if Store.Requested (Axis) /= Expected_Metrics (Axis) then
+               if Store.Requested (Axis) /= Expected_Config.Metrics (Axis) then
                   raise Protocol_Error with
                     "worker requested metric set differs from its configuration";
                elsif not Store.Requested (Axis) then
@@ -1282,9 +1313,8 @@ package body Flyology_Bench.Workers is
    end Validate_Measurement_Result;
 
    procedure Validate_Comparison_Result
-     (Value         : Comparison;
-      Expected_Seed : Long_Long_Integer;
-      Expected_Metrics : Metric_Set)
+     (Value           : Comparison;
+      Expected_Config : Configuration)
    is
       Count : constant Natural := Natural (Value.Reference_Data.Sample_Total);
       Outcomes : Natural := 0;
@@ -1303,11 +1333,16 @@ package body Flyology_Bench.Workers is
       end Add_Bounded;
    begin
       Validate_Measurement_Result
-        (Value.Reference_Data, Expected_Seed, Expected_Metrics);
+        (Value.Reference_Data, Expected_Config);
       Validate_Measurement_Result
-        (Value.Contender_Data, Expected_Seed, Expected_Metrics);
-      if Value.Random_Seed_Value /= Expected_Seed then
+        (Value.Contender_Data, Expected_Config);
+      if Value.Random_Seed_Value /= Expected_Config.Random_Seed then
          raise Protocol_Error with "worker comparison seed mismatch";
+      elsif Value.Practical_Threshold
+        /= Expected_Config.Practical_Threshold_Percent
+      then
+         raise Protocol_Error with
+           "worker comparison threshold differs from its configuration";
       end if;
       Add_Bounded
         (Value.Contender_Win_Total, Outcomes,
@@ -1340,11 +1375,14 @@ package body Flyology_Bench.Workers is
       if Observed_Reference_First /= Value.Reference_First then
          raise Protocol_Error with
            "worker comparison order flags disagree with its counts";
+      elsif not Comparison_Statistics_Consistent (Value) then
+         raise Protocol_Error with
+           "worker comparison statistics disagree with its paired samples";
       end if;
       for Axis in Metric_Axis loop
          declare
             Expected_Available : constant Boolean :=
-              Expected_Metrics (Axis)
+              Expected_Config.Metrics (Axis)
               and then Value.Reference_Data.Metric_Data.Data.Available (Axis)
               and then Value.Contender_Data.Metric_Data.Data.Available (Axis);
          begin
@@ -1388,6 +1426,7 @@ package body Flyology_Bench.Workers is
       Put_Natural (Frame_Body, Request.Repetition_Value);
       Put_Integer (Frame_Body, Request.Seed_Value);
       Put_U64 (Frame_Body, Request.Environment_Hash);
+      Put_U64 (Frame_Body, Request.Environment_Fingerprint_Hash);
       Put_U64 (Frame_Body, Request.Configuration_Hash);
       Put_Natural (Frame_Body, Environment_Mode'Pos (Request.Policy_Value));
    end Put_Common;
@@ -1527,9 +1566,15 @@ package body Flyology_Bench.Workers is
               (Prefix_Value
                  (Ada.Command_Line.Argument (8), "--environment-policy=")) - 1);
       end;
-      if Fingerprint (Current_Environment) /= Result.Environment_Hash then
-         raise Protocol_Error with "worker environment fingerprint mismatch";
-      end if;
+      declare
+         Current : constant Environment_Vectors.Vector := Current_Environment;
+      begin
+         if Fingerprint (Current) /= Result.Environment_Hash then
+            raise Protocol_Error with
+              "worker environment fingerprint mismatch";
+         end if;
+         Result.Environment_Fingerprint_Hash := Public_Fingerprint (Current);
+      end;
       return Result;
    exception
       when Constraint_Error =>
@@ -1815,7 +1860,8 @@ package body Flyology_Bench.Workers is
       Capacity   : Natural;
       Omitted    : in out Natural;
       EOF        : out Boolean;
-      Failed     : in out Boolean) is
+      Failed     : in out Boolean;
+      Error_Number : in out C.int) is
       Chunk : aliased String (1 .. 8_192);
       Count : C.long;
       Keep  : Natural;
@@ -1854,6 +1900,9 @@ package body Flyology_Bench.Workers is
          elsif C.int (GNAT.OS_Lib.Errno) = Would_Block_Error then
             return;
          else
+            if not Failed then
+               Error_Number := C.int (GNAT.OS_Lib.Errno);
+            end if;
             Failed := True;
             Close_Descriptor (Descriptor);
             EOF := True;
@@ -1870,7 +1919,8 @@ package body Flyology_Bench.Workers is
       Expected_Rep      : Positive;
       Expected_Seed     : Long_Long_Integer;
       Expected_Env      : U64;
-      Expected_Config   : U64;
+      Expected_Env_Fingerprint : U64;
+      Expected_Config_Hash : U64;
       Expected_Policy   : Environment_Mode) is
       Found_Identity : constant String :=
         Get_String (Data, Cursor, Maximum_Identity_Length);
@@ -1880,6 +1930,7 @@ package body Flyology_Bench.Workers is
       Found_Seed : constant Long_Long_Integer :=
         To_Integer (Get_U64 (Data, Cursor));
       Found_Env : constant U64 := Get_U64 (Data, Cursor);
+      Found_Env_Fingerprint : constant U64 := Get_U64 (Data, Cursor);
       Found_Config : constant U64 := Get_U64 (Data, Cursor);
       Found_Policy : constant Environment_Mode := Environment_Mode'Val
         (Get_Natural (Data, Cursor));
@@ -1889,7 +1940,8 @@ package body Flyology_Bench.Workers is
         or else Found_Rep /= Expected_Rep
         or else Found_Seed /= Expected_Seed
         or else Found_Env /= Expected_Env
-        or else Found_Config /= Expected_Config
+        or else Found_Env_Fingerprint /= Expected_Env_Fingerprint
+        or else Found_Config /= Expected_Config_Hash
         or else Found_Policy /= Expected_Policy
       then
          raise Protocol_Error with "worker result identity or metadata mismatch";
@@ -1940,7 +1992,8 @@ package body Flyology_Bench.Workers is
       Expected_Rep      : Positive;
       Expected_Seed     : Long_Long_Integer;
       Expected_Env      : U64;
-      Expected_Config   : U64;
+      Expected_Env_Fingerprint : U64;
+      Expected_Config_Hash : U64;
       Expected_Policy   : Environment_Mode;
       Complete          : out Boolean) is
       Cursor : aliased Natural := Data'First;
@@ -1976,7 +2029,8 @@ package body Flyology_Bench.Workers is
       Body_Cursor := First;
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Config, Expected_Policy);
+         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
+         Expected_Config_Hash, Expected_Policy);
       if Get_U64 (Data, Body_Cursor) /= Completion_Marker
         or else Body_Cursor /= Last + 1
       then
@@ -1991,9 +2045,10 @@ package body Flyology_Bench.Workers is
       Expected_Kind     : Result_Kind;
       Expected_Rep      : Positive;
       Expected_Seed     : Long_Long_Integer;
-      Expected_Metrics  : Metric_Set;
+      Expected_Config   : Configuration;
       Expected_Env      : U64;
-      Expected_Config   : U64;
+      Expected_Env_Fingerprint : U64;
+      Expected_Config_Hash : U64;
       Expected_Policy   : Environment_Mode;
       Target            : in out Worker_Result) is
       Cursor : aliased Natural := Data'First;
@@ -2013,7 +2068,8 @@ package body Flyology_Bench.Workers is
       Body_Cursor := First;
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Config, Expected_Policy);
+         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
+         Expected_Config_Hash, Expected_Policy);
       if Get_U64 (Data, Body_Cursor) /= Completion_Marker
         or else Body_Cursor /= Last + 1
       then
@@ -2027,7 +2083,8 @@ package body Flyology_Bench.Workers is
       Body_Cursor := First;
       Get_Common
         (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Config, Expected_Policy);
+         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
+         Expected_Config_Hash, Expected_Policy);
       Status := Envelope_Status'Val (Get_Natural (Data, Body_Cursor));
       Found_Kind := Result_Kind'Val (Get_Natural (Data, Body_Cursor));
       if Found_Kind /= Expected_Kind then
@@ -2055,11 +2112,11 @@ package body Flyology_Bench.Workers is
             if Expected_Kind = Ordinary_Measurement then
                Target.Measurement_Data := Get_Measurement (Data, Payload_Cursor);
                Validate_Measurement_Result
-                 (Target.Measurement_Data, Expected_Seed, Expected_Metrics);
+                 (Target.Measurement_Data, Expected_Config);
             else
                Target.Comparison_Data := Get_Comparison (Data, Payload_Cursor);
                Validate_Comparison_Result
-                 (Target.Comparison_Data, Expected_Seed, Expected_Metrics);
+                 (Target.Comparison_Data, Expected_Config);
             end if;
             Target.Outcome_Value := Normal_Result;
          when Envelope_Exception =>
@@ -2089,8 +2146,10 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "trailing worker payload data";
       end if;
    exception
-      when Constraint_Error =>
-         raise Protocol_Error with "worker result value is out of range";
+      when Error : Constraint_Error =>
+         raise Protocol_Error with
+           ("worker result value is out of range: "
+            & Ada.Exceptions.Exception_Message (Error));
    end Decode_Result_Stream;
 
    procedure Run_Repetition
@@ -2103,6 +2162,7 @@ package body Flyology_Bench.Workers is
       Launch          : Launch_Configuration;
       Environment_List : Environment_Vectors.Vector;
       Environment_Hash : U64;
+      Environment_Fingerprint_Hash : U64;
       Environment_Policy_Value : Environment_Mode;
       Rep             : Positive;
       Target          : out Worker_Result)
@@ -2119,6 +2179,7 @@ package body Flyology_Bench.Workers is
       Result_Omitted, Output_Omitted, Error_Omitted : Natural := 0;
       Result_EOF, Output_EOF, Error_EOF : Boolean := False;
       IO_Failed : Boolean := False;
+      IO_Error : C.int := 0;
       Ready : Boolean := False;
       Ready_Time : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Spawn_Start, Spawn_End, Now : Ada.Real_Time.Time;
@@ -2133,13 +2194,21 @@ package body Flyology_Bench.Workers is
       Protocol_Reason : US.Unbounded_String;
       Spawn_Result : C.int;
       Ignored : C.int;
+
+      procedure Record_IO_Failure (Error_Number : C.int) is
+      begin
+         if not IO_Failed then
+            IO_Error := Error_Number;
+         end if;
+         IO_Failed := True;
+      end Record_IO_Failure;
    begin
       Target := (others => <>);
       Target.Kind_Value := Expected_Kind;
       Target.Identity_Value := US.To_Unbounded_String (Identity_Value);
       Target.Repetition_Value := Rep;
       Target.Seed_Value := Seed_Value;
-      Target.Environment_Hash := Environment_Hash;
+      Target.Environment_Fingerprint_Hash := Environment_Fingerprint_Hash;
       Target.Policy_Value := Environment_Policy_Value;
       Config_Value.Random_Seed := Seed_Value;
       Config_Bytes := US.To_Unbounded_String
@@ -2206,19 +2275,20 @@ package body Flyology_Bench.Workers is
       loop
          Drain
            (Process.Descriptors (0), Result_Data, Maximum_Protocol_Bytes,
-            Result_Omitted, Result_EOF, IO_Failed);
+            Result_Omitted, Result_EOF, IO_Failed, IO_Error);
          Drain
            (Process.Descriptors (1), Output_Data, Launch.Diagnostic_Capacity,
-            Output_Omitted, Output_EOF, IO_Failed);
+            Output_Omitted, Output_EOF, IO_Failed, IO_Error);
          Drain
            (Process.Descriptors (2), Error_Data, Launch.Diagnostic_Capacity,
-            Error_Omitted, Error_EOF, IO_Failed);
+            Error_Omitted, Error_EOF, IO_Failed, IO_Error);
 
          if not Ready and then not Protocol_Failed then
             begin
                Validate_Ready
                  (US.To_String (Result_Data), Identity_Value, Expected_Kind,
-                  Rep, Seed_Value, Environment_Hash, Config_Hash,
+                  Rep, Seed_Value, Environment_Hash,
+                  Environment_Fingerprint_Hash, Config_Hash,
                   Environment_Policy_Value, Ready);
                if Ready then
                   Ready_Time := Ada.Real_Time.Clock;
@@ -2250,10 +2320,10 @@ package body Flyology_Bench.Workers is
                   --  Its PID can be reused, so neither it nor its former
                   --  process group is a safe signal target now.
                   Child_Ownership_Lost := True;
-                  IO_Failed := True;
+                  Record_IO_Failure (No_Child_Error);
                   Process.Pid := -1;
                else
-                  IO_Failed := True;
+                  Record_IO_Failure (C.int (GNAT.OS_Lib.Errno));
                end if;
             end if;
          end;
@@ -2311,14 +2381,14 @@ package body Flyology_Bench.Workers is
            and then C.int (GNAT.OS_Lib.Errno) /= No_Process_Error
            and then C.int (GNAT.OS_Lib.Errno) /= Permission_Error
          then
-            IO_Failed := True;
+            Record_IO_Failure (C.int (GNAT.OS_Lib.Errno));
          end if;
          declare
             Reaped : aliased Boolean;
          begin
             Reap (Process, Raw_Status, Reaped'Access);
             if not Reaped then
-               IO_Failed := True;
+               Record_IO_Failure (C.int (GNAT.OS_Lib.Errno));
             end if;
          end;
       end if;
@@ -2330,13 +2400,13 @@ package body Flyology_Bench.Workers is
          loop
             Drain
               (Process.Descriptors (0), Result_Data, Maximum_Protocol_Bytes,
-               Result_Omitted, Result_EOF, IO_Failed);
+               Result_Omitted, Result_EOF, IO_Failed, IO_Error);
             Drain
               (Process.Descriptors (1), Output_Data, Launch.Diagnostic_Capacity,
-               Output_Omitted, Output_EOF, IO_Failed);
+               Output_Omitted, Output_EOF, IO_Failed, IO_Error);
             Drain
               (Process.Descriptors (2), Error_Data, Launch.Diagnostic_Capacity,
-               Error_Omitted, Error_EOF, IO_Failed);
+               Error_Omitted, Error_EOF, IO_Failed, IO_Error);
             exit when (Result_EOF and Output_EOF and Error_EOF)
               or else Ada.Real_Time.Clock >= Drain_Deadline;
             delay 0.001;
@@ -2367,7 +2437,7 @@ package body Flyology_Bench.Workers is
          Target.Reason_Value := US.To_Unbounded_String
            ("parent worker I/O or process observation failed, errno="
             & Ada.Strings.Fixed.Trim
-              (GNAT.OS_Lib.Errno'Image, Ada.Strings.Both));
+              (C.int'Image (IO_Error), Ada.Strings.Both));
       elsif Protocol_Failed or else Result_Omitted > 0 then
          Target.Outcome_Value := Malformed_Protocol;
          Target.Reason_Value :=
@@ -2391,8 +2461,8 @@ package body Flyology_Bench.Workers is
          begin
             Decode_Result_Stream
               (US.To_String (Result_Data), Identity_Value, Expected_Kind,
-               Rep, Seed_Value, Config_Value.Metrics, Environment_Hash,
-               Config_Hash,
+               Rep, Seed_Value, Config_Value, Environment_Hash,
+               Environment_Fingerprint_Hash, Config_Hash,
                Environment_Policy_Value, Target);
          exception
             when Error : Protocol_Error =>
@@ -2423,6 +2493,7 @@ package body Flyology_Bench.Workers is
       Has_Directory : constant Boolean := Launch.Directory = Use_Directory;
       Entries : Environment_Vectors.Vector;
       Env_Hash : U64;
+      Env_Fingerprint_Hash : U64;
    begin
       if Results'Length /= Launch.Repetitions then
          raise Configuration_Error with
@@ -2508,11 +2579,13 @@ package body Flyology_Bench.Workers is
 
       Entries := Effective_Environment (Env);
       Env_Hash := Fingerprint (Entries);
+      Env_Fingerprint_Hash := Public_Fingerprint (Entries);
       for Offset in 0 .. Results'Length - 1 loop
          Run_Repetition
            (US.To_String (Full_Executable), US.To_String (Full_Directory),
             Has_Directory, Identity, Kind, Config, Launch, Entries, Env_Hash,
-            Env.Selected_Mode, Offset + 1, Results (Results'First + Offset));
+            Env_Fingerprint_Hash, Env.Selected_Mode, Offset + 1,
+            Results (Results'First + Offset));
       end loop;
    end Run;
 
@@ -2533,7 +2606,7 @@ package body Flyology_Bench.Workers is
    function Setup_Nanoseconds (Result : Worker_Result) return Long_Float is
      (Result.Setup_Time);
    function Environment_Fingerprint (Result : Worker_Result) return String is
-     (Hex (Result.Environment_Hash));
+     (Hex (Result.Environment_Fingerprint_Hash));
    function Environment_Policy (Result : Worker_Result) return Environment_Mode is
      (Result.Policy_Value);
    function Exit_Code (Result : Worker_Result) return Natural is

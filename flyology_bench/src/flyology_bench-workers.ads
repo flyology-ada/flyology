@@ -19,7 +19,7 @@ with Interfaces.C;
 package Flyology_Bench.Workers is
 
    --  Current binary envelope schema.
-   Protocol_Version : constant := 1;
+   Protocol_Version : constant := 2;
    --  Largest encoded stable case identity.
    Maximum_Identity_Length : constant := 512;
    --  Largest effective or edited environment entry count.
@@ -199,8 +199,10 @@ package Flyology_Bench.Workers is
    --  quiescence, interference observation, and metric sessions therefore run
    --  only inside the measuring worker.
    --  The caller must exclude process-wide SIGCHLD policies or other child
-   --  reapers that consume these workers. If ownership is nevertheless lost,
-   --  Run stops signaling the unanchored PID and reports Parent_IO_Failure.
+   --  reapers that consume these workers. If Run detects ownership loss, it
+   --  stops signaling the unanchored PID and reports Parent_IO_Failure. A
+   --  concurrent external reaper violates this exclusion contract and can
+   --  race the observation-to-reap interval on hosts without stable handles.
    --  @param Executable Direct path to the same benchmark executable.
    --  @param Identity Exact stable registered case identity.
    --  @param Kind Expected ordinary or paired result shape.
@@ -249,9 +251,11 @@ package Flyology_Bench.Workers is
    --  @param Result Worker process result.
    --  @return Setup duration in nanoseconds.
    function Setup_Nanoseconds (Result : Worker_Result) return Long_Float;
-   --  Return the non-echoing effective environment hash.
+   --  Return the non-echoing effective environment-name fingerprint.
    --  @param Result Worker process result.
-   --  @return Sixteen lowercase hexadecimal digits.
+   --  Values are excluded so inherited credentials cannot be recovered from
+   --  shared reports by testing guesses against the fingerprint.
+   --  @return Sixteen lowercase hexadecimal digits for the variable-name set.
    function Environment_Fingerprint (Result : Worker_Result) return String;
    --  Return the selected environment construction mode.
    --  @param Result Worker process result.
@@ -397,6 +401,7 @@ private
       Seed_Value        : Long_Long_Integer := 1;
       Config_Value      : Configuration := Default_Configuration;
       Environment_Hash  : Interfaces.Unsigned_64 := 0;
+      Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
       Configuration_Hash : Interfaces.Unsigned_64 := 0;
       Policy_Value      : Environment_Mode := Strict_Mode;
    end record;
@@ -410,7 +415,7 @@ private
       Pid_Value         : Interfaces.C.int := Interfaces.C.int (-1);
       Spawn_Time        : Long_Float := 0.0;
       Setup_Time        : Long_Float := 0.0;
-      Environment_Hash  : Interfaces.Unsigned_64 := 0;
+      Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
       Policy_Value      : Environment_Mode := Strict_Mode;
       Exit_Code_Value   : Natural := 0;
       Signal_Value      : Natural := 0;
