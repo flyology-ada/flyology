@@ -6,10 +6,11 @@ alr=$("$project_root/scripts/find-alr.sh")
 library_log=$(mktemp "${TMPDIR:-/tmp}/flyology-library-proof.XXXXXX")
 runtime_log=$(mktemp "${TMPDIR:-/tmp}/flyology-runtime-proof.XXXXXX")
 debug_log=$(mktemp "${TMPDIR:-/tmp}/flyology-debug-proof.XXXXXX")
+benchmark_log=$(mktemp "${TMPDIR:-/tmp}/flyology-benchmark-proof.XXXXXX")
 
 cleanup_logs()
 {
-  rm -f "$library_log" "$runtime_log" "$debug_log"
+  rm -f "$library_log" "$runtime_log" "$debug_log" "$benchmark_log"
 }
 
 trap cleanup_logs EXIT
@@ -93,5 +94,16 @@ run_gnatprove "$debug_log" \
   --report=all \
   -f \
   -u flyology_debug-internal-ring_policy.adb
+
+run_gnatprove "$benchmark_log" \
+  -P "$project_root/flyology_bench/flyology_bench.gpr" \
+  --mode=all \
+  --level=1 \
+  -j0 \
+  --output=oneline \
+  --output-header \
+  --report=all \
+  -f \
+  -u flyology_bench-baseline_math.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

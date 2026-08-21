@@ -25,6 +25,7 @@ procedure Baseline_Gate_Smoke is
    Legacy_Path : constant String := Root & ".v1.baseline";
    Slow_Path : constant String := Root & ".slow.baseline";
    Clock_Path : constant String := Root & ".clock.baseline";
+   Extreme_Path : constant String := Root & ".extreme.baseline";
    Output_Path : constant String := Root & ".output";
    Missing_Path : constant String := Root & ".missing";
    Failed_Target : constant String := Root & ".target";
@@ -178,6 +179,40 @@ procedure Baseline_Gate_Smoke is
       Write_Text (Destination, Unbounded.To_String (Output));
    end Rewrite_Clock;
 
+   procedure Rewrite_Samples
+     (Source, Destination, Sample_Image : String)
+   is
+      Input : Ada.Text_IO.File_Type;
+      Output : Unbounded.Unbounded_String;
+      Hash : Interfaces.Unsigned_64 := FNV_Offset;
+   begin
+      Ada.Text_IO.Open (Input, Ada.Text_IO.In_File, Source);
+      loop
+         declare
+            Original : constant String := Ada.Text_IO.Get_Line (Input);
+         begin
+            exit when Ada.Strings.Fixed.Index (Original, "checksum=") = 1;
+            declare
+               Separator : constant Natural :=
+                 Ada.Strings.Fixed.Index (Original, "=");
+               Line : constant String :=
+                 (if Ada.Strings.Fixed.Index (Original, "sample.") = 1
+                    and then Separator > 0
+                  then Original (Original'First .. Separator) & Sample_Image
+                  else Original);
+            begin
+               Unbounded.Append (Output, Line & ASCII.LF);
+               Hash_Line (Hash, Line);
+            end;
+         end;
+      end loop;
+      Ada.Text_IO.Close (Input);
+      Unbounded.Append (Output, "checksum=" & Hex_Image (Hash) & ASCII.LF);
+      Unbounded.Append
+        (Output, "end=flyology_bench baseline v2" & ASCII.LF);
+      Write_Text (Destination, Unbounded.To_String (Output));
+   end Rewrite_Samples;
+
    procedure Expect_Format_Error
      (Path     : String;
       Contents : String;
@@ -209,6 +244,7 @@ begin
    Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
    Delete_If_Present (Clock_Path);
+   Delete_If_Present (Extreme_Path);
    Delete_If_Present (Output_Path);
    Delete_If_Present (Missing_Path);
    Delete_If_Present (Failed_Target);
@@ -247,7 +283,7 @@ begin
           (Legacy_Path, "gate,""case", Fast,
            Fingerprint => "host=exact;switches=-O2",
            Policy =>
-             (Baselines.Fail_Closed_Gate_Policy with delta
+             (Baselines.Permissive_Gate_Policy with delta
                 Practical_Threshold_Percent => 20.0),
            Random_Seed => 99);
    begin
@@ -309,7 +345,7 @@ begin
            Random_Seed => 102);
       Equivalent : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Baseline_Path, "gate,""case", Fast,
+          (Slow_Path, "gate,""case", Slow,
            Fingerprint => "host=exact;switches=-O2",
            Policy =>
              (Baselines.Fail_Closed_Gate_Policy with delta
@@ -327,28 +363,28 @@ begin
    end;
 
    declare
-      Saved : constant Baselines.Baseline := Baselines.Load (Baseline_Path);
+      Saved : constant Baselines.Baseline := Baselines.Load (Slow_Path);
       Zero : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Fast,
+          (Saved, Slow,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => 0.0,
            Random_Seed => 105);
       Change_Low : constant Long_Float :=
-        100.0 * (1.0 / Baselines.Speedup_Confidence_High (Zero) - 1.0);
+        Baselines.Time_Change_Confidence_Low (Zero);
       Change_High : constant Long_Float :=
-        100.0 * (1.0 / Baselines.Speedup_Confidence_Low (Zero) - 1.0);
+        Baselines.Time_Change_Confidence_High (Zero);
       Boundary : constant Long_Float :=
         Long_Float'Max (abs Change_Low, abs Change_High);
       At_Boundary : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Fast,
+          (Saved, Slow,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => Boundary,
            Random_Seed => 105);
       Below_Boundary : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Fast,
+          (Saved, Slow,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => Boundary * 0.999,
            Random_Seed => 105);
@@ -379,7 +415,7 @@ begin
            Policy => Baselines.Fail_Closed_Gate_Policy);
       Inconclusive : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Baseline_Path, "gate,""case", Fast,
+          (Slow_Path, "gate,""case", Slow,
            Fingerprint => "host=exact;switches=-O2",
            Policy =>
              (Baselines.Fail_Closed_Gate_Policy with delta
@@ -469,6 +505,62 @@ begin
       & "sample_count=1001" & ASCII.LF,
       "out of range");
 
+   Rewrite_Samples
+     (Baseline_Path, Extreme_Path, Long_Float'Image (Long_Float'Last));
+   Expect_Format_Error
+     (Output_Path,
+      Read_All (Extreme_Path),
+      "supported nanosecond range");
+
+   declare
+      Invalid_Current : Flyology_Bench.Measurement;
+   begin
+      Rewrite_Clock
+        (Baseline_Path,
+         Clock_Path,
+         Flyology_Bench.Clock_Backend (Invalid_Current));
+      declare
+         Saved : constant Baselines.Baseline := Baselines.Load (Clock_Path);
+         Raised : Boolean := False;
+      begin
+         begin
+            declare
+               Ignored : constant Baselines.Regression :=
+                 Baselines.Compare
+                   (Saved,
+                    Invalid_Current,
+                    Fingerprint => "host=exact;switches=-O2");
+            begin
+               null;
+            end;
+         exception
+            when Baselines.Baseline_Comparison_Error =>
+               Raised := True;
+         end;
+         Check
+           (Raised,
+            "invalid current samples did not raise the named comparison error");
+      end;
+      declare
+         Gate : constant Baselines.Gate_Result :=
+           Baselines.Evaluate_Gate
+             (Clock_Path,
+              "gate,""case",
+              Invalid_Current,
+              Fingerprint => "host=exact;switches=-O2",
+              Policy => Baselines.Fail_Closed_Gate_Policy);
+      begin
+         Check
+           (Baselines.Status (Gate) = Baselines.Baseline_Error
+            and then Baselines.Compatible (Gate)
+            and then not Baselines.Has_Statistics (Gate)
+            and then Baselines.Rejected (Gate)
+            and then Ada.Strings.Fixed.Index
+              (Baselines.Reason (Gate), "current measurement") > 0,
+            "invalid current samples did not produce an actionable gate error");
+      end;
+   end;
+
    declare
       Corrupt : String := Read_All (Baseline_Path);
       Position : constant Natural := Ada.Strings.Fixed.Index
@@ -517,7 +609,7 @@ begin
    declare
       Escaped : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Baseline_Path, "gate,""case", Fast,
+          (Slow_Path, "gate,""case", Slow,
            Fingerprint => "host=exact;switches=-O2",
            Policy =>
              (Baselines.Permissive_Gate_Policy with delta
@@ -567,6 +659,7 @@ begin
    Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
    Delete_If_Present (Clock_Path);
+   Delete_If_Present (Extreme_Path);
    Delete_If_Present (Output_Path);
    Delete_If_Present (Failed_Target);
    Ada.Text_IO.Put_Line ("flyology_bench baseline gate smoke: PASS");
@@ -576,6 +669,7 @@ exception
       Delete_If_Present (Legacy_Path);
       Delete_If_Present (Slow_Path);
       Delete_If_Present (Clock_Path);
+      Delete_If_Present (Extreme_Path);
       Delete_If_Present (Output_Path);
       Delete_If_Present (Failed_Target);
       raise;
