@@ -114,7 +114,7 @@ rm -rf "$project_root/docs/api/flyology_bench"
    #  render, but --warnings reports the formals as undocumented. Keep this
    #  exception narrow; every other public benchmark entity remains enforced.
    sed -E \
-     -e '/^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$/d' \
+     -e '/^flyology_bench(-reporters|-sweeps)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$/d' \
      "$bench_gnatdoc_log"
 )
 

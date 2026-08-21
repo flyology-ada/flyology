@@ -173,6 +173,7 @@
             <li><a href="#first">Measure one operation</a></li>
             <li><a href="#read">Read the report</a></li>
             <li><a href="#compare">Compare implementations</a></li>
+            <li><a href="#sweeps">Sweep parameters and analyze scaling</a></li>
             <li><a href="#axes">Select measurement axes</a></li>
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
@@ -335,6 +336,30 @@ Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
               </table>
             </div>
             <p>The confidence interval comes from deterministic circular-block resampling of paired log-ratios. A practical verdict appears only when the complete interval clears the configured effect threshold. <code>Show_Individual_Details</code> appends the full latency, sampling, clock, CPU, memory, and elapsed card for every implementation.</p>
+          </section>
+
+          <section id="sweeps">
+            <span class="step-label">SWEEPS</span>
+            <h2>Sweep exact parameters without changing the timed operation.</h2>
+            <p><code>Flyology_Bench.Sweeps</code> retains an explicit ordered set of positive <code>size:</code> or <code>count:</code> points. Each canonical point identity contains the parameter kind and full unsigned decimal value; an optional bounded label is display metadata. Duplicate identities and invalid labels fail before collection.</p>
+            <p>The sweep generic selects a point and states its work outside the timed batch, then invokes an already-instantiated <code>Measure</code>, <code>Compare</code>, or <code>Compare_Batched</code> procedure once. The operation inside that procedure stays statically bound. A paired sweep therefore performs the existing adjacent, order-balanced comparison independently at every point; it does not compare two later blocks.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Work identity</dt><dd>Every logical operation carries an exact positive integral amount in items, bytes, or a caller-named unit. Decimal or binary scaling affects display only; CSV and newline-delimited JSON retain the raw value, unit, and scaling choice.</dd></div>
+                <div class="decision-row"><dt>Throughput</dt><dd>Operations per second and work units per second are derived by inverting the same wall nanoseconds-per-operation samples. There is no separately timed throughput measurement. Mean-time confidence endpoints are inverted in reverse order.</dd></div>
+                <div class="decision-row"><dt>Budgets and failures</dt><dd>A per-point budget applies the runner limit independently. A whole-sweep budget includes selection, warmup, calibration, and collection and passes each point the remaining collection limit. Setup failure, measurement failure, unavailable wall time, overflow, dry run, and budget exhaustion remain distinct inspectable statuses; callers choose stop or continue.</dd></div>
+                <div class="decision-row"><dt>Suite identity</dt><dd>A suite full case name is supplied as <code>Case_Name</code> and remains the registration and filter identity. Machine rows add a separate stable <code>point</code> field; the sweep layer does not create another suite runner.</dd></div>
+              </dl>
+            </div>
+            <p><code>Flyology_Bench.Scaling</code> analyzes stored or deterministic synthetic observations after collection. It fits constant, logarithmic, linear, n log n, quadratic, and cubic candidates in log space and reports every coefficient, nominal exponent, R-squared value, RMS and maximum log residual, selected model, and observed input range. Fewer than four distinct positive points, a range below twofold, invalid observations, numerical overflow, poor fit, or poor identifiability produce an explicit unavailable state. The result is empirical scaling over the observed range, not proof of big-O.</p>
+            <figure class="code-panel">
+              <figcaption>run the maintained paired size sweep</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+./examples/bin/sweep_comparison</code></pre>
+            </figure>
+            <p>The example compares insertion sort and Shell sort over five input sizes, prints median elapsed time, confidence bounds, operations per second, work units per second, and the paired verdict at every point, then analyzes each implementation's stored medians. It reports that invocation and makes no host performance claim.</p>
           </section>
 
           <section id="axes">

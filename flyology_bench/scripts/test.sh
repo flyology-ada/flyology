@@ -46,11 +46,22 @@ grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
   "$work_dir/custom.out"
 "$crate_root/tests/bin/baseline_gate_smoke" >"$work_dir/gate-smoke.out"
 cat "$work_dir/gate-smoke.out"
+"$crate_root/tests/bin/sweeps_smoke" >"$work_dir/sweeps.out"
+cat "$work_dir/sweeps.out"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
 "$crate_root/examples/bin/custom_metrics" >"$work_dir/custom-example.out"
 grep -q 'cache_lookups' "$work_dir/custom-example.out"
 grep -q '"timer_role":"primary_alternate"' "$work_dir/custom-example.out"
+"$crate_root/examples/bin/sweep_comparison" >"$work_dir/sweep-example.out"
+if ! grep -q '^empirical paired sweep sorting/in_place ' \
+  "$work_dir/sweep-example.out" \
+  || [ "$(grep -c '^empirical scaling sorting/in_place/' \
+       "$work_dir/sweep-example.out")" -ne 2 ]
+then
+  printf '%s\n' "sweep example did not report paired time/throughput and two scaling analyses" >&2
+  exit 1
+fi
 "$crate_root/examples/bin/recording_service" \
   >"$work_dir/recording-example.ansi"
 escape=$(printf '\033')
@@ -348,6 +359,56 @@ else
   grep -q '"calibration_clock":"harness_wall"' "$work_dir/custom.jsonl"
 fi
 
+awk '/^-- sweep machine output begin --$/ { inside = 1; next }
+     /^-- sweep machine output end --$/ { inside = 0; next }
+     inside { print }' "$work_dir/sweeps.out" >"$work_dir/sweeps.machine"
+grep '^{' "$work_dir/sweeps.machine" >"$work_dir/sweeps.jsonl"
+grep -v '^{' "$work_dir/sweeps.machine" >"$work_dir/sweeps.csv"
+awk '
+  function csv_fields(line, i, ch, quoted, count) {
+    quoted = 0
+    count = 1
+    for (i = 1; i <= length(line); i += 1) {
+      ch = substr(line, i, 1)
+      if (ch == "\"") {
+        if (quoted && substr(line, i + 1, 1) == "\"") {
+          i += 1
+        } else {
+          quoted = !quoted
+        }
+      } else if (ch == "," && !quoted) {
+        count += 1
+      }
+    }
+    return count
+  }
+  BEGIN { expected = 0; headers = 0; rows = 0; failures = 0 }
+  substr($0, 1, 10) == "benchmark," {
+    expected = csv_fields($0)
+    headers += 1
+    next
+  }
+  index($0, ",") > 0 {
+    rows += 1
+    actual = csv_fields($0)
+    if (expected == 0 || actual != expected) {
+      printf "sweep CSV column mismatch: expected %d, got %d: %s\n",
+        expected, actual, $0 > "/dev/stderr"
+      failures += 1
+    }
+  }
+  END {
+    if (headers != 3 || rows == 0) { failures += 1 }
+    if (failures > 0) { exit 1 }
+    printf "sweep: %d CSV sections, %d rows verified\n", headers, rows
+  }
+' "$work_dir/sweeps.csv"
+if ! grep -q '^"group/case,""escaped""",count:1,' "$work_dir/sweeps.csv"
+then
+  printf '%s\n' "sweep CSV did not preserve escaped suite case identity" >&2
+  exit 1
+fi
+
 # At least one long-form metric section must exist, otherwise the checks above
 # would pass over latency-only output.
 if ! grep -q '^name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,available,status,' "$work_dir/smoke.csv"
@@ -471,6 +532,44 @@ if command -v jq >/dev/null 2>&1; then
     and (.time_change_ci_high | type) == "number"
   ' "$work_dir/gate-smoke.jsonl" >/dev/null \
     || { printf '%s\n' "escaped baseline gate JSON failed validation" >&2; exit 1; }
+  jq -s -e '
+    any(.[];
+      .type == "sweep_point"
+      and .benchmark == "group/case,\"escaped\""
+      and .point == "count:1"
+      and .parameter_value == 1
+      and .work.raw_value == 1
+      and .sample_semantics == "per_operation_batch_mean"
+      and .available == true
+      and .throughput.direction == "higher_is_better")
+    and any(.[];
+      .type == "sweep_point"
+      and .result_kind == "paired_comparison"
+      and (.paired_verdict | type) == "string"
+      and .reference.operations_ci_low != null
+      and .contender.work_ci_high != null)
+    and any(.[];
+      .type == "sweep_point"
+      and .benchmark == "group/failure"
+      and .point == "count:2"
+      and .available == false
+      and .status == "point_setup_failed"
+      and (.failure | contains("bad, \"point\""))
+      and .median_elapsed_ns == null
+      and .throughput.operations_per_second == null)
+    and any(.[];
+      .type == "sweep_point"
+      and .benchmark == "group/dry"
+      and .available == false
+      and .status == "point_dry_run"
+      and .median_elapsed_ns == null)
+    and any(.[];
+      .type == "empirical_scaling"
+      and .status == "scaling_available"
+      and .selected_model == "linear"
+      and (.models | length) == 6)
+  ' "$work_dir/sweeps.jsonl" >/dev/null \
+    || { printf '%s\n' "sweep JSON/schema integration failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
 else
   awk '
@@ -506,5 +605,6 @@ else
     }
   ' "$work_dir/smoke.jsonl" "$work_dir/recording.jsonl" \
     "$work_dir/recording-example.jsonl" "$work_dir/multi.json" \
-    "$work_dir/gate.jsonl" "$work_dir/gate-smoke.jsonl"
+    "$work_dir/gate.jsonl" "$work_dir/gate-smoke.jsonl" \
+    "$work_dir/sweeps.jsonl"
 fi
