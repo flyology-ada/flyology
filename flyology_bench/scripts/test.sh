@@ -76,6 +76,42 @@ then
   printf '%s\n' "sweep example did not report paired time/throughput and two scaling analyses" >&2
   exit 1
 fi
+(
+  cd "$work_dir"
+  "$crate_root/tests/bin/suite_smoke" >"$work_dir/suite.out"
+)
+cat "$work_dir/suite.out"
+"$crate_root/examples/bin/suite_runner" --list >"$work_dir/suite-list.out"
+if [ "$(sed -n '1p' "$work_dir/suite-list.out")" != "integer/mix" ] \
+  || [ "$(sed -n '2p' "$work_dir/suite-list.out")" != "integer/branch" ] \
+  || [ "$(sed -n '3p' "$work_dir/suite-list.out")" != "integer/comparison" ] \
+  || [ -n "$(sed -n '4p' "$work_dir/suite-list.out")" ]
+then
+  printf '%s\n' "suite example list order changed" >&2
+  exit 1
+fi
+(
+  cd "$work_dir"
+  "$crate_root/examples/bin/suite_runner" \
+    --filter='integer/*' --skip='*comparison' --dry-run \
+    --output-style=json --output=suite-example.jsonl \
+    2>suite-example.progress
+  "$crate_root/examples/bin/suite_runner" \
+    --exact=integer/mix --dry-run --output-style=csv \
+    --output=suite-example.csv 2>>suite-example.progress
+)
+if grep -q 'running ' "$work_dir/suite-example.jsonl" \
+  || grep -q "$(printf '\033')" "$work_dir/suite-example.jsonl"
+then
+  printf '%s\n' "suite output file contains progress or ANSI" >&2
+  exit 1
+fi
+awk '
+  NR == 1 { expected = NF }
+  NF != expected { exit 1 }
+  END { if (NR != 3) exit 1 }
+' FS=, "$work_dir/suite-example.csv" \
+  || { printf '%s\n' "suite example CSV failed validation" >&2; exit 1; }
 "$crate_root/examples/bin/recording_service" \
   >"$work_dir/recording-example.ansi"
 escape=$(printf '\033')
@@ -454,6 +490,14 @@ fi
 # build dependency of the crate, so awk covers the same invariants when jq is
 # absent; the Linux validation image installs jq so that path always runs.
 if command -v jq >/dev/null 2>&1; then
+  jq -s -e '
+    length == 3
+    and (.[0].benchmark == "integer/mix")
+    and (.[1].benchmark == "integer/branch")
+    and all(.[0:2][]; .dry_run == true and .median_ns == null)
+    and (.[2].result_kind == "summary")
+  ' "$work_dir/suite-example.jsonl" >/dev/null \
+    || { printf '%s\n' "suite example JSON failed validation" >&2; exit 1; }
   check_json() {
     jq -e '
       def metric_ok:
@@ -657,6 +701,18 @@ if command -v jq >/dev/null 2>&1; then
     || { printf '%s\n' "sweep JSON/schema integration failed validation" >&2; exit 1; }
   printf 'JSON verified with jq\n'
 else
+  awk '
+    BEGIN { failures = 0; objects = 0 }
+    {
+      objects += 1
+      if ($0 !~ /^\{/ || $0 !~ /\}$/ || $0 !~ /"result_kind":/ \
+        || $0 !~ /"dry_run":true/) {
+        failures += 1
+      }
+    }
+    END { if (objects != 3 || failures > 0) exit 1 }
+  ' "$work_dir/suite-example.jsonl" \
+    || { printf '%s\n' "suite example JSON failed structural validation" >&2; exit 1; }
   awk '
     BEGIN { failures = 0; objects = 0 }
     {

@@ -29,6 +29,8 @@ The initial API provides:
 - optional measured timestamp-cost subtraction, disabled by default;
 - atomically published raw-sample baselines with exact compatibility
   fingerprints and CI regression gates;
+- an explicit bounded suite registry with stable identities, deterministic
+  list/filter/skip selection, shared configuration, and aggregate status;
 - host/toolchain metadata and optional strict Linux or advisory Darwin thread
   placement;
 - selectable wall-time, CPU-time, RSS, fault, context-switch, storage-I/O,
@@ -316,6 +318,80 @@ putting it inside a nanosecond operation would measure the out-of-line barrier
 call as part of that operation. Volatile state is often clearer for a first
 benchmark. `Clobber_Memory` prevents motion of memory operations across a
 chosen boundary.
+
+## Run an explicit suite
+
+`Flyology_Bench.Suites` is a generic bounded registry. Instantiate it at the
+same scope as wrapper procedures around existing `Measure` or `Compare`
+instantiations. The wrapper call is indirect, but the timed `Operation` or
+`Batch` inside the existing generic remains statically bound:
+
+```ada
+package Benchmarks is new Flyology_Bench.Suites (Maximum_Cases => 8);
+
+procedure Run_Mix
+  (Config : Flyology_Bench.Configuration;
+   Result : out Flyology_Bench.Measurement) is
+begin
+   Measure_Mix (Config, Result);
+end Run_Mix;
+
+Suite : Benchmarks.Suite;
+
+Benchmarks.Register
+  (Suite, "mix", Run_Mix'Access,
+   Group => "integer", Tags => "arithmetic,smoke");
+```
+
+Names, groups, and tags are case-sensitive. Each segment starts with an ASCII
+letter or digit and continues with ASCII letters, digits, `.`, `_`, or `-`.
+The full identity is `group/name`, or only `name` when the group is empty.
+Duplicate full identities fail during registration. Registration order is the
+default discovery and execution order.
+
+`Parse` accepts an explicit argument array for tests. `Parse_Command_Line` is
+only a wrapper around it. Selection supports exact full identity, substring or
+small-glob filters (`*` and `?`), exact groups and tags, and exclusion filters.
+Repeated filters are alternatives; repeated tags must all match. `--order=name`
+requests lexical full-identity order. A no-match run fails unless
+`--allow-empty` is explicit.
+
+Every selected callback receives one effective `Configuration`. The CLI can
+override warmup, measurement time, maximum sampling time, sample count,
+minimum sample time, practical threshold, and random seed. Durations require a
+strict decimal plus `ns`, `us`, `ms`, or `s`. Fields without an override retain
+the supplied base configuration.
+
+The runner executes cases serially in one process. Global state, caches, and
+host conditions therefore carry between cases. `--fail-fast` stops after the
+first callback exception; the default continues and reports the stable full
+identity with each exception. A paired `Inconclusive` verdict is counted but
+does not fail the suite. `--require-metrics` makes an unavailable requested
+built-in axis fail the final status. `Run_Summary` reports discovered,
+selected, completed, skipped, failed, inconclusive, unavailable, and rejected
+counts. Map `not Successful (Summary)` to `Ada.Command_Line.Failure` in a main
+procedure.
+
+`--dry-run` applies the smallest valid collection policy to every selected
+callback. Its output is marked `dry_run`, contains no performance numbers, and
+must not be recorded as a baseline. An explicit `--output` file contains only
+plain human output, one-schema CSV, or newline-delimited JSON. Progress and
+ANSI sequences remain outside that file.
+
+The maintained `suite_runner` example demonstrates discovery, selection,
+machine output, and dry validation:
+
+```sh
+./examples/bin/suite_runner --list
+./examples/bin/suite_runner --filter='integer/*' --skip='*comparison'
+./examples/bin/suite_runner --exact=integer/mix --output-style=csv
+./examples/bin/suite_runner --dry-run --output-style=json \
+  --output=suite.ndjson
+```
+
+Baseline recording and checking remain explicit follow-up modes. The suite
+will consume `Flyology_Bench.Baselines.Evaluate_Gate` after that additive gate
+API lands; it does not duplicate artifact formats or regression statistics.
 
 ## Resource and runtime axes
 

@@ -174,6 +174,7 @@
             <li><a href="#read">Read the report</a></li>
             <li><a href="#compare">Compare implementations</a></li>
             <li><a href="#sweeps">Sweep parameters and analyze scaling</a></li>
+            <li><a href="#suites">Run a benchmark suite</a></li>
             <li><a href="#axes">Select measurement axes</a></li>
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
@@ -360,6 +361,32 @@ alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
 ./examples/bin/sweep_comparison</code></pre>
             </figure>
             <p>The example compares insertion sort and Shell sort over five input sizes, prints median elapsed time, confidence bounds, operations per second, work units per second, and the paired verdict at every point, then analyzes each implementation's stored medians. It reports that invocation and makes no host performance claim.</p>
+          </section>
+
+          <section id="suites">
+            <span class="step-label">SUITE</span>
+            <h2>Register and select a benchmark suite.</h2>
+            <p><a href="../../api/flyology_bench/14e8355037c37505e5d1422f2b73ec8ce45d51601ed49d8a9cd79a63a7fb26de.html"><code>Flyology_Bench.Suites</code></a> builds a bounded explicit registry. Ada provides no required reflection or linker-discovered inventory, so each case has a stable registered identity. The runner preserves registration order unless <code>--order=name</code> requests lexical full-identity order.</p>
+            <figure class="code-panel">
+              <figcaption>discover and validate the maintained suite</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./examples/bin/suite_runner --list
+./examples/bin/suite_runner --filter='integer/*' --skip='*comparison'
+./examples/bin/suite_runner --exact=integer/mix --output-style=csv
+./examples/bin/suite_runner --dry-run --output-style=json \
+  --output=suite.ndjson</code></pre>
+            </figure>
+            <p>Names, groups, tags, and matching are case-sensitive. A filter without <code>*</code> or <code>?</code> is a substring match. A glob uses only those two portable wildcards. A no-match selection returns a failing status unless <code>--allow-empty</code> is explicit.</p>
+            <p>Every selected callback receives one shared <code>Configuration</code>. The callback wraps an existing generic <code>Measure</code> or <code>Compare</code> instantiation. Indirect dispatch occurs before collection, while the timed operation inside that instantiation remains statically bound.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Serial process</dt><dd>Cases execute serially. Global state, caches, and host conditions carry between cases.</dd></div>
+                <div class="decision-row"><dt>Exceptions</dt><dd>The default continues after a callback exception and reports its full identity. <code>--fail-fast</code> stops before the next case.</dd></div>
+                <div class="decision-row"><dt>Dry run</dt><dd><code>--dry-run</code> invokes each callback with the smallest valid collection policy. Output is marked as validation-only and contains no performance numbers.</dd></div>
+                <div class="decision-row"><dt>Machine files</dt><dd><code>--output</code> writes plain human output, one-schema CSV, or newline-delimited JSON. Progress and ANSI sequences stay outside the file.</dd></div>
+              </dl>
+            </div>
+            <p>The aggregate reports discovered, selected, completed, skipped, failed, inconclusive, unavailable, and rejected counts. An inconclusive paired comparison does not fail by default. The maintained main maps a failing final status to <code>Ada.Command_Line.Failure</code>.</p>
           </section>
 
           <section id="axes">
