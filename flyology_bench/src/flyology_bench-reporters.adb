@@ -848,7 +848,10 @@ package body Flyology_Bench.Reporters is
                   (if Color then Dim else "")
                   & "   " & Pad ("axis", 32) & Pad ("unit", 20)
                   & Pad ("reference", 14) & Pad ("contender", 14)
-                  & Pad ("change", 16) & Pad ("95% CI", 24)
+                  & Pad ("change", 16)
+                  & Pad
+                      (Image (Confidence_Level_Percent (Reference), 1)
+                       & "% CI", 24)
                   & "verdict" & End_Style);
                Header_Printed := True;
             end if;
@@ -938,7 +941,9 @@ package body Flyology_Bench.Reporters is
          & Iterations_Per_Sample (Result)'Image & " iter/sample x"
          & Samples (Result)'Image & " samples"
          & "  median batch "
-         & Duration_Image (Median_Batch_Nanoseconds (Result)));
+         & Duration_Image (Median_Batch_Nanoseconds (Result))
+         & "  " & Image (Confidence_Level_Percent (Result), 1) & "% CI /"
+         & Bootstrap_Resamples (Result)'Image & " resamples");
       Ada.Text_IO.Put_Line
         (File,
          "   " & Quality_Color & Pad ("quality", 10) & End_Style & " | CV "
@@ -980,8 +985,9 @@ package body Flyology_Bench.Reporters is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,iterations,samples,timer_cost_ns,min_ns,median_ns,mean_ns,"
-         & "mean_ci95_low_ns,mean_ci95_high_ns,p95_ns,p99_ns,max_ns,"
+         "name,iterations,samples,confidence_level_percent,bootstrap_resamples,"
+         & "timer_cost_ns,min_ns,median_ns,mean_ns,"
+         & "mean_ci_low_ns,mean_ci_high_ns,p95_ns,p99_ns,max_ns,"
          & "stddev_ns,mad_ns,cv_percent,low_severe,low_mild,high_mild,"
          & "high_severe,clock_backend,clock_resolution_ns,"
          & "observed_clock_resolution_ns,median_timer_cost_ns,median_batch_ns,"
@@ -1006,6 +1012,8 @@ package body Flyology_Bench.Reporters is
          CSV_String (Name)
          & "," & Iterations_Per_Sample (Result)'Image
          & "," & Samples (Result)'Image
+         & "," & JSON_Number (Confidence_Level_Percent (Result))
+         & "," & Bootstrap_Resamples (Result)'Image
          & "," & JSON_Number (Timer_Cost_Nanoseconds (Result))
          & "," & JSON_Number (Minimum_Nanoseconds (Result))
          & "," & JSON_Number (Median_Nanoseconds (Result))
@@ -1054,8 +1062,9 @@ package body Flyology_Bench.Reporters is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,axis,scope,unit,available,status,samples,min,median,mean,"
-         & "mean_ci95_low,mean_ci95_high,p95,p99,max");
+         "name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,"
+         & "available,status,samples,min,median,mean,mean_ci_low,mean_ci_high,"
+         & "p95,p99,max");
    end Put_Metrics_CSV_Header;
 
    procedure Put_Metrics_CSV
@@ -1067,7 +1076,10 @@ package body Flyology_Bench.Reporters is
          if Metric_Requested (Result, Axis) then
             Ada.Text_IO.Put
               (File,
-               CSV_String (Name) & "," & CSV_String (Metric_Name (Axis))
+               CSV_String (Name)
+               & "," & JSON_Number (Confidence_Level_Percent (Result))
+               & "," & Bootstrap_Resamples (Result)'Image
+               & "," & CSV_String (Metric_Name (Axis))
                & "," & CSV_String (Scope_Name (Scope (Axis)))
                & "," & CSV_String (Metric_Unit (Axis)) & ","
                & (if Metric_Available (Result, Axis) then "true" else "false")
@@ -1131,9 +1143,9 @@ package body Flyology_Bench.Reporters is
                      & ",""min"":" & JSON_Number (Summary.Minimum)
                      & ",""median"":" & JSON_Number (Summary.Median)
                      & ",""mean"":" & JSON_Number (Summary.Mean)
-                     & ",""mean_ci95_low"":"
+                     & ",""mean_ci_low"":"
                      & JSON_Number (Summary.Confidence_Low)
-                     & ",""mean_ci95_high"":"
+                     & ",""mean_ci_high"":"
                      & JSON_Number (Summary.Confidence_High)
                      & ",""p95"":" & JSON_Number (Summary.P95)
                      & ",""p99"":" & JSON_Number (Summary.P99)
@@ -1184,9 +1196,9 @@ package body Flyology_Bench.Reporters is
                      & ",""contender_median"":"
                      & JSON_Number (Item.Contender_Median)
                      & ",""change"":" & JSON_Number (Item.Change)
-                     & ",""ci95_low"":"
+                     & ",""ci_low"":"
                      & JSON_Number (Item.Confidence_Low)
-                     & ",""ci95_high"":"
+                     & ",""ci_high"":"
                      & JSON_Number (Item.Confidence_High)
                      & ",""verdict"":"
                      & JSON_String (Metric_Verdict_Name (Item.Verdict)));
@@ -1216,13 +1228,17 @@ package body Flyology_Bench.Reporters is
          & JSON_String (Flyology_Bench.Metadata.Compiler) & "}"
          & ",""iterations"":" & Iterations_Per_Sample (Result)'Image
          & ",""samples"":" & Samples (Result)'Image
+         & ",""statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":" & Bootstrap_Resamples (Result)'Image
+         & ",""bootstrap"":""circular_block""}"
          & ",""timer_cost_ns"":" & JSON_Number (Timer_Cost_Nanoseconds (Result))
          & ",""min_ns"":" & JSON_Number (Minimum_Nanoseconds (Result))
          & ",""median_ns"":" & JSON_Number (Median_Nanoseconds (Result))
          & ",""mean_ns"":" & JSON_Number (Mean_Nanoseconds (Result))
-         & ",""mean_ci95_low_ns"":"
+         & ",""mean_ci_low_ns"":"
          & JSON_Number (Mean_Confidence_Low_Nanoseconds (Result))
-         & ",""mean_ci95_high_ns"":"
+         & ",""mean_ci_high_ns"":"
          & JSON_Number (Mean_Confidence_High_Nanoseconds (Result))
          & ",""p95_ns"":" & JSON_Number (P95_Nanoseconds (Result))
          & ",""p99_ns"":" & JSON_Number (P99_Nanoseconds (Result))
@@ -1248,7 +1264,6 @@ package body Flyology_Bench.Reporters is
          & JSON_Number (Quantization_Floor_Nanoseconds (Result))
          & ",""lag_one_correlation"":"
          & JSON_Number (Sample_Lag_One_Correlation (Result))
-         & ",""bootstrap"":""circular_block"""
          & ",""outliers"":{""low_severe"":" & Counts.Low_Severe'Image
          & ",""low_mild"":" & Counts.Low_Mild'Image
          & ",""high_mild"":" & Counts.High_Mild'Image
@@ -1321,7 +1336,10 @@ package body Flyology_Bench.Reporters is
         (File,
          Muted & "   " & Pad ("implementation", 22)
          & Pad ("median", 13) & Pad ("speedup", 11)
-         & Pad ("elapsed time", 18) & Pad ("95% CI", 20)
+         & Pad ("elapsed time", 18)
+         & Pad
+             (Image (Confidence_Level_Percent (Reference_Data), 1)
+              & "% CI", 20)
          & "verdict" & End_Style);
       Ada.Text_IO.Put_Line
         (File,
@@ -1375,10 +1393,11 @@ package body Flyology_Bench.Reporters is
       Ada.Text_IO.Put_Line
         (File,
          "reference,contender,reference_iterations,contender_iterations,"
-         & "samples,reference_median_ns,"
+         & "samples,confidence_level_percent,bootstrap_resamples,"
+         & "reference_median_ns,"
          & "contender_median_ns,geometric_mean_speedup,median_speedup,"
-         & "speedup_ci95_low,speedup_ci95_high,time_change_percent,"
-         & "time_change_ci95_low,time_change_ci95_high,mean_difference_ns,"
+         & "speedup_ci_low,speedup_ci_high,time_change_percent,"
+         & "time_change_ci_low,time_change_ci_high,mean_difference_ns,"
          & "contender_wins,reference_wins,ties,reference_first,"
          & "contender_first,verdict,practical_threshold_percent,"
          & "order_effect_percent,lag_one_correlation");
@@ -1402,6 +1421,8 @@ package body Flyology_Bench.Reporters is
          & "," & Iteration_Count'Image
              (Iterations_Per_Sample (Contender_Data))
          & "," & Sample_Count'Image (Samples (Reference_Data))
+         & "," & JSON_Number (Confidence_Level_Percent (Reference_Data))
+         & "," & Bootstrap_Resamples (Reference_Data)'Image
          & "," & JSON_Number (Median_Nanoseconds (Reference_Data))
          & "," & JSON_Number (Median_Nanoseconds (Contender_Data))
          & "," & JSON_Number (Geometric_Mean_Speedup (Result))
@@ -1430,8 +1451,9 @@ package body Flyology_Bench.Reporters is
    begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,axis,scope,unit,available,status,method,"
-         & "reference_median,contender_median,change,ci95_low,ci95_high,"
+         "reference,contender,confidence_level_percent,bootstrap_resamples,"
+         & "axis,scope,unit,available,status,method,"
+         & "reference_median,contender_median,change,ci_low,ci_high,"
          & "verdict");
    end Put_Comparison_Metrics_CSV_Header;
 
@@ -1453,6 +1475,8 @@ package body Flyology_Bench.Reporters is
                  (File,
                   CSV_String (Reference_Name) & ","
                   & CSV_String (Contender_Name) & ","
+                  & JSON_Number (Confidence_Level_Percent (Reference)) & ","
+                  & Bootstrap_Resamples (Reference)'Image & ","
                   & CSV_String (Metric_Name (Axis)) & ","
                   & CSV_String (Scope_Name (Scope (Axis))) & ","
                   & CSV_String (Metric_Unit (Axis)) & ","
@@ -1504,6 +1528,11 @@ package body Flyology_Bench.Reporters is
          & ",""contender_iterations"":" & Iteration_Count'Image
              (Iterations_Per_Sample (Contender_Data))
          & ",""samples"":" & Sample_Count'Image (Samples (Reference_Data))
+         & ",""statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Reference_Data))
+         & ",""bootstrap_resamples"":"
+         & Bootstrap_Resamples (Reference_Data)'Image
+         & ",""bootstrap"":""circular_block""}"
          & ",""reference_median_ns"":"
          & JSON_Number (Median_Nanoseconds (Reference_Data))
          & ",""contender_median_ns"":"
@@ -1511,15 +1540,15 @@ package body Flyology_Bench.Reporters is
          & ",""geometric_mean_speedup"":"
          & JSON_Number (Geometric_Mean_Speedup (Result))
          & ",""median_speedup"":" & JSON_Number (Median_Speedup (Result))
-         & ",""speedup_ci95_low"":"
+         & ",""speedup_ci_low"":"
          & JSON_Number (Speedup_Confidence_Low (Result))
-         & ",""speedup_ci95_high"":"
+         & ",""speedup_ci_high"":"
          & JSON_Number (Speedup_Confidence_High (Result))
          & ",""time_change_percent"":"
          & JSON_Number (Relative_Time_Change_Percent (Result))
-         & ",""time_change_ci95_low"":"
+         & ",""time_change_ci_low"":"
          & JSON_Number (Relative_Time_Change_Confidence_Low (Result))
-         & ",""time_change_ci95_high"":"
+         & ",""time_change_ci_high"":"
          & JSON_Number (Relative_Time_Change_Confidence_High (Result))
          & ",""mean_difference_ns"":"
          & JSON_Number (Mean_Time_Difference_Nanoseconds (Result))
@@ -1537,7 +1566,7 @@ package body Flyology_Bench.Reporters is
          & JSON_Number (Order_Effect_Percent (Result))
          & ",""lag_one_correlation"":"
          & JSON_Number (Lag_One_Correlation (Result))
-         & ",""bootstrap"":""circular_block"",""metrics"":");
+         & ",""metrics"":");
       Put_Comparison_Metrics_JSON (File, Result);
       Ada.Text_IO.Put_Line (File, "}");
    end Put_Comparison_JSON;
@@ -1576,7 +1605,9 @@ package body Flyology_Bench.Reporters is
          & Pad ("median", 13)
          & Pad ("speedup", 11)
          & Pad ("elapsed time", 18)
-         & Pad ("95% CI", 20)
+         & Pad
+             (Image (Confidence_Level_Percent (Reference), 1)
+              & "% CI", 20)
          & "verdict" & End_Style);
       Ada.Text_IO.Put_Line
         (File,
@@ -1650,9 +1681,10 @@ package body Flyology_Bench.Reporters is
       Ada.Text_IO.Put_Line
         (File,
          "reference,contender,reference_iterations,contender_iterations,"
-         & "samples,schedule,batching,reference_median_ns,"
+         & "samples,schedule,batching,confidence_level_percent,"
+         & "bootstrap_resamples,reference_median_ns,"
          & "contender_median_ns,reference_mean_ns,contender_mean_ns,"
-         & "geometric_mean_speedup,speedup_ci95_low,speedup_ci95_high,"
+         & "geometric_mean_speedup,speedup_ci_low,speedup_ci_high,"
          & "time_change_percent,verdict,practical_threshold_percent,"
          & "order_effect_percent,lag_one_correlation,clock_backend,"
          & "clock_resolution_ns,quantization_floor_ns");
@@ -1688,6 +1720,8 @@ package body Flyology_Bench.Reporters is
                & "," & Samples (Data)'Image
                & "," & CSV_String (Schedule_Name (Shootout_Schedule (Result)))
                & "," & CSV_String (Batching_Name (Shootout_Batching (Result)))
+               & "," & JSON_Number (Confidence_Level_Percent (Reference))
+               & "," & Bootstrap_Resamples (Reference)'Image
                & "," & JSON_Number (Median_Nanoseconds (Reference))
                & "," & JSON_Number (Median_Nanoseconds (Data))
                & "," & JSON_Number (Mean_Nanoseconds (Reference))
@@ -1751,6 +1785,10 @@ package body Flyology_Bench.Reporters is
          & JSON_String (Schedule_Name (Shootout_Schedule (Result)))
          & ",""batching"":"
          & JSON_String (Batching_Name (Shootout_Batching (Result))) & ","
+         & """statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Reference))
+         & ",""bootstrap_resamples"":" & Bootstrap_Resamples (Reference)'Image
+         & ",""bootstrap"":""circular_block""},"
          & """reference"":{""name"":"
          & JSON_String (Pretty_Name (Case_Id'Image (Case_Id'First)))
          & ",""iterations"":" & Iterations_Per_Sample (Reference)'Image
@@ -1778,9 +1816,9 @@ package body Flyology_Bench.Reporters is
                & ",""median_ns"":" & JSON_Number (Median_Nanoseconds (Data))
                & ",""mean_ns"":" & JSON_Number (Mean_Nanoseconds (Data))
                & ",""speedup"":" & JSON_Number (Geometric_Mean_Speedup (Pair))
-               & ",""speedup_ci95_low"":"
+               & ",""speedup_ci_low"":"
                & JSON_Number (Speedup_Confidence_Low (Pair))
-               & ",""speedup_ci95_high"":"
+               & ",""speedup_ci_high"":"
                & JSON_Number (Speedup_Confidence_High (Pair))
                & ",""time_change_percent"":"
                & JSON_Number (Relative_Time_Change_Percent (Pair))
@@ -1801,6 +1839,6 @@ package body Flyology_Bench.Reporters is
          "],""clock"":{""backend"":" & JSON_String (Clock_Backend (Reference))
          & ",""resolution_ns"":"
          & JSON_Number (Clock_Resolution_Nanoseconds (Reference))
-         & "},""bootstrap"":""circular_block""}");
+         & "}}");
    end Put_Multi_Comparison_JSON;
 end Flyology_Bench.Reporters;

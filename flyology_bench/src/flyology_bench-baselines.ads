@@ -37,13 +37,18 @@ package Flyology_Bench.Baselines is
    --  default metadata fingerprint.
    --  @param Practical_Threshold_Percent Smallest meaningful time change.
    --  @param Random_Seed Deterministic bootstrap seed.
+   --  @param Confidence_Level_Percent Central interval coverage in percent.
+   --  @param Bootstrap_Resamples Number of bootstrap distributions to draw.
    --  @return Compatibility, interval, change, and verdict.
    function Compare
      (Saved      : Baseline;
       Current    : Measurement;
       Fingerprint : String := "";
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1) return Regression;
+      Random_Seed : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
+      return Regression;
 
    --  Return the name stored in a baseline.
    --  @param Saved Loaded baseline.
@@ -67,12 +72,12 @@ package Flyology_Bench.Baselines is
 
    --  Return the lower endpoint of the independent bootstrap interval.
    --  @param Result Compatible regression result.
-   --  @return Lower 95% speedup bound.
+   --  @return Lower configured-confidence speedup bound.
    function Speedup_Confidence_Low (Result : Regression) return Long_Float;
 
    --  Return the upper endpoint of the independent bootstrap interval.
    --  @param Result Compatible regression result.
-   --  @return Upper 95% speedup bound.
+   --  @return Upper configured-confidence speedup bound.
    function Speedup_Confidence_High (Result : Regression) return Long_Float;
 
    --  Return current time change relative to baseline. Negative is faster.

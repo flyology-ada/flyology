@@ -15,7 +15,9 @@ package body Flyology_Bench.Recording is
    use Flyology_Bench.Internal_Probes;
    use type Interfaces.Unsigned_64;
 
-   Bootstrap_Resamples : constant := 2_000;
+   function Lower_Tail
+     (Confidence : Confidence_Percentage) return Long_Float is
+     ((100.0 - Long_Float (Confidence)) / 200.0);
 
    function To_Fixed (Value : String) return Fixed_Name is
       Result : Fixed_Name;
@@ -484,7 +486,7 @@ package body Flyology_Bench.Recording is
             declare
                Count   : constant Positive := Result.Valid_Counts (Axis);
                Ordered : Float_Array (1 .. Count);
-               Means   : Float_Array (1 .. Bootstrap_Resamples);
+               Means   : Float_Array (1 .. Result.Bootstrap_Resample_Total);
                Sum     : Long_Float := 0.0;
                Random  : Interfaces.Unsigned_64 :=
                  16#243F_6A88_85A3_08D3#
@@ -515,8 +517,13 @@ package body Flyology_Bench.Recording is
                   Means (Resample) := Sum / Long_Float (Count);
                end loop;
                Sort (Means);
-               Summary.Confidence_Low := Percentile (Means, 0.025);
-               Summary.Confidence_High := Percentile (Means, 0.975);
+               Summary.Confidence_Low :=
+                 Percentile
+                   (Means, Lower_Tail (Result.Confidence_Level_Value));
+               Summary.Confidence_High :=
+                 Percentile
+                   (Means,
+                    1.0 - Lower_Tail (Result.Confidence_Level_Value));
                Result.Summaries (Axis) := Summary;
             end;
          end if;
@@ -1023,6 +1030,8 @@ package body Flyology_Bench.Recording is
       end if;
       Data.Stores (Benchmark_Capacity (Item.Identifier)).Copy_To
         (Result, Data.Config.Metrics, Elapsed);
+      Result.Confidence_Level_Value := Data.Config.Confidence_Level_Percent;
+      Result.Bootstrap_Resample_Total := Data.Config.Bootstrap_Resamples;
 
       for Axis in Metric_Axis loop
          if Data.Config.Metrics (Axis) then
@@ -1085,6 +1094,12 @@ package body Flyology_Bench.Recording is
    function Metric_Statistics
      (Result : Recorded_Measurement; Axis : Metric_Axis) return Metric_Summary is
      (Result.Summaries (Axis));
+   function Confidence_Level_Percent
+     (Result : Recorded_Measurement) return Confidence_Percentage is
+     (Result.Confidence_Level_Value);
+   function Bootstrap_Resamples
+     (Result : Recorded_Measurement) return Bootstrap_Resample_Count is
+     (Result.Bootstrap_Resample_Total);
    function Metric_Status
      (Result : Recorded_Measurement; Axis : Metric_Axis)
       return Metric_Availability is (Result.Statuses (Axis));
@@ -1165,6 +1180,8 @@ package body Flyology_Bench.Recording is
       Axis      : Metric_Axis;
       Seed      : Long_Long_Integer;
       Threshold : Long_Float;
+      Confidence : Confidence_Percentage;
+      Resamples  : Bootstrap_Resample_Count;
       Item      : out Metric_Comparison_Result)
    is
       Reference_Count : constant Natural := Reference.Valid_Counts (Axis);
@@ -1179,7 +1196,7 @@ package body Flyology_Bench.Recording is
          return;
       end if;
       declare
-         Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+         Bootstrap : Float_Array (1 .. Resamples);
          Random    : Interfaces.Unsigned_64 :=
            16#D1B5_4A32_D192_ED03# xor Interfaces.Unsigned_64 (Seed)
            xor Interfaces.Unsigned_64 (Metric_Axis'Pos (Axis) + 1);
@@ -1257,8 +1274,10 @@ package body Flyology_Bench.Recording is
             end;
          end loop;
          Sort (Bootstrap);
-         Item.Confidence_Low := Percentile (Bootstrap, 0.025);
-         Item.Confidence_High := Percentile (Bootstrap, 0.975);
+         Item.Confidence_Low :=
+           Percentile (Bootstrap, Lower_Tail (Confidence));
+         Item.Confidence_High :=
+           Percentile (Bootstrap, 1.0 - Lower_Tail (Confidence));
          if Direction (Axis) = Diagnostic then
             Item.Verdict := Metric_Diagnostic;
          elsif Relative
@@ -1283,7 +1302,9 @@ package body Flyology_Bench.Recording is
       Contender : Recorded_Measurement;
       Result    : out Recorded_Comparison;
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1) is
+      Random_Seed : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000) is
       Wall : Metric_Comparison_Result;
    begin
       if Practical_Threshold_Percent < 0.0 then
@@ -1293,12 +1314,15 @@ package body Flyology_Bench.Recording is
       Result := (others => <>);
       Result.Reference_Label := Reference.Label;
       Result.Contender_Label := Contender.Label;
+      Result.Confidence_Level_Value := Confidence_Level_Percent;
+      Result.Bootstrap_Resample_Total := Bootstrap_Resamples;
       for Axis in Metric_Axis loop
          Result.Reference_Statuses (Axis) := Reference.Statuses (Axis);
          Result.Contender_Statuses (Axis) := Contender.Statuses (Axis);
          Analyze_Independent_Metric
            (Reference, Contender, Axis, Random_Seed,
-            Practical_Threshold_Percent, Result.Metrics (Axis));
+            Practical_Threshold_Percent, Confidence_Level_Percent,
+            Bootstrap_Resamples, Result.Metrics (Axis));
       end loop;
       Wall := Result.Metrics (Wall_Time);
       if Wall.Available and then Wall.Reference_Median > 0.0
@@ -1332,6 +1356,12 @@ package body Flyology_Bench.Recording is
      (To_String (Result.Reference_Label));
    function Contender_Name (Result : Recorded_Comparison) return String is
      (To_String (Result.Contender_Label));
+   function Confidence_Level_Percent
+     (Result : Recorded_Comparison) return Confidence_Percentage is
+     (Result.Confidence_Level_Value);
+   function Bootstrap_Resamples
+     (Result : Recorded_Comparison) return Bootstrap_Resample_Count is
+     (Result.Bootstrap_Resample_Total);
    procedure Require_Wall_Comparison (Result : Recorded_Comparison) is
    begin
       if not Result.Wall_Available then

@@ -43,6 +43,8 @@ begin
        --  Linux and retain explicit unavailable statuses elsewhere.
        Metrics => Flyology_Bench.Process_Resource_Metrics
          or Flyology_Bench.Linux_Hardware_Metrics,
+       Confidence_Level_Percent => 90.0,
+       Bootstrap_Resamples => 200,
        others  => <>));
 
    --  A rejected second start must not replace the active configuration or
@@ -106,6 +108,10 @@ begin
    Check (Recording.Observed (Fast_Result) = 40, "fast observed count");
    Check (Recording.Observed (Slow_Result) = 40, "slow observed count");
    Check (Recording.Retained (Fast_Result) = 40, "fast retained count");
+   Check
+     (Recording.Confidence_Level_Percent (Fast_Result) = 90.0
+      and then Recording.Bootstrap_Resamples (Fast_Result) = 200,
+      "recorded snapshot lost its statistical settings");
    Check (Recording.In_Flight (Fast_Result) = 0, "finished spans remain active");
    Check
      (Recording.Metric_Samples (Fast_Result, Flyology_Bench.Wall_Time) = 40,
@@ -170,7 +176,14 @@ begin
          & Long_Float'Image (Slow_Median) & " ns");
    end;
 
-   Recording.Compare_Independent (Fast_Result, Slow_Result, Compared);
+   Recording.Compare_Independent
+     (Fast_Result, Slow_Result, Compared,
+      Confidence_Level_Percent => 80.0,
+      Bootstrap_Resamples => 150);
+   Check
+     (Recording.Confidence_Level_Percent (Compared) = 80.0
+      and then Recording.Bootstrap_Resamples (Compared) = 150,
+      "independent comparison lost its statistical settings");
    Check
      (Recording.Relative_Change_Percent (Compared) > 0.0,
       "independent comparison direction");
