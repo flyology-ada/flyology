@@ -8,7 +8,10 @@ project Flyology_Bench_Docs is
       "flyology_bench-metadata.ads",
       "flyology_bench-recording.ads",
       "flyology_bench-recording-reporters.ads",
-      "flyology_bench-reporters.ads");
+      "flyology_bench-reporters.ads",
+      "flyology_bench-scaling.ads",
+      "flyology_bench-sweeps.ads",
+      "flyology_bench-sweeps-reporters.ads");
    for Object_Dir use "obj";
    for Create_Missing_Dirs use "True";
 
