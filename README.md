@@ -1548,8 +1548,9 @@ the synchronous API. A caller declares one `Completion_Set` and limited
 operation objects that refer to it. Additive operation-producing overloads
 cover raw descriptor readiness, monotonic timers, raw stream and datagram
 socket operations, Internet and Unix-stream connection attempts and accepts,
-buffer-owning stream operations, and completion-driven
-positional file reads and writes. Initiation does not create a helper task,
+buffer-owning stream operations, and completion-driven positional file reads
+and writes over aliased arrays or ownership-transferred unique buffers.
+Initiation does not create a helper task,
 per-operation stack, callback thread, or steady-state heap allocation.
 
 `Wait_Some` returns all newly terminal operations observed in a batch; its
@@ -1589,6 +1590,9 @@ each readiness notification. A submitted file operation uses a caller-owned
 runtime request node and does not become terminal until the kernel has
 relinquished its borrowed array. File operations currently require a
 lightweight owner; the existing synchronous file procedures remain lane-neutral.
+On Darwin, a submitted scoped POSIX AIO request that is cancelled or expires is
+left registered until its natural completion notification; this avoids reusing
+an `aiocb` address while kqueue may still associate it with the prior request.
 The completion set creates one shared wake pipe lazily when its first external
 file completion is started, rather than one descriptor per operation.
 
@@ -1600,8 +1604,13 @@ for the same route. Array and socket actuals passed through explicit access
 parameters must outlive the operation and remain untouched while it is pending.
 The unique-buffer socket overloads retain the owning handle but enter its data
 callback only for an immediate nonblocking socket step, so a callback view never
-escapes. Scope exit requests cancellation and drains providers with kernel-owned
-buffers before releasing the operation slot.
+escapes. Unique-buffer file overloads instead move the buffer token into the
+operation because the kernel retains its address across submission. Their typed
+`Finish` moves the buffer back before reporting a retained provider exception;
+abandonment cancels and drains before releasing the token to its pool. The pool
+must outlive the owning operation, just as it must outlive an ordinary buffer
+handle. Scope exit requests cancellation and drains providers with
+kernel-owned buffers before releasing the operation slot.
 
 Provider libraries implement an owner-stack driver, not an `Arm` function in
 their user API. Their operation-producing overload constructs a typed root
@@ -1654,6 +1663,8 @@ lifecycle, generation, capacity, and threshold cases are in
 | Unix-stream socket `Accept_Connection` | success quorum and all | native and lightweight |
 | positional file `Read_At` | all | lightweight; empty and rejection cases native |
 | positional file `Write_At` | success quorum | lightweight; empty and rejection cases native |
+| owned-buffer file `Read_At` | success quorum | lightweight; ownership-return rejection native |
+| owned-buffer file `Write_At` | success quorum | lightweight; ownership-return rejection native |
 
 The same programs cover cancellation, timeout, EOF, zero-length stream and
 datagram operations, datagram metadata and source selection, retained connect
@@ -2363,7 +2374,7 @@ group lock and applies these states:
 | --- | --- | --- |
 | Token already requested | No request is submitted | Immediate |
 | Waiting for kernel queue capacity | Remove the request from the per-group FIFO | Immediate |
-| Darwin POSIX AIO submitted | Call `aio_cancel`; distinguish `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE` | Immediate `EVFILT_AIO` deletion and `aio_return` for `AIO_CANCELED`; otherwise the normal terminal event |
+| Darwin POSIX AIO submitted | A synchronous wait calls `aio_cancel` and distinguishes `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE`; a scoped operation records cancellation and leaves the request registered | Immediate `EVFILT_AIO` deletion and `aio_return` for a synchronously cancelled request; otherwise the normal terminal event |
 | Linux `io_uring` submitted | Submit `IORING_OP_ASYNC_CANCEL`; consume its administrative CQE separately | The original operation's terminal CQE |
 | Linux native AIO submitted | Call `io_cancel`; positional read and write iocbs have had no kernel cancel handler since Linux 3.11 and report `EINVAL`, which is recorded as not-cancelable | The normal completion event |
 | Cancellation unsupported, already completing, or not cancelable | Record the disposition and retain ownership | The normal completion event |

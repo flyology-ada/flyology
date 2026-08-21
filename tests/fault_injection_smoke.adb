@@ -7,6 +7,7 @@ with Ada.Unchecked_Deallocation;
 with Fault_Control;
 with Flyology.IO.Sockets;
 with Flyology;
+with Flyology.Buffers;
 with Flyology.Dormancy;
 with Flyology.IO;
 with Flyology.IO.Connections;
@@ -505,6 +506,35 @@ procedure Fault_Injection_Smoke is
                  and then Last = Input'Last
                  and then Input = Data;
             end;
+         end;
+
+         --  An owning operation must follow the same deterministic queued
+         --  cancel-and-drain path before its detached buffer slot is released.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Storage : aliased Flyology.Buffers.Pool
+              (Block_Size => 4, Capacity => 1);
+            Item : Flyology.Buffers.Unique_Buffer (Storage'Access);
+            Set : aliased Operations.Completion_Set (1);
+            Acquired : Boolean;
+         begin
+            Flyology.Buffers.Acquire (Item);
+            Flyology.Buffers.Copy_From (Item, [9, 8, 7, 6]);
+            declare
+               Abandoned : Files.Write_Operation :=
+                 Files.Write_At (Set'Access, File, 8, Item, 1.0);
+               pragma Unreferenced (Abandoned);
+            begin
+               Passed := Passed
+                 and then not Flyology.Buffers.Has_Buffer (Item);
+            end;
+            Fault_Control.Reset;
+            Flyology.Buffers.Try_Acquire (Item, Acquired);
+            Passed := Passed
+              and then Acquired
+              and then Flyology.Buffers.Has_Buffer (Item);
          end;
 
          --  Invalid initiation is a deterministic submission failure. The

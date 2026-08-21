@@ -3,6 +3,7 @@ with Flyology.Buffers;
 with Flyology.Cancellation;
 with Flyology.Operations;
 with Interfaces.C;
+private with Flyology.Buffers.Drivers;
 private with System;
 
 --  Provides positional file I/O with lane-specific blocking behavior.
@@ -40,10 +41,10 @@ package Flyology.IO.Files is
    type File_Offset is range 0 .. Interfaces.C.long_long'Last;
 
    --  Common limited base for completion-driven positional file operations.
-   --  Concrete operations borrow an aliased array until Finish consumes the
-   --  terminal result. Scoped file operations currently require a lightweight
-   --  owner; the existing synchronous overloads remain available in both
-   --  lanes.
+   --  Concrete operations either borrow an aliased array or own a moved
+   --  unique-buffer token until Finish consumes the terminal result. Scoped
+   --  file operations currently require a lightweight owner; the existing
+   --  synchronous overloads remain available in both lanes.
    type File_Operation is
      abstract new Flyology.Operations.Operation with private;
    --  Scoped completion-driven positional read.
@@ -118,6 +119,78 @@ package Flyology.IO.Files is
        not Flyology.Operations.Is_Active (Operation)
        and then not Flyology.Operations.Is_Terminal (Operation);
 
+   --  Start one positional read after moving Item into the operation. Item is
+   --  vacant on return. Typed Finish moves the buffer back only after the
+   --  kernel has relinquished it; abandoning the operation drains and releases
+   --  the owned buffer to its pool. Item's pool must outlive the operation.
+   --  @param Set Completion set that owns the operation slot
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Acquired destination buffer whose ownership transfers
+   --  @param Timeout Relative operation deadline
+   --  @return Started limited owning read operation
+   function Read_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Flyology.IO.Infinite) return Read_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item),
+          Post => not Flyology.Buffers.Has_Buffer (Item);
+
+   --  Start or restart one owning positional read.
+   --  @param File Open descriptor permitting reads
+   --  @param Offset Starting byte position
+   --  @param Item Acquired destination buffer whose ownership transfers
+   --  @param Timeout Relative operation deadline
+   --  @param Operation Fresh, released, or consumed read operation
+   procedure Read_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Read_Operation)
+     with Pre =>
+       Flyology.Buffers.Has_Buffer (Item)
+       and then not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation),
+          Post => not Flyology.Buffers.Has_Buffer (Item);
+
+   --  Start one positional write after moving Item into the operation. The
+   --  readable payload length bounds the write.
+   --  @param Set Completion set that owns the operation slot
+   --  @param File Open descriptor permitting writes
+   --  @param Offset Starting byte position
+   --  @param Item Acquired source buffer whose ownership transfers
+   --  @param Timeout Relative operation deadline
+   --  @return Started limited owning write operation
+   function Write_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Flyology.IO.Infinite) return Write_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item),
+          Post => not Flyology.Buffers.Has_Buffer (Item);
+
+   --  Start or restart one owning positional write.
+   --  @param File Open descriptor permitting writes
+   --  @param Offset Starting byte position
+   --  @param Item Acquired source buffer whose ownership transfers
+   --  @param Timeout Relative operation deadline
+   --  @param Operation Fresh, released, or consumed write operation
+   procedure Write_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Write_Operation)
+     with Pre =>
+       Flyology.Buffers.Has_Buffer (Item)
+       and then not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation),
+          Post => not Flyology.Buffers.Has_Buffer (Item);
+
    --  Consume a terminal positional read and publish its Last value.
    --  @param Operation Terminal read operation
    --  @param Last Last element read, or Item'First - 1 at end of file
@@ -137,6 +210,37 @@ package Flyology.IO.Files is
    procedure Finish
      (Operation : in out Write_Operation;
       Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume an owning positional read, move its buffer into vacant Item,
+   --  and publish the new readable length. The move also occurs before a
+   --  retained provider exception is raised.
+   --  @param Operation Terminal owning read operation
+   --  @param Item Vacant buffer handle from the same pool
+   --  @param Read Number of bytes read; zero at end of file
+   --  @exception Program_Error Item is occupied, belongs to another pool, or
+   --     Operation does not own a buffer
+   procedure Finish
+     (Operation : in out Read_Operation;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Read      : out Natural)
+     with Pre => not Flyology.Buffers.Has_Buffer (Item),
+          Post => Flyology.Buffers.Has_Buffer (Item)
+            and then Flyology.Buffers.Length (Item) = Read;
+
+   --  Consume an owning positional write, move its buffer into vacant Item,
+   --  and publish the transferred byte count. The move also occurs before a
+   --  retained provider exception is raised.
+   --  @param Operation Terminal owning write operation
+   --  @param Item Vacant buffer handle from the same pool
+   --  @param Written Number of bytes written on normal return
+   --  @exception Program_Error Item is occupied, belongs to another pool, or
+   --     Operation does not own a buffer
+   procedure Finish
+     (Operation : in out Write_Operation;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Written   : out Natural)
+     with Pre => not Flyology.Buffers.Has_Buffer (Item),
+          Post => Flyology.Buffers.Has_Buffer (Item);
 
    --  Open Path directly on the calling lane. Create adds the platform create
    --  flag and Truncate truncates an existing file. Truncate is invalid with
@@ -337,6 +441,8 @@ private
       Buffer_Length : Natural := 0;
       Failure     : Scoped_File_Failure := No_Failure;
       Timed_Out   : Boolean := False;
+      Cancellation_Requested : Boolean := False;
+      Owned       : Flyology.Buffers.Drivers.Detached_Buffer;
    end record;
 
    --  @exclude

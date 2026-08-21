@@ -149,8 +149,8 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   release a kernel-owned buffer before terminal completion.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
   datagram socket arrays, Internet and Unix-stream connection attempts and
-  accepts,
-  unique-buffer stream operations, and lightweight positional file arrays. A
+  accepts, unique-buffer stream operations, and lightweight positional file
+  arrays and ownership-transferring unique buffers. A
   successful scoped accept owns the accepted descriptor until typed `Finish`
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
@@ -200,8 +200,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - A `Flyology.Buffers.Unique_Buffer` has exactly one owner. Buffer channels
   transfer the slot token without copying payload bytes; timeout, close, or
   abort before acceptance must restore sender ownership. Pool storage outlives
-  every buffer and channel tied to it, and mutation remains exclusive rather
-  than reference-counted or atomically shared.
+  every buffer, channel, and owning file operation tied to it, and mutation
+  remains exclusive rather than reference-counted or atomically shared.
+- A scoped file operation that accepts a `Unique_Buffer` moves its token into
+  the operation. The caller's handle remains vacant until typed `Finish` moves
+  the token back. Provider failure still restores the token before raising;
+  abandoned operations cancel and drain before releasing it to the pool.
 
 ## Relocatable data-structure invariants
 

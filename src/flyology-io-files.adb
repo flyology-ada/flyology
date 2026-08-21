@@ -1,4 +1,5 @@
 with GNAT.OS_Lib;
+with Flyology_Config;
 with Flyology.File_Open_Policy;
 with Flyology.File_Timeout_Policy;
 with Flyology.Operations.Drivers;
@@ -8,9 +9,12 @@ package body Flyology.IO.Files is
    package C renames Interfaces.C;
 
    use type Ada.Streams.Stream_Element_Offset;
+   use type Flyology.Operations.Terminal_Outcome;
    use type C.int;
    use type C.long;
    use type C.long_long;
+
+   Is_Darwin : constant Boolean := Flyology_Config.Alire_Host_OS = "macos";
 
    function C_Open
      (Path        : System.Address;
@@ -159,7 +163,7 @@ package body Flyology.IO.Files is
    begin
       if Item.Node.State /= Async_File_Terminal then
          Rearm_Completion (Item);
-      elsif Item.Node.Cancelled /= 0 then
+      elsif Item.Node.Cancelled /= 0 or else Item.Cancellation_Requested then
          if Item.Timed_Out then
             Item.Failure := Deadline_Failure;
             Flyology.Operations.Drivers.Complete
@@ -213,6 +217,7 @@ package body Flyology.IO.Files is
       Item.Buffer_Length := Length;
       Item.Failure := No_Failure;
       Item.Timed_Out := False;
+      Item.Cancellation_Requested := False;
 
       Flyology.Operations.Drivers.Start (Item);
       if Length = 0 then
@@ -276,7 +281,23 @@ package body Flyology.IO.Files is
          when Flyology.Operations.Source_Ready =>
             Publish_File_Terminal (Item);
          when Flyology.Operations.Deadline_Reached =>
+            if Item.Cancellation_Requested then
+               Rearm_Completion (Item);
+               return;
+            end if;
             Item.Timed_Out := True;
+            if Is_Darwin
+              and then Item.Node.State = Async_File_Submitted
+            then
+               --  Darwin POSIX AIO notifications are keyed by the aiocb
+               --  address. Reaping an immediate aio_cancel result and then
+               --  reusing that address can suppress a later EVFILT_AIO
+               --  notification. Keep the request registered and turn its
+               --  natural completion into the terminal timeout instead.
+               Item.Cancellation_Requested := True;
+               Rearm_Completion (Item);
+               return;
+            end if;
             Status := Cancel_Async_File
               (Item.Node'Address, Async_File_Node_Size);
             if Status /= 0 then
@@ -300,6 +321,12 @@ package body Flyology.IO.Files is
       if Item.Node.State = Async_File_Unused then
          Flyology.Operations.Drivers.Complete
            (Item, Flyology.Operations.Cancelled);
+         return;
+      elsif Is_Darwin and then Item.Node.State = Async_File_Submitted then
+         --  A submitted Darwin request remains kernel-owned until its normal
+         --  completion notification. Delayed cancellation is already part of
+         --  the public buffer-safety contract.
+         Item.Cancellation_Requested := True;
          return;
       end if;
       Status := Cancel_Async_File (Item.Node'Address, Async_File_Node_Size);
@@ -380,13 +407,90 @@ package body Flyology.IO.Files is
       end return;
    end Write_At;
 
-   procedure Finish_Common (Operation : in out File_Operation'Class) is
-      Outcome : constant Flyology.Operations.Terminal_Outcome :=
-        Flyology.Operations.Outcome (Operation);
-      Failure : constant Scoped_File_Failure := Operation.Failure;
-      Error   : constant C.int := Operation.Node.Error_Code;
+   procedure Read_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Read_Operation)
+   is
    begin
-      Flyology.Operations.Consume (Operation);
+      Flyology.Buffers.Drivers.Move_From (Item, Operation.Owned);
+      begin
+         Start_Scoped_File
+           (Operation,
+            File,
+            Offset,
+            Flyology.Buffers.Drivers.Address (Operation.Owned),
+            1,
+            Flyology.Buffers.Drivers.Capacity (Operation.Owned),
+            False,
+            Timeout);
+      exception
+         when others =>
+            Flyology.Buffers.Drivers.Move_To (Operation.Owned, Item);
+            raise;
+      end;
+   end Read_At;
+
+   function Read_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Flyology.IO.Infinite) return Read_Operation
+   is
+   begin
+      return Result : Read_Operation (Set) do
+         Read_At (File, Offset, Item, Timeout, Result);
+      end return;
+   end Read_At;
+
+   procedure Write_At
+     (File      : File_Descriptor;
+      Offset    : File_Offset;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Flyology.IO.Infinite;
+      Operation : in out Write_Operation)
+   is
+   begin
+      Flyology.Buffers.Drivers.Move_From (Item, Operation.Owned);
+      begin
+         Start_Scoped_File
+           (Operation,
+            File,
+            Offset,
+            Flyology.Buffers.Drivers.Address (Operation.Owned),
+            1,
+            Flyology.Buffers.Drivers.Length (Operation.Owned),
+            True,
+            Timeout);
+      exception
+         when others =>
+            Flyology.Buffers.Drivers.Move_To (Operation.Owned, Item);
+            raise;
+      end;
+   end Write_At;
+
+   function Write_At
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      File    : File_Descriptor;
+      Offset  : File_Offset;
+      Item    : in out Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Flyology.IO.Infinite) return Write_Operation
+   is
+   begin
+      return Result : Write_Operation (Set) do
+         Write_At (File, Offset, Item, Timeout, Result);
+      end return;
+   end Write_At;
+
+   procedure Raise_Finish_Status
+     (Outcome : Flyology.Operations.Terminal_Outcome;
+      Failure : Scoped_File_Failure;
+      Error   : C.int)
+   is
+   begin
       case Outcome is
          when Flyology.Operations.Succeeded =>
             null;
@@ -407,6 +511,20 @@ package body Flyology.IO.Files is
                   raise Device_Error with "file operation failed";
             end case;
       end case;
+   end Raise_Finish_Status;
+
+   procedure Finish_Common (Operation : in out File_Operation'Class) is
+      Outcome : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Scoped_File_Failure := Operation.Failure;
+      Error   : constant C.int := Operation.Node.Error_Code;
+   begin
+      if Flyology.Buffers.Drivers.Has_Buffer (Operation.Owned) then
+         raise Program_Error with
+           "owning file operation requires buffer-returning Finish";
+      end if;
+      Flyology.Operations.Consume (Operation);
+      Raise_Finish_Status (Outcome, Failure, Error);
    end Finish_Common;
 
    procedure Finish
@@ -422,6 +540,58 @@ package body Flyology.IO.Files is
         (if Result = 0
          then First - 1
          else First + Ada.Streams.Stream_Element_Offset (Result) - 1);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Read_Operation;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Read      : out Natural)
+   is
+      Result : constant C.long_long := Operation.Node.Result;
+      Outcome : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Scoped_File_Failure := Operation.Failure;
+      Error   : constant C.int := Operation.Node.Error_Code;
+   begin
+      if Flyology.Buffers.Has_Buffer (Item) then
+         raise Program_Error with "file operation finish buffer is occupied";
+      elsif not Flyology.Buffers.Drivers.Same_Pool
+        (Operation.Owned, Item)
+      then
+         raise Program_Error with "file operation buffer pool mismatch";
+      end if;
+      Flyology.Operations.Consume (Operation);
+      if Outcome = Flyology.Operations.Succeeded then
+         Flyology.Buffers.Drivers.Set_Length
+           (Operation.Owned, Natural (Result));
+      end if;
+      Flyology.Buffers.Drivers.Move_To (Operation.Owned, Item);
+      Raise_Finish_Status (Outcome, Failure, Error);
+      Read := Natural (Result);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Write_Operation;
+      Item      : in out Flyology.Buffers.Unique_Buffer;
+      Written   : out Natural)
+   is
+      Result : constant C.long_long := Operation.Node.Result;
+      Outcome : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Scoped_File_Failure := Operation.Failure;
+      Error   : constant C.int := Operation.Node.Error_Code;
+   begin
+      if Flyology.Buffers.Has_Buffer (Item) then
+         raise Program_Error with "file operation finish buffer is occupied";
+      elsif not Flyology.Buffers.Drivers.Same_Pool
+        (Operation.Owned, Item)
+      then
+         raise Program_Error with "file operation buffer pool mismatch";
+      end if;
+      Flyology.Operations.Consume (Operation);
+      Flyology.Buffers.Drivers.Move_To (Operation.Owned, Item);
+      Raise_Finish_Status (Outcome, Failure, Error);
+      Written := Natural (Result);
    end Finish;
 
    procedure Finish

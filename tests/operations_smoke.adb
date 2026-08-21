@@ -35,6 +35,8 @@ procedure Operations_Smoke is
    --  Sockets.Accept_Connection (Internet)      Successes (4), All      both
    --  Files.Read_At (array)                     All                     lightweight
    --  Files.Write_At (array)                    Successes (2)           lightweight
+   --  Files.Read_At (owned buffer)              Successes (2)           lightweight
+   --  Files.Write_At (owned buffer)             Successes (2)           lightweight
    use type Ada.Streams.Stream_Element;
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
@@ -1350,6 +1352,131 @@ procedure Operations_Smoke is
                  and then Read_Right = Right_Data;
             end;
 
+            --  File-buffer operations transfer ownership into the operation.
+            --  Finish returns each buffer only after kernel ownership ends.
+            declare
+               Storage : aliased Flyology.Buffers.Pool
+                 (Block_Size => 8, Capacity => 3);
+               Other_Storage : aliased Flyology.Buffers.Pool
+                 (Block_Size => 8, Capacity => 1);
+               Input  : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Output : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Occupied : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Wrong_Pool :
+                 Flyology.Buffers.Unique_Buffer (Other_Storage'Access);
+               Set : aliased Flyology.Operations.Completion_Set (3);
+               Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+               Read, Written : Natural;
+               Rejected_Scalar, Rejected_Occupied, Rejected_Pool :
+                 Boolean := False;
+               Wrong_Last : Ada.Streams.Stream_Element_Offset;
+            begin
+               Flyology.Buffers.Acquire (Input);
+               Flyology.Buffers.Acquire (Output);
+               Flyology.Buffers.Acquire (Occupied);
+               Flyology.Buffers.Copy_From (Output, [41, 42, 43, 44]);
+               declare
+                  Get : aliased Flyology.IO.Files.Read_Operation :=
+                    Flyology.IO.Files.Read_At
+                      (Set'Access, File, 0, Input, 1.0);
+                  Put : aliased Flyology.IO.Files.Write_Operation :=
+                    Flyology.IO.Files.Write_At
+                      (Set'Access, File, 16, Output, 1.0);
+                  Both : Flyology.Operations.Gate_Operation :=
+                    Flyology.Operations.Wait_For_Successes
+                      (Set'Access, [Ref (Get), Ref (Put)], 2);
+               begin
+                  Passed := Passed
+                    and then not Flyology.Buffers.Has_Buffer (Input)
+                    and then not Flyology.Buffers.Has_Buffer (Output);
+                  Flyology.Operations.Wait_All (Set);
+                  Flyology.Operations.Finish (Both, Matches);
+                  Flyology.IO.Files.Finish (Get, Input, Read);
+                  begin
+                     Flyology.IO.Files.Finish (Put, Wrong_Last);
+                  exception
+                     when Program_Error =>
+                        Rejected_Scalar := True;
+                  end;
+                  begin
+                     Flyology.IO.Files.Finish
+                       (Put, Occupied, Written);
+                  exception
+                     when Program_Error =>
+                        Rejected_Occupied := True;
+                  end;
+                  begin
+                     Flyology.IO.Files.Finish
+                       (Put, Wrong_Pool, Written);
+                  exception
+                     when Program_Error =>
+                        Rejected_Pool := True;
+                  end;
+                  Flyology.IO.Files.Finish (Put, Output, Written);
+               end;
+               Passed := Passed
+                 and then Matches.Count = 2
+                 and then Rejected_Scalar
+                 and then Rejected_Occupied
+                 and then Rejected_Pool
+                 and then Flyology.Buffers.Has_Buffer (Input)
+                 and then Flyology.Buffers.Has_Buffer (Output)
+                 and then Read = 8
+                 and then Written = 4
+                 and then Flyology.Buffers.Length (Input) = 8
+                 and then Flyology.Buffers.Length (Output) = 4;
+            end;
+
+            --  The same-name procedure overload starts into an established
+            --  operation component and has the same ownership handoff.
+            declare
+               Storage : aliased Flyology.Buffers.Pool
+                 (Block_Size => 4, Capacity => 1);
+               Item : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Put : Flyology.IO.Files.Write_Operation (Set'Access);
+               Written : Natural;
+            begin
+               Flyology.Buffers.Acquire (Item);
+               Flyology.Buffers.Copy_From (Item, [61, 62, 63, 64]);
+               Flyology.IO.Files.Write_At
+                 (File, 28, Item, 1.0, Put);
+               Passed := Passed and then not Flyology.Buffers.Has_Buffer (Item);
+               Flyology.Operations.Wait_All (Set);
+               Flyology.IO.Files.Finish (Put, Item, Written);
+               Passed := Passed
+                 and then Written = 4
+                 and then Flyology.Buffers.Has_Buffer (Item)
+                 and then Flyology.Buffers.Length (Item) = 4;
+            end;
+
+            --  Abandoning an owning operation drains first and then returns
+            --  its detached slot to the pool; the original handle stays
+            --  vacant and can reacquire it.
+            declare
+               Storage : aliased Flyology.Buffers.Pool
+                 (Block_Size => 4, Capacity => 1);
+               Item : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Acquired : Boolean;
+            begin
+               Flyology.Buffers.Acquire (Item);
+               Flyology.Buffers.Copy_From (Item, [51, 52, 53, 54]);
+               declare
+                  Put : Flyology.IO.Files.Write_Operation :=
+                    Flyology.IO.Files.Write_At
+                      (Set'Access, File, 24, Item, 1.0);
+                  pragma Unreferenced (Put);
+               begin
+                  Passed := Passed
+                    and then not Flyology.Buffers.Has_Buffer (Item);
+               end;
+               Flyology.Buffers.Try_Acquire (Item, Acquired);
+               Passed := Passed
+                 and then Acquired
+                 and then Flyology.Buffers.Has_Buffer (Item);
+            end;
+
             --  The start-into-existing overloads are the public composition
             --  form. Exercise a heterogeneous file pair without constructing
             --  temporary operation values.
@@ -1461,6 +1588,7 @@ procedure Operations_Smoke is
                  and then Last_Read = Empty_Input'First - 1
                  and then Last_Written = Empty_Output'First - 1;
             end;
+
             Flyology.IO.Files.Close (File);
          exception
             when others =>
@@ -1560,6 +1688,52 @@ procedure Operations_Smoke is
                  and then Matches.Count = 2
                  and then Last_Read = Empty_Input'First - 1
                  and then Last_Written = Empty_Output'First - 1;
+            end;
+
+            --  Wrong-lane failure is retained until typed Finish, which still
+            --  returns each owned buffer before raising Device_Error.
+            declare
+               Storage : aliased Flyology.Buffers.Pool
+                 (Block_Size => 4, Capacity => 2);
+               Input  : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Output : Flyology.Buffers.Unique_Buffer (Storage'Access);
+               Set : aliased Flyology.Operations.Completion_Set (2);
+               Read, Written : Natural;
+               Read_Failed, Write_Failed : Boolean := False;
+            begin
+               Flyology.Buffers.Acquire (Input);
+               Flyology.Buffers.Acquire (Output);
+               Flyology.Buffers.Copy_From (Input, [71, 72]);
+               Flyology.Buffers.Copy_From (Output, [73, 74, 75]);
+               declare
+                  Get : Flyology.IO.Files.Read_Operation :=
+                    Flyology.IO.Files.Read_At
+                      (Set'Access, File, 0, Input, 1.0);
+                  Put : Flyology.IO.Files.Write_Operation :=
+                    Flyology.IO.Files.Write_At
+                      (Set'Access, File, 0, Output, 1.0);
+               begin
+                  Flyology.Operations.Wait_All (Set);
+                  begin
+                     Flyology.IO.Files.Finish (Get, Input, Read);
+                  exception
+                     when Flyology.IO.Device_Error =>
+                        Read_Failed := True;
+                  end;
+                  begin
+                     Flyology.IO.Files.Finish (Put, Output, Written);
+                  exception
+                     when Flyology.IO.Device_Error =>
+                        Write_Failed := True;
+                  end;
+               end;
+               Passed := Passed
+                 and then Read_Failed
+                 and then Write_Failed
+                 and then Flyology.Buffers.Has_Buffer (Input)
+                 and then Flyology.Buffers.Has_Buffer (Output)
+                 and then Flyology.Buffers.Length (Input) = 2
+                 and then Flyology.Buffers.Length (Output) = 3;
             end;
             Flyology.IO.Files.Close (File);
          exception
