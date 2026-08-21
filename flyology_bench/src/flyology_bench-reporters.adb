@@ -2340,12 +2340,33 @@ package body Flyology_Bench.Reporters is
          Ada.Text_IO.Put_Line
            (File,
             "   comparison | " & Image (Baselines.Speedup (Result)) & "x"
-            & "  95% CI ["
+            & "  " & Image (Baselines.Confidence_Level_Percent (Result), 1)
+            & "% CI ["
             & Image (Baselines.Speedup_Confidence_Low (Result)) & ", "
-            & Image (Baselines.Speedup_Confidence_High (Result)) & "]"
-            & "  " & Time_Change_Image
-                (Baselines.Time_Change_Percent (Result)));
+            & Image (Baselines.Speedup_Confidence_High (Result)) & "]");
+         Ada.Text_IO.Put_Line
+           (File,
+            "   time change | "
+            & Time_Change_Image (Baselines.Time_Change_Percent (Result))
+            & "  " & Image (Baselines.Confidence_Level_Percent (Result), 1)
+            & "% CI ["
+            & Image (Baselines.Time_Change_Confidence_Low (Result), 2)
+            & "%, "
+            & Image (Baselines.Time_Change_Confidence_High (Result), 2)
+            & "%]");
       end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         Muted & "   statistics | " & Baselines.Bootstrap_Method (Result)
+         & ", "
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & " resamples, seed "
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
+         & End_Style);
       Ada.Text_IO.Put_Line
         (File,
          "   threshold  | +/-"
@@ -2360,8 +2381,10 @@ package body Flyology_Bench.Reporters is
       Ada.Text_IO.Put_Line
         (File,
          "type,schema_version,baseline_path,baseline_name,current_name,status,"
-         & "rejected,compatible,compatibility_issue,speedup,speedup_ci95_low,"
-         & "speedup_ci95_high,time_change_percent,"
+         & "rejected,compatible,compatibility_issue,bootstrap_method,"
+         & "confidence_level_percent,bootstrap_resamples,random_seed,speedup,"
+         & "speedup_ci_low,speedup_ci_high,time_change_percent,"
+         & "time_change_ci_low,time_change_ci_high,"
          & "practical_threshold_percent,reason");
    end Put_Gate_CSV_Header;
 
@@ -2373,7 +2396,7 @@ package body Flyology_Bench.Reporters is
    begin
       Ada.Text_IO.Put
         (File,
-         "baseline_gate,1,"
+         "baseline_gate,2,"
          & CSV_String (Baselines.Baseline_Path (Result)) & ","
          & CSV_String (Baselines.Baseline_Name (Result)) & ","
          & CSV_String (Baselines.Current_Name (Result)) & ","
@@ -2381,6 +2404,15 @@ package body Flyology_Bench.Reporters is
          & (if Baselines.Rejected (Result) then "true" else "false") & ","
          & (if Baselines.Compatible (Result) then "true" else "false") & ","
          & CSV_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & "," & CSV_String (Baselines.Bootstrap_Method (Result)) & ","
+         & JSON_Number (Baselines.Confidence_Level_Percent (Result)) & ","
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & ","
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
          & ",");
       if Baselines.Has_Statistics (Result) then
          Ada.Text_IO.Put
@@ -2388,9 +2420,12 @@ package body Flyology_Bench.Reporters is
             JSON_Number (Baselines.Speedup (Result)) & ","
             & JSON_Number (Baselines.Speedup_Confidence_Low (Result)) & ","
             & JSON_Number (Baselines.Speedup_Confidence_High (Result)) & ","
-            & JSON_Number (Baselines.Time_Change_Percent (Result)) & ",");
+            & JSON_Number (Baselines.Time_Change_Percent (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Confidence_Low (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Confidence_High (Result))
+            & ",");
       else
-         Ada.Text_IO.Put (File, ",,,,");
+         Ada.Text_IO.Put (File, ",,,,,,");
       end if;
       Ada.Text_IO.Put_Line
         (File,
@@ -2406,7 +2441,7 @@ package body Flyology_Bench.Reporters is
    begin
       Ada.Text_IO.Put
         (File,
-         "{""type"":""baseline_gate"",""schema_version"":1"
+         "{""type"":""baseline_gate"",""schema_version"":2"
          & ",""baseline_path"":" & JSON_String
              (Baselines.Baseline_Path (Result))
          & ",""baseline_name"":" & JSON_String
@@ -2420,22 +2455,39 @@ package body Flyology_Bench.Reporters is
          & (if Baselines.Compatible (Result) then "true" else "false")
          & ",""compatibility_issue"":"
          & JSON_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & ",""bootstrap_method"":"
+         & JSON_String (Baselines.Bootstrap_Method (Result))
+         & ",""confidence_level_percent"":"
+         & JSON_Number (Baselines.Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":"
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & ",""random_seed"":"
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
          & ",""speedup"":");
       if Baselines.Has_Statistics (Result) then
          Ada.Text_IO.Put
            (File,
             JSON_Number (Baselines.Speedup (Result))
-            & ",""speedup_ci95_low"":"
+            & ",""speedup_ci_low"":"
             & JSON_Number (Baselines.Speedup_Confidence_Low (Result))
-            & ",""speedup_ci95_high"":"
+            & ",""speedup_ci_high"":"
             & JSON_Number (Baselines.Speedup_Confidence_High (Result))
             & ",""time_change_percent"":"
-            & JSON_Number (Baselines.Time_Change_Percent (Result)));
+            & JSON_Number (Baselines.Time_Change_Percent (Result))
+            & ",""time_change_ci_low"":"
+            & JSON_Number (Baselines.Time_Change_Confidence_Low (Result))
+            & ",""time_change_ci_high"":"
+            & JSON_Number (Baselines.Time_Change_Confidence_High (Result)));
       else
          Ada.Text_IO.Put
            (File,
-            "null,""speedup_ci95_low"":null,""speedup_ci95_high"":null,"
-            & """time_change_percent"":null");
+            "null,""speedup_ci_low"":null,""speedup_ci_high"":null,"
+            & """time_change_percent"":null,""time_change_ci_low"":null,"
+            & """time_change_ci_high"":null");
       end if;
       Ada.Text_IO.Put_Line
         (File,

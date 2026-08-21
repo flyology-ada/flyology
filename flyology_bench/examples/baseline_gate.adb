@@ -6,6 +6,7 @@ with Ada.Environment_Variables;
 with Ada.Text_IO;
 with Flyology_Bench;
 with Flyology_Bench.Baselines;
+with Flyology_Bench.Metadata;
 with Flyology_Bench.Reporters;
 with Interfaces;
 
@@ -14,7 +15,7 @@ procedure Baseline_Gate is
    use type Interfaces.Unsigned_64;
 
    Usage : constant String :=
-     "usage: baseline_gate (record|check) BASELINE_PATH";
+     "usage: baseline_gate (record|check) BASELINE_PATH ENVIRONMENT_ID";
    Benchmark_Name : constant String := "baseline_gate_example";
    Value : Interfaces.Unsigned_64 := 1 with Volatile;
    Inject_Regression : constant Boolean :=
@@ -46,49 +47,57 @@ procedure Baseline_Gate is
         On_Inconclusive => Baselines.Report_Only);
    Result : Flyology_Bench.Measurement;
 begin
-   if Ada.Command_Line.Argument_Count /= 2
+   if Ada.Command_Line.Argument_Count /= 3
      or else
        (Ada.Command_Line.Argument (1) /= "record"
         and then Ada.Command_Line.Argument (1) /= "check")
+     or else Ada.Command_Line.Argument (3)'Length = 0
    then
       Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, Usage);
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
       return;
    end if;
 
-   Measure (Config, Result);
-   if Ada.Command_Line.Argument (1) = "record" then
-      Baselines.Save
-        (Ada.Command_Line.Argument (2), Benchmark_Name, Result);
-      Ada.Text_IO.Put_Line
-        ("recorded baseline " & Ada.Command_Line.Argument (2));
-   else
-      declare
-         Gate : constant Baselines.Gate_Result :=
-           Baselines.Evaluate_Gate
-             (Ada.Command_Line.Argument (2),
-              Benchmark_Name,
-              Result,
-              Policy => CI_Gate_Policy,
-              Random_Seed => 97);
-         Output : constant String :=
-           Ada.Environment_Variables.Value
-             ("FLYOLOGY_BENCH_OUTPUT", Default => "terminal");
-      begin
-         if Output = "terminal" then
-            Flyology_Bench.Reporters.Put_Gate_Console (Gate);
-         elsif Output = "csv" then
-            Flyology_Bench.Reporters.Put_Gate_CSV_Header;
-            Flyology_Bench.Reporters.Put_Gate_CSV (Gate);
-         elsif Output = "json" then
-            Flyology_Bench.Reporters.Put_Gate_JSON (Gate);
-         else
-            raise Constraint_Error with
-              "FLYOLOGY_BENCH_OUTPUT must be terminal, csv, or json";
-         end if;
-         if Baselines.Rejected (Gate) then
-            Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
-         end if;
-      end;
-   end if;
+   declare
+      Full_Fingerprint : constant String :=
+        Flyology_Bench.Metadata.Fingerprint (Ada.Command_Line.Argument (3));
+   begin
+      Measure (Config, Result);
+      if Ada.Command_Line.Argument (1) = "record" then
+         Baselines.Save
+           (Ada.Command_Line.Argument (2), Benchmark_Name, Result,
+            Fingerprint => Full_Fingerprint);
+         Ada.Text_IO.Put_Line
+           ("recorded baseline " & Ada.Command_Line.Argument (2));
+      else
+         declare
+            Gate : constant Baselines.Gate_Result :=
+              Baselines.Evaluate_Gate
+                (Ada.Command_Line.Argument (2),
+                 Benchmark_Name,
+                 Result,
+                 Fingerprint => Full_Fingerprint,
+                 Policy => CI_Gate_Policy,
+                 Random_Seed => 97);
+            Output : constant String :=
+              Ada.Environment_Variables.Value
+                ("FLYOLOGY_BENCH_OUTPUT", Default => "terminal");
+         begin
+            if Output = "terminal" then
+               Flyology_Bench.Reporters.Put_Gate_Console (Gate);
+            elsif Output = "csv" then
+               Flyology_Bench.Reporters.Put_Gate_CSV_Header;
+               Flyology_Bench.Reporters.Put_Gate_CSV (Gate);
+            elsif Output = "json" then
+               Flyology_Bench.Reporters.Put_Gate_JSON (Gate);
+            else
+               raise Constraint_Error with
+                 "FLYOLOGY_BENCH_OUTPUT must be terminal, csv, or json";
+            end if;
+            if Baselines.Rejected (Gate) then
+               Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+            end if;
+         end;
+      end if;
+   end;
 end Baseline_Gate;
