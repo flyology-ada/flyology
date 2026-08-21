@@ -1946,6 +1946,7 @@ package body Flyology_Bench is
             end loop;
             if Available_Count > 0 then
                declare
+                  Samples : Float_Array (1 .. Available_Count);
                   Ordered : Float_Array (1 .. Available_Count);
                   Means   : Float_Array (1 .. Bootstrap_Resamples);
                   Sum     : Long_Float := 0.0;
@@ -1966,9 +1967,10 @@ package body Flyology_Bench is
                        = Metric_Collected
                      then
                         Next := Next + 1;
-                        Ordered (Next) :=
+                        Samples (Next) :=
                           Result.Custom_Data.Data.Values (Axis, Sample);
-                        Sum := Sum + Ordered (Next);
+                        Ordered (Next) := Samples (Next);
+                        Sum := Sum + Samples (Next);
                      end if;
                   end loop;
                   Sort (Ordered);
@@ -1995,7 +1997,7 @@ package body Flyology_Bench is
                            begin
                               for Offset in 0 .. Block_Length - 1 loop
                                  exit when Drawn = Available_Count;
-                                 Sum := Sum + Ordered
+                                 Sum := Sum + Samples
                                    (((Start - 1 + Offset)
                                      mod Available_Count) + 1);
                                  Drawn := Drawn + 1;
@@ -2132,19 +2134,23 @@ package body Flyology_Bench is
                      then
                         Item.Verdict := Metric_Practically_Equivalent;
                      elsif Descriptor.Direction_Value = Lower_Is_Better
-                       and then Item.Confidence_High < 0.0
+                       and then Item.Confidence_High
+                         < -Result.Practical_Threshold
                      then
                         Item.Verdict := Contender_Better;
                      elsif Descriptor.Direction_Value = Lower_Is_Better
-                       and then Item.Confidence_Low > 0.0
+                       and then Item.Confidence_Low
+                         > Result.Practical_Threshold
                      then
                         Item.Verdict := Reference_Better;
                      elsif Descriptor.Direction_Value = Higher_Is_Better
-                       and then Item.Confidence_Low > 0.0
+                       and then Item.Confidence_Low
+                         > Result.Practical_Threshold
                      then
                         Item.Verdict := Contender_Better;
                      elsif Descriptor.Direction_Value = Higher_Is_Better
-                       and then Item.Confidence_High < 0.0
+                       and then Item.Confidence_High
+                         < -Result.Practical_Threshold
                      then
                         Item.Verdict := Reference_Better;
                      end if;

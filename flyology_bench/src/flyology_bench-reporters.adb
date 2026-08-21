@@ -38,6 +38,11 @@ package body Flyology_Bench.Reporters is
    function Comparison_Metric_Status_Name
      (Result : Comparison;
       Axis   : Metric_Axis) return String;
+   function Custom_Comparison_Status_Name
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return String;
+   function Primary_Timing_Position
+     (Result : Measurement) return Custom_Metric_Count;
 
    function Memory_Image (Bytes : Long_Float) return String;
    function Pad (Value : String; Width : Positive) return String;
@@ -370,6 +375,47 @@ package body Flyology_Bench.Reporters is
            & "; contender " & Metric_Status_Name (Contender_Status);
       end if;
    end Comparison_Metric_Status_Name;
+
+   function Custom_Comparison_Status_Name
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return String
+   is
+      Reference_Status : constant Metric_Availability :=
+        Custom_Metric_Status (Reference_Measurement (Result), Axis);
+      Contender_Status : constant Metric_Availability :=
+        Custom_Metric_Status (Contender_Measurement (Result), Axis);
+   begin
+      if Reference_Status = Metric_Collected
+        and then Contender_Status = Metric_Collected
+      then
+         return
+           (if Compare_Custom_Metric (Result, Axis).Available
+            then Metric_Status_Name (Metric_Collected)
+            else Metric_Status_Name (Invalid_Value));
+      elsif Reference_Status = Contender_Status then
+         return Metric_Status_Name (Reference_Status);
+      elsif Reference_Status = Metric_Collected then
+         return "contender " & Metric_Status_Name (Contender_Status);
+      elsif Contender_Status = Metric_Collected then
+         return "reference " & Metric_Status_Name (Reference_Status);
+      else
+         return "reference " & Metric_Status_Name (Reference_Status)
+           & "; contender " & Metric_Status_Name (Contender_Status);
+      end if;
+   end Custom_Comparison_Status_Name;
+
+   function Primary_Timing_Position
+     (Result : Measurement) return Custom_Metric_Count is
+   begin
+      for Position in 1 .. Custom_Metric_Total (Result) loop
+         if Custom_Metric_Is_Primary_Timing
+              (Result, Custom_Metric_Index (Position))
+         then
+            return Custom_Metric_Count (Position);
+         end if;
+      end loop;
+      return 0;
+   end Primary_Timing_Position;
 
    function Metric_Method_Name
      (Value : Metric_Comparison_Method) return String is
@@ -885,7 +931,11 @@ package body Flyology_Bench.Reporters is
                   Ada.Text_IO.Put_Line
                     (File,
                      (if Color then Cyan else "")
-                     & "   " & Pad (Custom_Metric_Name (Result, Axis), 32)
+                     & "   " & Pad
+                         (Custom_Metric_Name (Result, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                             then " [primary]" else ""),
+                          32)
                      & End_Style
                      & Pad (Scope_Name (Custom_Metric_Scope (Result, Axis)), 15)
                      & Pad (Image (Summary.Median), 15)
@@ -898,7 +948,11 @@ package body Flyology_Bench.Reporters is
                   Ada.Text_IO.Put_Line
                     (File,
                      (if Color then Dim else "")
-                     & "   " & Pad (Custom_Metric_Name (Result, Axis), 32)
+                     & "   " & Pad
+                         (Custom_Metric_Name (Result, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                             then " [primary]" else ""),
+                          32)
                      & Pad (Scope_Name (Custom_Metric_Scope (Result, Axis)), 15)
                      & "unavailable: " & Metric_Status_Name (Status)
                      & End_Style);
@@ -1019,7 +1073,12 @@ package body Flyology_Bench.Reporters is
                   begin
                      Ada.Text_IO.Put_Line
                        (File, Row_Color (Item.Verdict)
-                        & "   " & Pad (Custom_Metric_Name (Reference, Axis), 32)
+                        & "   " & Pad
+                            (Custom_Metric_Name (Reference, Axis)
+                             & (if Custom_Metric_Is_Primary_Timing
+                                     (Reference, Axis)
+                                then " [primary]" else ""),
+                             32)
                         & Pad (Custom_Metric_Unit (Reference, Axis), 20)
                         & Pad (Image (Item.Reference_Median), 14)
                         & Pad (Image (Item.Contender_Median), 14)
@@ -1030,9 +1089,16 @@ package body Flyology_Bench.Reporters is
                   Ada.Text_IO.Put_Line
                     (File,
                      (if Color then Dim else "")
-                     & "   " & Pad (Custom_Metric_Name (Reference, Axis), 32)
+                     & "   " & Pad
+                         (Custom_Metric_Name (Reference, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing
+                                  (Reference, Axis)
+                             then " [primary]" else ""),
+                          32)
                      & Pad (Custom_Metric_Unit (Reference, Axis), 20)
-                     & "unavailable" & End_Style);
+                     & "unavailable: "
+                     & Custom_Comparison_Status_Name (Result, Axis)
+                     & End_Style);
                end if;
             end;
          end loop;
@@ -1052,6 +1118,8 @@ package body Flyology_Bench.Reporters is
       Accent : constant String := (if Color then Green & Bold else "");
       Muted  : constant String := (if Color then Dim else "");
       End_Style : constant String := (if Color then Reset else "");
+      Primary_Position : constant Custom_Metric_Count :=
+        Primary_Timing_Position (Result);
       Quality_Color : constant String :=
         (if not Color then ""
          elsif Coefficient_Of_Variation_Percent (Result) > 10.0
@@ -1065,15 +1133,50 @@ package body Flyology_Bench.Reporters is
          Prefix & "-- " & Name & " "
          & (1 .. (if Name'Length < 52 then 52 - Name'Length else 1) => '-')
          & End_Style);
+      if Primary_Position > 0 then
+         declare
+            Axis : constant Custom_Metric_Index :=
+              Custom_Metric_Index (Primary_Position);
+            Summary : constant Metric_Summary :=
+              Custom_Metric_Statistics (Result, Axis);
+            Status : constant Metric_Availability :=
+              Custom_Metric_Status (Result, Axis);
+         begin
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Accent & Pad ("primary", 10) & End_Style & " | "
+               & Accent & Custom_Metric_Name (Result, Axis) & End_Style
+               & (if Summary.Available
+                  then " median " & Image (Summary.Median) & " "
+                    & Custom_Metric_Unit (Result, Axis)
+                    & "  mean " & Image (Summary.Mean) & " "
+                    & Custom_Metric_Unit (Result, Axis)
+                  else " unavailable: " & Metric_Status_Name (Status)));
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Muted & Pad ("source", 10) & End_Style & " | "
+               & Custom_Metric_Timing_Source (Result, Axis)
+               & "  resolution " & Image (Custom_Metric_Resolution (Result, Axis))
+               & " " & Custom_Metric_Unit (Result, Axis)
+               & "  calibration harness wall");
+         end;
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Muted & Pad ("wall basis", 10) & End_Style & " | "
+            & "harness wall median " & Duration_Image (Median_Nanoseconds (Result))
+            & "/op  mean " & Duration_Image (Mean_Nanoseconds (Result)));
+      else
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Accent & Pad ("latency", 10) & End_Style & " | "
+            & Accent & "median " & Duration_Image (Median_Nanoseconds (Result))
+            & "/op" & End_Style & "  mean "
+            & Duration_Image (Mean_Nanoseconds (Result)));
+      end if;
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Accent & Pad ("latency", 10) & End_Style & " | "
-         & Accent & "median " & Duration_Image (Median_Nanoseconds (Result))
-         & "/op" & End_Style & "  mean "
-         & Duration_Image (Mean_Nanoseconds (Result)));
-      Ada.Text_IO.Put_Line
-        (File,
-         "   " & (if Color then Cyan else "") & Pad ("tails", 10)
+         "   " & (if Color then Cyan else "")
+         & Pad ((if Primary_Position > 0 then "wall tails" else "tails"), 10)
          & End_Style & " | p95 "
          & Duration_Image (P95_Nanoseconds (Result))
          & "  p99 " & Duration_Image (P99_Nanoseconds (Result))
@@ -1081,7 +1184,8 @@ package body Flyology_Bench.Reporters is
          & " .. " & Duration_Image (Maximum_Nanoseconds (Result)));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & (if Color then Cyan else "") & Pad ("sampling", 10)
+         "   " & (if Color then Cyan else "")
+         & Pad ((if Primary_Position > 0 then "wall batch" else "sampling"), 10)
          & End_Style & " |"
          & Iterations_Per_Sample (Result)'Image & " iter/sample x"
          & Samples (Result)'Image & " samples"
@@ -1101,11 +1205,15 @@ package body Flyology_Bench.Reporters is
          & Image (Sample_Lag_One_Correlation (Result), 2));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Muted & Pad ("clock", 10) & End_Style & " | "
+         "   " & Muted
+         & Pad ((if Primary_Position > 0 then "wall clock" else "clock"), 10)
+         & End_Style & " | "
          & Clock_Backend (Result));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Muted & Pad ("resolution", 10) & End_Style & " | nominal "
+         "   " & Muted
+         & Pad ((if Primary_Position > 0 then "wall timer" else "resolution"), 10)
+         & End_Style & " | nominal "
          & Duration_Image (Clock_Resolution_Nanoseconds (Result))
          & "  observed "
          & Duration_Image (Observed_Clock_Resolution_Nanoseconds (Result))
@@ -1657,6 +1765,8 @@ package body Flyology_Bench.Reporters is
          else Yellow & Bold);
       Muted : constant String := (if Color then Dim else "");
       End_Style : constant String := (if Color then Reset else "");
+      Primary_Position : constant Custom_Metric_Count :=
+        Primary_Timing_Position (Reference_Data);
    begin
       Ada.Text_IO.Put_Line
         (File,
@@ -1667,6 +1777,29 @@ package body Flyology_Bench.Reporters is
                then 45 - Contender_Name'Length - Reference_Name'Length
                else 1) => '-')
          & End_Style);
+      if Primary_Position > 0 then
+         declare
+            Axis : constant Custom_Metric_Index :=
+              Custom_Metric_Index (Primary_Position);
+         begin
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & (if Color then Cyan & Bold else "")
+               & "primary timer: "
+               & Custom_Metric_Name (Reference_Data, Axis)
+               & End_Style & "  source "
+               & Custom_Metric_Timing_Source (Reference_Data, Axis)
+               & "  resolution "
+               & Image (Custom_Metric_Resolution (Reference_Data, Axis))
+               & " " & Custom_Metric_Unit (Reference_Data, Axis)
+               & "  calibration harness wall");
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Muted
+               & "primary comparison is reported in the axes table; "
+               & "the comparison below is harness wall" & End_Style);
+         end;
+      end if;
       Ada.Text_IO.Put_Line
         (File,
          Muted & "   " & Pad ("implementation", 22)
@@ -1863,7 +1996,6 @@ package body Flyology_Bench.Reporters is
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
    is
       Reference : constant Measurement := Reference_Measurement (Result);
-      Contender : constant Measurement := Contender_Measurement (Result);
       Prefix : constant String := "flyology_bench.comparison_metrics.v2,"
         & CSV_String (Reference_Name) & "," & CSV_String (Contender_Name);
 
@@ -1918,15 +2050,6 @@ package body Flyology_Bench.Reporters is
                Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
                Item : constant Metric_Comparison_Result :=
                  Compare_Custom_Metric (Result, Axis);
-               Reference_Status : constant Metric_Availability :=
-                 Custom_Metric_Status (Reference, Axis);
-               Contender_Status : constant Metric_Availability :=
-                 Custom_Metric_Status (Contender, Axis);
-               Status : constant Metric_Availability :=
-                 (if Reference_Status /= Metric_Collected then Reference_Status
-                  elsif Contender_Status /= Metric_Collected then Contender_Status
-                  elsif not Item.Available then Invalid_Value
-                  else Metric_Collected);
             begin
                Ada.Text_IO.Put
                  (File, Prefix & ",custom,"
@@ -1950,7 +2073,8 @@ package body Flyology_Bench.Reporters is
                       (Custom_Metric_Resolution (Reference, Axis))
                   & ",harness_wall,"
                   & (if Item.Available then "true" else "false")
-                  & "," & CSV_String (Metric_Status_Name (Status)));
+                  & "," & CSV_String
+                      (Custom_Comparison_Status_Name (Result, Axis)));
                Finish (Item);
             end;
          end loop;
@@ -1964,12 +2088,11 @@ package body Flyology_Bench.Reporters is
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
    is
       Reference : constant Measurement := Reference_Measurement (Result);
-      Contender : constant Measurement := Contender_Measurement (Result);
       procedure Finish
         (Kind, Axis, Unit, Scope_Text, Attribution_Text, Direction_Text,
          Semantics_Text, Normalization_Text, Timer_Role, Timing_Source : String;
          Resolution : Long_Float;
-         Status : Metric_Availability;
+         Status : String;
          Item : Metric_Comparison_Result) is
       begin
          Ada.Text_IO.Put
@@ -1989,7 +2112,7 @@ package body Flyology_Bench.Reporters is
             & ",""resolution"":" & JSON_Number (Resolution)
             & ",""calibration_clock"":""harness_wall"",""available"":"
             & (if Item.Available then "true" else "false")
-            & ",""status"":" & JSON_String (Metric_Status_Name (Status)));
+            & ",""status"":" & JSON_String (Status));
          if Item.Available then
             Ada.Text_IO.Put
               (File, ",""method"":" & JSON_String (Metric_Method_Name (Item.Method))
@@ -2007,8 +2130,6 @@ package body Flyology_Bench.Reporters is
          if Metric_Requested (Reference, Axis) then
             declare
                Item : constant Metric_Comparison_Result := Compare_Metric (Result, Axis);
-               Status : constant Metric_Availability :=
-                 (if Item.Available then Metric_Collected else Probe_Failed);
             begin
                Finish
                  ("builtin", Metric_Name (Axis), Metric_Unit (Axis),
@@ -2022,7 +2143,7 @@ package body Flyology_Bench.Reporters is
                   (if Axis = Wall_Time then Clock_Backend (Reference) else ""),
                   (if Axis = Wall_Time
                    then Clock_Resolution_Nanoseconds (Reference) else 0.0),
-                  Status, Item);
+                  Comparison_Metric_Status_Name (Result, Axis), Item);
             end;
          end if;
       end loop;
@@ -2032,12 +2153,6 @@ package body Flyology_Bench.Reporters is
                Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
                Item : constant Metric_Comparison_Result :=
                  Compare_Custom_Metric (Result, Axis);
-               RS : constant Metric_Availability := Custom_Metric_Status (Reference, Axis);
-               CS : constant Metric_Availability := Custom_Metric_Status (Contender, Axis);
-               Status : constant Metric_Availability :=
-                 (if RS /= Metric_Collected then RS
-                  elsif CS /= Metric_Collected then CS
-                  elsif Item.Available then Metric_Collected else Invalid_Value);
             begin
                Finish
                  ("custom", Custom_Metric_Name (Reference, Axis),
@@ -2050,7 +2165,8 @@ package body Flyology_Bench.Reporters is
                   (if Custom_Metric_Is_Primary_Timing (Reference, Axis)
                    then "primary_alternate" else "metric"),
                   Custom_Metric_Timing_Source (Reference, Axis),
-                  Custom_Metric_Resolution (Reference, Axis), Status, Item);
+                  Custom_Metric_Resolution (Reference, Axis),
+                  Custom_Comparison_Status_Name (Result, Axis), Item);
             end;
          end loop;
       end if;

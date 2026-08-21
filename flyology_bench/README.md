@@ -482,7 +482,10 @@ separate built-in axis for warmup, equal-wall calibration, sampling budgets,
 interference windows, and progress. It never applies wall timestamp-cost
 subtraction to the alternate value. `Manual_Timing_Comparison` applies the
 same contract to adjacent paired batches. Both use equal harness-wall slices;
-there is currently no equal-alternate-time calibration mode.
+there is currently no equal-alternate-time calibration mode. Compact console
+output places the declared primary timer first with its source and resolution,
+then labels harness wall time as calibration; paired output identifies which
+axes-table verdict belongs to the primary timer.
 
 Use the versioned `Put_Extended_Metrics_CSV` and
 `Put_Extended_Comparison_Metrics_CSV` schemas, or the corresponding NDJSON

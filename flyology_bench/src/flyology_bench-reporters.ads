@@ -35,7 +35,9 @@ package Flyology_Bench.Reporters is
      (Base : Configuration := Default_Configuration;
       Name : String := "benchmark") return Configuration;
 
-   --  Print one compact, human-readable benchmark summary.
+   --  Print one compact, human-readable benchmark summary. A declared primary
+   --  alternate timer is shown first with its source and resolution; harness
+   --  wall time remains explicitly labeled as the calibration clock.
    --  @param Name Benchmark name.
    --  @param Result Completed measurement.
    --  @param File Destination text file.
@@ -114,7 +116,9 @@ package Flyology_Bench.Reporters is
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
    --  Print one compact paired-comparison summary. Speedup greater than one
-   --  and negative time change both mean the contender was faster.
+   --  and negative time change both mean the contender was faster. When an
+   --  alternate timer is primary, its comparison is identified in the axes
+   --  table and the top-level wall comparison is labeled as harness wall.
    --  @param Reference_Name Name of the existing or baseline operation.
    --  @param Contender_Name Name of the operation compared with it.
    --  @param Result Completed paired comparison.
