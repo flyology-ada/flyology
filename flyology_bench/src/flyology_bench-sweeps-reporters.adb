@@ -500,7 +500,9 @@ package body Flyology_Bench.Sweeps.Reporters is
                & JSON (Case_Name) & """,""point"":"""
                & JSON (Identity (Point_Value)) & """,""parameter_kind"":"""
                & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
-               & Number (Value (Point_Value)) & ",""parameter_label"":"""
+               & Number (Value (Point_Value))
+               & ",""parameter_value_exact"":"""
+               & Number (Value (Point_Value)) & """,""parameter_label"":"""
                & JSON (Label (Point_Value))
                & """,""result_kind"":""ordinary_measurement"",""work"":{""available"":"
                & Boolean_Name (Has_Work) & ",""kind"":"
@@ -510,6 +512,10 @@ package body Flyology_Bench.Sweeps.Reporters is
                & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
                   else "null") & ",""raw_value"":"
                & (if Has_Work then Number (Raw_Value (Amount)) else "null")
+               & ",""raw_value_exact"":"
+               & (if Has_Work
+                  then '"' & Number (Raw_Value (Amount)) & '"'
+                  else "null")
                & ",""display_scaling"":"
                & (if Has_Work
                   then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
@@ -601,7 +607,9 @@ package body Flyology_Bench.Sweeps.Reporters is
                & JSON (Case_Name) & """,""point"":"""
                & JSON (Identity (Point_Value)) & """,""parameter_kind"":"""
                & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
-               & Number (Value (Point_Value)) & ",""parameter_label"":"""
+               & Number (Value (Point_Value))
+               & ",""parameter_value_exact"":"""
+               & Number (Value (Point_Value)) & """,""parameter_label"":"""
                & JSON (Label (Point_Value))
                & """,""result_kind"":""paired_comparison"",""work"":{""available"":"
                & Boolean_Name (Has_Work) & ",""kind"":"
@@ -611,6 +619,10 @@ package body Flyology_Bench.Sweeps.Reporters is
                & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
                   else "null") & ",""raw_value"":"
                & (if Has_Work then Number (Raw_Value (Amount)) else "null")
+               & ",""raw_value_exact"":"
+               & (if Has_Work
+                  then '"' & Number (Raw_Value (Amount)) & '"'
+                  else "null")
                & ",""display_scaling"":"
                & (if Has_Work
                   then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
@@ -769,9 +781,17 @@ package body Flyology_Bench.Sweeps.Reporters is
          & ",""minimum_input"":"
          & (if Scaling.Input_Range_Available (Result)
             then Number (Scaling.Minimum_Input (Result)) else "null")
+         & ",""minimum_input_exact"":"
+         & (if Scaling.Input_Range_Available (Result)
+            then '"' & Number (Scaling.Minimum_Input (Result)) & '"'
+            else "null")
          & ",""maximum_input"":"
          & (if Scaling.Input_Range_Available (Result)
             then Number (Scaling.Maximum_Input (Result)) else "null")
+         & ",""maximum_input_exact"":"
+         & (if Scaling.Input_Range_Available (Result)
+            then '"' & Number (Scaling.Maximum_Input (Result)) & '"'
+            else "null")
          & ",""selected_model"":"
          & (if Scaling.Available (Result)
             then '"' & Model_Name (Scaling.Selected_Model (Result)) & '"'
