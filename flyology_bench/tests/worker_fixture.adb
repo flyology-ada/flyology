@@ -168,7 +168,10 @@ begin
          Data : Ada.Strings.Unbounded.Unbounded_String;
       begin
          Ada.Strings.Unbounded.Append (Data, "FLYBWRK1");
-         Put_U32 (Data, 1);
+         Put_U32
+           (Data,
+            Interfaces.Unsigned_32
+              (Flyology_Bench.Workers.Protocol_Version));
          Put_U32 (Data, 1);
          Put_U32 (Data, 4 * 1_024 * 1_024 + 1);
          Write_Raw (Ada.Strings.Unbounded.To_String (Data));
@@ -181,12 +184,15 @@ begin
          Put_String (Data, "different-case");
          Put_U64 (Data, 0);
          Put_U64 (Data, 1);
-         for Index in 1 .. 5 loop
+         for Index in 1 .. 7 loop
             Put_U64 (Data, 0);
          end loop;
          Put_U64 (Data, 16#C0DE_F17E_BA5E_0001#);
          Ada.Strings.Unbounded.Append (Frame, "FLYBWRK1");
-         Put_U32 (Frame, 1);
+         Put_U32
+           (Frame,
+            Interfaces.Unsigned_32
+              (Flyology_Bench.Workers.Protocol_Version));
          Put_U32 (Frame, 1);
          Put_U32
            (Frame, Interfaces.Unsigned_32 (Ada.Strings.Unbounded.Length (Data)));
@@ -291,6 +297,13 @@ begin
               (Result);
          elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-statistics" then
             Flyology_Bench.Workers.Test_Support.Corrupt_Statistics (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name)
+           = "wrong-iteration-count"
+         then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Iteration_Count
+              (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-sample-count" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Sample_Count (Result);
          elsif Ada.Strings.Unbounded.To_String (Name)
            = "wrong-environment-report"
          then

@@ -7,5 +7,7 @@ package Flyology_Bench.Workers.Test_Support is
    procedure Corrupt_Comparison_Statistics (Value : in out Comparison);
    procedure Corrupt_Environment_Report (Value : in out Measurement);
    procedure Corrupt_Metric_Request (Value : in out Measurement);
+   procedure Corrupt_Iteration_Count (Value : in out Measurement);
+   procedure Corrupt_Sample_Count (Value : in out Measurement);
    procedure Corrupt_Statistics (Value : in out Measurement);
 end Flyology_Bench.Workers.Test_Support;

@@ -19,7 +19,7 @@ with Interfaces.C;
 package Flyology_Bench.Workers is
 
    --  Current binary envelope schema.
-   Protocol_Version : constant := 2;
+   Protocol_Version : constant := 3;
    --  Largest encoded stable case identity.
    Maximum_Identity_Length : constant := 512;
    --  Largest effective or edited environment entry count.
@@ -261,6 +261,16 @@ package Flyology_Bench.Workers is
    --  @param Result Worker process result.
    --  @return Strict or inherited mode.
    function Environment_Policy (Result : Worker_Result) return Environment_Mode;
+   --  Return the effective strict-mode locale policy.
+   --  @param Result Worker process result.
+   --  @return Clear or preserve locale policy supplied to the worker.
+   function Environment_Locale_Policy
+     (Result : Worker_Result) return Locale_Policy;
+   --  Return the effective strict-mode timezone policy.
+   --  @param Result Worker process result.
+   --  @return Clear or preserve timezone policy supplied to the worker.
+   function Environment_Timezone_Policy
+     (Result : Worker_Result) return Timezone_Policy;
    --  Return a nonzero ordinary exit code, or zero when not applicable.
    --  @param Result Worker process result.
    --  @return Portable exit code.
@@ -404,6 +414,8 @@ private
       Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
       Configuration_Hash : Interfaces.Unsigned_64 := 0;
       Policy_Value      : Environment_Mode := Strict_Mode;
+      Locale_Value      : Locale_Policy := Clear_Locale;
+      Timezone_Value    : Timezone_Policy := Clear_Timezone;
    end record;
 
    type Worker_Result is record
@@ -417,6 +429,8 @@ private
       Setup_Time        : Long_Float := 0.0;
       Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
       Policy_Value      : Environment_Mode := Strict_Mode;
+      Locale_Value      : Locale_Policy := Clear_Locale;
+      Timezone_Value    : Timezone_Policy := Clear_Timezone;
       Exit_Code_Value   : Natural := 0;
       Signal_Value      : Natural := 0;
       Forced_Value      : Boolean := False;
