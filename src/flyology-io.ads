@@ -65,7 +65,9 @@ package Flyology.IO with Preelaborate is
    end record;
 
    --  Maximum number of descriptors in one allocation-free Wait_Any call.
-   Max_Wait_Requests : constant := 32;
+   --  Bound shared with completion sets: 32 operations may each retain four
+   --  transport/lifecycle descriptor interests without helper tasks.
+   Max_Wait_Requests : constant := 128;
 
    --  Report whether the calling Ada task uses a Flyology event loop.
    --  @return True for a lightweight task; False for a native task

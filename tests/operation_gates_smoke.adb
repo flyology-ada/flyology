@@ -1,13 +1,75 @@
 with Ada.Exceptions;
+with Ada.Streams;
 with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Flyology;
+with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
+with Flyology.Operations.Drivers;
 
 procedure Operation_Gates_Smoke is
    use type Flyology.Execution_Model;
+   use type Flyology.Operations.Driver_Event;
    use type Flyology.Operations.Terminal_Outcome;
+
+   type Multi_Source_Operation
+     (Set : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Set) with null record;
+
+   overriding procedure Drive
+     (Item  : in out Multi_Source_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   overriding procedure Request_Cancellation
+     (Item : in out Multi_Source_Operation);
+
+   type Rescheduling_Operation
+     (Set : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Set) with null record;
+
+   overriding procedure Drive
+     (Item  : in out Rescheduling_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   overriding procedure Request_Cancellation
+     (Item : in out Rescheduling_Operation);
+
+   overriding procedure Drive
+     (Item  : in out Multi_Source_Operation;
+      Event : Flyology.Operations.Driver_Event) is
+   begin
+      if Event /= Flyology.Operations.Source_Ready then
+         raise Program_Error with "unexpected multi-source driver event";
+      end if;
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Succeeded);
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Multi_Source_Operation) is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   overriding procedure Drive
+     (Item  : in out Rescheduling_Operation;
+      Event : Flyology.Operations.Driver_Event) is
+   begin
+      if Event /= Flyology.Operations.Continue_Operation then
+         raise Program_Error with "unexpected rescheduling driver event";
+      end if;
+      Flyology.Operations.Drivers.Reschedule (Item);
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Rescheduling_Operation) is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
 
    protected Result is
       procedure Set (Passed : Boolean);
@@ -67,6 +129,58 @@ procedure Operation_Gates_Smoke is
    task body Runner is
       Passed : Boolean := True;
    begin
+      --  One operation can wait on several heterogeneous lifecycle/readiness
+      --  descriptors while retaining one completion-set slot. Readiness of
+      --  either descriptor resumes the same driver exactly once.
+      declare
+         package Sockets renames Flyology.IO.Sockets;
+         Left_1, Right_1, Left_2, Right_2 : Sockets.Socket_Type;
+         Set : aliased Flyology.Operations.Completion_Set (1);
+         Item : Multi_Source_Operation (Set'Access);
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Sockets.Create_Socket_Pair (Left_1, Right_1);
+         Sockets.Create_Socket_Pair (Left_2, Right_2);
+         Sockets.Prepare (Left_1);
+         Sockets.Prepare (Left_2);
+         Flyology.Operations.Drivers.Start (Item);
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Item,
+            [(Sockets.Native_Descriptor (Left_1), False),
+             (Sockets.Native_Descriptor (Left_2), False)]);
+         Sockets.Send_Socket (Right_2, Data, Last);
+         Flyology.Operations.Wait_All (Set);
+         Passed := Passed
+           and then Flyology.Operations.Outcome (Item) =
+             Flyology.Operations.Succeeded;
+         Flyology.Operations.Consume (Item);
+      end;
+
+      --  A provider may request another immediate owner-stack step after
+      --  partial progress. Such a member must not hide an already-completed
+      --  sibling from Wait_Some, even when it keeps rescheduling itself.
+      declare
+         Set : aliased Flyology.Operations.Completion_Set (2);
+         Fast : Flyology.IO.Timers.Timer_Operation :=
+           Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
+         Busy : Rescheduling_Operation (Set'Access);
+         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+      begin
+         Flyology.Operations.Drivers.Start (Busy);
+         Flyology.Operations.Drivers.Reschedule (Busy);
+         Flyology.Operations.Wait_Some (Set, Batch);
+         Passed := Passed
+           and then Contains (Batch, Flyology.Operations.Id (Fast))
+           and then Flyology.Operations.Is_Active (Busy);
+         Flyology.IO.Timers.Finish (Fast);
+         Flyology.Operations.Cancel (Busy);
+         Passed := Passed
+           and then Flyology.Operations.Outcome (Busy) =
+             Flyology.Operations.Cancelled;
+         Flyology.Operations.Consume (Busy);
+      end;
+
       --  Wait_All counts every terminal member outcome, including
       --  cancellation, and retains the complete matching snapshot.
       declare

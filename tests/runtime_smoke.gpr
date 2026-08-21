@@ -58,6 +58,7 @@ project Runtime_Smoke is
       "connection_driver_smoke.adb",
       "connection_driver_tls_smoke.adb",
       "connection_lifecycle_smoke.adb",
+      "connection_operations_smoke.adb",
       "connection_state_model.adb",
       "connection_tls_upgrade_smoke.adb",
       "connect_transient_smoke.adb",

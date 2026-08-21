@@ -150,8 +150,14 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
-  arrays and ownership-transferring unique buffers, plus nonrecursive file
-  watcher `Next` and retained task-result `Wait`. A
+  arrays and ownership-transferring unique buffers, high-level connection data
+  operations over plaintext or TLS, nonrecursive and recursive file-watcher
+  `Next`, and retained task-result `Wait`. Recursive `Next` is a disclosed
+  exception to the immediate-step rule: after its hidden watcher child becomes
+  ready, its owner-stack driver performs capacity-bounded directory discovery
+  and registration metadata calls before the parent terminalizes. Those calls
+  never run on the scheduler stack, but they can occupy a lightweight event
+  loop on a slow filesystem. A
   `Flyology.Channels.Bounded` instance also provides scoped `Send` and
   `Receive`: initiation uses attempt, caller-owned subscription, and recheck
   so channel state cannot change in a lost-wake gap. Subscription storage is

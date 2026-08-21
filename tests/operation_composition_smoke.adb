@@ -208,25 +208,28 @@ procedure Operation_Composition_Smoke is
       end case;
    end Finish;
 
+   type Result_Array is array (Positive range 1 .. 2) of Boolean;
+
    protected Result is
       procedure Set (Passed : Boolean);
       entry Wait (Passed : out Boolean);
    private
-      Done : Boolean := False;
-      OK   : Boolean := False;
+      Values    : Result_Array := [others => False];
+      Published : Natural range 0 .. 2 := 0;
+      Consumed  : Natural range 0 .. 2 := 0;
    end Result;
 
    protected body Result is
       procedure Set (Passed : Boolean) is
       begin
-         OK := Passed;
-         Done := True;
+         Published := Published + 1;
+         Values (Published) := Passed;
       end Set;
 
-      entry Wait (Passed : out Boolean) when Done is
+      entry Wait (Passed : out Boolean) when Consumed < Published is
       begin
-         Passed := OK;
-         Done := False;
+         Consumed := Consumed + 1;
+         Passed := Values (Consumed);
       end Wait;
    end Result;
 

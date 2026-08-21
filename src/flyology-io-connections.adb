@@ -2,6 +2,8 @@ with Ada.Exceptions;
 with Ada.Unchecked_Deallocation;
 with Flyology.Connection_Policy;
 with Flyology.IO.TLS_Driver;
+with Flyology.Operations.Drivers;
+with Flyology.Socket_Policy;
 with Flyology.Time_Math;
 with Interfaces.C;
 
@@ -13,6 +15,8 @@ package body Flyology.IO.Connections is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Flyology.Capacity.Acquire_Result;
+   use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Terminal_Outcome;
    use type Interfaces.C.int;
    use type TLS.Session_Access;
    use type TLS.Role;
@@ -239,14 +243,20 @@ package body Flyology.IO.Connections is
          Result := Lease_Acquired;
       end Try_Acquire;
 
-      procedure Abandon_Operation (Generation : Descriptor_Generation) is
+      procedure Abandon_Operation
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State)
+      is
       begin
          pragma Unreferenced (Generation);
-         if Started_Operations = 0 then
+         if State.all /= Registered or else Started_Operations = 0 then
             raise Program_Error with "stale connection operation withdrawal";
          end if;
          Started_Operations :=
            Policy.Started_After_Release (Started_Operations);
+         --  Publish discharge of the caller's obligation in the same
+         --  protected action and before the fallible wake notification.
+         State.all := Unregistered;
          if Policy.Should_Wake_Next
            (Active, Closing, Started_Operations, Lease_Signalled)
          then
@@ -306,10 +316,12 @@ package body Flyology.IO.Connections is
 
       procedure Release
         (Generation : Descriptor_Generation;
-         Socket     : in out Sockets.Socket_Type)
+         Socket     : in out Sockets.Socket_Type;
+         State      : not null access Operation_State)
       is
       begin
-         if not Active
+         if State.all /= Acquired
+           or else not Active
            or else Generation /= Current_Generation
            or else Started_Operations = 0
          then
@@ -322,6 +334,9 @@ package body Flyology.IO.Connections is
          Active := False;
          Started_Operations :=
            Policy.Started_After_Release (Started_Operations);
+         --  As with abandonment, make the guard non-owning before a wake can
+         --  fail. Validation failures leave it owning so finalization retries.
+         State.all := Unregistered;
          if Policy.Should_Wake_Next
            (Active, Closing, Started_Operations, Lease_Signalled)
          then
@@ -406,19 +421,49 @@ package body Flyology.IO.Connections is
 
    end Descriptor_Controller;
 
-   overriding procedure Finalize (Guard : in out Operation_Guard) is
+   procedure Release_Operation (Guard : in out Operation_Guard) is
    begin
       case Guard.State is
          when Unregistered =>
             null;
          when Registered =>
-            Guard.Item.Controller.Abandon_Operation (Guard.Generation);
-            Guard.State := Unregistered;
+            Guard.Item.Controller.Abandon_Operation
+              (Guard.Generation, Guard.State'Access);
          when Acquired =>
-            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket);
-            Guard.State := Unregistered;
+            Guard.Item.Controller.Release
+              (Guard.Generation, Guard.Socket, Guard.State'Access);
       end case;
+   end Release_Operation;
+
+   overriding procedure Finalize (Guard : in out Operation_Guard) is
+   begin
+      Release_Operation (Guard);
    end Finalize;
+
+   procedure Release_Operation (Guard : in out Scoped_Operation_Guard) is
+   begin
+      case Guard.State is
+         when Unregistered =>
+            null;
+         when Registered =>
+            Guard.Item.Controller.Abandon_Operation
+              (Guard.Generation, Guard.State'Access);
+         when Acquired =>
+            Guard.Item.Controller.Release
+              (Guard.Generation, Guard.Socket, Guard.State'Access);
+      end case;
+      if Guard.State = Unregistered then
+         Guard.Item := null;
+      end if;
+   exception
+      when others =>
+         --  Drop the retained Item only when the controller has atomically
+         --  discharged the guard. Otherwise finalization must retry.
+         if Guard.State = Unregistered then
+            Guard.Item := null;
+         end if;
+         raise;
+   end Release_Operation;
 
    overriding procedure Finalize (Guard : in out Admission_Guard) is
       Failure : Ada.Exceptions.Exception_Occurrence;
@@ -1071,6 +1116,531 @@ package body Flyology.IO.Connections is
 
    function Is_Open (Item : Connection) return Boolean is
      (Item.Controller.Is_Open_State);
+
+   procedure Arm_Connection_Sources
+     (Item         : in out Connection_Operation'Class;
+      Primary      : Descriptor;
+      Primary_Write : Boolean;
+      Lifecycle    : Descriptor)
+   is
+      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count : Natural := 2;
+   begin
+      Interrupt_Sources
+        (Item.Owner, Item.Token, Interrupts, Interrupt_Count);
+      Sources (1) := (Descriptor => Primary, For_Write => Primary_Write);
+      Sources (2) := (Descriptor => Lifecycle, For_Write => False);
+      for Index in 1 .. Interrupt_Count loop
+         Count := Count + 1;
+         Sources (Count) :=
+           (Descriptor => Interrupts (Index), For_Write => False);
+      end loop;
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Item, Sources (1 .. Count));
+   end Arm_Connection_Sources;
+
+   procedure Complete_Connection_Operation
+     (Item   : in out Connection_Operation'Class;
+      Result : Flyology.Operations.Terminal_Outcome)
+   is
+      Published : Flyology.Operations.Terminal_Outcome := Result;
+   begin
+      begin
+         Release_Operation (Item.Guard);
+      exception
+         when others =>
+            Item.Failure := Cleanup_Failure;
+            Published := Flyology.Operations.Failed;
+      end;
+      Flyology.Operations.Drivers.Complete (Item, Published);
+   end Complete_Connection_Operation;
+
+   procedure Fail_Connection_Operation
+     (Item   : in out Connection_Operation'Class;
+      Reason : Scoped_IO_Failure) is
+   begin
+      Item.Failure := Reason;
+      Complete_Connection_Operation (Item, Flyology.Operations.Failed);
+   end Fail_Connection_Operation;
+
+   procedure Drive_Transport (Item : in out Connection_Operation'Class) is
+      Sending : constant Boolean := Item.Kind = Send_Complete;
+      Data_First : constant Ada.Streams.Stream_Element_Offset :=
+        (if Sending then Item.Send_Data.all'First else Item.Data.all'First);
+      Data_Last : constant Ada.Streams.Stream_Element_Offset :=
+        (if Sending then Item.Send_Data.all'Last else Item.Data.all'Last);
+      First : constant Ada.Streams.Stream_Element_Offset :=
+        (if Item.Kind = Receive_One then Data_First else Item.Cursor);
+      Last : Ada.Streams.Stream_Element_Offset := First - 1;
+      Status : TLS.Step_Status := TLS.Complete;
+      Retry_Attempt : Natural := 0;
+
+      procedure Arm_Transport (For_Write : Boolean) is
+      begin
+         Arm_Connection_Sources
+           (Item, Item.FD, For_Write, Item.Close_Source);
+      end Arm_Transport;
+
+      procedure Complete_Progress is
+      begin
+         Item.Last := Last;
+         if Item.Kind = Receive_One then
+            Complete_Connection_Operation
+              (Item, Flyology.Operations.Succeeded);
+         elsif Last < First then
+            Fail_Connection_Operation
+              (Item,
+               (if Sending
+                then No_Progress_Failure
+                else Peer_Closed_Failure));
+         else
+            Item.Cursor := Last + 1;
+            if Item.Cursor > Data_Last then
+               Complete_Connection_Operation
+                 (Item, Flyology.Operations.Succeeded);
+            elsif Item.Transport = TLS_Transport then
+               Flyology.Operations.Drivers.Reschedule (Item);
+            else
+               Arm_Transport (Sending);
+            end if;
+         end if;
+      end Complete_Progress;
+   begin
+      Check_TLS_Operation
+        (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
+      if First > Data_Last then
+         Item.Last := Data_First - 1;
+         Complete_Connection_Operation
+           (Item, Flyology.Operations.Succeeded);
+         return;
+      end if;
+
+      case Item.Transport is
+         when TLS_Transport =>
+            if Item.Item.TLS_Session = null then
+               Fail_Connection_Operation (Item, State_Failure);
+               return;
+            elsif Sending then
+               TLS_Driver.Send_Once
+                 (Item.Item.TLS_Session.all,
+                  Item.Send_Data.all (First .. Data_Last),
+                  Last,
+                  Status);
+            else
+               TLS_Driver.Receive_Once
+                 (Item.Item.TLS_Session.all,
+                  Item.Data.all (First .. Data_Last),
+                  Last,
+                  Status);
+            end if;
+            case Status is
+               when TLS.Complete =>
+                  Complete_Progress;
+               when TLS.Want_Read =>
+                  Arm_Transport (False);
+               when TLS.Want_Write =>
+                  Arm_Transport (True);
+               when TLS.Peer_Closed =>
+                  Item.Last := First - 1;
+                  if Item.Kind = Receive_One then
+                     Complete_Connection_Operation
+                       (Item, Flyology.Operations.Succeeded);
+                  else
+                     Fail_Connection_Operation
+                       (Item, TLS_Failure);
+                  end if;
+               when TLS.Failed =>
+                  --  TLS_Driver raises before returning this status.
+                  Fail_Connection_Operation (Item, TLS_Failure);
+            end case;
+         when Plain_Transport =>
+            loop
+               begin
+                  if Sending then
+                     Sockets.Send_Socket
+                       (Item.Guard.Socket,
+                        Item.Send_Data.all (First .. Data_Last),
+                        Last);
+                  else
+                     Sockets.Receive_Socket
+                       (Item.Guard.Socket,
+                        Item.Data.all (First .. Data_Last),
+                        Last);
+                  end if;
+                  exit;
+               exception
+                  when Occurrence : Sockets.Socket_Error =>
+                     case Sockets.Resolve_Exception (Occurrence) is
+                        when Sockets.Resource_Temporarily_Unavailable =>
+                           Arm_Transport (Sending);
+                           return;
+                        when Sockets.No_Buffer_Space_Available =>
+                           if Sending then
+                              Arm_Transport (True);
+                           else
+                              Fail_Connection_Operation
+                                (Item, Socket_Failure);
+                           end if;
+                           return;
+                        when Sockets.Interrupted_System_Call =>
+                           Retry_Attempt := Retry_Attempt + 1;
+                           if not Flyology.Socket_Policy.Retry_IO_Immediately
+                             (Retry_Attempt)
+                           then
+                              Arm_Transport (Sending);
+                              return;
+                           end if;
+                        when others =>
+                           Fail_Connection_Operation (Item, Socket_Failure);
+                           return;
+                     end case;
+               end;
+            end loop;
+            Complete_Progress;
+         when No_Transport | TLS_Upgrading =>
+            Fail_Connection_Operation (Item, State_Failure);
+      end case;
+   exception
+      when Operation_Cancelled =>
+         Complete_Connection_Operation
+           (Item, Flyology.Operations.Cancelled);
+      when TLS.TLS_Error =>
+         Fail_Connection_Operation (Item, TLS_Failure);
+      when Sockets.Socket_Error =>
+         Fail_Connection_Operation (Item, Socket_Failure);
+      when others =>
+         Fail_Connection_Operation (Item, State_Failure);
+   end Drive_Transport;
+
+   procedure Try_Scoped_Acquire
+     (Item : in out Connection_Operation'Class)
+   is
+      Result : Lease_Result;
+   begin
+      --  Observe persistent lifecycle state before attempting the lease. The
+      --  same sources are armed below under their respective protected-state
+      --  recheck protocols, so no transition can be lost in between.
+      declare
+         Interrupts : Interrupt_Set (1 .. 2);
+         Count : Natural;
+      begin
+         Interrupt_Sources (Item.Owner, Item.Token, Interrupts, Count);
+      end;
+      Item.Item.Controller.Try_Acquire
+        (Item.Guard.Generation,
+         Item.Guard.State'Access,
+         Result,
+         Item.FD,
+         Item.Close_Source,
+         Item.Guard.Socket,
+         Item.Owner,
+         Item.Transport);
+      case Result is
+         when Lease_Busy =>
+            Arm_Connection_Sources
+              (Item,
+               Item.Lease_Source,
+               False,
+               Item.Initial_Close_Source);
+         when Lease_Cancelled =>
+            Complete_Connection_Operation
+              (Item, Flyology.Operations.Cancelled);
+         when Lease_Acquired =>
+            Sockets.Prepare (Item.Guard.Socket);
+            Drive_Transport (Item);
+      end case;
+   exception
+      when Operation_Cancelled =>
+         Complete_Connection_Operation
+           (Item, Flyology.Operations.Cancelled);
+      when Sockets.Socket_Error =>
+         Fail_Connection_Operation (Item, Socket_Failure);
+      when others =>
+         Fail_Connection_Operation (Item, State_Failure);
+   end Try_Scoped_Acquire;
+
+   overriding procedure Drive
+     (Item  : in out Connection_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Fail_Connection_Operation (Item, Deadline_Failure);
+      elsif Event = Flyology.Operations.Start_Operation then
+         begin
+            Item.Item.Controller.Start_Operation
+              (Item.Guard.Generation'Access,
+               Item.Guard.State'Access,
+               Item.Lease_Source,
+               Item.Initial_Close_Source,
+               Item.Owner);
+            Try_Scoped_Acquire (Item);
+         exception
+            when Operation_Cancelled =>
+               Complete_Connection_Operation
+                 (Item, Flyology.Operations.Cancelled);
+            when others =>
+               Fail_Connection_Operation (Item, State_Failure);
+         end;
+      elsif Event in
+        Flyology.Operations.Source_Ready |
+        Flyology.Operations.Continue_Operation
+      then
+         if Item.Guard.State = Registered then
+            Try_Scoped_Acquire (Item);
+         elsif Item.Guard.State = Acquired then
+            Drive_Transport (Item);
+         else
+            Fail_Connection_Operation (Item, State_Failure);
+         end if;
+      else
+         Fail_Connection_Operation (Item, State_Failure);
+      end if;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Connection_Operation) is
+   begin
+      Complete_Connection_Operation
+        (Item, Flyology.Operations.Cancelled);
+   exception
+      when others =>
+         --  Complete_Connection_Operation retains cleanup failure itself;
+         --  cancellation must never propagate out of the provider primitive.
+         null;
+   end Request_Cancellation;
+
+   procedure Start_Scoped_IO
+     (Operation  : in out Connection_Operation'Class;
+      Item       : not null access Connection'Class;
+      Kind       : Scoped_IO_Kind;
+      Data       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration;
+      Token      : access Cancellation_Token)
+   is
+   begin
+      if Operation.Guard.State /= Unregistered then
+         raise Flyology.Operations.Operation_Error with
+           "connection operation still owns a lease";
+      end if;
+      Operation.Item := Item.all'Unchecked_Access;
+      Operation.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.Guard.Item := Item.all'Unchecked_Access;
+      Operation.Kind := Kind;
+      Operation.Data := Data.all'Unchecked_Access;
+      Operation.Send_Data := null;
+      Operation.Cursor := Data.all'First;
+      Operation.Last := Data.all'First - 1;
+      Operation.Lease_Source := Invalid_Descriptor;
+      Operation.Initial_Close_Source := Invalid_Descriptor;
+      Operation.Close_Source := Invalid_Descriptor;
+      Operation.Owner := null;
+      Operation.FD := Invalid_Descriptor;
+      Operation.Transport := No_Transport;
+      Operation.Failure := No_Failure;
+      Flyology.Operations.Drivers.Start (Operation);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Operation),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Cancel (Operation);
+         end if;
+         if Flyology.Operations.Is_Terminal (Operation) then
+            Flyology.Operations.Consume (Operation);
+         end if;
+         raise;
+   end Start_Scoped_IO;
+
+   procedure Start_Scoped_Send
+     (Operation  : in out Send_All_Operation;
+      Item       : not null access Connection'Class;
+      Data       : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration;
+      Token      : access Cancellation_Token)
+   is
+   begin
+      if Operation.Guard.State /= Unregistered then
+         raise Flyology.Operations.Operation_Error with
+           "connection operation still owns a lease";
+      end if;
+      Operation.Item := Item.all'Unchecked_Access;
+      Operation.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.Guard.Item := Item.all'Unchecked_Access;
+      Operation.Kind := Send_Complete;
+      Operation.Data := null;
+      Operation.Send_Data := Data.all'Unchecked_Access;
+      Operation.Cursor := Data.all'First;
+      Operation.Last := Data.all'First - 1;
+      Operation.Lease_Source := Invalid_Descriptor;
+      Operation.Initial_Close_Source := Invalid_Descriptor;
+      Operation.Close_Source := Invalid_Descriptor;
+      Operation.Owner := null;
+      Operation.FD := Invalid_Descriptor;
+      Operation.Transport := No_Transport;
+      Operation.Failure := No_Failure;
+      Flyology.Operations.Drivers.Start (Operation);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Operation),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Cancel (Operation);
+         end if;
+         if Flyology.Operations.Is_Terminal (Operation) then
+            Flyology.Operations.Consume (Operation);
+         end if;
+         raise;
+   end Start_Scoped_Send;
+
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null) return Receive_Operation
+   is
+   begin
+      return Result : Receive_Operation (Set) do
+         Start_Scoped_IO
+           (Result, Item, Receive_One, Data, Timeout, Token);
+      end return;
+   end Receive;
+
+   procedure Receive
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Cancellation_Token := null;
+      Operation : in out Receive_Operation) is
+   begin
+      Start_Scoped_IO
+        (Operation, Item, Receive_One, Data, Timeout, Token);
+   end Receive;
+
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null)
+      return Receive_Exactly_Operation
+   is
+   begin
+      return Result : Receive_Exactly_Operation (Set) do
+         Start_Scoped_IO
+           (Result, Item, Receive_Complete, Data, Timeout, Token);
+      end return;
+   end Receive_Exactly;
+
+   procedure Receive_Exactly
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Cancellation_Token := null;
+      Operation : in out Receive_Exactly_Operation) is
+   begin
+      Start_Scoped_IO
+        (Operation, Item, Receive_Complete, Data, Timeout, Token);
+   end Receive_Exactly;
+
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null) return Send_All_Operation
+   is
+   begin
+      return Result : Send_All_Operation (Set) do
+         Start_Scoped_Send (Result, Item, Data, Timeout, Token);
+      end return;
+   end Send_All;
+
+   procedure Send_All
+     (Item      : not null access Connection'Class;
+      Data      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Cancellation_Token := null;
+      Operation : in out Send_All_Operation) is
+   begin
+      Start_Scoped_Send (Operation, Item, Data, Timeout, Token);
+   end Send_All;
+
+   procedure Finish_Scoped_IO
+     (Item : in out Connection_Operation'Class)
+   is
+      Result : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Item);
+      Failure : constant Scoped_IO_Failure := Item.Failure;
+   begin
+      Flyology.Operations.Consume (Item);
+      case Result is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            case Failure is
+               when Deadline_Failure =>
+                  raise Timeout_Error with "connection operation timed out";
+               when Socket_Failure =>
+                  raise Sockets.Socket_Error with
+                    "scoped connection socket operation failed";
+               when TLS_Failure =>
+                  raise TLS.TLS_Error with
+                    "scoped connection TLS operation failed";
+               when Peer_Closed_Failure =>
+                  raise Device_Error with
+                    "connection closed while receiving";
+               when No_Progress_Failure =>
+                  raise Device_Error with
+                    "connection closed while sending";
+               when State_Failure =>
+                  raise Program_Error with
+                    "scoped connection state is invalid";
+               when Cleanup_Failure =>
+                  raise Program_Error with
+                    "scoped connection cleanup failed";
+               when No_Failure =>
+                  raise Program_Error with
+                    "scoped connection operation failed";
+            end case;
+      end case;
+   end Finish_Scoped_IO;
+
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+      Saved_Last : constant Ada.Streams.Stream_Element_Offset :=
+        Operation.Last;
+   begin
+      Finish_Scoped_IO (Operation);
+      Last := Saved_Last;
+   end Finish;
+
+   procedure Finish (Operation : in out Receive_Exactly_Operation) is
+   begin
+      Finish_Scoped_IO (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Send_All_Operation) is
+   begin
+      Finish_Scoped_IO (Operation);
+   end Finish;
 
    procedure Receive
      (Item                 : in out Connection;

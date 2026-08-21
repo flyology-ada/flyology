@@ -1,4 +1,5 @@
 with Ada.Finalization;
+with Flyology.Cancellation;
 with Interfaces;
 with Interfaces.C;
 with System;
@@ -12,6 +13,9 @@ package Flyology.Operations with Preelaborate is
 
    --  Maximum number of operations in one completion set.
    Max_Operations : constant := 32;
+   --  Maximum descriptor interests armed by one operation. This covers a
+   --  primary transport plus bounded lifecycle and cancellation sources.
+   Max_Readiness_Sources_Per_Operation : constant := 4;
    --  Valid caller-selected completion-set capacity.
    subtype Operation_Capacity is Positive range 1 .. Max_Operations;
 
@@ -20,7 +24,8 @@ package Flyology.Operations with Preelaborate is
    --  Raised when an operation has an invalid or stale lifecycle state.
    Operation_Error : exception;
    --  Raised by a provider-specific Finish after terminal cancellation.
-   Operation_Cancelled : exception;
+   Operation_Cancelled : exception renames
+     Flyology.Cancellation.Operation_Cancelled;
 
    --  Stable one-based identity for a slot in one completion set.
    subtype Operation_Id is Positive range 1 .. Max_Operations;
@@ -75,8 +80,13 @@ package Flyology.Operations with Preelaborate is
    --  @enum Source_Ready The provider's current descriptor became ready
    --  @enum Deadline_Reached The provider's monotonic deadline expired
    --  @enum Dependency_Changed A member operation changed terminal state
+   --  @enum Continue_Operation A bounded progress step asked to run again
    type Driver_Event is
-     (Start_Operation, Source_Ready, Deadline_Reached, Dependency_Changed);
+     (Start_Operation,
+      Source_Ready,
+      Deadline_Reached,
+      Dependency_Changed,
+      Continue_Operation);
 
    --  Advance one provider state machine on the owning task's stack. The
    --  implementation must rearm a source or publish a terminal outcome before
@@ -287,14 +297,28 @@ package Flyology.Operations with Preelaborate is
 private
    type Slot_State is (Vacant, Idle, Pending, Terminal);
    type Source_Kind is
-     (No_Source, Descriptor_Source, Timer_Source, Dependency_Source);
+     (No_Source,
+      Descriptor_Source,
+      Timer_Source,
+      Dependency_Source,
+      Immediate_Source);
+
+   subtype Readiness_Source_Index is Positive range
+     1 .. Max_Readiness_Sources_Per_Operation;
+   type Descriptor_Source_Array is
+     array (Readiness_Source_Index) of Interfaces.C.int;
+   type Write_Interest_Array is
+     array (Readiness_Source_Index) of Boolean;
 
    type Slot_Record is record
       State       : Slot_State := Vacant;
       Generation  : Interfaces.Unsigned_64 := 0;
       Source      : Source_Kind := No_Source;
-      Descriptor  : Interfaces.C.int := Interfaces.C.int (-1);
-      For_Write   : Boolean := False;
+      Source_Count : Natural range
+        0 .. Max_Readiness_Sources_Per_Operation := 0;
+      Descriptors : Descriptor_Source_Array :=
+        (others => Interfaces.C.int (-1));
+      For_Write   : Write_Interest_Array := (others => False);
       Deadline    : Duration := Duration'Last;
       Result      : Terminal_Outcome := Succeeded;
       Reported    : Boolean := False;

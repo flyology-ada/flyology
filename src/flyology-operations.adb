@@ -4,6 +4,7 @@ package body Flyology.Operations is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type Flyology.IO.Wait_Kind;
    use type Interfaces.Unsigned_64;
    use type Interfaces.Unsigned_32;
    use type System.Address;
@@ -29,6 +30,34 @@ package body Flyology.Operations is
       end loop;
       return Count;
    end Population;
+
+   procedure Clear_Source (Slot : in out Slot_Record) is
+   begin
+      Slot.Source := No_Source;
+      Slot.Source_Count := 0;
+      Slot.Descriptors := (others => -1);
+      Slot.For_Write := (others => False);
+   end Clear_Source;
+
+   function Has_Readiness
+     (Slot       : Slot_Record;
+      Descriptor : Interfaces.C.int;
+      For_Write  : Boolean) return Boolean
+   is
+   begin
+      if Slot.Source /= Descriptor_Source then
+         return False;
+      end if;
+      for Position in 1 .. Slot.Source_Count loop
+         if Slot.Descriptors (Readiness_Source_Index (Position)) = Descriptor
+           and then
+             Slot.For_Write (Readiness_Source_Index (Position)) = For_Write
+         then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Readiness;
 
    procedure Stabilize_Dependents (Set : in out Completion_Set'Class);
 
@@ -134,9 +163,7 @@ package body Flyology.Operations is
          Slot.Generation := Slot.Generation + 1;
          Item.Generation := Slot.Generation;
          Slot.State := Pending;
-         Slot.Source := No_Source;
-         Slot.Descriptor := -1;
-         Slot.For_Write := False;
+         Clear_Source (Slot);
          Slot.Deadline := Duration'Last;
          Slot.Has_Deadline := False;
          Slot.Result := Succeeded;
@@ -171,8 +198,7 @@ package body Flyology.Operations is
               "operation cannot complete while a child remains attached";
          end if;
          Slot.State := Terminal;
-         Slot.Source := No_Source;
-         Slot.Descriptor := -1;
+         Clear_Source (Slot);
          Slot.Has_Deadline := False;
          Slot.Deadline := Duration'Last;
          Slot.Result := Result;
@@ -569,8 +595,7 @@ package body Flyology.Operations is
            and then Set.Slots (Id).Has_Deadline
            and then Set.Slots (Id).Deadline <= Now
          then
-            Set.Slots (Id).Source := No_Source;
-            Set.Slots (Id).Descriptor := -1;
+            Clear_Source (Set.Slots (Id));
             Set.Slots (Id).Has_Deadline := False;
             Set.Slots (Id).Deadline := Duration'Last;
             if Set.Slots (Id).Owner = null then
@@ -582,6 +607,26 @@ package body Flyology.Operations is
          end if;
       end loop;
    end Expire_Timers;
+
+   function Drive_Immediate (Set : in out Completion_Set) return Boolean is
+      Drove : Boolean := False;
+   begin
+      for Id in Set.Slots'Range loop
+         if Set.Slots (Id).State = Pending
+           and then Set.Slots (Id).Source = Immediate_Source
+         then
+            Drove := True;
+            Clear_Source (Set.Slots (Id));
+            if Set.Slots (Id).Owner = null then
+               raise Operation_Error with "pending operation has no driver";
+            end if;
+            Drive
+              (Set.Slots (Id).Owner.all,
+               Continue_Operation);
+         end if;
+      end loop;
+      return Drove;
+   end Drive_Immediate;
 
    procedure Wait_Some
      (Set       : in out Completion_Set;
@@ -599,11 +644,26 @@ package body Flyology.Operations is
       Completed : out Completion_Batch;
       Gate      : Gate_Kind)
    is
+      Drove_Immediate : Boolean;
+
+      function Active_Request_Count return Natural is
+         Count : Natural := 0;
+      begin
+         for Id in Set.Slots'Range loop
+            if Set.Slots (Id).State = Pending
+              and then Set.Slots (Id).Source = Descriptor_Source
+            then
+               Count := Count + Set.Slots (Id).Source_Count;
+            end if;
+         end loop;
+         return Count;
+      end Active_Request_Count;
    begin
       loop
          Begin_Propagation_Batch (Set);
          begin
             Expire_Timers (Set);
+            Drove_Immediate := Drive_Immediate (Set);
          exception
             when others =>
                End_Propagation_Batch (Set);
@@ -611,21 +671,31 @@ package body Flyology.Operations is
          end;
          End_Propagation_Batch (Set);
          if (case Gate is
-                when Terminal_Gate =>
-                  Unreported_Count (Set) >= Required
-                    or else Pending_Count (Set) = 0,
-                when Success_Gate =>
-                  Unreported_Success_Count (Set) >= Required
-                    or else Unreported_Success_Count (Set)
-                      + Pending_Count (Set) < Required)
+                   when Terminal_Gate =>
+                     Unreported_Count (Set) >= Required
+                       or else Pending_Count (Set) = 0,
+                   when Success_Gate =>
+                     Unreported_Success_Count (Set) >= Required
+                       or else Unreported_Success_Count (Set)
+                         + Pending_Count (Set) < Required)
          then
             Publish_Unreported (Set, Completed);
             return;
+         elsif Drove_Immediate then
+            --  One bounded immediate-drive pass is enough before giving the
+            --  owner task a fairness point. A provider may reschedule itself
+            --  after partial progress; it must not hide a terminal member
+            --  from a partial wait or monopolize a lightweight event loop.
+            delay 0.0;
+            goto Continue_Wait;
          end if;
 
          declare
-            Requests : Flyology.IO.Wait_Request_Array (1 .. Set.Capacity);
-            Slot_Map : array (Positive range 1 .. Set.Capacity) of
+            Maximum_Requests : constant Natural :=
+              Active_Request_Count;
+            Requests : Flyology.IO.Wait_Request_Array
+              (1 .. Maximum_Requests);
+            Slot_Map : array (Positive range 1 .. Maximum_Requests) of
               Operation_Id;
             Request_Count : Natural := 0;
             Have_Timer : Boolean := False;
@@ -635,18 +705,25 @@ package body Flyology.Operations is
                if Set.Slots (Id).State = Pending then
                   case Set.Slots (Id).Source is
                      when Descriptor_Source =>
-                        Request_Count := Request_Count + 1;
-                        Requests (Request_Count) :=
-                          (FD => Set.Slots (Id).Descriptor,
-                           Condition =>
-                             (if Set.Slots (Id).For_Write
-                              then Flyology.IO.For_Write
-                              else Flyology.IO.For_Read));
-                        Slot_Map (Request_Count) := Id;
+                        for Position in 1 .. Set.Slots (Id).Source_Count loop
+                           Request_Count := Request_Count + 1;
+                           Requests (Request_Count) :=
+                             (FD => Set.Slots (Id).Descriptors
+                                (Readiness_Source_Index (Position)),
+                              Condition =>
+                                (if Set.Slots (Id).For_Write
+                                   (Readiness_Source_Index (Position))
+                                 then Flyology.IO.For_Write
+                                 else Flyology.IO.For_Read));
+                           Slot_Map (Request_Count) := Id;
+                        end loop;
                      when Timer_Source =>
                         null;
                      when Dependency_Source =>
                         null;
+                     when Immediate_Source =>
+                        raise Operation_Error with
+                          "immediate operation was not driven";
                      when No_Source =>
                         if not Set.Slots (Id).Has_Deadline then
                            raise Operation_Error with
@@ -697,12 +774,15 @@ package body Flyology.Operations is
                   begin
                      for Position in 1 .. Ready.Count loop
                         declare
+                           Request_Index : constant Positive :=
+                             Ready.Indexes (Position);
                            Id : constant Operation_Id :=
-                             Slot_Map (Ready.Indexes (Position));
+                             Slot_Map (Request_Index);
                            Descriptor : constant Interfaces.C.int :=
-                             Set.Slots (Id).Descriptor;
+                             Requests (Request_Index).FD;
                            For_Write : constant Boolean :=
-                             Set.Slots (Id).For_Write;
+                             Requests (Request_Index).Condition =
+                               Flyology.IO.For_Write;
                         begin
                            if not Processed (Id) then
                               if Descriptor =
@@ -718,16 +798,13 @@ package body Flyology.Operations is
                                  if not Processed (Candidate)
                                    and then Set.Slots (Candidate).State =
                                      Pending
-                                   and then Set.Slots (Candidate).Source =
-                                     Descriptor_Source
-                                   and then Set.Slots (Candidate).Descriptor =
-                                     Descriptor
-                                   and then Set.Slots (Candidate).For_Write =
-                                     For_Write
+                                   and then Has_Readiness
+                                     (Set.Slots (Candidate),
+                                      Descriptor,
+                                      For_Write)
                                  then
                                     Processed (Candidate) := True;
-                                    Set.Slots (Candidate).Source := No_Source;
-                                    Set.Slots (Candidate).Descriptor := -1;
+                                    Clear_Source (Set.Slots (Candidate));
                                     if Set.Slots (Candidate).Owner = null then
                                        raise Operation_Error with
                                          "pending operation has no driver";
@@ -749,6 +826,8 @@ package body Flyology.Operations is
                end;
             end if;
          end;
+         <<Continue_Wait>>
+         null;
       end loop;
    end Wait_For_Gate;
 
@@ -920,14 +999,13 @@ package body Flyology.Operations is
                   end if;
                   Parent_Slot.Child := 0;
                   Parent_Slot.Child_Generation := 0;
-                  Parent_Slot.Source := No_Source;
+                  Clear_Source (Parent_Slot);
                   Slot.Dependents := 0;
                end;
             end;
          end if;
          Slot.State := Idle;
-         Slot.Source := No_Source;
-         Slot.Descriptor := -1;
+         Clear_Source (Slot);
          Slot.Has_Deadline := False;
          Slot.Deadline := Duration'Last;
          Slot.Reported := False;
@@ -997,8 +1075,7 @@ package body Flyology.Operations is
                   --  finalized provider object. Detach reclaims this
                   --  tombstone after the last observer terminalizes.
                   Slot.Owner := null;
-                  Slot.Source := No_Source;
-                  Slot.Descriptor := -1;
+                  Clear_Source (Slot);
                   Slot.Has_Deadline := False;
                   Slot.Deadline := Duration'Last;
                end if;

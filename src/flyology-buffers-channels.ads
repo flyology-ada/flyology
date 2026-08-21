@@ -426,11 +426,14 @@ private
    end record;
 
    --  @exclude
+   --  @param Item Buffer-channel operation to advance
+   --  @param Event Source event that caused the step
    overriding procedure Drive
      (Item  : in out Channel_Operation;
       Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
+   --  @param Item Buffer-channel operation to cancel
    overriding procedure Request_Cancellation
      (Item : in out Channel_Operation);
 

@@ -415,7 +415,8 @@ package body Flyology.Channels.Bounded is
                Item.Value := Empty_Value;
                Item.Failure := Timeout_Failure;
             end if;
-         when Flyology.Operations.Dependency_Changed =>
+         when Flyology.Operations.Dependency_Changed
+            | Flyology.Operations.Continue_Operation =>
             raise Program_Error with
               "channel operation received a dependency event";
       end case;

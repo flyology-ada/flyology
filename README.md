@@ -1548,18 +1548,20 @@ caller-provided array of read/write interests. It allocates neither in the
 public library nor while registering a lightweight fiber, returns the exact array
 index that became ready, and returns zero on timeout. Repeated descriptors and
 separate read/write interests for one descriptor are valid; when multiple
-entries are ready together the lowest index wins. The fixed limit of 32 keeps
-per-fiber scheduler storage predictable and is intended for protocol engines,
-not as a replacement for ownership-aware connection APIs.
+entries are ready together the lowest index wins. The fixed limit of 128
+supports 32 scoped operations with four lifecycle or readiness interests each.
+The lightweight RTS allocates only the link count used by the current wait on
+the suspended fiber's stack.
 
 `Flyology.Operations` adds a bounded scoped-operation layer without replacing
 the synchronous API. A caller declares one `Completion_Set` and limited
 operation objects that refer to it. Additive operation-producing overloads
 cover raw descriptor readiness, monotonic timers, raw stream and datagram
 socket operations, Internet and Unix-stream connection attempts and accepts,
-buffer-owning stream operations, and completion-driven positional file reads
-and writes over aliased arrays or ownership-transferred unique buffers, plus
-nonrecursive file-watcher `Next` and retained task-result `Wait`.
+buffer-owning stream operations, high-level plaintext-or-TLS connection data
+operations, and completion-driven positional file reads and writes over aliased
+arrays or ownership-transferred unique buffers, plus nonrecursive and recursive
+file-watcher `Next` and retained task-result `Wait`.
 Instances of `Flyology.Channels.Bounded` likewise add operation-producing
 `Send` and `Receive` overloads without changing their protected entries or
 nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
@@ -1617,6 +1619,11 @@ operation as `in out`; composite providers use that form for child record
 components. The older readiness and relative-timer `Rearm` names remain aliases
 for the same route. Array and socket actuals passed through explicit access
 parameters must outlive the operation and remain untouched while it is pending.
+The owner of a scoped high-level connection operation must finish it or cancel
+and drain it before that same task calls synchronous `Connections.Close`;
+`Close` may wait for registered work, while only the owner task can drive its
+scoped operation. A concurrent closer is instead observed through the
+operation's close wake source.
 The unique-buffer socket overloads retain the owning handle but enter its data
 callback only for an immediate nonblocking socket step, so a callback view never
 escapes. Unique-buffer file overloads instead move the buffer token into the
@@ -1630,10 +1637,15 @@ kernel-owned buffers before releasing the operation slot.
 Provider libraries implement an owner-stack driver, not an `Arm` function in
 their user API. Their operation-producing overload constructs a typed root
 operation and calls `Flyology.Operations.Drivers.Start`. Each `Drive`
-invocation performs a bounded immediate step, then arms readiness or a
+invocation normally performs a bounded immediate step, then arms readiness or a
 deadline, waits for its external completion source, or publishes a terminal
 outcome. `Drive` never calls a blocking synchronous API and never runs on the
-scheduler stack. `Request_Cancellation` removes observational waits immediately
+scheduler stack. Recursive watcher `Next` is the documented exception: its
+owner-stack driver performs capacity-bounded directory discovery and watch
+registration after its hidden readiness child completes. These metadata calls
+can occupy a lightweight event loop on a slow filesystem. The recursive parent
+does not terminalize until reconciliation finishes. `Request_Cancellation`
+removes observational waits immediately
 or starts a cancel-and-drain transition for retained kernel input.
 
 Higher-level providers compose the same public operation values rather than
@@ -1672,6 +1684,7 @@ generic channel rows are in
 | unique-buffer socket `Receive` | all | native and lightweight |
 | unique-buffer socket `Send` | all | native and lightweight |
 | unique-buffer socket `Send_All` | all | native and lightweight |
+| high-level Connection `Receive`, `Receive_Exactly`, and `Send_All` | success and all, including TLS transport | native and lightweight |
 | socket array `Receive_Datagram` | success quorum and all | native and lightweight |
 | socket array `Send_Datagram` | success quorum and all | native and lightweight |
 | Internet-stream socket `Connect` | success quorum and all | native and lightweight |
@@ -1683,8 +1696,10 @@ generic channel rows are in
 | owned-buffer file `Read_At` | success quorum | lightweight; ownership-return rejection native |
 | owned-buffer file `Write_At` | success quorum | lightweight; ownership-return rejection native |
 | file-watcher `Next` | success and all | native and lightweight |
+| recursive file-watcher `Next` | success and all after reconciliation | native and lightweight; reconciliation metadata runs on the owner lane |
 | task-result `Wait` | success and all | native and lightweight |
 | bounded-channel `Send` and `Receive` | success and all | native and lightweight |
+| buffer-channel `Send_Move` and `Receive_Move` | success and all | native and lightweight |
 
 The same programs cover cancellation, timeout, EOF, zero-length stream and
 datagram operations, datagram metadata and source selection, retained connect
@@ -1696,6 +1711,32 @@ descriptor-direction fan-out, failed success thresholds, terminal-before-gate
 construction, nested and fanned-out gates, stale and cross-set references,
 slot reuse, implicit finalization, initiation rollback, ascending stable
 batches, the 32-slot dependency-mask boundary, and one-shot `Finish` behavior.
+
+The final audit of the remaining blocking public primitives records these
+decisions. “Add later” means that the primitive has a terminal result that can
+compose usefully, but no operation-producing overload exists yet. Such an
+overload must use a real readiness, completion, or subscription protocol; it
+must not wrap the synchronous call inside `Drive`.
+
+| Remaining primitive | Decision | Reason |
+| --- | --- | --- |
+| high-level connection admission and TLS `Upgrade`/`Shutdown` | add later | Admission, handshake, and close-notify have useful terminal results and existing nonblocking readiness steps; the current high-level data operations already work after TLS upgrade. |
+| wall-clock `Wait_Until` and `Timer_Set.Wait_Next` | add later | Both return useful terminal observations. Their providers must retain the wall-clock source or the timer-set arm state instead of calling the synchronous waits from `Drive`; ordinary monotonic timer roots already compose today. |
+| cancellation-token `Await_Request` | add later | A token already has retained one-shot state and a readiness source, so a typed no-result operation can hide the descriptor adapter and compose directly with gates. |
+| DNS `Resolve` and `Resolve_Using` | add later | A resolver operation can compose its bounded UDP/TCP attempts and retain the address result; calling the synchronous resolver from a driver would nest waits. |
+| subprocess pipe I/O and `Wait` | add later | Pipe operations have descriptor readiness and the process owns a persistent exit wake source with a stable retained status. |
+| `Subprocesses.Capture.Run` | add later | Capture is a useful higher-level composite of stdin, stdout, stderr, and process-exit children; synchronous spawn remains an explicitly documented initiation cost. |
+| `Files.Transfers.Send_Chunk` | add later | The transfer naturally composes a file-read child with socket-send progress while retaining scratch-buffer ownership and one deadline. |
+| `Native_Executors.Await` | add later | Submission is already split phase; an adapter can subscribe to the accepted handle without adding a worker or stack. |
+| supervision `Wait_Termination` for exact child generations | add later | Static and dynamic supervisors retain generation-stamped terminal observations; a subscription operation would avoid polling without following replacements. |
+| buffer-pool and capacity-gate acquisition | add later | Acquisition has an atomic try/subscribe/recheck shape, and typed `Finish` can transfer the permit or buffer ownership. |
+| shared-memory Unix-socket handoff `Send`/`Receive` | add later | Descriptor transfer has a useful terminal result, but its dedicated-channel poison and ownership rules require purpose-built providers. |
+| `Task_Scopes.Join` | keep synchronous | Join is the structured lexical cleanup boundary. Individual retained task results already compose through `Task_Results.Wait`. |
+| capacity, channel, executor, and service-loop drain waits | keep synchronous | These are structured teardown boundaries. Compose the individual work and shutdown sources; do not race cleanup itself as an independently consumable result. |
+| structured-server `Serve`, connection-driver `Run`, and supervision service loops | keep synchronous | These calls own long-running service lifecycles rather than one independently consumable result. Compose their shutdown and retained results instead. |
+| legacy `Bounded_Channels` entries | keep synchronous | `Flyology.Channels.Bounded` is the operation-capable generic; duplicating the protocol in the older compatibility surface would add two ways to express the same channel. |
+| local timed data-structure retries and execution-group migration | keep synchronous | They are cooperative caller actions without a stable external completion source; turning them into immediate reschedule loops would not create useful concurrency. |
+| metadata and VM calls such as open, close, map, flush, spawn, and recursive `Refresh` | keep synchronous | They have no portable readiness completion source. Use an explicit native-task boundary when caller-lane occupation is unacceptable. |
 
 Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
 exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path

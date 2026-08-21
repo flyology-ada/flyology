@@ -190,7 +190,8 @@ package body Flyology.IO.File_Watches is
             Item.Outcome := Timed_Out;
             Flyology.Operations.Drivers.Complete
               (Item, Flyology.Operations.Succeeded);
-         when Flyology.Operations.Dependency_Changed =>
+         when Flyology.Operations.Dependency_Changed
+            | Flyology.Operations.Continue_Operation =>
             raise Program_Error with
               "watcher operation received a dependency event";
       end case;

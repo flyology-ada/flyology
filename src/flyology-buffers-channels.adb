@@ -744,7 +744,8 @@ package body Flyology.Buffers.Channels is
             if Result = Channel_Empty then
                Item.Failure := Timeout_Failure;
             end if;
-         when Flyology.Operations.Dependency_Changed =>
+         when Flyology.Operations.Dependency_Changed
+            | Flyology.Operations.Continue_Operation =>
             raise Program_Error with
               "buffer channel operation received a dependency event";
       end case;

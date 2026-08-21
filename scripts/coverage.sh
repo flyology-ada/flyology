@@ -113,6 +113,7 @@ observability_native_smoke
 observability_smoke
 operations_smoke
 operation_gates_smoke
+connection_operations_smoke
 buffer_channel_operations_smoke
 channel_operations_smoke
 priority_semantics_smoke

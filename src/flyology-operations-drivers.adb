@@ -41,8 +41,9 @@ package body Flyology.Operations.Drivers is
       end if;
       Slot.State := Idle;
       Slot.Source := No_Source;
-      Slot.Descriptor := -1;
-      Slot.For_Write := False;
+      Slot.Source_Count := 0;
+      Slot.Descriptors := (others => -1);
+      Slot.For_Write := (others => False);
       Slot.Deadline := Duration'Last;
       Slot.Has_Deadline := False;
       Slot.Result := Succeeded;
@@ -54,18 +55,42 @@ package body Flyology.Operations.Drivers is
       Descriptor : Interfaces.C.int;
       For_Write  : Boolean)
    is
-      Id : Operation_Id;
+      Sources : constant Readiness_Source_Array :=
+        (1 => (Descriptor => Descriptor, For_Write => For_Write));
    begin
-      if Descriptor < 0 then
-         raise Operation_Error with "invalid readiness descriptor";
+      Arm_Readiness (Item, Sources);
+   end Arm_Readiness;
+
+   procedure Arm_Readiness
+     (Item    : in out Operation'Class;
+      Sources : Readiness_Source_Array)
+   is
+      Id : Operation_Id;
+      Position : Natural := Readiness_Source_Index'First;
+   begin
+      if Sources'Length = 0
+        or else Sources'Length > Max_Readiness_Sources_Per_Operation
+      then
+         raise Operation_Error with "invalid readiness source count";
       end if;
+      for Source of Sources loop
+         if Source.Descriptor < 0 then
+            raise Operation_Error with "invalid readiness descriptor";
+         end if;
+      end loop;
       Id := Pending_Slot (Item);
       if Item.Set.Slots (Id).Source /= No_Source then
          raise Operation_Error with "operation already has an armed source";
       end if;
       Item.Set.Slots (Id).Source := Descriptor_Source;
-      Item.Set.Slots (Id).Descriptor := Descriptor;
-      Item.Set.Slots (Id).For_Write := For_Write;
+      Item.Set.Slots (Id).Source_Count := Sources'Length;
+      for Source of Sources loop
+         Item.Set.Slots (Id).Descriptors
+           (Readiness_Source_Index (Position)) := Source.Descriptor;
+         Item.Set.Slots (Id).For_Write
+           (Readiness_Source_Index (Position)) := Source.For_Write;
+         Position := Position + 1;
+      end loop;
    end Arm_Readiness;
 
    procedure Arm_Deadline
@@ -88,6 +113,15 @@ package body Flyology.Operations.Drivers is
       Item.Set.Slots (Id).Has_Deadline := False;
       Item.Set.Slots (Id).Deadline := Duration'Last;
    end Clear_Deadline;
+
+   procedure Reschedule (Item : in out Operation'Class) is
+      Id : constant Operation_Id := Pending_Slot (Item);
+   begin
+      if Item.Set.Slots (Id).Source /= No_Source then
+         raise Operation_Error with "operation already has an armed source";
+      end if;
+      Item.Set.Slots (Id).Source := Immediate_Source;
+   end Reschedule;
 
    procedure Completion_Source
      (Item              : in out Operation'Class;

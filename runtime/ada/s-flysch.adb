@@ -106,7 +106,9 @@ package body System.Flyology.Scheduler is
    --  when several tasks wait on the same descriptor and direction.
    IO_Bucket_Count : constant := 8_191;
    subtype IO_Bucket_Index is Natural range 0 .. IO_Bucket_Count - 1;
-   Max_IO_Link_Count : constant := 32;
+   --  One completion-set operation can arm a transport plus three lifecycle
+   --  interests. Keep parity with Flyology.IO.Max_Wait_Requests.
+   Max_IO_Link_Count : constant := 128;
    subtype IO_Link_Kind is Positive range 1 .. Max_IO_Link_Count;
    Primary_IO : constant IO_Link_Kind := 1;
 
@@ -1432,7 +1434,7 @@ package body System.Flyology.Scheduler is
       Previous : IO_Wait_Link_Access;
       Link     : IO_Wait_Link_Access;
       Cancellations : Pollers.Interest_Request_Array
-        (1 .. Max_IO_Link_Count);
+        (1 .. Item.Active_IO_Link_Count);
       Cancellation_Count : Natural := 0;
 
       function Already_Listed
@@ -3989,71 +3991,138 @@ package body System.Flyology.Scheduler is
       Interrupt_Wait      : C.int) return C.int
    is
       Group     : constant Loop_Group_Access := Thread_Group;
-      Item      : Fiber_Access;
       Whole     : C.long_long;
       Remainder : C.long_long;
       Timeout   : Duration;
-      Links     : aliased IO_Wait_Link_Array (1 .. Max_IO_Link_Count);
-      Kernel_Watches : Pollers.Interest_Request_Array
-        (1 .. Max_IO_Link_Count);
-      Kernel_Watch_Count : Natural := 0;
 
-      function Request_At (Index : Positive) return Runtime_Wait_Request;
-      function Plan_Arm (Index : Positive) return Boolean;
-      procedure Register_Arm (Index : Positive);
+      function Do_Wait (Actual_Count : IO_Link_Kind) return C.int;
 
-      function Request_At (Index : Positive) return Runtime_Wait_Request is
-         Bytes : constant SSE.Storage_Offset :=
-           SSE.Storage_Offset
-             ((Index - 1) *
-              (Runtime_Wait_Request_Array'Component_Size /
-               System.Storage_Unit));
+      function Do_Wait (Actual_Count : IO_Link_Kind) return C.int is
+         Item : Fiber_Access;
+         --  The suspended fiber owns exactly the links needed by this wait.
+         --  Raising the heterogeneous-set ceiling therefore does not charge
+         --  every ordinary one-descriptor wait for the maximum stack frame.
+         Links : aliased IO_Wait_Link_Array (1 .. Actual_Count);
+         Kernel_Watches : Pollers.Interest_Request_Array
+           (1 .. Actual_Count);
+         Kernel_Watch_Count : Natural := 0;
+
+         function Request_At (Index : Positive) return Runtime_Wait_Request;
+         function Plan_Arm (Index : Positive) return Boolean;
+         procedure Register_Arm (Index : Positive);
+
+         function Request_At (Index : Positive) return Runtime_Wait_Request is
+            Bytes : constant SSE.Storage_Offset :=
+              SSE.Storage_Offset
+                ((Index - 1) *
+                 (Runtime_Wait_Request_Array'Component_Size /
+                  System.Storage_Unit));
+         begin
+            return Wait_Request_Conversions.To_Pointer (Requests + Bytes).all;
+         end Request_At;
+
+         function Plan_Arm (Index : Positive) return Boolean is
+            Request : constant Runtime_Wait_Request := Request_At (Index);
+            Interest : constant Pollers.Interest :=
+              (if Request.For_Write = 0
+               then Pollers.Readable else Pollers.Writable);
+            Needs_Kernel_Watch : Boolean;
+         begin
+            if Request.Descriptor < 0
+              or else Request.For_Write not in 0 | 1
+            then
+               return False;
+            end if;
+            Needs_Kernel_Watch := not IO_Interest_Registered_Locked
+              (Group, Request.Descriptor, Interest);
+            if Needs_Kernel_Watch then
+               for Planned in 1 .. Kernel_Watch_Count loop
+                  if Kernel_Watches (Planned).Descriptor = Request.Descriptor
+                    and then Kernel_Watches (Planned).Condition = Interest
+                  then
+                     Needs_Kernel_Watch := False;
+                     exit;
+                  end if;
+               end loop;
+            end if;
+            if Needs_Kernel_Watch then
+               Kernel_Watch_Count := Kernel_Watch_Count + 1;
+               Kernel_Watches (Kernel_Watch_Count) :=
+                 (Descriptor => Request.Descriptor, Condition => Interest);
+            end if;
+            return True;
+         end Plan_Arm;
+
+         procedure Register_Arm (Index : Positive) is
+            Request : constant Runtime_Wait_Request := Request_At (Index);
+            Interest : constant Pollers.Interest :=
+              (if Request.For_Write = 0
+               then Pollers.Readable else Pollers.Writable);
+         begin
+            Register_IO_Wait_Locked
+              (Group, Item, Request.Descriptor, Interest,
+               IO_Link_Kind (Index), C.int (Index));
+         end Register_Arm;
       begin
-         return Wait_Request_Conversions.To_Pointer (Requests + Bytes).all;
-      end Request_At;
+         Lock_Group (Group);
+         Item := Group.Current_Fiber;
+         Item.Active_IO_Links := Links (1)'Unchecked_Access;
+         Item.Active_IO_Link_Count := Natural (Actual_Count);
+         Item.Deadline :=
+           (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
+         Item.Timed_Out := False;
+         Item.IO_Result := 0;
+         Item.IO_Interrupt_Wait := Interrupt_Wait /= 0;
+         Item.State := Waiting;
+         if not Register_Timer_Locked (Group, Item) then
+            Item.State := Running;
+            Item.Deadline := No_Deadline;
+            Item.Active_IO_Links := null;
+            Item.Active_IO_Link_Count := 0;
+            Unlock_Group (Group);
+            return -1;
+         end if;
 
-      function Plan_Arm (Index : Positive) return Boolean is
-         Request : constant Runtime_Wait_Request := Request_At (Index);
-         Interest : constant Pollers.Interest :=
-           (if Request.For_Write = 0
-            then Pollers.Readable else Pollers.Writable);
-         Needs_Kernel_Watch : Boolean;
-      begin
-         if Request.Descriptor < 0
-           or else Request.For_Write not in 0 | 1
+         --  Reverse registration preserves the public rule that the lowest
+         --  request index wins when duplicates become ready together.
+         for Index in reverse 1 .. Positive (Actual_Count) loop
+            if not Plan_Arm (Index) then
+               Remove_Timer_Locked (Group, Item);
+               Item.State := Running;
+               Item.Active_IO_Links := null;
+               Item.Active_IO_Link_Count := 0;
+               Unlock_Group (Group);
+               return -1;
+            end if;
+         end loop;
+         if Kernel_Watch_Count > 0
+           and then not Pollers.Watch_Many
+             (Group.Scheduler_Poller,
+              Kernel_Watches (1 .. Kernel_Watch_Count))
          then
-            return False;
+            if not Pollers.Cancel_Many
+              (Group.Scheduler_Poller,
+               Kernel_Watches (1 .. Kernel_Watch_Count))
+            then
+               Fatal (Poller_Failure);
+            end if;
+            Remove_Timer_Locked (Group, Item);
+            Item.State := Running;
+            Item.Active_IO_Links := null;
+            Item.Active_IO_Link_Count := 0;
+            Unlock_Group (Group);
+            return -1;
          end if;
-         Needs_Kernel_Watch := not IO_Interest_Registered_Locked
-           (Group, Request.Descriptor, Interest);
-         if Needs_Kernel_Watch then
-            for Planned in 1 .. Kernel_Watch_Count loop
-               if Kernel_Watches (Planned).Descriptor = Request.Descriptor
-                 and then Kernel_Watches (Planned).Condition = Interest
-               then
-                  Needs_Kernel_Watch := False;
-                  exit;
-               end if;
-            end loop;
-         end if;
-         if Needs_Kernel_Watch then
-            Kernel_Watch_Count := Kernel_Watch_Count + 1;
-            Kernel_Watches (Kernel_Watch_Count) :=
-              (Descriptor => Request.Descriptor, Condition => Interest);
-         end if;
-         return True;
-      end Plan_Arm;
+         for Index in reverse 1 .. Positive (Actual_Count) loop
+            Register_Arm (Index);
+         end loop;
 
-      procedure Register_Arm (Index : Positive) is
-         Request : constant Runtime_Wait_Request := Request_At (Index);
-         Interest : constant Pollers.Interest :=
-           (if Request.For_Write = 0
-            then Pollers.Readable else Pollers.Writable);
-      begin
-         Register_IO_Wait_Locked
-           (Group, Item, Request.Descriptor, Interest,
-            IO_Link_Kind (Index), C.int (Index));
-      end Register_Arm;
+         Item.Enqueue_At_Head := False;
+         Contexts.Switch (Item.Context, Group.Scheduler_Context);
+         Item.Active_IO_Links := null;
+         Item.Active_IO_Link_Count := 0;
+         return Item.IO_Result;
+      end Do_Wait;
    begin
       --  Current_Fiber belongs exclusively to this event thread until the
       --  locked state transition below.
@@ -4076,64 +4145,7 @@ package body System.Flyology.Scheduler is
            + Duration (Remainder) / 1_000_000_000;
       end if;
 
-      Lock_Group (Group);
-      Item := Group.Current_Fiber;
-      Item.Active_IO_Links := Links (1)'Unchecked_Access;
-      Item.Active_IO_Link_Count := Natural (Count);
-      Item.Deadline :=
-        (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
-      Item.Timed_Out := False;
-      Item.IO_Result := 0;
-      Item.IO_Interrupt_Wait := Interrupt_Wait /= 0;
-      Item.State := Waiting;
-      if not Register_Timer_Locked (Group, Item) then
-         Item.State := Running;
-         Item.Deadline := No_Deadline;
-         Item.Active_IO_Links := null;
-         Item.Active_IO_Link_Count := 0;
-         Unlock_Group (Group);
-         return -1;
-      end if;
-
-      --  Reverse registration preserves the public rule that the lowest
-      --  request index wins when duplicate descriptors become ready together.
-      for Index in reverse 1 .. Positive (Count) loop
-         if not Plan_Arm (Index) then
-            Remove_Timer_Locked (Group, Item);
-            Item.State := Running;
-            Item.Active_IO_Links := null;
-            Item.Active_IO_Link_Count := 0;
-            Unlock_Group (Group);
-            return -1;
-         end if;
-      end loop;
-      if Kernel_Watch_Count > 0
-        and then not Pollers.Watch_Many
-          (Group.Scheduler_Poller,
-           Kernel_Watches (1 .. Kernel_Watch_Count))
-      then
-         if not Pollers.Cancel_Many
-           (Group.Scheduler_Poller,
-            Kernel_Watches (1 .. Kernel_Watch_Count))
-         then
-            Fatal (Poller_Failure);
-         end if;
-         Remove_Timer_Locked (Group, Item);
-         Item.State := Running;
-         Item.Active_IO_Links := null;
-         Item.Active_IO_Link_Count := 0;
-         Unlock_Group (Group);
-         return -1;
-      end if;
-      for Index in reverse 1 .. Positive (Count) loop
-         Register_Arm (Index);
-      end loop;
-
-      Item.Enqueue_At_Head := False;
-      Contexts.Switch (Item.Context, Group.Scheduler_Context);
-      Item.Active_IO_Links := null;
-      Item.Active_IO_Link_Count := 0;
-      return Item.IO_Result;
+      return Do_Wait (IO_Link_Kind (Count));
    end Wait_IO_Many;
 
    function File_Operation

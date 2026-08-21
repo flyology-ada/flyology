@@ -326,6 +326,7 @@ connection_close_abort_smoke
 connection_driver_smoke
 connection_driver_tls_smoke
 connection_lifecycle_smoke
+connection_operations_smoke
 connection_state_model
 connection_tls_upgrade_smoke
 concurrency_primitives_smoke

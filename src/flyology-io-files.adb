@@ -307,7 +307,8 @@ package body Flyology.IO.Files is
             else
                Publish_File_Terminal (Item);
             end if;
-         when Flyology.Operations.Dependency_Changed =>
+         when Flyology.Operations.Dependency_Changed
+            | Flyology.Operations.Continue_Operation =>
             raise Program_Error with
               "file operation received a dependency event";
       end case;
