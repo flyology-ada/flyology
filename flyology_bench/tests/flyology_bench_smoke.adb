@@ -247,6 +247,8 @@ procedure Flyology_Bench_Smoke is
       Shootout_Scheduling => Flyology_Bench.Balanced_Rounds,
       Subtract_Timer_Cost => False,
       Practical_Threshold_Percent => 1.0,
+      Confidence_Level_Percent => 90.0,
+      Bootstrap_Resamples => 200,
       Random_Seed         => 42,
       Metrics             =>
         Flyology_Bench.Process_Resource_Metrics or
@@ -372,6 +374,38 @@ procedure Flyology_Bench_Smoke is
       end if;
    end Stop_Foreign_Load;
 begin
+   Check
+     (Flyology_Bench.Default_Configuration.Confidence_Level_Percent = 95.0
+      and then Flyology_Bench.Default_Configuration.Bootstrap_Resamples
+        = 2_000,
+      "default statistical settings changed");
+   declare
+      Too_Low : Long_Float := 49.9 with Volatile;
+      Too_Many : Positive := 100_001 with Volatile;
+   begin
+      begin
+         declare
+            Rejected : constant Flyology_Bench.Confidence_Percentage :=
+              Flyology_Bench.Confidence_Percentage (Too_Low);
+            pragma Unreferenced (Rejected);
+         begin
+            raise Program_Error with "confidence bound was not enforced";
+         end;
+      exception
+         when Constraint_Error => null;
+      end;
+      begin
+         declare
+            Rejected : constant Flyology_Bench.Bootstrap_Resample_Count :=
+              Flyology_Bench.Bootstrap_Resample_Count (Too_Many);
+            pragma Unreferenced (Rejected);
+         begin
+            raise Program_Error with "resample bound was not enforced";
+         end;
+      exception
+         when Constraint_Error => null;
+      end;
+   end;
    Operation_Benchmark
      ((Config with delta
         CPU_Quiescence =>
@@ -454,6 +488,10 @@ begin
       and then Flyology_Bench.Mean_Nanoseconds (First)
         <= Flyology_Bench.Mean_Confidence_High_Nanoseconds (First),
       "mean lies outside its bootstrap interval");
+   Check
+     (Flyology_Bench.Confidence_Level_Percent (First) = 90.0
+      and then Flyology_Bench.Bootstrap_Resamples (First) = 200,
+      "measurement did not retain its statistical settings");
    Check
      (Flyology_Bench.Metric_Available
         (First, Flyology_Bench.Process_CPU_Time)
@@ -606,6 +644,10 @@ begin
         <= Flyology_Bench.Speedup_Confidence_High (Compared),
       "comparison returned an invalid speedup interval");
    Check
+     (Flyology_Bench.Confidence_Level_Percent (Compared) = 90.0
+      and then Flyology_Bench.Bootstrap_Resamples (Compared) = 200,
+      "comparison did not retain its statistical settings");
+   Check
      (Flyology_Bench.Relative_Time_Change_Confidence_Low (Compared)
         <= Flyology_Bench.Relative_Time_Change_Confidence_High (Compared),
       "comparison returned an invalid relative-change interval");
@@ -694,7 +736,9 @@ begin
         Flyology_Bench.Baselines.Load (Baseline_Path);
       Regression : constant Flyology_Bench.Baselines.Regression :=
         Flyology_Bench.Baselines.Compare
-          (Saved, First, Fingerprint => "smoke-host");
+          (Saved, First, Fingerprint => "smoke-host",
+           Confidence_Level_Percent => 80.0,
+           Bootstrap_Resamples => 150);
       Incompatible : constant Flyology_Bench.Baselines.Regression :=
         Flyology_Bench.Baselines.Compare
           (Saved, First, Fingerprint => "different-host");

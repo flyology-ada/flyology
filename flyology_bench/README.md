@@ -23,7 +23,8 @@ The initial API provides:
 - raw per-operation samples;
 - minimum, median, mean, p95, p99, maximum, standard deviation, median absolute
   deviation, and coefficient of variation;
-- deterministic circular-block bootstrap 95% confidence intervals;
+- deterministic circular-block bootstrap confidence intervals with bounded,
+  configurable coverage and resample count;
 - Tukey mild and severe outlier diagnostics without silently dropping samples;
 - optional measured timestamp-cost subtraction, disabled by default;
 - persisted raw-sample baselines with compatibility fingerprints;
@@ -243,6 +244,14 @@ reports lag-one correlation and the difference between reference-first and
 contender-first ratio groups. These diagnostics flag drift; they do not prove a
 particular physical cause.
 
+`Confidence_Level_Percent` defaults to 95.0 and accepts 50.0 through 99.9.
+`Bootstrap_Resamples` defaults to 2,000 and accepts 100 through 100,000. Both
+are fields of the runner and recording configurations; recorded independent
+comparisons and saved-baseline comparisons accept the same bounded settings as
+parameters. A wider interval or more resamples increases analysis work but
+does not collect additional workload samples. Results retain the settings, and
+console, CSV, and JSON reporters identify them alongside each interval.
+
 `Practical_Threshold_Percent` defaults to one percent. A verdict is
 `Contender_Faster` or `Reference_Faster` only when the entire confidence
 interval clears that threshold. It is `Practically_Equivalent` only when the
@@ -437,10 +446,11 @@ phase changes; they are not permission to discard inconvenient runs.
 
 `Configuration` carries its own rules rather than checking them on entry to a
 run. Fields whose meaning excludes a value use a subtype that excludes it:
-`Nonnegative_Duration`, `Positive_Duration`, `Percentage`, and
-`Threshold_Percentage`, which excludes 100 percent. A literal outside a bound
-is a compile-time diagnostic; a computed one raises `Constraint_Error` at the
-assignment or aggregate that produced it, naming the offending line.
+`Nonnegative_Duration`, `Positive_Duration`, `Percentage`,
+`Threshold_Percentage`, which excludes 100 percent,
+`Confidence_Percentage`, and `Bootstrap_Resample_Count`. A literal outside a
+bound is a compile-time diagnostic; a computed one raises `Constraint_Error`
+at the assignment or aggregate that produced it, naming the offending line.
 
 Each optional policy takes its `Enabled` flag, and `Interference` also its
 `Response`, as a discriminant, so a policy's settings exist only while they
@@ -711,12 +721,14 @@ FLYOLOGY_BENCH_OUTPUT=csv examples/bin/basic
 FLYOLOGY_BENCH_OUTPUT=json examples/bin/basic
 ```
 
-The original CSV reporters retain their stable latency schemas. The long-form
-`Put_Metrics_CSV` and `Put_Comparison_Metrics_CSV` reporters emit one row per
-axis, including availability status and failure reasons. The multi-way
-long-form reporter emits
-those rows for every contender. JSON measurement, comparison, and multi-way
-objects include metric arrays alongside environment, clock, and latency data.
+CSV summary and long-form schemas include `confidence_level_percent` and
+`bootstrap_resamples`; interval columns use generic `ci_low`/`ci_high` names
+because coverage is configurable. `Put_Metrics_CSV` and
+`Put_Comparison_Metrics_CSV` emit one row per axis, including availability
+status and failure reasons. The multi-way long-form reporter emits those rows
+for every contender. JSON measurement, comparison, multi-way, and recording
+objects include a `statistics` object alongside their metric, environment,
+clock, and latency data.
 
 ## Build and test
 

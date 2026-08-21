@@ -224,6 +224,11 @@ package body Flyology_Bench.Recording.Reporters is
          & " wall time    individual spans, independent sampling");
       Ada.Text_IO.Put_Line
         (File,
+         "statistics  | " & Image (Confidence_Level_Percent (Result))
+         & "% confidence    " & Natural_Image (Bootstrap_Resamples (Result))
+         & " bootstrap resamples");
+      Ada.Text_IO.Put_Line
+        (File,
          "observed    | " & Natural_Image (Observed (Result))
          & " finished    " & Natural_Image (Retained (Result))
          & " retained    " & Natural_Image (Dropped (Result)) & " omitted");
@@ -287,7 +292,8 @@ package body Flyology_Bench.Recording.Reporters is
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
       Ada.Text_IO.Put_Line
-        (File, "name,sample_semantics,axis,scope,attribution,unit,status,"
+        (File, "name,sample_semantics,confidence_level_percent,"
+         & "bootstrap_resamples,axis,scope,attribution,unit,status,"
          & "samples,unavailable_samples,scope_changed,min,median,mean,ci_low,"
          & "ci_high,p95,p99,max,"
          & "observed,retained,dropped,in_flight,abandoned,success,failure,"
@@ -315,6 +321,8 @@ package body Flyology_Bench.Recording.Reporters is
             begin
                Ada.Text_IO.Put_Line
                  (File, CSV_String (Name (Result)) & ",individual_span,"
+                  & Image (Confidence_Level_Percent (Result)) & ","
+                  & Natural_Image (Bootstrap_Resamples (Result)) & ","
                   & CSV_String (Metric_Name (Axis)) & ","
                   & CSV_String (Scope_Name (Scope (Axis))) & ","
                   & CSV_String (Attribution_Name (Attribution (Result, Axis)))
@@ -388,6 +396,11 @@ package body Flyology_Bench.Recording.Reporters is
          & ",""sample_semantics"":""individual_span"""
          & ",""observed"":" & Natural_Image (Observed (Result))
          & ",""retained"":" & Natural_Image (Retained (Result))
+         & ",""statistics"":{""confidence_level_percent"":"
+         & Image (Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":"
+         & Natural_Image (Bootstrap_Resamples (Result))
+         & ",""bootstrap"":""independent""}"
          & ",""dropped"":" & Natural_Image (Dropped (Result))
          & ",""in_flight"":" & Natural_Image (In_Flight (Result))
          & ",""abandoned"":" & Natural_Image (Abandoned (Result))
@@ -494,6 +507,10 @@ package body Flyology_Bench.Recording.Reporters is
       Ada.Text_IO.Put_Line
         (File, "-- independent comparison: " & Reference_Name (Result)
          & " vs " & Contender_Name (Result) & " --");
+      Ada.Text_IO.Put_Line
+        (File, Image (Confidence_Level_Percent (Result)) & "% confidence,"
+         & Natural_Image (Bootstrap_Resamples (Result))
+         & " bootstrap resamples");
       if Wall_Comparison_Available (Result) then
          Ada.Text_IO.Put_Line
            (File, "speedup  " & Image (Speedup (Result)) & "x  ["
@@ -543,7 +560,8 @@ package body Flyology_Bench.Recording.Reporters is
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
       Ada.Text_IO.Put_Line
-        (File, "reference,contender,comparison_design,axis,unit,"
+        (File, "reference,contender,comparison_design,"
+         & "confidence_level_percent,bootstrap_resamples,axis,unit,"
          & "reference_status,contender_status,available,method,"
          & "reference_median,contender_median,change,ci_low,ci_high,verdict");
    end Put_Comparison_CSV_Header;
@@ -567,6 +585,8 @@ package body Flyology_Bench.Recording.Reporters is
                Ada.Text_IO.Put_Line
                  (File, CSV_String (Reference_Name (Result)) & ","
                   & CSV_String (Contender_Name (Result)) & ",independent,"
+                  & Image (Confidence_Level_Percent (Result)) & ","
+                  & Natural_Image (Bootstrap_Resamples (Result)) & ","
                   & CSV_String (Metric_Name (Axis)) & ","
                   & CSV_String (Metric_Unit (Axis)) & ","
                   & Metric_Status_Name (Reference_Status) & ","
@@ -596,6 +616,11 @@ package body Flyology_Bench.Recording.Reporters is
         (File, "{""reference"":" & JSON_String (Reference_Name (Result))
          & ",""contender"":" & JSON_String (Contender_Name (Result))
          & ",""comparison_design"":""independent"""
+         & ",""statistics"":{""confidence_level_percent"":"
+         & Image (Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":"
+         & Natural_Image (Bootstrap_Resamples (Result))
+         & ",""bootstrap"":""independent""}"
          & ",""wall_comparison_available"":"
          & Boolean_Image (Wall_Comparison_Available (Result))
          & ",""speedup"":"

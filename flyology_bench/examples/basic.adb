@@ -281,6 +281,8 @@ procedure Basic is
       Shootout_Scheduling          => Flyology_Bench.Balanced_Rounds,
       Subtract_Timer_Cost          => False,
       Practical_Threshold_Percent => 1.0,
+      Confidence_Level_Percent     => 95.0,
+      Bootstrap_Resamples          => 2_000,
       Random_Seed                  => 42,
       Metrics                      => Selected_Metrics,
       Scheduler_Probe              => null,

@@ -39,6 +39,15 @@ package Flyology_Bench is
    --  Number of independently timed samples collected for one measurement.
    subtype Sample_Count is Positive range 10 .. 1_000;
 
+   --  Central coverage of a two-sided bootstrap confidence interval, in
+   --  percent. The bounds exclude intervals too narrow to be useful and the
+   --  unattainable 100-percent interval.
+   subtype Confidence_Percentage is Long_Float range 50.0 .. 99.9;
+
+   --  Number of bootstrap distributions drawn for each reported interval.
+   --  The upper bound keeps analysis time and temporary storage bounded.
+   subtype Bootstrap_Resample_Count is Positive range 100 .. 100_000;
+
    --  Index into the raw samples retained by a measurement.
    subtype Sample_Index is Positive range 1 .. Sample_Count'Last;
 
@@ -609,6 +618,10 @@ package Flyology_Bench is
    --  cost once from every timed sample.
    --  @field Practical_Threshold_Percent Smallest relative time change treated
    --  as practically meaningful by paired-comparison verdicts.
+   --  @field Confidence_Level_Percent Central coverage of every bootstrap
+   --  confidence interval, in percent.
+   --  @field Bootstrap_Resamples Number of bootstrap distributions drawn for
+   --  every analyzed measurement or comparison axis.
    --  @field Random_Seed Seed used for order shuffling and bootstrap sampling.
    --  @field Metrics Axes retained and compared around each timed batch.
    --  @field Scheduler_Probe Optional source of cumulative Flyology scheduler
@@ -638,6 +651,8 @@ package Flyology_Bench is
       Shootout_Scheduling  : Shootout_Schedule_Policy := Balanced_Rounds;
       Subtract_Timer_Cost  : Boolean := False;
       Practical_Threshold_Percent : Threshold_Percentage := 1.0;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples  : Bootstrap_Resample_Count := 2_000;
       Random_Seed          : Long_Long_Integer := 1;
       Metrics              : Metric_Set := Time_Metrics;
       Scheduler_Probe      : Flyology_Scheduler_Probe := null;
@@ -887,6 +902,18 @@ package Flyology_Bench is
    function Mean_Confidence_High_Nanoseconds
      (Result : Measurement) return Long_Float;
 
+   --  Return the confidence level used to analyze this measurement.
+   --  @param Result Completed measurement.
+   --  @return Central bootstrap interval coverage in percent.
+   function Confidence_Level_Percent
+     (Result : Measurement) return Confidence_Percentage;
+
+   --  Return the bootstrap resample count used to analyze this measurement.
+   --  @param Result Completed measurement.
+   --  @return Number of bootstrap distributions drawn per interval.
+   function Bootstrap_Resamples
+     (Result : Measurement) return Bootstrap_Resample_Count;
+
    --  Return sample dispersion relative to the arithmetic mean.
    --  @param Result Completed measurement.
    --  @return Sample standard deviation as a percentage of the mean.
@@ -1005,6 +1032,18 @@ package Flyology_Bench is
    --  @param Result Completed comparison.
    --  @return Contender-side measurement using the shared sample schedule.
    function Contender_Measurement (Result : Comparison) return Measurement;
+
+   --  Return the confidence level used to analyze this comparison.
+   --  @param Result Completed comparison.
+   --  @return Central bootstrap interval coverage in percent.
+   function Confidence_Level_Percent
+     (Result : Comparison) return Confidence_Percentage;
+
+   --  Return the bootstrap resample count used to analyze this comparison.
+   --  @param Result Completed comparison.
+   --  @return Number of bootstrap distributions drawn per interval.
+   function Bootstrap_Resamples
+     (Result : Comparison) return Bootstrap_Resample_Count;
 
    --  Return the geometric mean paired speedup. A value greater than one means
    --  the contender is faster.
@@ -1236,6 +1275,8 @@ private
       CV_Percent         : Long_Float := 0.0;
       Outlier_Total      : Outlier_Counts;
       Lag_One            : Long_Float := 0.0;
+      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
       Random_Seed_Value  : Long_Long_Integer := 1;
       Telemetry_Available : Boolean := False;
       Telemetry_CPU       : Sample_Array (Sample_Index'Range) :=

@@ -18,9 +18,11 @@ package body Flyology_Bench is
 
    use type Interfaces.Unsigned_64;
 
-   Bootstrap_Resamples : constant := 2_000;
-
    type Float_Array is array (Positive range <>) of Long_Float;
+
+   function Lower_Tail
+     (Confidence : Confidence_Percentage) return Long_Float is
+     ((100.0 - Long_Float (Confidence)) / 200.0);
 
    procedure Free_Metric_Store is new Ada.Unchecked_Deallocation
      (Metric_Store, Metric_Store_Access);
@@ -1522,7 +1524,7 @@ package body Flyology_Bench is
       end loop;
 
       declare
-         Means : Float_Array (1 .. Bootstrap_Resamples);
+         Means : Float_Array (1 .. Result.Bootstrap_Resample_Total);
          State : Interfaces.Unsigned_64 :=
            16#9E37_79B9_7F4A_7C15# xor
            Interfaces.Unsigned_64 (Result.Random_Seed_Value);
@@ -1560,8 +1562,11 @@ package body Flyology_Bench is
             Means (Resample) := Sum / Long_Float (Count);
          end loop;
          Sort (Means);
-         Result.Confidence_Low := Percentile (Means, 0.025);
-         Result.Confidence_High := Percentile (Means, 0.975);
+         Result.Confidence_Low :=
+           Percentile (Means, Lower_Tail (Result.Confidence_Level_Value));
+         Result.Confidence_High :=
+           Percentile
+             (Means, 1.0 - Lower_Tail (Result.Confidence_Level_Value));
       end;
    end Analyze;
 
@@ -1577,7 +1582,7 @@ package body Flyology_Bench is
             declare
                Count   : constant Positive := Positive (Result.Sample_Total);
                Ordered : Float_Array (1 .. Count);
-               Means   : Float_Array (1 .. Bootstrap_Resamples);
+               Means   : Float_Array (1 .. Result.Bootstrap_Resample_Total);
                Sum     : Long_Float := 0.0;
                State   : Interfaces.Unsigned_64 :=
                  16#243F_6A88_85A3_08D3# xor
@@ -1633,8 +1638,13 @@ package body Flyology_Bench is
                   Means (Resample) := Sum / Long_Float (Count);
                end loop;
                Sort (Means);
-               Summary.Confidence_Low := Percentile (Means, 0.025);
-               Summary.Confidence_High := Percentile (Means, 0.975);
+               Summary.Confidence_Low :=
+                 Percentile
+                   (Means, Lower_Tail (Result.Confidence_Level_Value));
+               Summary.Confidence_High :=
+                 Percentile
+                   (Means,
+                    1.0 - Lower_Tail (Result.Confidence_Level_Value));
                Result.Metric_Data.Data.Summaries (Axis) := Summary;
             end;
          end if;
@@ -1655,7 +1665,8 @@ package body Flyology_Bench is
          then
             declare
                Samples : Float_Array (1 .. Count);
-               Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+               Bootstrap : Float_Array
+                 (1 .. Result.Reference_Data.Bootstrap_Resample_Total);
                Positive_Only : Boolean := True;
                Sum : Long_Float := 0.0;
                State : Interfaces.Unsigned_64 :=
@@ -1737,8 +1748,16 @@ package body Flyology_Bench is
                   end if;
                end loop;
                Sort (Bootstrap);
-               Item.Confidence_Low := Percentile (Bootstrap, 0.025);
-               Item.Confidence_High := Percentile (Bootstrap, 0.975);
+               Item.Confidence_Low :=
+                 Percentile
+                   (Bootstrap,
+                    Lower_Tail
+                      (Result.Reference_Data.Confidence_Level_Value));
+               Item.Confidence_High :=
+                 Percentile
+                   (Bootstrap,
+                    1.0 - Lower_Tail
+                      (Result.Reference_Data.Confidence_Level_Value));
 
                if Direction (Axis) = Diagnostic then
                   Item.Verdict := Metric_Diagnostic;
@@ -1892,7 +1911,8 @@ package body Flyology_Bench is
       end if;
 
       declare
-         Bootstrap_Speedups : Float_Array (1 .. Bootstrap_Resamples);
+         Bootstrap_Speedups : Float_Array
+           (1 .. Result.Reference_Data.Bootstrap_Resample_Total);
          State : Interfaces.Unsigned_64 :=
            16#D1B5_4A32_D192_ED03# xor
            Interfaces.Unsigned_64 (Result.Random_Seed_Value);
@@ -1931,9 +1951,14 @@ package body Flyology_Bench is
          end loop;
          Sort (Bootstrap_Speedups);
          Result.Speedup_CI_Low :=
-           Percentile (Bootstrap_Speedups, 0.025);
+           Percentile
+             (Bootstrap_Speedups,
+              Lower_Tail (Result.Reference_Data.Confidence_Level_Value));
          Result.Speedup_CI_High :=
-           Percentile (Bootstrap_Speedups, 0.975);
+           Percentile
+             (Bootstrap_Speedups,
+              1.0 - Lower_Tail
+                (Result.Reference_Data.Confidence_Level_Value));
       end;
 
       declare
@@ -2058,6 +2083,8 @@ package body Flyology_Bench is
    begin
       Result := (others => <>);
       Result.Sample_Total := Config.Samples;
+      Result.Confidence_Level_Value := Config.Confidence_Level_Percent;
+      Result.Bootstrap_Resample_Total := Config.Bootstrap_Resamples;
       Result.Random_Seed_Value := Config.Random_Seed;
       Initialize_Metrics (Config, Result);
       Notify (Config, Starting);
@@ -2364,6 +2391,14 @@ package body Flyology_Bench is
       Await_CPU_Quiescence (Config);
       Result.Reference_Data.Sample_Total := Config.Samples;
       Result.Contender_Data.Sample_Total := Config.Samples;
+      Result.Reference_Data.Confidence_Level_Value :=
+        Config.Confidence_Level_Percent;
+      Result.Contender_Data.Confidence_Level_Value :=
+        Config.Confidence_Level_Percent;
+      Result.Reference_Data.Bootstrap_Resample_Total :=
+        Config.Bootstrap_Resamples;
+      Result.Contender_Data.Bootstrap_Resample_Total :=
+        Config.Bootstrap_Resamples;
       Result.Reference_Data.Random_Seed_Value := Config.Random_Seed;
       Result.Contender_Data.Random_Seed_Value := Config.Random_Seed;
       Initialize_Metrics (Config, Result.Reference_Data);
@@ -2966,6 +3001,10 @@ package body Flyology_Bench is
       for Index in 1 .. Count loop
          Result.Data (Comparison_Case_Index (Index)).Sample_Total :=
            Config.Samples;
+         Result.Data (Comparison_Case_Index (Index)).Confidence_Level_Value :=
+           Config.Confidence_Level_Percent;
+         Result.Data (Comparison_Case_Index (Index)).Bootstrap_Resample_Total :=
+           Config.Bootstrap_Resamples;
          Result.Data (Comparison_Case_Index (Index)).Random_Seed_Value :=
            Config.Random_Seed;
          Initialize_Metrics
@@ -3453,6 +3492,14 @@ package body Flyology_Bench is
    function Mean_Confidence_High_Nanoseconds
      (Result : Measurement) return Long_Float is (Result.Confidence_High);
 
+   function Confidence_Level_Percent
+     (Result : Measurement) return Confidence_Percentage is
+     (Result.Confidence_Level_Value);
+
+   function Bootstrap_Resamples
+     (Result : Measurement) return Bootstrap_Resample_Count is
+     (Result.Bootstrap_Resample_Total);
+
    function Coefficient_Of_Variation_Percent
      (Result : Measurement) return Long_Float is (Result.CV_Percent);
 
@@ -3641,6 +3688,14 @@ package body Flyology_Bench is
 
    function Contender_Measurement (Result : Comparison) return Measurement is
      (Result.Contender_Data);
+
+   function Confidence_Level_Percent
+     (Result : Comparison) return Confidence_Percentage is
+     (Result.Reference_Data.Confidence_Level_Value);
+
+   function Bootstrap_Resamples
+     (Result : Comparison) return Bootstrap_Resample_Count is
+     (Result.Reference_Data.Bootstrap_Resample_Total);
 
    function Geometric_Mean_Speedup (Result : Comparison) return Long_Float is
      (Result.Geometric_Speedup);
