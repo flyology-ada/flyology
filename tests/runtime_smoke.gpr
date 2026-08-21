@@ -47,6 +47,7 @@ project Runtime_Smoke is
    for Main use
      ("accept_transient_smoke.adb",
       "buffer_channel_cancel_smoke.adb",
+      "buffer_channel_operations_smoke.adb",
       "buffers_smoke.adb",
       "cancellation_wake_smoke.adb",
       "channel_reentrancy_child.adb",

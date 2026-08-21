@@ -158,7 +158,13 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   intrusive and address-bucketed per generic instance; the protected channel
   API exposes no separate arm hook. A pending send owns its copied element,
   while a successful receive retains its element until typed `Finish`.
-  successful scoped accept owns the accepted descriptor until typed `Finish`
+  `Flyology.Buffers.Channels` follows the same subscribe/recheck protocol with
+  ownership-transferring `Send_Move` and `Receive_Move` operations. A pending
+  send owns its moved buffer; failure or cancellation returns it through typed
+  `Finish`. A successful receive owns its dequeued buffer until typed `Finish`
+  moves it into a vacant same-pool handle. The pool and controlled channel must
+  outlive every associated operation.
+  A successful scoped accept owns the accepted descriptor until typed `Finish`
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
   truncation, and ECN metadata until typed `Finish`; an empty array still

@@ -1301,7 +1301,7 @@ the pool block under the same completion and cancellation rules as an ordinary
 that a socket backend also avoids the kernel's network copy.
 
 `Flyology.Buffers.Channels.Channel` is a fixed-capacity MPMC FIFO specialized
-for these handles. Its protected storage contains only scalar ownership tokens,
+for these handles. Its protected storage contains only fixed ownership records,
 not payloads. Successful `Send_Move` leaves the sender vacant. A full, timed
 out, closed, or aborted send restores ownership to the sender; a channel being
 finalized returns undelivered buffers to its pool. Close-and-drain behavior
@@ -1310,6 +1310,15 @@ atomically with the token and remains separate from the buffer's application
 tag. `Transfer_Metadata` is a distinct 64-bit modular type so it cannot mix
 implicitly with unrelated integers. Each consumer owns its encoding and
 validation; `No_Metadata` is the default zero value, not a presence marker.
+
+The channel also provides operation-producing `Send_Move` and `Receive_Move`
+overloads. Starting a scoped send moves the buffer into the operation. Success
+moves it onward to the channel, so typed `Finish` leaves the caller's handle
+vacant; timeout, close, cancellation, or driver failure moves it back before
+raising. A scoped receive takes no destination while pending. Once it succeeds,
+the operation owns the dequeued buffer and typed `Finish` moves it into a vacant
+same-pool handle. Abandoning either operation cancels or drains it and releases
+any buffer it still owns. The pool and channel must outlive the operations.
 
 One `Pool` has one protected free list and one contiguous payload allocation.
 A shared pool therefore keeps all free capacity available to every caller but
@@ -1553,7 +1562,9 @@ and writes over aliased arrays or ownership-transferred unique buffers, plus
 nonrecursive file-watcher `Next` and retained task-result `Wait`.
 Instances of `Flyology.Channels.Bounded` likewise add operation-producing
 `Send` and `Receive` overloads without changing their protected entries or
-nonblocking calls.
+nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
+`Send_Move` and `Receive_Move` operations with the same completion-set and gate
+protocol.
 Initiation does not create a helper task,
 per-operation stack, callback thread, or steady-state heap allocation.
 

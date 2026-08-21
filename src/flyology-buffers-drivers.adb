@@ -38,6 +38,45 @@ package body Flyology.Buffers.Drivers is
       Source.Owner := null;
    end Move_To;
 
+   procedure Move
+     (Source : in out Detached_Buffer;
+      Target : in out Detached_Buffer)
+   is
+   begin
+      if not Has_Buffer (Source) then
+         raise Program_Error with "move from a vacant detached buffer";
+      elsif Has_Buffer (Target) then
+         raise Program_Error with "move into an occupied detached buffer";
+      end if;
+      Target.Owner := Source.Owner;
+      Target.Token := Source.Token;
+      Source.Token := No_Token;
+      Source.Owner := null;
+   end Move;
+
+   procedure Release (Item : in out Detached_Buffer) is
+   begin
+      if Has_Buffer (Item) then
+         Release_Token (Item.Owner, Item.Token);
+         Item.Owner := null;
+      end if;
+   end Release;
+
+   procedure Set_Channel_Metadata
+     (Item  : in out Detached_Buffer;
+      Value : Interfaces.Unsigned_64)
+   is
+   begin
+      if not Has_Buffer (Item) then
+         raise Program_Error with "metadata on a vacant detached buffer";
+      end if;
+      Item.Token.Channel_Metadata := Value;
+   end Set_Channel_Metadata;
+
+   function Channel_Metadata
+     (Item : Detached_Buffer) return Interfaces.Unsigned_64 is
+     (Item.Token.Channel_Metadata);
+
    function Address (Item : Detached_Buffer) return System.Address is
       First : constant Storage_Offset :=
         Storage_Offset (Item.Token.Slot - 1)
@@ -65,10 +104,7 @@ package body Flyology.Buffers.Drivers is
 
    overriding procedure Finalize (Item : in out Detached_Buffer) is
    begin
-      if Has_Buffer (Item) then
-         Release_Token (Item.Owner, Item.Token);
-         Item.Owner := null;
-      end if;
+      Release (Item);
    end Finalize;
 
 end Flyology.Buffers.Drivers;

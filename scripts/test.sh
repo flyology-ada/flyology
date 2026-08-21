@@ -315,6 +315,7 @@ fi
 ordinary_mains='cancellation_wake_smoke
 unix_stream_socket_smoke
 buffer_channel_cancel_smoke
+buffer_channel_operations_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_operations_smoke

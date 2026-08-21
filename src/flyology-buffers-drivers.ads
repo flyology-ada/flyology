@@ -1,4 +1,5 @@
 with Ada.Finalization;
+with Interfaces;
 with System;
 
 --  Internal ownership-transfer support for completion-driven providers.
@@ -24,6 +25,34 @@ package Flyology.Buffers.Drivers is
    procedure Move_To
      (Source : in out Detached_Buffer;
       Item   : in out Unique_Buffer);
+
+   --  Move provider-owned storage without exposing its raw token.
+   --  @param Source Provider-owned source, vacant after the move
+   --  @param Target Vacant provider-owned destination
+   --  @exclude
+   procedure Move
+     (Source : in out Detached_Buffer;
+      Target : in out Detached_Buffer);
+
+   --  Release provider-owned storage to its pool.
+   --  @param Item Provider-owned storage to release
+   --  @exclude
+   procedure Release (Item : in out Detached_Buffer);
+
+   --  Set channel-local metadata retained with provider-owned storage.
+   --  @param Item Provider-owned storage to update
+   --  @param Value Opaque channel metadata
+   --  @exclude
+   procedure Set_Channel_Metadata
+     (Item  : in out Detached_Buffer;
+      Value : Interfaces.Unsigned_64);
+
+   --  Return channel-local metadata retained with provider-owned storage.
+   --  @param Item Provider-owned storage to inspect
+   --  @return Opaque channel metadata
+   --  @exclude
+   function Channel_Metadata
+     (Item : Detached_Buffer) return Interfaces.Unsigned_64;
 
    --  Report whether provider storage owns a pool token.
    --  @param Item Provider-owned storage
