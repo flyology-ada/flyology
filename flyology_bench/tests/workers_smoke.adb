@@ -20,6 +20,8 @@ procedure Workers_Smoke is
    use type W.Worker_Outcome;
    use type W.Result_Kind;
    use type Flyology_Bench.Host_Lock_Outcome;
+   use type Flyology_Bench.Metric_Availability;
+   use type Flyology_Bench.Metric_Set;
    use type C.int;
    use type GNAT.OS_Lib.File_Descriptor;
 
@@ -109,6 +111,38 @@ begin
    declare
       Results : W.Worker_Result_Array (1 .. 1);
       Env : constant W.Environment := W.Create_Environment;
+      Config : constant Flyology_Bench.Configuration :=
+        (Base with delta
+           Metrics => Flyology_Bench.Time_Metrics
+             or Flyology_Bench.Flyology_Scheduler_Metrics);
+   begin
+      W.Run
+        (Fixture, "ordinary", W.Ordinary_Measurement, Config,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Normal_Result,
+             "valid unavailable worker metrics were rejected: "
+             & W.Reason (Results (1)));
+      declare
+         Value : constant Flyology_Bench.Measurement :=
+           W.Measurement_Value (Results (1));
+      begin
+         for Axis in Flyology_Bench.Flyology_Dispatches
+           .. Flyology_Bench.Flyology_Migrations
+         loop
+            Check (Flyology_Bench.Metric_Requested (Value, Axis),
+                   "worker lost a requested unavailable metric");
+            Check
+              (not Flyology_Bench.Metric_Available (Value, Axis)
+               and then Flyology_Bench.Metric_Status (Value, Axis)
+                 = Flyology_Bench.Probe_Failed,
+               "worker changed an unavailable metric status");
+         end loop;
+      end;
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Env : constant W.Environment := W.Create_Environment;
    begin
       W.Run
         (Fixture, "paired", W.Paired_Comparison, Base, Default_Launch, Env,
@@ -192,10 +226,25 @@ begin
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
              "measurement metric set mismatch was accepted");
       W.Run
+        (Fixture, "wrong-statistics", W.Ordinary_Measurement, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "measurement statistics mismatch was accepted");
+      W.Run
+        (Fixture, "wrong-environment-report", W.Ordinary_Measurement, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "inconsistent environment report was accepted");
+      W.Run
         (Fixture, "wrong-counts", W.Paired_Comparison, Base,
          Default_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
              "inconsistent comparison counts were accepted");
+      W.Run
+        (Fixture, "wrong-comparison-statistics", W.Paired_Comparison, Base,
+         Default_Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Malformed_Protocol,
+             "comparison statistics mismatch was accepted");
    end;
 
    declare
@@ -233,6 +282,42 @@ begin
          Timeout_Launch, Env, Results);
       Check (W.Outcome (Results (1)) = W.Execution_Timeout,
              "continuous diagnostics postponed the worker deadline");
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Pid_File : constant String := Test_Directory & "/descendant.pid";
+      Env : W.Environment := W.Create_Environment;
+      Launch : constant W.Launch_Configuration :=
+        (Default_Launch with delta
+           Total_Timeout     => 0.200,
+           Termination_Grace => 0.020);
+      Descendant : C.int := -1;
+   begin
+      if Ada.Directories.Exists (Pid_File) then
+         Ada.Directories.Delete_File (Pid_File);
+      end if;
+      W.Add (Env, "DESCENDANT_PID_FILE", Pid_File);
+      W.Run
+        (Fixture, "descendant-timeout", W.Ordinary_Measurement, Base,
+         Launch, Env, Results);
+      Check (W.Outcome (Results (1)) = W.Execution_Timeout,
+             "descendant containment fixture did not time out");
+      Check (Ada.Directories.Exists (Pid_File),
+             "descendant fixture did not publish its PID");
+      declare
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_File);
+         Descendant := C.int'Value (Ada.Text_IO.Get_Line (File));
+         Ada.Text_IO.Close (File);
+      end;
+      for Attempt in 1 .. 200 loop
+         exit when PID_Exists (Descendant) = 0;
+         delay 0.010;
+      end loop;
+      Check (PID_Exists (Descendant) = 0,
+             "worker process-group descendant survived containment");
    end;
 
    declare
@@ -340,6 +425,7 @@ begin
    declare
       Results : W.Worker_Result_Array (1 .. 1);
       Strict_Env : W.Environment := W.Create_Environment;
+      Alternate_Env : W.Environment := W.Create_Environment;
       Inherited_Env : constant W.Environment :=
         W.Create_Environment (W.Inherit_Mode);
       Removed_Env : W.Environment := W.Create_Environment (W.Inherit_Mode);
@@ -351,6 +437,7 @@ begin
         Ada.Environment_Variables.Exists ("WORKER_SECRET");
       Old_Secret : constant String :=
         Ada.Environment_Variables.Value ("WORKER_SECRET", "");
+      First_Fingerprint : US.Unbounded_String;
    begin
       Ada.Environment_Variables.Set ("WORKER_SECRET", "do-not-report");
       W.Add (Strict_Env, "KEEP", "strict-value");
@@ -369,6 +456,19 @@ begin
       Check (Ada.Strings.Fixed.Index
                (W.Environment_Fingerprint (Results (1)), "do-not-report") = 0,
              "environment fingerprint echoed a secret");
+      First_Fingerprint := US.To_Unbounded_String
+        (W.Environment_Fingerprint (Results (1)));
+
+      W.Add (Alternate_Env, "KEEP", "different-secret-value");
+      W.Run
+        (Fixture, "environment", W.Ordinary_Measurement, Base, Launch,
+         Alternate_Env, Results);
+      Check (W.Outcome (Results (1)) = W.Normal_Result,
+             "alternate-value environment worker failed");
+      Check
+        (W.Environment_Fingerprint (Results (1))
+           = US.To_String (First_Fingerprint),
+         "reported environment fingerprint depends on variable values");
 
       W.Run
         (Fixture, "environment", W.Ordinary_Measurement, Base,

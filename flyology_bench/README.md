@@ -1136,9 +1136,12 @@ standard temporary-directory variables. Locale and timezone variables require
 the explicit `Preserve_Locale` and `Preserve_Timezone` policies. `Inherit_Mode`
 copies the complete parent environment and is an explicit opt-in. `Add` and
 `Remove` apply exact bounded changes. The result reports the selected policy
-and a stable hash of the effective name/value set, but it never reports the
-values themselves. The hash is compatibility metadata, not a secret-storage or
-authentication mechanism.
+and a stable hash of the effective variable-name set. Values are deliberately
+excluded, so a shared report cannot be used to test guesses for an inherited
+credential. The name-set hash is compatibility metadata, not an authentication
+mechanism; two environments that differ only in values have the same reported
+fingerprint. The internal parent/worker check still covers exact values but is
+not exposed through `Worker_Result`.
 
 The working directory is inherited under `Inherit_Directory` or resolved and
 validated before spawn under `Use_Directory`. The child inherits only standard
@@ -1161,9 +1164,11 @@ as soon as the call returns rather than extending the worker budget.
 
 The parent must retain exclusive reaping ownership for these worker children:
 do not install automatic `SIGCHLD` reaping or let another child manager consume
-them while `Run` is active. If ownership is lost despite that contract, the
-worker result is `Parent_IO_Failure`; the implementation disarms the PID guard
-and does not signal an identity the operating system may already have reused.
+them while `Run` is active. If `Run` detects that ownership was lost, the worker
+result is `Parent_IO_Failure`; the implementation disarms the PID guard and does
+not signal an identity the operating system may already have reused. A
+concurrent external reaper violates the exclusion contract and can race the
+observation-to-reap interval on hosts without a stable process handle.
 
 Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
 configuration that cannot fit before spawning. Failure reasons are truncated

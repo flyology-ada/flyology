@@ -38,6 +38,18 @@ int flyology_bench_worker_test_pid_exists(int pid)
     return errno == ESRCH ? 0 : -1;
 }
 
+int flyology_bench_worker_test_spawn_stubborn_descendant(void)
+{
+    pid_t child = fork();
+    if (child != 0) return (int)child;
+
+    /* Ada tasking is initialized in the worker.  The fork child therefore
+     * uses only async-signal-safe operations until _exit. */
+    (void)signal(SIGTERM, SIG_IGN);
+    for (;;) (void)pause();
+    _exit(127);
+}
+
 static struct sigaction saved_sigchld;
 static int saved_sigchld_valid = 0;
 

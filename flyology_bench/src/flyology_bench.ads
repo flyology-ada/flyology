@@ -1663,4 +1663,16 @@ private
       Data       : Measurement_Case_Array;
       Against_Reference : Comparison_Case_Array;
    end record;
+
+   --  @exclude
+   --  @param Value Internal measurement reconstructed from a worker envelope.
+   --  @return True when raw samples reproduce every derived statistic.
+   function Measurement_Statistics_Consistent
+     (Value : Measurement) return Boolean;
+
+   --  @exclude
+   --  @param Value Internal comparison reconstructed from a worker envelope.
+   --  @return True when paired samples reproduce every derived statistic.
+   function Comparison_Statistics_Consistent
+     (Value : Comparison) return Boolean;
 end Flyology_Bench;
