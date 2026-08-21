@@ -12,6 +12,10 @@ package Flyology_Bench.Baselines is
    --  A baseline artifact could not be written, published, or read.
    Baseline_IO_Error : exception;
 
+   --  Saved or current sample data cannot be compared within the numeric
+   --  domain representable by the harness's clock and iteration counters.
+   Baseline_Comparison_Error : exception;
+
    --  Require raises this exception when a gate result is rejected.
    Regression_Gate_Failure : exception;
 
@@ -64,6 +68,8 @@ package Flyology_Bench.Baselines is
    --  @return Compatibility, interval, change, and verdict.
    --  @exception Constraint_Error Compatible samples request more than the
    --  bounded bootstrap analysis work.
+   --  @exception Baseline_Comparison_Error Sample data cannot be compared
+   --  within the supported numeric domain.
    function Compare
      (Saved      : Baseline;
       Current    : Measurement;
@@ -142,7 +148,8 @@ package Flyology_Bench.Baselines is
    --  rejects. Improvement and practical equivalence always pass.
    --  @field Practical_Threshold_Percent Smallest meaningful time change.
    --  @field On_Missing Action when Path does not exist.
-   --  @field On_Invalid Action for malformed, corrupt, or unreadable artifacts.
+   --  @field On_Invalid Action for malformed, corrupt, or unreadable artifacts
+   --  and invalid current measurement data.
    --  @field On_Incompatible Action for exact identity, fingerprint, or clock
    --  incompatibility.
    --  @field On_Inconclusive Action when the confidence interval establishes
@@ -174,7 +181,8 @@ package Flyology_Bench.Baselines is
    --  @enum Missing_Baseline Path does not exist.
    --  @enum Incompatible_Baseline Exact identity, fingerprint, or clock differs.
    --  @enum Invalid_Baseline Artifact validation failed.
-   --  @enum Baseline_Error Artifact reading failed for another reason.
+   --  @enum Baseline_Error Artifact I/O or current-measurement validation
+   --  prevented comparison.
    type Gate_Status is
      (Improvement,
       Practical_Equivalence,

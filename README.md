@@ -2920,6 +2920,14 @@ the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
 cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
 limit.
 
+The standalone `flyology_bench` crate also uses a private SPARK numeric kernel
+for saved-baseline regression gates. Bounds derived from the unsigned clock
+delta and maximum iteration count keep its sample sums, means, independent-run
+ratios, percentile interpolation, time-change conversion, and interval verdict
+free of floating overflow. The proof covers those deterministic primitives;
+artifact I/O, bootstrap orchestration, and reporter formatting remain
+behaviorally tested boundaries.
+
 The public-library proof boundary also covers native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling. Socket policy
 proves the IPv4/IPv6 and stream/datagram ABI encodings, maps host-supplied errno
