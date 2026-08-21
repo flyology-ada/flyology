@@ -205,6 +205,11 @@ package Flyology_Bench is
    --  allocated.
    --  @enum Probe_Failed A native snapshot, counter control, or read failed,
    --  or the kernel rejected the requested counter attributes.
+   --  @enum Counter_Reset A custom cumulative ending value was below its
+   --  beginning value.
+   --  @enum Invalid_Value A custom value was NaN, infinite, or a negative
+   --  completed elapsed value.
+   --  @enum Conversion_Overflow Custom delta or unit conversion overflowed.
    --  @enum Metric_Partially_Collected At least one retained sample contains a
    --  value, but one or more retained samples do not.
    type Metric_Availability is
@@ -215,6 +220,9 @@ package Flyology_Bench is
       Unsupported_Event,
       Counter_Resources_Unavailable,
       Probe_Failed,
+      Counter_Reset,
+      Invalid_Value,
+      Conversion_Overflow,
       Metric_Partially_Collected);
 
    --  Attribution boundary of a metric.
@@ -224,9 +232,13 @@ package Flyology_Bench is
    --  @enum Native_Task_Tree The executing pthread and child native tasks or
    --  processes it creates after counter initialization.
    --  @enum Flyology_Runtime Counters supplied by Flyology observability.
+   --  @enum Caller_Defined_Window Scope described by the provider contract.
+   --  @enum Device_Or_Accelerator Synchronized external execution scope.
+   --  @enum Simulated_Clock Deterministic or simulated clock scope.
    type Metric_Scope is
      (Batch_Wall_Clock, Benchmark_Process, Current_Native_Thread,
-      Native_Task_Tree, Flyology_Runtime);
+      Native_Task_Tree, Flyology_Runtime, Caller_Defined_Window,
+      Device_Or_Accelerator, Simulated_Clock);
 
    --  Quality of the boundary used to attribute a collected metric. This is
    --  deliberately separate from Metric_Availability: a process-wide value
@@ -263,6 +275,119 @@ package Flyology_Bench is
    --  @enum Absolute_Difference Signed or zero-valued samples use differences.
    type Metric_Comparison_Method is
      (Relative_Ratio, Absolute_Difference);
+
+   --  Bounded caller-defined measurement axes. Registration is complete
+   --  before a run starts; collection performs no allocation.
+   Max_Custom_Metrics : constant := 8;
+   --  Maximum custom metric identity length.
+   Max_Custom_Metric_Name_Length : constant := 48;
+   --  Maximum custom metric unit length.
+   Max_Custom_Metric_Unit_Length : constant := 24;
+   --  Maximum alternate timing source identity length.
+   Max_Timing_Source_Name_Length : constant := 48;
+   --  Number of registered custom axes.
+   subtype Custom_Metric_Count is Natural range 0 .. Max_Custom_Metrics;
+   --  One-based custom axis index in registration order.
+   subtype Custom_Metric_Index is Positive range 1 .. Max_Custom_Metrics;
+
+   --  Meaning of the two snapshots surrounding one retained batch.
+   --  Cumulative_Delta requires a nondecreasing signed counter and stores
+   --  After - Before. Absolute_Sample stores the ending value. Completed_Elapsed
+   --  also stores the ending value, but identifies it as a synchronized elapsed
+   --  duration supplied by the measured batch.
+   --  @enum Cumulative_Delta Store a checked ending-minus-beginning counter.
+   --  @enum Absolute_Sample Store the explicit ending sample value.
+   --  @enum Completed_Elapsed Store a synchronized finite nonnegative elapsed
+   --  value returned by measured work.
+   type Custom_Sample_Semantics is
+     (Cumulative_Delta, Absolute_Sample, Completed_Elapsed);
+
+   --  Whether a batch value is retained once or divided by its exact logical
+   --  operation count. Units must describe the resulting value truthfully.
+   --  @enum Per_Batch Retain one value for the complete batch.
+   --  @enum Per_Operation Divide by the exact logical-operation count.
+   type Custom_Normalization is (Per_Batch, Per_Operation);
+
+   --  Comparison method declared by the provider. Relative_Positive rejects
+   --  any pair containing zero or a negative value instead of silently
+   --  changing statistical meaning. Absolute always compares signed
+   --  contender-minus-reference differences.
+   --  @enum Relative_Positive Compare paired positive values as ratios.
+   --  @enum Absolute Compare paired signed differences.
+   type Custom_Comparison_Semantics is
+     (Relative_Positive, Absolute);
+
+   --  One caller-provided snapshot slot.
+   --  @field Status Collection outcome; values are ignored unless collected.
+   --  @field Counter_Value Signed cumulative value for delta semantics.
+   --  @field Sample_Value Floating sample for absolute or elapsed semantics.
+   type Custom_Value is record
+      Status        : Metric_Availability := Metric_Collected;
+      Counter_Value : Long_Long_Integer := 0;
+      Sample_Value  : Long_Float := 0.0;
+   end record;
+   --  Fixed provider snapshot covering every possible registered axis.
+   type Custom_Snapshot is
+     array (Custom_Metric_Index) of Custom_Value;
+
+   --  A single bounded snapshot callback covers every registered custom axis.
+   --  It runs once immediately before and once immediately after each retained
+   --  batch. It must not allocate if allocation-free collection is required.
+   --  @param Snapshot Failure-initialized slots populated by the provider.
+   type Custom_Probe is access procedure (Snapshot : in out Custom_Snapshot);
+
+   --  Bounded pre-run descriptors and their transient provider callback.
+   type Custom_Metric_Registry is private;
+
+   --  Register one axis in deterministic registration order. Names are
+   --  lowercase ASCII identifiers beginning with a letter and containing only
+   --  letters, digits, '.', '_', or '-'. Units and timing-source names are
+   --  nonempty printable ASCII without commas, quotes, backslashes, or control
+   --  characters. Duplicate identities and built-in-name collisions raise
+   --  Constraint_Error. Registration beyond Max_Custom_Metrics raises
+   --  Capacity_Error.
+   --  @param Registry Registry to extend before collection.
+   --  @param Name Stable lowercase identity.
+   --  @param Unit Unit after optional iteration normalization.
+   --  @param Scope Boundary covered by the value.
+   --  @param Attribution Quality of the provider's attribution boundary.
+   --  @param Direction Favorable comparison direction or diagnostic.
+   --  @param Semantics Interpretation of begin and end snapshot fields.
+   --  @param Normalization Per-batch or per-operation storage.
+   --  @param Comparison Relative-positive or signed absolute comparison.
+   --  @param Primary_Timing Whether this is the reported alternate timer.
+   --  @param Timing_Source Stable alternate timing source identity.
+   --  @param Resolution Positive resolution in Unit for a primary timer.
+   procedure Register_Custom_Metric
+     (Registry        : in out Custom_Metric_Registry;
+      Name            : String;
+      Unit            : String;
+      Scope           : Metric_Scope;
+      Attribution     : Metric_Attribution;
+      Direction       : Metric_Direction;
+      Semantics       : Custom_Sample_Semantics := Cumulative_Delta;
+      Normalization   : Custom_Normalization := Per_Operation;
+      Comparison      : Custom_Comparison_Semantics := Relative_Positive;
+      Primary_Timing  : Boolean := False;
+      Timing_Source   : String := "";
+      Resolution      : Long_Float := 0.0);
+
+   --  Install the one provider used by a registry. The provider address lives
+   --  only for the synchronous call; completed results never retain it.
+   --  @param Registry Registry used by a subsequent synchronous runner call.
+   --  @param Probe Begin/end snapshot callback.
+   procedure Set_Custom_Probe
+     (Registry : in out Custom_Metric_Registry;
+      Probe    : Custom_Probe);
+
+   --  Return the number of registered axes.
+   --  @param Registry Registry to inspect.
+   --  @return Registered custom axis count.
+   function Custom_Metrics (Registry : Custom_Metric_Registry)
+     return Custom_Metric_Count;
+
+   --  Raised when bounded custom metric registration is full.
+   Capacity_Error : exception;
 
    --  Resource-oriented result of a metric comparison.
    --  @enum Metric_Inconclusive The interval establishes no direction.
@@ -626,6 +751,7 @@ package Flyology_Bench is
    --  @field Metrics Axes retained and compared around each timed batch.
    --  @field Scheduler_Probe Optional source of cumulative Flyology scheduler
    --  counters. The callback runs only outside timed regions.
+   --  @field Custom_Metrics Bounded custom axes and synchronous run provider.
    --  @field CPU_Quiescence Optional sustained low-host-CPU gate performed
    --  before clock characterization and workload warmup.
    --  @field Interference Optional watch for foreign CPU load arriving after
@@ -656,6 +782,7 @@ package Flyology_Bench is
       Random_Seed          : Long_Long_Integer := 1;
       Metrics              : Metric_Set := Time_Metrics;
       Scheduler_Probe      : Flyology_Scheduler_Probe := null;
+      Custom_Metrics       : Custom_Metric_Registry;
       CPU_Quiescence       : CPU_Quiescence_Policy := (others => <>);
       Interference         : Interference_Policy := (others => <>);
       Placement            : Placement_Policy := (others => <>);
@@ -675,7 +802,7 @@ package Flyology_Bench is
        raise Constraint_Error with "incoherent benchmark configuration";
 
    --  Default configuration for interactive microbenchmark runs.
-   Default_Configuration : constant Configuration := (others => <>);
+   Default_Configuration : constant Configuration;
 
    --  Tukey-fence classifications computed without removing any samples.
    --  @field Low_Severe Samples below the lower outer fence.
@@ -1037,6 +1164,114 @@ package Flyology_Bench is
      (Result : Measurement;
       Axis   : Metric_Axis) return Metric_Summary;
 
+   --  Number of registered custom axes retained by a measurement.
+   --  @param Result Completed measurement.
+   --  @return Registered custom axis count.
+   function Custom_Metric_Total
+     (Result : Measurement) return Custom_Metric_Count;
+   --  Return a custom axis's stable identity.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Stable custom metric name.
+   function Custom_Metric_Name
+     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   --  Return the unit after normalization.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Custom metric unit.
+   function Custom_Metric_Unit
+     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   --  Return the declared scope.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Caller-declared scope.
+   function Custom_Metric_Scope
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Scope;
+   --  Return the declared attribution quality.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Caller-declared attribution.
+   function Custom_Metric_Attribution
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Metric_Attribution;
+   --  Return the declared optimization direction.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Lower, higher, or diagnostic direction.
+   function Custom_Metric_Direction
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Direction;
+   --  Return begin/end sample semantics.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Cumulative, absolute, or completed-elapsed semantics.
+   function Custom_Metric_Semantics
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Custom_Sample_Semantics;
+   --  Return batch normalization semantics.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Per-batch or per-operation normalization.
+   function Custom_Metric_Normalization
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Custom_Normalization;
+   --  Return the declared comparison form.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Relative-positive or signed absolute comparison.
+   function Custom_Metric_Comparison
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Custom_Comparison_Semantics;
+   --  Test whether an axis is the alternate reported timer.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return True for the one primary alternate timing axis.
+   function Custom_Metric_Is_Primary_Timing
+     (Result : Measurement; Axis : Custom_Metric_Index) return Boolean;
+   --  Return alternate timer identity, or empty for an ordinary metric.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Stable timing source identity.
+   function Custom_Metric_Timing_Source
+     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   --  Return alternate source resolution in its output unit.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Positive primary-timer resolution, otherwise zero.
+   function Custom_Metric_Resolution
+     (Result : Measurement; Axis : Custom_Metric_Index) return Long_Float;
+   --  Return aggregate custom-axis availability.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Complete, partial, or failure status.
+   function Custom_Metric_Status
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Metric_Availability;
+   --  Return one collected custom value.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @param Index Retained sample index.
+   --  @return Value in Custom_Metric_Unit units.
+   function Custom_Metric_Sample
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index;
+      Index  : Sample_Index) return Long_Float;
+   --  Return one retained custom sample's status.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @param Index Retained sample index.
+   --  @return Collected or specific unavailable status.
+   function Custom_Metric_Sample_Status
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index;
+      Index  : Sample_Index) return Metric_Availability;
+   --  Return the summary over collected custom values.
+   --  @param Result Completed measurement.
+   --  @param Axis Registered custom axis.
+   --  @return Summary whose sample count excludes unavailable values.
+   function Custom_Metric_Statistics
+     (Result : Measurement;
+      Axis   : Custom_Metric_Index) return Metric_Summary;
+
    --  Return the reference side of a paired comparison.
    --  @param Result Completed comparison.
    --  @return Reference-side measurement using the shared sample schedule.
@@ -1155,6 +1390,14 @@ package Flyology_Bench is
      (Result : Comparison;
       Axis   : Metric_Axis) return Metric_Comparison_Result;
 
+   --  Return one paired custom metric comparison.
+   --  @param Result Completed direct or multi-way paired comparison.
+   --  @param Axis Registered custom axis.
+   --  @return Paired comparison, unavailable unless both sides are complete.
+   function Compare_Custom_Metric
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return Metric_Comparison_Result;
+
    --  Return how many timed pairs ran the reference first.
    --  @param Result Completed comparison.
    --  @return Timed pairs that ran the reference side first.
@@ -1221,6 +1464,40 @@ package Flyology_Bench is
    procedure Clobber_Memory;
 
 private
+   type Custom_Name_Buffer is
+     array (Positive range 1 .. Max_Custom_Metric_Name_Length) of Character;
+   type Custom_Unit_Buffer is
+     array (Positive range 1 .. Max_Custom_Metric_Unit_Length) of Character;
+   type Timing_Source_Buffer is
+     array (Positive range 1 .. Max_Timing_Source_Name_Length) of Character;
+
+   type Custom_Metric_Descriptor is record
+      Name_Length          : Natural range 0 .. Max_Custom_Metric_Name_Length := 0;
+      Name_Data            : Custom_Name_Buffer := [others => ' '];
+      Unit_Length          : Natural range 0 .. Max_Custom_Metric_Unit_Length := 0;
+      Unit_Data            : Custom_Unit_Buffer := [others => ' '];
+      Scope_Value          : Metric_Scope := Batch_Wall_Clock;
+      Attribution_Value    : Metric_Attribution := Unattributable;
+      Direction_Value      : Metric_Direction := Diagnostic;
+      Semantics_Value      : Custom_Sample_Semantics := Cumulative_Delta;
+      Normalization_Value  : Custom_Normalization := Per_Operation;
+      Comparison_Value     : Custom_Comparison_Semantics := Relative_Positive;
+      Primary_Timing_Value : Boolean := False;
+      Timing_Length        : Natural range 0 .. Max_Timing_Source_Name_Length := 0;
+      Timing_Data          : Timing_Source_Buffer := [others => ' '];
+      Resolution_Value     : Long_Float := 0.0;
+   end record;
+   type Custom_Descriptor_Array is
+     array (Custom_Metric_Index) of Custom_Metric_Descriptor;
+
+   type Custom_Metric_Registry is record
+      Count       : Custom_Metric_Count := 0;
+      Descriptors : Custom_Descriptor_Array := [others => (others => <>)];
+      Provider    : Custom_Probe := null;
+   end record;
+
+   Default_Configuration : constant Configuration := (others => <>);
+
    --  Shapes of one native probe reading. The runner, the recorder, and the
    --  probe layer all store readings in these, so a measurement boundary
    --  never converts between two spellings of the same snapshot.
@@ -1266,6 +1543,34 @@ private
    --  @param Object Internal shared store handle.
    overriding procedure Finalize (Object : in out Metric_Store_Handle);
 
+   type Custom_Sample_Matrix is
+     array (Custom_Metric_Index, Sample_Index) of Long_Float;
+   type Custom_Status_Matrix is
+     array (Custom_Metric_Index, Sample_Index) of Metric_Availability;
+   type Custom_Summary_Array is
+     array (Custom_Metric_Index) of Metric_Summary;
+   type Custom_Comparison_Array is
+     array (Custom_Metric_Index) of Metric_Comparison_Result;
+   type Custom_Store is record
+      References  : Positive := 1;
+      Count       : Custom_Metric_Count := 0;
+      Descriptors : Custom_Descriptor_Array := [others => (others => <>)];
+      Status      : Custom_Status_Matrix :=
+        [others => [others => Metric_Not_Requested]];
+      Values      : Custom_Sample_Matrix := [others => [others => 0.0]];
+      Summaries   : Custom_Summary_Array := [others => (others => <>)];
+   end record;
+   type Custom_Store_Access is access Custom_Store;
+   type Custom_Store_Handle is new Ada.Finalization.Controlled with record
+      Data : Custom_Store_Access := null;
+   end record;
+   --  @exclude
+   --  @param Object Internal shared custom store handle.
+   overriding procedure Adjust (Object : in out Custom_Store_Handle);
+   --  @exclude
+   --  @param Object Internal shared custom store handle.
+   overriding procedure Finalize (Object : in out Custom_Store_Handle);
+
    type Measurement is record
       Sample_Total       : Sample_Count := Sample_Count'First;
       Iterations         : Iteration_Count := 1;
@@ -1310,6 +1615,7 @@ private
       Foreign_CPU         : Sample_Array (Sample_Index'Range) :=
         (others => 0.0);
       Metric_Data         : Metric_Store_Handle;
+      Custom_Data         : Custom_Store_Handle;
    end record;
 
    type Comparison is record
@@ -1335,6 +1641,8 @@ private
       Random_Seed_Value    : Long_Long_Integer := 1;
       Verdict_Value        : Comparison_Verdict := Inconclusive;
       Metric_Comparisons   : Metric_Comparison_Array :=
+        [others => (others => <>)];
+      Custom_Comparisons   : Custom_Comparison_Array :=
         [others => (others => <>)];
    end record;
 

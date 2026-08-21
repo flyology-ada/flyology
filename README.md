@@ -3199,7 +3199,8 @@ rather than hidden behind a claim of universal portability.
   comparison benchmarking crate for Ada and Flyology workloads. The website's
   [benchmarking guide](https://flyology.org/guide/benchmarking/) covers the
   runnable API, multi-way comparisons, telemetry, machine output, and the
-  interpretation of fractional nanosecond results.
+  interpretation of fractional nanosecond results, bounded custom axes, and
+  caller-synchronized alternate timing.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
 - [`docker`](docker): native-architecture Linux validation Dockerfile.
 

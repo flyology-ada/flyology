@@ -40,8 +40,15 @@ printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
 }
 cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
+"$crate_root/tests/bin/custom_metrics_smoke" >"$work_dir/custom.out"
+cat "$work_dir/custom.out"
+grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
+  "$work_dir/custom.out"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
+"$crate_root/examples/bin/custom_metrics" >"$work_dir/custom-example.out"
+grep -q 'cache_lookups' "$work_dir/custom-example.out"
+grep -q '"timer_role":"primary_alternate"' "$work_dir/custom-example.out"
 "$crate_root/examples/bin/recording_service" \
   >"$work_dir/recording-example.ansi"
 escape=$(printf '\033')
@@ -145,6 +152,39 @@ awk '/^-- recording machine output begin --$/ { inside = 1; next }
 grep '^{' "$work_dir/recording.machine" >"$work_dir/recording.jsonl"
 grep -v '^{' "$work_dir/recording.machine" >"$work_dir/recording.csv"
 check_csv recording "$work_dir/recording.csv"
+
+awk '/^-- custom machine output begin --$/ { inside = 1; next }
+     /^-- custom machine output end --$/ { inside = 0; next }
+     inside && /^\{/ { print }' "$work_dir/custom.out" \
+  >"$work_dir/custom.jsonl"
+if command -v jq >/dev/null 2>&1; then
+  jq -s -e '
+    any(.[];
+      .schema == "flyology_bench.metrics.v2"
+      and .kind == "custom"
+      and .axis == "primary_time"
+      and .timer_role == "primary_alternate"
+      and .timing_source == "deterministic_fake_ticks"
+      and .calibration_clock == "harness_wall"
+      and .resolution == 1)
+    and any(.[];
+      .schema == "flyology_bench.comparison_metrics.v2"
+      and .kind == "custom"
+      and .method == "relative percent"
+      and .change == 60)
+    and any(.[];
+      .schema == "flyology_bench.metrics.v2"
+      and .name == "failed_custom"
+      and .kind == "custom"
+      and .available == false
+      and .status == "probe failed"
+      and (has("mean") | not))
+  ' "$work_dir/custom.jsonl" >/dev/null
+else
+  grep -q '"kind":"custom".*"timer_role":"primary_alternate"' \
+    "$work_dir/custom.jsonl"
+  grep -q '"calibration_clock":"harness_wall"' "$work_dir/custom.jsonl"
+fi
 
 # At least one long-form metric section must exist, otherwise the checks above
 # would pass over latency-only output.

@@ -96,6 +96,14 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Topology changes—group allocation, dedicated reservations, migration, and
   destruction—may briefly use the global topology/registry lock. Ordinary
   scheduling and I/O remain per-group.
+- `flyology_bench` custom metrics are registered before collection in a bounded
+  eight-axis registry. One begin/end provider snapshot surrounds each retained
+  batch outside harness wall timestamps; unavailable, reset, invalid, and
+  overflowed values remain statuses rather than zero. Alternate/manual timing
+  retains harness wall time for calibration, budgets, interference, and
+  progress, and wall timer-cost subtraction never applies to another source.
+  Custom providers are not supported by `Recording` until overlapping-span
+  ownership and attribution have a separate coherent design.
 
 ## I/O invariants
 

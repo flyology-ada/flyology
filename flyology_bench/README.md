@@ -33,6 +33,8 @@ The initial API provides:
 - selectable wall-time, CPU-time, RSS, fault, context-switch, storage-I/O,
   Linux hardware-counter, and Flyology scheduler axes sampled around the same
   retained batches;
+- up to eight bounded caller-defined axes and a static adapter for synchronized
+  caller-supplied elapsed values, while retaining harness wall time;
 - an optional sustained low-host-CPU gate before warmup;
 - an optional watch for foreign CPU load arriving after that gate, which can
   annotate, collect a contaminated window again, or pause and re-warm, and
@@ -419,6 +421,85 @@ It passes the batch result to the opaque barrier after the ending clock read, so
 the optimizer must retain the computation without charging the barrier call to
 the measured interval. `Measure_With_Hooks` likewise runs setup before the
 starting timestamp and teardown after the ending timestamp.
+
+## Custom metrics and alternate timing
+
+`Custom_Metric_Registry` adds at most eight axes without extending the
+`Metric_Axis` enumeration or changing existing long-form schemas. Register
+every axis and install one bounded snapshot callback before calling a runner:
+
+```ada
+Flyology_Bench.Register_Custom_Metric
+  (Config.Custom_Metrics,
+   Name        => "cache_lookups",
+   Unit        => "lookups/op",
+   Scope       => Flyology_Bench.Caller_Defined_Window,
+   Attribution => Flyology_Bench.Shared_Process_Window,
+   Direction   => Flyology_Bench.Lower_Is_Better);
+Flyology_Bench.Set_Custom_Probe
+  (Config.Custom_Metrics, Probe'Access);
+```
+
+Names are stable lowercase ASCII identifiers of at most 48 characters. They
+begin with a letter and contain only letters, digits, `.`, `_`, or `-`.
+Built-in identities use their lowercase underscore spelling, such as
+`wall_time`, for collision checks. Units are at most 24 printable ASCII
+characters and exclude comma, quote, and backslash. Registration order is
+reporting order; duplicates and built-in collisions raise `Constraint_Error`,
+and the ninth axis raises `Capacity_Error`.
+
+The default `Cumulative_Delta` semantics reads a signed cumulative counter at
+both boundaries, rejects a decrease as `Counter_Reset`, checks subtraction and
+floating conversion, and optionally divides the delta by the exact batch
+iteration count. `Absolute_Sample` explicitly retains the ending signed or
+zero value. `Completed_Elapsed` requires a finite nonnegative ending value.
+NaN, infinity, conversion overflow, a failed callback, and provider-reported
+unavailability remain statuses; they never become numeric zero. A partial run
+retains every per-sample status, summarizes only collected values, and is not
+eligible for a paired comparison. `Relative_Positive` rejects a pair
+containing zero or a negative value; choose `Absolute` explicitly for signed
+contender-minus-reference comparisons.
+
+Probe order is fixed. Built-in begin snapshots run first, followed by the
+custom begin snapshot and harness wall start. After the batch, the harness wall
+timestamp runs first, then the custom end snapshot, Linux counter stop/read,
+scheduler end snapshot, and process-resource end snapshot. This keeps custom
+callback cost outside wall time. It does not make probe families independent:
+one family can perturb the machine state observed by a later family, and the
+reporter does not “correct” that interaction. Providers must declare scope and
+attribution; a returned number does not imply `Exact_Window`. A current-thread
+provider must either establish that both callbacks ran on the same native
+thread or report the sample unavailable. Registration and result-store
+allocation precede collection; the retained-batch path performs no allocation.
+
+`Flyology_Bench.Manual_Timing` is a generic/static adapter for a simulated,
+device, accelerator, or other caller-owned source. Its batch returns a
+completed elapsed value and status. The caller must synchronize measured work
+before returning; queue submission latency must not be described as device
+execution. `Scale_To_Unit` performs a checked conversion and the retained
+resolution uses the same output unit. The adapter keeps `wall time` as a
+separate built-in axis for warmup, equal-wall calibration, sampling budgets,
+interference windows, and progress. It never applies wall timestamp-cost
+subtraction to the alternate value. `Manual_Timing_Comparison` applies the
+same contract to adjacent paired batches. Both use equal harness-wall slices;
+there is currently no equal-alternate-time calibration mode.
+
+Use the versioned `Put_Extended_Metrics_CSV` and
+`Put_Extended_Comparison_Metrics_CSV` schemas, or the corresponding NDJSON
+procedures, for built-in and custom axes together. They retain kind, name,
+unit, scope, attribution, direction, sample semantics, normalization, timing
+role/source/resolution, calibration clock, availability, status, summaries,
+comparison method, interval, and verdict. The older CSV procedures remain
+unchanged. `examples/custom_metrics.adb` demonstrates a domain counter and a
+deterministic simulated timer; it makes no claim about untested GPU support.
+
+Custom providers are not currently integrated with `Recording`. A recording
+span can overlap other spans and migrate independently, so reusing one
+runner-style begin/end snapshot would not provide coherent per-span ownership,
+bounded concurrency, or attribution. The registry and retained per-sample
+status model are the integration seam for a future recording-specific design;
+until then, record domain observations separately rather than labeling them as
+Flyology_Bench recording axes.
 
 ## Measurement model
 
