@@ -1,6 +1,7 @@
 with "../flyology_bench.gpr";
 
 project Flyology_Bench_Tests is
+   for Languages use ("Ada", "C");
    for Source_Dirs use (".");
    for Main use
      ("flyology_bench_smoke.adb",
@@ -18,6 +19,8 @@ project Flyology_Bench_Tests is
    package Compiler is
       for Default_Switches ("Ada") use
         ("-O2", "-g", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa");
+      for Default_Switches ("C") use
+        ("-O2", "-std=c11", "-Wall", "-Wextra", "-Werror");
    end Compiler;
 
    package Binder is

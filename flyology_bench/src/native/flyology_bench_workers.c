@@ -244,6 +244,7 @@ int flyology_bench_worker_signal_terminate(void) { return SIGTERM; }
 int flyology_bench_worker_signal_kill(void) { return SIGKILL; }
 int flyology_bench_worker_errno_interrupted(void) { return EINTR; }
 int flyology_bench_worker_errno_would_block(void) { return EAGAIN; }
+int flyology_bench_worker_errno_no_child(void) { return ECHILD; }
 int flyology_bench_worker_errno_no_process(void) { return ESRCH; }
 int flyology_bench_worker_errno_permission(void) { return EPERM; }
 int flyology_bench_worker_status_exited(int status) { return WIFEXITED(status); }
@@ -258,33 +259,4 @@ int flyology_bench_worker_status_signaled(int status)
 int flyology_bench_worker_status_signal(int status)
 {
     return WTERMSIG(status);
-}
-
-/* Focused fixture/ABI observations.  These contain no worker policy. */
-void flyology_bench_worker_test_abort(void)
-{
-    (void)signal(SIGABRT, SIG_DFL);
-    (void)raise(SIGABRT);
-    _exit(127);
-}
-
-int flyology_bench_worker_test_ignore_terminate(void)
-{
-    struct sigaction action;
-    action.sa_handler = SIG_IGN;
-    (void)sigemptyset(&action.sa_mask);
-    action.sa_flags = 0;
-    return sigaction(SIGTERM, &action, NULL);
-}
-
-int flyology_bench_worker_test_descriptor_open(int descriptor)
-{
-    int result = fcntl(descriptor, F_GETFD);
-    return result >= 0 ? 1 : (errno == EBADF ? 0 : -1);
-}
-
-int flyology_bench_worker_test_pid_exists(int pid)
-{
-    if (kill((pid_t)pid, 0) == 0 || errno == EPERM) return 1;
-    return errno == ESRCH ? 0 : -1;
 }

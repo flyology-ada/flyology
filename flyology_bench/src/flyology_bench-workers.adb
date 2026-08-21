@@ -109,6 +109,10 @@ package body Flyology_Bench.Workers is
    pragma Import
      (C, C_Errno_Would_Block,
       "flyology_bench_worker_errno_would_block");
+   function C_Errno_No_Child return C.int;
+   pragma Import
+     (C, C_Errno_No_Child,
+      "flyology_bench_worker_errno_no_child");
    function C_Errno_No_Process return C.int;
    pragma Import
      (C, C_Errno_No_Process,
@@ -133,6 +137,7 @@ package body Flyology_Bench.Workers is
 
    Interrupted_Error : constant C.int := C_Errno_Interrupted;
    Would_Block_Error : constant C.int := C_Errno_Would_Block;
+   No_Child_Error    : constant C.int := C_Errno_No_Child;
    No_Process_Error  : constant C.int := C_Errno_No_Process;
    Permission_Error  : constant C.int := C_Errno_Permission;
 
@@ -776,6 +781,25 @@ package body Flyology_Bench.Workers is
       end loop;
    end Sort_Entries;
 
+   function Environment_Within_Byte_Limit
+     (Entries : Environment_Vectors.Vector) return Boolean
+   is
+      Total : Natural := 1;
+   begin
+      for Variable of Entries loop
+         declare
+            Size : constant Natural :=
+              US.Length (Variable.Name) + 1 + US.Length (Variable.Value) + 1;
+         begin
+            if Size > Maximum_Environment_Bytes - Total then
+               return False;
+            end if;
+            Total := Total + Size;
+         end;
+      end loop;
+      return True;
+   end Environment_Within_Byte_Limit;
+
    function Is_Strict_Base_Name
      (Name     : String;
       Item     : Environment) return Boolean is
@@ -825,22 +849,9 @@ package body Flyology_Bench.Workers is
          Delete_Entry (Result, Name);
       end loop;
       Sort_Entries (Result);
-      declare
-         Total : Natural := 1;
-      begin
-         for Variable of Result loop
-            declare
-               Size : constant Natural :=
-                 US.Length (Variable.Name) + 1 + US.Length (Variable.Value) + 1;
-            begin
-               if Size > Maximum_Environment_Bytes - Total then
-                  raise Configuration_Error with
-                    "worker environment exceeds byte limit";
-               end if;
-               Total := Total + Size;
-            end;
-         end loop;
-      end;
+      if not Environment_Within_Byte_Limit (Result) then
+         raise Configuration_Error with "worker environment exceeds byte limit";
+      end if;
       return Result;
    end Effective_Environment;
 
@@ -857,8 +868,17 @@ package body Flyology_Bench.Workers is
          Set_Entry (Result, Name, Value);
       end Include;
    begin
-      Ada.Environment_Variables.Iterate (Include'Access);
+      begin
+         Ada.Environment_Variables.Iterate (Include'Access);
+      exception
+         when Configuration_Error =>
+            raise Protocol_Error with
+              "worker inherited too many environment entries";
+      end;
       Sort_Entries (Result);
+      if not Environment_Within_Byte_Limit (Result) then
+         raise Protocol_Error with "worker environment exceeds byte limit";
+      end if;
       return Result;
    end Current_Environment;
 
@@ -1192,10 +1212,12 @@ package body Flyology_Bench.Workers is
 
    procedure Validate_Measurement_Result
      (Value         : Measurement;
-      Expected_Seed : Long_Long_Integer)
+      Expected_Seed : Long_Long_Integer;
+      Expected_Metrics : Metric_Set)
    is
       Count : constant Natural := Natural (Value.Sample_Total);
       Classified : Natural := 0;
+      Any_Metric_Expected : Boolean := False;
 
       procedure Add_Classified (Amount : Natural) is
       begin
@@ -1213,19 +1235,56 @@ package body Flyology_Bench.Workers is
       Add_Classified (Value.Outlier_Total.Low_Mild);
       Add_Classified (Value.Outlier_Total.High_Mild);
       Add_Classified (Value.Outlier_Total.High_Severe);
+      for Axis in Metric_Axis loop
+         Any_Metric_Expected := Any_Metric_Expected or Expected_Metrics (Axis);
+      end loop;
+      if Any_Metric_Expected /= (Value.Metric_Data.Data /= null) then
+         raise Protocol_Error with
+           "worker metric store presence differs from its configuration";
+      end if;
       if Value.Metric_Data.Data /= null then
          for Axis in Metric_Axis loop
-            if Value.Metric_Data.Data.Summaries (Axis).Samples > Count then
-               raise Protocol_Error with
-                 "worker metric summary count exceeds measurement samples";
-            end if;
+            declare
+               Store : Metric_Store renames Value.Metric_Data.Data.all;
+               Summary : Metric_Summary renames Store.Summaries (Axis);
+            begin
+               if Store.Requested (Axis) /= Expected_Metrics (Axis) then
+                  raise Protocol_Error with
+                    "worker requested metric set differs from its configuration";
+               elsif not Store.Requested (Axis) then
+                  if Store.Available (Axis)
+                    or else Store.Status (Axis) /= Metric_Not_Requested
+                    or else Summary.Available
+                    or else Summary.Samples /= 0
+                  then
+                     raise Protocol_Error with
+                       "worker unrequested metric carries result data";
+                  end if;
+               elsif Store.Available (Axis) then
+                  if Store.Status (Axis) /= Metric_Collected
+                    or else not Summary.Available
+                    or else Summary.Samples /= Count
+                  then
+                     raise Protocol_Error with
+                       "worker available metric metadata is inconsistent";
+                  end if;
+               elsif Store.Status (Axis) in
+                 Metric_Not_Requested | Metric_Collected
+                 or else Summary.Available
+                 or else Summary.Samples /= 0
+               then
+                  raise Protocol_Error with
+                    "worker unavailable metric metadata is inconsistent";
+               end if;
+            end;
          end loop;
       end if;
    end Validate_Measurement_Result;
 
    procedure Validate_Comparison_Result
      (Value         : Comparison;
-      Expected_Seed : Long_Long_Integer)
+      Expected_Seed : Long_Long_Integer;
+      Expected_Metrics : Metric_Set)
    is
       Count : constant Natural := Natural (Value.Reference_Data.Sample_Total);
       Outcomes : Natural := 0;
@@ -1243,8 +1302,10 @@ package body Flyology_Bench.Workers is
          Total := Total + Amount;
       end Add_Bounded;
    begin
-      Validate_Measurement_Result (Value.Reference_Data, Expected_Seed);
-      Validate_Measurement_Result (Value.Contender_Data, Expected_Seed);
+      Validate_Measurement_Result
+        (Value.Reference_Data, Expected_Seed, Expected_Metrics);
+      Validate_Measurement_Result
+        (Value.Contender_Data, Expected_Seed, Expected_Metrics);
       if Value.Random_Seed_Value /= Expected_Seed then
          raise Protocol_Error with "worker comparison seed mismatch";
       end if;
@@ -1280,6 +1341,21 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with
            "worker comparison order flags disagree with its counts";
       end if;
+      for Axis in Metric_Axis loop
+         declare
+            Expected_Available : constant Boolean :=
+              Expected_Metrics (Axis)
+              and then Value.Reference_Data.Metric_Data.Data.Available (Axis)
+              and then Value.Contender_Data.Metric_Data.Data.Available (Axis);
+         begin
+            if Value.Metric_Comparisons (Axis).Available
+              /= Expected_Available
+            then
+               raise Protocol_Error with
+                 "worker metric comparison availability is inconsistent";
+            end if;
+         end;
+      end loop;
    end Validate_Comparison_Result;
 
    procedure Write_All (Data : String) is
@@ -1431,15 +1507,20 @@ package body Flyology_Bench.Workers is
          Result.Kind_Value := Result_Kind'Val
            (Parse_Positive
               (Prefix_Value (Ada.Command_Line.Argument (3), "--kind=")) - 1);
-         Result.Repetition_Value := Parse_Positive
-           (Prefix_Value (Ada.Command_Line.Argument (4), "--repetition="));
+         Result.Repetition_Value := Repetition_Count
+           (Parse_Positive
+              (Prefix_Value
+                 (Ada.Command_Line.Argument (4), "--repetition=")));
          Result.Seed_Value := Parse_Integer
            (Prefix_Value (Ada.Command_Line.Argument (5), "--seed="));
          Result.Environment_Hash := Parse_Hex_U64
            (Prefix_Value (Ada.Command_Line.Argument (6), "--environment="));
          Result.Config_Value := Decode_Configuration
            (Config_Bytes, Default_Configuration);
-         Result.Config_Value.Random_Seed := Result.Seed_Value;
+         if Result.Config_Value.Random_Seed /= Result.Seed_Value then
+            raise Protocol_Error with
+              "worker configuration seed differs from its request seed";
+         end if;
          Result.Configuration_Hash := Hash (Config_Bytes);
          Result.Policy_Value := Environment_Mode'Val
            (Parse_Positive
@@ -1566,37 +1647,99 @@ package body Flyology_Bench.Workers is
 
    overriding procedure Finalize (Process : in out Process_Guard);
 
-   --  A protected action is abort-deferred.  A successful posix_spawn return
-   --  therefore publishes the PID and every parent endpoint into the
-   --  controlled guard before a pending caller abort can take effect.
+   procedure Free_C_String (Item : in out CS.chars_ptr) is
+   begin
+      if Item /= CS.Null_Ptr then
+         CS.Free (Item);
+      end if;
+   end Free_C_String;
+
+   procedure Free_C_Strings (Items : in out Chars_Ptr_Array) is
+   begin
+      for Item of Items loop
+         Free_C_String (Item);
+      end loop;
+   end Free_C_Strings;
+
+   --  A protected action is abort-deferred.  It owns the temporary C strings
+   --  through cleanup and publishes a successful spawn directly into the
+   --  controlled process guard before a pending caller abort can take effect.
    protected type Spawn_Adopter is
       procedure Start
         (Process             : in out Process_Guard;
-         Executable          : CS.chars_ptr;
-         Arguments           : System.Address;
-         Environment         : System.Address;
-         Working_Directory   : CS.chars_ptr;
+         Executable          : String;
+         Argument_Values     : String_Vectors.Vector;
+         Environment_Values  : Environment_Vectors.Vector;
+         Has_Directory       : Boolean;
+         Working_Directory   : String;
+         Started             : out Ada.Real_Time.Time;
+         Finished            : out Ada.Real_Time.Time;
          Result              : out C.int);
    end Spawn_Adopter;
 
    protected body Spawn_Adopter is
       procedure Start
         (Process             : in out Process_Guard;
-         Executable          : CS.chars_ptr;
-         Arguments           : System.Address;
-         Environment         : System.Address;
-         Working_Directory   : CS.chars_ptr;
-         Result              : out C.int) is
+         Executable          : String;
+         Argument_Values     : String_Vectors.Vector;
+         Environment_Values  : Environment_Vectors.Vector;
+         Has_Directory       : Boolean;
+         Working_Directory   : String;
+         Started             : out Ada.Real_Time.Time;
+         Finished            : out Ada.Real_Time.Time;
+         Result              : out C.int)
+      is
+         Argument_Count : constant Natural :=
+           Natural (Argument_Values.Length);
+         Environment_Count : constant Natural :=
+           Natural (Environment_Values.Length);
+         Arguments : Chars_Ptr_Array (0 .. Argument_Count) :=
+           (others => CS.Null_Ptr);
+         Variables : Chars_Ptr_Array (0 .. Environment_Count) :=
+           (others => CS.Null_Ptr);
+         Executable_C : CS.chars_ptr := CS.Null_Ptr;
+         Directory_C : CS.chars_ptr := CS.Null_Ptr;
       begin
          Process.Pid := -1;
          Process.Descriptors := (others => -1);
+         Executable_C := CS.New_String (Executable);
+         for Index in 1 .. Argument_Count loop
+            Arguments (Index - 1) := CS.New_String
+              (Argument_Values.Element (Positive (Index)));
+         end loop;
+         for Index in 1 .. Environment_Count loop
+            declare
+               Variable : constant Environment_Entry :=
+                 Environment_Values.Element (Positive (Index));
+            begin
+               Variables (Index - 1) := CS.New_String
+                 (US.To_String (Variable.Name) & "="
+                  & US.To_String (Variable.Value));
+            end;
+         end loop;
+         if Has_Directory then
+            Directory_C := CS.New_String (Working_Directory);
+         end if;
+         Started := Ada.Real_Time.Clock;
          Result := C_Spawn
-           (Process.Pid'Access, Process.Descriptors'Address, Executable,
-            Arguments, Environment, Working_Directory);
+           (Process.Pid'Access, Process.Descriptors'Address, Executable_C,
+            Arguments'Address, Variables'Address, Directory_C);
+         Finished := Ada.Real_Time.Clock;
          if Result /= 0 then
             Process.Pid := -1;
             Process.Descriptors := (others => -1);
          end if;
+         Free_C_String (Directory_C);
+         Free_C_String (Executable_C);
+         Free_C_Strings (Variables);
+         Free_C_Strings (Arguments);
+      exception
+         when others =>
+            Free_C_String (Directory_C);
+            Free_C_String (Executable_C);
+            Free_C_Strings (Variables);
+            Free_C_Strings (Arguments);
+            raise;
       end Start;
    end Spawn_Adopter;
 
@@ -1609,11 +1752,18 @@ package body Flyology_Bench.Workers is
       end if;
    end Close_Descriptor;
 
-   procedure Reap (Process : in out Process_Guard; Raw_Status : out C.int) is
+   procedure Reap
+     (Process    : in out Process_Guard;
+      Raw_Status : out C.int;
+      Succeeded  : access Boolean := null)
+   is
       Result : C.int;
       Status : aliased C.int := 0;
    begin
       Raw_Status := 0;
+      if Succeeded /= null then
+         Succeeded.all := Process.Pid <= 0;
+      end if;
       if Process.Pid <= 0 then
          return;
       end if;
@@ -1628,7 +1778,14 @@ package body Flyology_Bench.Workers is
             exit;
          end if;
       end loop;
-      Raw_Status := Status;
+      if Succeeded /= null then
+         Succeeded.all := Result = Process.Pid;
+      end if;
+      if Result = Process.Pid then
+         Raw_Status := Status;
+      end if;
+      --  A failed wait means this package no longer owns a waitable PID.
+      --  Disarm cleanup rather than risking a signal to a reused identity.
       Process.Pid := -1;
    end Reap;
 
@@ -1646,15 +1803,6 @@ package body Flyology_Bench.Workers is
    exception
       when others => null;
    end Finalize;
-
-   procedure Free_C_Strings (Items : in out Chars_Ptr_Array) is
-   begin
-      for Item of Items loop
-         if Item /= CS.Null_Ptr then
-            CS.Free (Item);
-         end if;
-      end loop;
-   end Free_C_Strings;
 
    function Elapsed_Nanoseconds
      (Started, Finished : Ada.Real_Time.Time) return Long_Float is
@@ -1843,6 +1991,7 @@ package body Flyology_Bench.Workers is
       Expected_Kind     : Result_Kind;
       Expected_Rep      : Positive;
       Expected_Seed     : Long_Long_Integer;
+      Expected_Metrics  : Metric_Set;
       Expected_Env      : U64;
       Expected_Config   : U64;
       Expected_Policy   : Environment_Mode;
@@ -1906,11 +2055,11 @@ package body Flyology_Bench.Workers is
             if Expected_Kind = Ordinary_Measurement then
                Target.Measurement_Data := Get_Measurement (Data, Payload_Cursor);
                Validate_Measurement_Result
-                 (Target.Measurement_Data, Expected_Seed);
+                 (Target.Measurement_Data, Expected_Seed, Expected_Metrics);
             else
                Target.Comparison_Data := Get_Comparison (Data, Payload_Cursor);
                Validate_Comparison_Result
-                 (Target.Comparison_Data, Expected_Seed);
+                 (Target.Comparison_Data, Expected_Seed, Expected_Metrics);
             end if;
             Target.Outcome_Value := Normal_Result;
          when Envelope_Exception =>
@@ -1975,6 +2124,7 @@ package body Flyology_Bench.Workers is
       Spawn_Start, Spawn_End, Now : Ada.Real_Time.Time;
       Startup_Deadline, Total_Deadline, Grace_Deadline : Ada.Real_Time.Time;
       Exit_Observed : Boolean := False;
+      Child_Ownership_Lost : Boolean := False;
       Timed_Out : Boolean := False;
       Startup_Expired : Boolean := False;
       Term_Sent : Boolean := False;
@@ -1997,66 +2147,35 @@ package body Flyology_Bench.Workers is
       Config_Hash := Hash (US.To_String (Config_Bytes));
 
       declare
-         Environment_Count : constant Natural :=
-           Natural (Environment_List.Length);
-         Arguments : Chars_Ptr_Array (0 .. 9) := (others => CS.Null_Ptr);
-         Variables : Chars_Ptr_Array (0 .. Environment_Count) :=
-           (others => CS.Null_Ptr);
-         Executable_C : CS.chars_ptr := CS.New_String (Executable_Path);
-         Directory_C : CS.chars_ptr := CS.Null_Ptr;
+         Argument_Values : String_Vectors.Vector;
       begin
-         Arguments (0) := CS.New_String (Executable_Path);
-         Arguments (1) := CS.New_String (Worker_Marker);
-         Arguments (2) := CS.New_String
+         Argument_Values.Append (Executable_Path);
+         Argument_Values.Append (Worker_Marker);
+         Argument_Values.Append
            ("--identity=" & Hex_Encode (Identity_Value));
-         Arguments (3) := CS.New_String
+         Argument_Values.Append
            ("--kind=" & Ada.Strings.Fixed.Trim
               (Positive'Image (Result_Kind'Pos (Expected_Kind) + 1),
                Ada.Strings.Both));
-         Arguments (4) := CS.New_String
+         Argument_Values.Append
            ("--repetition=" & Ada.Strings.Fixed.Trim
               (Positive'Image (Rep), Ada.Strings.Both));
-         Arguments (5) := CS.New_String
+         Argument_Values.Append
            ("--seed=" & Ada.Strings.Fixed.Trim
               (Long_Long_Integer'Image (Seed_Value), Ada.Strings.Both));
-         Arguments (6) := CS.New_String
+         Argument_Values.Append
            ("--environment=" & Hex (Environment_Hash));
-         Arguments (7) := CS.New_String
+         Argument_Values.Append
            ("--config=" & Hex_Encode (US.To_String (Config_Bytes)));
-         Arguments (8) := CS.New_String
+         Argument_Values.Append
            ("--environment-policy=" & Ada.Strings.Fixed.Trim
               (Positive'Image
                  (Environment_Mode'Pos (Environment_Policy_Value) + 1),
                Ada.Strings.Both));
-         for Index in 1 .. Environment_Count loop
-            declare
-               Variable : constant Environment_Entry :=
-                 Environment_List.Element (Positive (Index));
-            begin
-               Variables (Index - 1) := CS.New_String
-                 (US.To_String (Variable.Name) & "=" & US.To_String (Variable.Value));
-            end;
-         end loop;
-         if Has_Directory then
-            Directory_C := CS.New_String (Working_Path);
-         end if;
-
-         Spawn_Start := Ada.Real_Time.Clock;
          Adopter.Start
-           (Process, Executable_C, Arguments'Address, Variables'Address,
-            Directory_C, Spawn_Result);
-         Spawn_End := Ada.Real_Time.Clock;
-         CS.Free (Directory_C);
-         CS.Free (Executable_C);
-         Free_C_Strings (Variables);
-         Free_C_Strings (Arguments);
-      exception
-         when others =>
-            CS.Free (Directory_C);
-            CS.Free (Executable_C);
-            Free_C_Strings (Variables);
-            Free_C_Strings (Arguments);
-            raise;
+           (Process, Executable_Path, Argument_Values, Environment_List,
+            Has_Directory, Working_Path, Spawn_Start, Spawn_End,
+            Spawn_Result);
       end;
 
       Target.Spawn_Time := Elapsed_Nanoseconds (Spawn_Start, Spawn_End);
@@ -2123,15 +2242,26 @@ package body Flyology_Bench.Workers is
          begin
             if Observation = 1 then
                Exit_Observed := True;
-            elsif Observation < 0
-              and then C.int (GNAT.OS_Lib.Errno) /= Interrupted_Error
-            then
-               IO_Failed := True;
+            elsif Observation < 0 then
+               if C.int (GNAT.OS_Lib.Errno) = Interrupted_Error then
+                  null;
+               elsif C.int (GNAT.OS_Lib.Errno) = No_Child_Error then
+                  --  SIGCHLD policy or another reaper consumed the child.
+                  --  Its PID can be reused, so neither it nor its former
+                  --  process group is a safe signal target now.
+                  Child_Ownership_Lost := True;
+                  IO_Failed := True;
+                  Process.Pid := -1;
+               else
+                  IO_Failed := True;
+               end if;
             end if;
          end;
 
          Now := Ada.Real_Time.Clock;
-         if not Term_Sent then
+         if Child_Ownership_Lost then
+            null;
+         elsif not Term_Sent then
             if Protocol_Failed or else IO_Failed then
                if not Exit_Observed then
                   Ignored := C_Kill (-Process.Pid, C_Signal_Kill);
@@ -2168,20 +2298,30 @@ package body Flyology_Bench.Workers is
             Hard_Sent := True;
          end if;
 
-         exit when Exit_Observed;
+         exit when Exit_Observed or else Child_Ownership_Lost;
          delay 0.002;
       end loop;
 
-      --  The unreaped root still anchors the process-group identity here, so
-      --  this cannot target a reused PID.  Remove descendants before reaping.
-      Ignored := C_Kill (-Process.Pid, C_Signal_Kill);
-      if Ignored /= 0
-        and then C.int (GNAT.OS_Lib.Errno) /= No_Process_Error
-        and then C.int (GNAT.OS_Lib.Errno) /= Permission_Error
-      then
-         IO_Failed := True;
+      if not Child_Ownership_Lost then
+         --  The unreaped root still anchors the process-group identity here,
+         --  so this cannot target a reused PID.  Remove descendants before
+         --  reaping.
+         Ignored := C_Kill (-Process.Pid, C_Signal_Kill);
+         if Ignored /= 0
+           and then C.int (GNAT.OS_Lib.Errno) /= No_Process_Error
+           and then C.int (GNAT.OS_Lib.Errno) /= Permission_Error
+         then
+            IO_Failed := True;
+         end if;
+         declare
+            Reaped : aliased Boolean;
+         begin
+            Reap (Process, Raw_Status, Reaped'Access);
+            if not Reaped then
+               IO_Failed := True;
+            end if;
+         end;
       end if;
-      Reap (Process, Raw_Status);
 
       declare
          Drain_Deadline : constant Ada.Real_Time.Time :=
@@ -2212,7 +2352,11 @@ package body Flyology_Bench.Workers is
       Target.Error_Omitted := Error_Omitted;
       Target.Forced_Value := Hard_Sent and then Timed_Out;
 
-      if Timed_Out then
+      if Child_Ownership_Lost then
+         Target.Outcome_Value := Parent_IO_Failure;
+         Target.Reason_Value := US.To_Unbounded_String
+           ("worker child was consumed by an external reaper");
+      elsif Timed_Out then
          Target.Outcome_Value :=
            (if Startup_Expired then Startup_Timeout else Execution_Timeout);
          Target.Reason_Value := US.To_Unbounded_String
@@ -2247,7 +2391,8 @@ package body Flyology_Bench.Workers is
          begin
             Decode_Result_Stream
               (US.To_String (Result_Data), Identity_Value, Expected_Kind,
-               Rep, Seed_Value, Environment_Hash, Config_Hash,
+               Rep, Seed_Value, Config_Value.Metrics, Environment_Hash,
+               Config_Hash,
                Environment_Policy_Value, Target);
          exception
             when Error : Protocol_Error =>

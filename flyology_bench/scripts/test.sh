@@ -159,6 +159,7 @@ for symbol in \
   flyology_bench_worker_spawn \
   flyology_bench_worker_set_nonblocking \
   flyology_bench_worker_observe_exit \
+  flyology_bench_worker_errno_no_child \
   flyology_bench_worker_status_exited
 do
   nm -g "$crate_root/lib/libflyology_bench.a" | grep -q "$symbol" || {
@@ -166,6 +167,12 @@ do
     exit 1
   }
 done
+if nm -g "$crate_root/lib/libflyology_bench.a" \
+  | grep -q 'flyology_bench_worker_test_'
+then
+  printf '%s\n' "test-only worker symbols leaked into the production library" >&2
+  exit 1
+fi
 
 "$crate_root/examples/bin/fresh_process" >"$work_dir/fresh-process.out"
 cat "$work_dir/fresh-process.out"
