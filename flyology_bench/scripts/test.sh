@@ -147,12 +147,12 @@ check_csv recording "$work_dir/recording.csv"
 
 # At least one long-form metric section must exist, otherwise the checks above
 # would pass over latency-only output.
-if ! grep -q '^name,axis,scope,unit,available,status,' "$work_dir/smoke.csv"
+if ! grep -q '^name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,available,status,' "$work_dir/smoke.csv"
 then
   printf '%s\n' "measurement metric CSV lost its status column" >&2
   exit 1
 fi
-if ! grep -q '^reference,contender,axis,scope,unit,available,status,' \
+if ! grep -q '^reference,contender,confidence_level_percent,bootstrap_resamples,axis,scope,unit,available,status,' \
   "$work_dir/multi.csv"
 then
   printf '%s\n' "comparison metric CSV lost its status column" >&2
@@ -170,6 +170,13 @@ if command -v jq >/dev/null 2>&1; then
         and (.available == (.status == "collected"));
       def metrics_ok:
         (length > 0) and all(metric_ok);
+      def statistics_ok:
+        (.statistics.confidence_level_percent >= 50.0)
+        and (.statistics.confidence_level_percent <= 99.9)
+        and (.statistics.bootstrap_resamples >= 100)
+        and (.statistics.bootstrap_resamples <= 100000);
+      statistics_ok
+      and
       if .type == "multi_comparison" then
         (.reference.metrics | metrics_ok)
         and (.contenders | length > 0)
@@ -195,12 +202,18 @@ if command -v jq >/dev/null 2>&1; then
     any(.[];
       .sample_semantics == "individual_span"
       and .name == "fast\trequest"
+      and .statistics.confidence_level_percent == 90.0
+      and .statistics.bootstrap_resamples == 200
       and (.samples | length == 40)
       and all(.samples[];
         (.observation | type) == "number"
         and (.outcome == "success" or .outcome == "failure")
         and (.metrics | length > 0)
         and all(.metrics[]; has("axis") and has("status") and has("value"))))
+    and any(.[];
+      .comparison_design == "independent"
+      and .statistics.confidence_level_percent == 80.0
+      and .statistics.bootstrap_resamples == 150)
     and any(.[];
       .comparison_design == "independent"
       and .wall_comparison_available == false
@@ -217,6 +230,8 @@ if command -v jq >/dev/null 2>&1; then
     and all(.[];
       .sample_semantics == "individual_span"
       and .observed > 0
+      and .statistics.confidence_level_percent == 95.0
+      and .statistics.bootstrap_resamples == 2000
       and (.metrics | length > 0))
   ' "$work_dir/recording-example.jsonl" >/dev/null \
     || { printf '%s\n' "recording example JSON failed validation" >&2; exit 1; }

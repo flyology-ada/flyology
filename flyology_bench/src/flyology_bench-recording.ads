@@ -35,12 +35,18 @@ package Flyology_Bench.Recording is
    --  @field Random_Seed Seed used by reservoir selection and bootstrapping.
    --  @field Practical_Threshold_Percent Smallest relative change used for an
    --  independent-comparison verdict.
+   --  @field Confidence_Level_Percent Central coverage of bootstrap confidence
+   --  intervals, in percent.
+   --  @field Bootstrap_Resamples Number of bootstrap distributions drawn for
+   --  every analyzed metric.
    type Configuration is record
       Metrics              : Metric_Set := Process_Resource_Metrics;
       Scheduler_Probe      : Flyology_Scheduler_Probe := null;
       Retention            : Retention_Policy := Reservoir;
       Random_Seed          : Long_Long_Integer := 1;
       Practical_Threshold_Percent : Long_Float := 1.0;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples  : Bootstrap_Resample_Count := 2_000;
    end record;
 
    --  Default policy for externally recorded spans.
@@ -213,6 +219,16 @@ package Flyology_Bench.Recording is
    function Metric_Statistics
      (Result : Recorded_Measurement;
       Axis   : Metric_Axis) return Metric_Summary;
+   --  Return the confidence level used to analyze this snapshot.
+   --  @param Result Recorded snapshot.
+   --  @return Central bootstrap interval coverage in percent.
+   function Confidence_Level_Percent
+     (Result : Recorded_Measurement) return Confidence_Percentage;
+   --  Return the bootstrap resample count used to analyze this snapshot.
+   --  @param Result Recorded snapshot.
+   --  @return Number of bootstrap distributions drawn per interval.
+   function Bootstrap_Resamples
+     (Result : Recorded_Measurement) return Bootstrap_Resample_Count;
    --  Return collection status for an axis. Metric_Collected means every
    --  retained span has a value; Metric_Partially_Collected means only a
    --  subset does.
@@ -308,13 +324,17 @@ package Flyology_Bench.Recording is
    --  @param Result Independent bootstrap comparison.
    --  @param Practical_Threshold_Percent Relative practical-effect threshold.
    --  @param Random_Seed Deterministic bootstrap seed.
+   --  @param Confidence_Level_Percent Central interval coverage in percent.
+   --  @param Bootstrap_Resamples Number of bootstrap distributions to draw.
    --  @exception Constraint_Error Practical_Threshold_Percent is negative.
    procedure Compare_Independent
      (Reference : Recorded_Measurement;
       Contender : Recorded_Measurement;
       Result    : out Recorded_Comparison;
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1);
+      Random_Seed : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000);
 
    --  Return the reference identity.
    --  @param Result Independent comparison.
@@ -324,6 +344,16 @@ package Flyology_Bench.Recording is
    --  @param Result Independent comparison.
    --  @return Contender name.
    function Contender_Name (Result : Recorded_Comparison) return String;
+   --  Return the confidence level used for this comparison.
+   --  @param Result Independent comparison.
+   --  @return Central bootstrap interval coverage in percent.
+   function Confidence_Level_Percent
+     (Result : Recorded_Comparison) return Confidence_Percentage;
+   --  Return the bootstrap resample count used for this comparison.
+   --  @param Result Independent comparison.
+   --  @return Number of bootstrap distributions drawn per interval.
+   function Bootstrap_Resamples
+     (Result : Recorded_Comparison) return Bootstrap_Resample_Count;
    --  Return reference median divided by contender median.
    --  @param Result Independent comparison.
    --  @return Speedup, greater than one when the contender is faster.
@@ -331,13 +361,13 @@ package Flyology_Bench.Recording is
    function Speedup (Result : Recorded_Comparison) return Long_Float;
    --  Return the lower bootstrap speedup endpoint.
    --  @param Result Independent comparison.
-   --  @return Lower 95-percent confidence endpoint.
+   --  @return Lower configured-confidence endpoint.
    --  @exception Constraint_Error Wall comparison is unavailable.
    function Speedup_Confidence_Low
      (Result : Recorded_Comparison) return Long_Float;
    --  Return the upper bootstrap speedup endpoint.
    --  @param Result Independent comparison.
-   --  @return Upper 95-percent confidence endpoint.
+   --  @return Upper configured-confidence endpoint.
    --  @exception Constraint_Error Wall comparison is unavailable.
    function Speedup_Confidence_High
      (Result : Recorded_Comparison) return Long_Float;
@@ -349,13 +379,13 @@ package Flyology_Bench.Recording is
      (Result : Recorded_Comparison) return Long_Float;
    --  Return the lower relative-change endpoint.
    --  @param Result Independent comparison.
-   --  @return Lower 95-percent confidence endpoint in percent.
+   --  @return Lower configured-confidence endpoint in percent.
    --  @exception Constraint_Error Wall comparison is unavailable.
    function Relative_Change_Confidence_Low
      (Result : Recorded_Comparison) return Long_Float;
    --  Return the upper relative-change endpoint.
    --  @param Result Independent comparison.
-   --  @return Upper 95-percent confidence endpoint in percent.
+   --  @return Upper configured-confidence endpoint in percent.
    --  @exception Constraint_Error Wall comparison is unavailable.
    function Relative_Change_Confidence_High
      (Result : Recorded_Comparison) return Long_Float;
@@ -473,6 +503,8 @@ private
       Values         : Metric_Value_Store := [others => null];
       Samples        : Recorded_Sample_Array_Access := null;
       Summaries      : Summary_Array := [others => (others => <>)];
+      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
    end record;
    --  @exclude Internal deep-copy hook.
    --  @param Object Internal result.
@@ -494,6 +526,8 @@ private
       Change_High     : Long_Float := 0.0;
       Verdict_Value   : Comparison_Verdict := Inconclusive;
       Wall_Available  : Boolean := False;
+      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
       Reference_Statuses : Availability_Array :=
         [others => Metric_Not_Requested];
       Contender_Statuses : Availability_Array :=

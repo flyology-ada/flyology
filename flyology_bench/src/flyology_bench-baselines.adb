@@ -11,8 +11,11 @@ package body Flyology_Bench.Baselines is
    use type Interfaces.Unsigned_64;
 
    Magic : constant String := "flyology_bench baseline v1";
-   Bootstrap_Resamples : constant := 2_000;
    type Float_Array is array (Positive range <>) of Long_Float;
+
+   function Lower_Tail
+     (Confidence : Confidence_Percentage) return Long_Float is
+     ((100.0 - Long_Float (Confidence)) / 200.0);
 
    procedure Reject_Newline (Value : String; Field : String) is
    begin
@@ -157,7 +160,10 @@ package body Flyology_Bench.Baselines is
       Current    : Measurement;
       Fingerprint : String := "";
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1) return Regression
+      Random_Seed : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
+      return Regression
    is
       Result : Regression;
       Current_Count : constant Positive := Positive (Samples (Current));
@@ -259,8 +265,11 @@ package body Flyology_Bench.Baselines is
            / (Current_Sum / Long_Float (Current_Count));
       end loop;
       Sort (Bootstrap);
-      Result.CI_Low := Percentile (Bootstrap, 0.025);
-      Result.CI_High := Percentile (Bootstrap, 0.975);
+      Result.CI_Low :=
+        Percentile (Bootstrap, Lower_Tail (Confidence_Level_Percent));
+      Result.CI_High :=
+        Percentile
+          (Bootstrap, 1.0 - Lower_Tail (Confidence_Level_Percent));
       declare
          Change_Low : constant Long_Float :=
            100.0 * (1.0 / Result.CI_High - 1.0);
