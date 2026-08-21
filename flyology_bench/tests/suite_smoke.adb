@@ -6,12 +6,14 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench;
+with Flyology_Bench.Reporters;
 with Flyology_Bench.Suites;
 
 procedure Suite_Smoke is
    use Ada.Strings.Unbounded;
    use type Flyology_Bench.Iteration_Count;
    use type Flyology_Bench.Metric_Set;
+   use type Flyology_Bench.Progress_Handler;
 
    package Runner is new Flyology_Bench.Suites (Maximum_Cases => 8);
    use type Runner.Final_Status;
@@ -23,6 +25,7 @@ procedure Suite_Smoke is
    Calls   : Natural := 0;
    Last_Config : Flyology_Bench.Configuration :=
      Flyology_Bench.Default_Configuration;
+   Reporter_Sink  : Ada.Text_IO.File_Type;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -47,6 +50,23 @@ procedure Suite_Smoke is
      (Reference_Operation => Operation,
       Contender_Operation => Contender);
 
+   type Multi_Case is (Reference_Case, Contender_Case);
+
+   procedure Multi_Batch
+     (Which      : Multi_Case;
+      Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
+         case Which is
+            when Reference_Case => Operation;
+            when Contender_Case => Contender;
+         end case;
+      end loop;
+   end Multi_Batch;
+
+   procedure Compare_Multi is new Flyology_Bench.Compare_Many
+     (Case_Id => Multi_Case, Batch => Multi_Batch);
+
    procedure Run_Measurement
      (Config : Flyology_Bench.Configuration;
       Result : out Flyology_Bench.Measurement) is
@@ -64,6 +84,27 @@ procedure Suite_Smoke is
       Last_Config := Config;
       Compare_Operations (Config, Result);
    end Run_Comparison;
+
+   procedure Run_Multi
+     (Config : Flyology_Bench.Configuration;
+      Result : out Flyology_Bench.Multi_Comparison) is
+   begin
+      Calls := Calls + 1;
+      Last_Config := Config;
+      Compare_Multi (Config, Result);
+   end Run_Multi;
+
+   package Multi_Registration is new Runner.Multi_Way_Registration
+     (Case_Id => Multi_Case,
+      Run     => Run_Multi);
+
+   procedure Run_And_Close_Output
+     (Config : Flyology_Bench.Configuration;
+      Result : out Flyology_Bench.Measurement) is
+   begin
+      Measure_Operation (Config, Result);
+      Ada.Text_IO.Close (Reporter_Sink);
+   end Run_And_Close_Output;
 
    procedure Fail
      (Config : Flyology_Bench.Configuration;
@@ -293,6 +334,50 @@ begin
    end;
 
    declare
+      Multi_Target : Runner.Suite;
+      Result       : Flyology_Bench.Multi_Comparison;
+      Path         : constant String := "suite-multi.jsonl";
+      Progress_Path : constant String := "suite-multi.progress";
+      Progress     : Ada.Text_IO.File_Type;
+      Summary      : Runner.Run_Summary;
+      Options      : constant Runner.Runner_Options :=
+        Runner.Parse
+          ([U ("--output-style=json"), U ("--output=" & Path)], Base_Config);
+   begin
+      Multi_Registration.Register
+        (Multi_Target, "shootout", Group => "core", Tags => "multi,smoke");
+      Check
+        (Runner.Kind (Multi_Target, 1) = Runner.Multi_Way_Comparison,
+         "multi-way registration kind");
+      Runner.Execute_One_Multi
+        (Multi_Target, "core/shootout", Base_Config, Result);
+      Check
+        (Flyology_Bench.Cases (Result) = 2,
+         "execute-one multi-way result");
+      Remove (Path);
+      Remove (Progress_Path);
+      Ada.Text_IO.Create (Progress, Ada.Text_IO.Out_File, Progress_Path);
+      Runner.Execute
+        (Multi_Target, "multi_suite", Options, Summary, Progress => Progress);
+      Ada.Text_IO.Close (Progress);
+      Check (Runner.Successful (Summary), "multi-way suite did not succeed");
+      declare
+         Output_Text : constant String := Read_All (Path);
+      begin
+         Check
+           (Ada.Strings.Fixed.Index
+              (Output_Text, """result_kind"":""multi_way_comparison""") /= 0
+            and then Ada.Strings.Fixed.Index
+              (Output_Text, """type"":""multi_comparison""") /= 0
+            and then Ada.Strings.Fixed.Index
+              (Output_Text, """contenders""") /= 0,
+            "multi-way full JSON reporting");
+      end;
+      Remove (Path);
+      Remove (Progress_Path);
+   end;
+
+   declare
       Path : constant String := "suite-config.csv";
       File : Ada.Text_IO.File_Type;
       Summary : Runner.Run_Summary;
@@ -312,6 +397,21 @@ begin
       Check
         (Last_Config.Maximum_Iterations = 1_000,
          "callback configuration changed unrelated field");
+      declare
+         Output_Text : constant String := Read_All (Path);
+      begin
+         Check
+           (Ada.Strings.Fixed.Index (Output_Text, "row_kind") /= 0
+            and then Ada.Strings.Fixed.Index
+              (Output_Text,
+               "config_suite,core/alpha,ordinary_measurement,completed,false,"
+               & "measurement") /= 0
+            and then Ada.Strings.Fixed.Index
+              (Output_Text, "clock_backend") /= 0
+            and then Ada.Strings.Fixed.Index
+              (Output_Text, ",metric,") /= 0,
+            "suite CSV did not preserve full reporter schemas");
+      end;
       Remove (Path);
    end;
 
@@ -388,6 +488,13 @@ begin
         Runner.Parse
           (Args_3 ("--filter", "absent", "--allow-empty"), Base_Config);
       Summary : Runner.Run_Summary;
+      Output_Path   : constant String := "suite-empty-list.out";
+      Progress_Path : constant String := "suite-empty-list.progress";
+      Output_File   : Ada.Text_IO.File_Type;
+      Progress_File : Ada.Text_IO.File_Type;
+      List_Options  : constant Runner.Runner_Options :=
+        Runner.Parse
+          ([U ("--list"), U ("--filter=absent")], Base_Config);
    begin
       Runner.List (Target, No_Match, Summary);
       Check
@@ -395,17 +502,44 @@ begin
          "no-match status was successful");
       Runner.List (Target, Allowed, Summary);
       Check (Runner.Successful (Summary), "allow-empty did not pass");
+      Remove (Output_Path);
+      Remove (Progress_Path);
+      Ada.Text_IO.Create (Output_File, Ada.Text_IO.Out_File, Output_Path);
+      Ada.Text_IO.Create (Progress_File, Ada.Text_IO.Out_File, Progress_Path);
+      Runner.Execute
+        (Target, "empty_suite", List_Options, Summary,
+         Output => Output_File, Progress => Progress_File);
+      Ada.Text_IO.Close (Output_File);
+      Ada.Text_IO.Close (Progress_File);
+      Check
+        (Ada.Strings.Fixed.Index
+           (Read_All (Progress_Path),
+            "no benchmark cases matched the selection") /= 0,
+         "empty list omitted diagnostic");
+      Remove (Output_Path);
+      Remove (Progress_Path);
    end;
 
    declare
       JSON_Path     : constant String := "suite-smoke.jsonl";
       Progress_Path : constant String := "suite-smoke.progress";
       Progress      : Ada.Text_IO.File_Type;
+      Dry_Base      : constant Flyology_Bench.Configuration :=
+        (Flyology_Bench.Reporters.Terminal_Mode (Base_Config, "must-not-run")
+         with delta
+           Metrics => Flyology_Bench.All_Builtin_Metrics,
+           CPU_Quiescence =>
+             (Enabled => True,
+              Maximum_Average_CPU_Percent => 0.0,
+              Maximum_Core_CPU_Percent => 0.0,
+              Stable_Time => 1.0,
+              Poll_Interval => 0.100,
+              Timeout => 15.0));
       Options : constant Runner.Runner_Options :=
         Runner.Parse
           ([U ("--dry-run"), U ("--continue-on-error"),
             U ("--output-style=json"), U ("--output=" & JSON_Path)],
-           Base_Config);
+           Dry_Base);
       Summary : Runner.Run_Summary;
    begin
       Remove (JSON_Path);
@@ -419,6 +553,16 @@ begin
       Check (Summary.Failed = 1, "dry failed count");
       Check (Summary.Dry_Run, "dry summary marker");
       Check (Summary.Status = Runner.Benchmark_Failed, "dry failure status");
+      Check
+        (Last_Config.Maximum_Iterations = 1_000
+         and then Last_Config.Maximum_Sampling_Time > 0.0
+         and then Last_Config.Metrics = Flyology_Bench.Time_Metrics
+         and then not Last_Config.CPU_Quiescence.Enabled
+         and then not Last_Config.Interference.Enabled
+         and then not Last_Config.Placement.Enabled
+         and then not Last_Config.Host_Lock.Enabled
+         and then Last_Config.Progress = null,
+         "dry run retained non-validation collection policy");
       declare
          Output_Text   : constant String := Read_All (JSON_Path);
          Progress_Text : constant String := Read_All (Progress_Path);
@@ -443,6 +587,37 @@ begin
             "progress stream absent");
       end;
       Remove (JSON_Path);
+      Remove (Progress_Path);
+   end;
+
+   declare
+      Path          : constant String := "suite-machine-progress.jsonl";
+      Progress_Path : constant String := "suite-machine-progress.log";
+      Progress      : Ada.Text_IO.File_Type;
+      Summary       : Runner.Run_Summary;
+      Terminal_Base : constant Flyology_Bench.Configuration :=
+        Flyology_Bench.Reporters.Terminal_Mode
+          (Base_Config, "must-not-run");
+      Options : constant Runner.Runner_Options :=
+        Runner.Parse
+          ([U ("--exact=core/alpha"), U ("--output-style=json"),
+            U ("--output=" & Path)], Terminal_Base);
+   begin
+      Remove (Path);
+      Remove (Progress_Path);
+      Ada.Text_IO.Create (Progress, Ada.Text_IO.Out_File, Progress_Path);
+      Runner.Execute
+        (Target, "machine_suite", Options, Summary, Progress => Progress);
+      Ada.Text_IO.Close (Progress);
+      Check (Runner.Successful (Summary), "machine suite did not succeed");
+      Check
+        (Last_Config.Progress = null,
+         "machine output retained configured terminal progress");
+      Check
+        (Ada.Strings.Fixed.Index
+           (Read_All (Path), """clock"":{""backend""") /= 0,
+         "machine JSON omitted full reporter payload");
+      Remove (Path);
       Remove (Progress_Path);
    end;
 
@@ -484,6 +659,40 @@ begin
         (Ada.Strings.Fixed.Index (Read_All (Sink_Path), """quoted""") /= 0,
          "CSV exception escaping absent");
       Remove (Sink_Path);
+   end;
+
+   declare
+      Reporting_Target : Runner.Suite;
+      Summary          : Runner.Run_Summary;
+      Options          : constant Runner.Runner_Options :=
+        Runner.Parse
+          ([U ("--output-style=csv"), U ("--fail-fast")], Base_Config);
+      Progress         : Ada.Text_IO.File_Type;
+      Output_Path      : constant String := "suite-reporting-error.csv";
+      Progress_Path    : constant String := "suite-reporting-error.progress";
+      Raised           : Boolean := False;
+   begin
+      Runner.Register
+        (Reporting_Target, "close-output", Run_And_Close_Output'Access);
+      Remove (Output_Path);
+      Remove (Progress_Path);
+      Ada.Text_IO.Create (Reporter_Sink, Ada.Text_IO.Out_File, Output_Path);
+      Ada.Text_IO.Create (Progress, Ada.Text_IO.Out_File, Progress_Path);
+      begin
+         Runner.Execute
+           (Reporting_Target, "reporting_suite", Options, Summary,
+            Output => Reporter_Sink, Progress => Progress);
+      exception
+         when Ada.Text_IO.Status_Error | Ada.Text_IO.Device_Error =>
+            Raised := True;
+      end;
+      Ada.Text_IO.Close (Progress);
+      Check (Raised, "reporting failure did not propagate");
+      Check
+        (Summary.Completed = 1 and then Summary.Failed = 0,
+         "reporting failure was counted as callback failure");
+      Remove (Output_Path);
+      Remove (Progress_Path);
    end;
 
    Check (Calls > 0 and then Counter > 0, "callbacks did not execute");

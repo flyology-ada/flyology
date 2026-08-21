@@ -40,6 +40,24 @@ procedure Suite_Runner is
      (Reference_Operation => Mix,
       Contender_Operation => Double_Mix);
 
+   type Mix_Case is (Single_Run, Double_Run, Branch_Run);
+
+   procedure Mix_Batch
+     (Which      : Mix_Case;
+      Iterations : Flyology_Bench.Iteration_Count) is
+   begin
+      for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
+         case Which is
+            when Single_Run => Mix;
+            when Double_Run => Double_Mix;
+            when Branch_Run => Branch;
+         end case;
+      end loop;
+   end Mix_Batch;
+
+   procedure Compare_All is new Flyology_Bench.Compare_Many
+     (Case_Id => Mix_Case, Batch => Mix_Batch);
+
    procedure Run_Mix
      (Config : Flyology_Bench.Configuration;
       Result : out Flyology_Bench.Measurement) is
@@ -61,6 +79,17 @@ procedure Suite_Runner is
       Compare_Mixes (Config, Result);
    end Run_Comparison;
 
+   procedure Run_Shootout
+     (Config : Flyology_Bench.Configuration;
+      Result : out Flyology_Bench.Multi_Comparison) is
+   begin
+      Compare_All (Config, Result);
+   end Run_Shootout;
+
+   package Shootout_Registration is new Benchmarks.Multi_Way_Registration
+     (Case_Id => Mix_Case,
+      Run     => Run_Shootout);
+
    Target  : Benchmarks.Suite;
    Summary : Benchmarks.Run_Summary;
    Base    : constant Flyology_Bench.Configuration :=
@@ -81,6 +110,8 @@ begin
    Benchmarks.Register_Paired
      (Target, "comparison", "mix", "double_mix", Run_Comparison'Access,
       Group => "integer", Tags => "arithmetic,paired");
+   Shootout_Registration.Register
+     (Target, "shootout", Group => "integer", Tags => "arithmetic,multi");
 
    declare
       Options : constant Benchmarks.Runner_Options :=

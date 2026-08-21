@@ -85,7 +85,8 @@ cat "$work_dir/suite.out"
 if [ "$(sed -n '1p' "$work_dir/suite-list.out")" != "integer/mix" ] \
   || [ "$(sed -n '2p' "$work_dir/suite-list.out")" != "integer/branch" ] \
   || [ "$(sed -n '3p' "$work_dir/suite-list.out")" != "integer/comparison" ] \
-  || [ -n "$(sed -n '4p' "$work_dir/suite-list.out")" ]
+  || [ "$(sed -n '4p' "$work_dir/suite-list.out")" != "integer/shootout" ] \
+  || [ -n "$(sed -n '5p' "$work_dir/suite-list.out")" ]
 then
   printf '%s\n' "suite example list order changed" >&2
   exit 1
@@ -99,6 +100,12 @@ fi
   "$crate_root/examples/bin/suite_runner" \
     --exact=integer/mix --dry-run --output-style=csv \
     --output=suite-example.csv 2>>suite-example.progress
+  "$crate_root/examples/bin/suite_runner" \
+    --exact=integer/mix --output-style=json \
+    --output=suite-full.jsonl 2>>suite-example.progress
+  "$crate_root/examples/bin/suite_runner" \
+    --exact=integer/mix --output-style=csv \
+    --output=suite-full.csv 2>>suite-example.progress
 )
 if grep -q 'running ' "$work_dir/suite-example.jsonl" \
   || grep -q "$(printf '\033')" "$work_dir/suite-example.jsonl"
@@ -106,12 +113,29 @@ then
   printf '%s\n' "suite output file contains progress or ANSI" >&2
   exit 1
 fi
-awk '
-  NR == 1 { expected = NF }
-  NF != expected { exit 1 }
-  END { if (NR != 3) exit 1 }
-' FS=, "$work_dir/suite-example.csv" \
-  || { printf '%s\n' "suite example CSV failed validation" >&2; exit 1; }
+check_suite_csv() {
+  awk -F, -v source="$1" '
+    BEGIN { expected = 0; headers = 0; rows = 0 }
+    $1 == "suite" && $2 == "benchmark" {
+      expected = NF
+      headers += 1
+      next
+    }
+    {
+      rows += 1
+      if (expected == 0 || NF != expected) {
+        printf "%s: row has %d columns after %d-column header\n",
+          source, NF, expected > "/dev/stderr"
+        exit 1
+      }
+    }
+    END { if (headers == 0 || rows == 0) exit 1 }
+  ' "$2"
+}
+check_suite_csv suite-dry "$work_dir/suite-example.csv" \
+  || { printf '%s\n' "suite dry CSV failed validation" >&2; exit 1; }
+check_suite_csv suite-full "$work_dir/suite-full.csv" \
+  || { printf '%s\n' "suite full CSV failed validation" >&2; exit 1; }
 "$crate_root/examples/bin/recording_service" \
   >"$work_dir/recording-example.ansi"
 escape=$(printf '\033')
@@ -491,13 +515,27 @@ fi
 # absent; the Linux validation image installs jq so that path always runs.
 if command -v jq >/dev/null 2>&1; then
   jq -s -e '
-    length == 3
+    length == 4
     and (.[0].benchmark == "integer/mix")
     and (.[1].benchmark == "integer/branch")
     and all(.[0:2][]; .dry_run == true and .median_ns == null)
-    and (.[2].result_kind == "summary")
+    and (.[2].benchmark == "integer/shootout")
+    and (.[2].result_kind == "multi_way_comparison")
+    and (.[3].result_kind == "summary")
   ' "$work_dir/suite-example.jsonl" >/dev/null \
     || { printf '%s\n' "suite example JSON failed validation" >&2; exit 1; }
+  jq -s -e '
+    length == 2
+    and (.[0].suite == "maintained")
+    and (.[0].benchmark == "integer/mix")
+    and (.[0].result_kind == "ordinary_measurement")
+    and (.[0].outcome == "completed")
+    and (.[0].dry_run == false)
+    and (.[0].clock.backend | type == "string")
+    and (.[0].metrics | length > 0)
+    and (.[1].result_kind == "summary")
+  ' "$work_dir/suite-full.jsonl" >/dev/null \
+    || { printf '%s\n' "suite full JSON failed validation" >&2; exit 1; }
   check_json() {
     jq -e '
       def metric_ok:
@@ -710,9 +748,21 @@ else
         failures += 1
       }
     }
-    END { if (objects != 3 || failures > 0) exit 1 }
+    END { if (objects != 4 || failures > 0) exit 1 }
   ' "$work_dir/suite-example.jsonl" \
     || { printf '%s\n' "suite example JSON failed structural validation" >&2; exit 1; }
+  awk '
+    BEGIN { failures = 0; objects = 0 }
+    {
+      objects += 1
+      if ($0 !~ /^\{/ || $0 !~ /\}$/ || $0 !~ /"suite":"maintained"/
+        || $0 !~ /"result_kind":/ || $0 !~ /"outcome":/) {
+        failures += 1
+      }
+    }
+    END { if (objects != 2 || failures > 0) exit 1 }
+  ' "$work_dir/suite-full.jsonl" \
+    || { printf '%s\n' "suite full JSON failed structural validation" >&2; exit 1; }
   awk '
     BEGIN { failures = 0; objects = 0 }
     {

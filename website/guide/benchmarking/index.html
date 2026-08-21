@@ -377,16 +377,16 @@ alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
   --output=suite.ndjson</code></pre>
             </figure>
             <p>Names, groups, tags, and matching are case-sensitive. A filter without <code>*</code> or <code>?</code> is a substring match. A glob uses only those two portable wildcards. A no-match selection returns a failing status unless <code>--allow-empty</code> is explicit.</p>
-            <p>Every selected callback receives one shared <code>Configuration</code>. The callback wraps an existing generic <code>Measure</code> or <code>Compare</code> instantiation. Indirect dispatch occurs before collection, while the timed operation inside that instantiation remains statically bound.</p>
+            <p>Every selected callback receives one shared <code>Configuration</code>. The callback wraps an existing generic <code>Measure</code>, <code>Compare</code>, or <code>Compare_Many</code> instantiation. Multi-way registration also binds the case enumeration to the existing generic reporters. Indirect dispatch occurs before collection, while the timed operation inside that instantiation remains statically bound.</p>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Serial process</dt><dd>Cases execute serially. Global state, caches, and host conditions carry between cases.</dd></div>
                 <div class="decision-row"><dt>Exceptions</dt><dd>The default continues after a callback exception and reports its full identity. <code>--fail-fast</code> stops before the next case.</dd></div>
-                <div class="decision-row"><dt>Dry run</dt><dd><code>--dry-run</code> invokes each callback with the smallest valid collection policy. Output is marked as validation-only and contains no performance numbers.</dd></div>
-                <div class="decision-row"><dt>Machine files</dt><dd><code>--output</code> writes plain human output, one-schema CSV, or newline-delimited JSON. Progress and ANSI sequences stay outside the file.</dd></div>
+                <div class="decision-row"><dt>Dry run</dt><dd><code>--dry-run</code> invokes each callback with ten time-only samples, a finite collection cap, and optional host gates, telemetry, scheduler probes, and progress disabled. Output is validation-only and contains no performance numbers.</dd></div>
+                <div class="decision-row"><dt>Machine files</dt><dd><code>--output</code> writes plain human output, typed CSV table sections, or newline-delimited JSON. Suite context prefixes the complete existing latency and metric schemas. Configured terminal progress and ANSI sequences stay outside machine output.</dd></div>
               </dl>
             </div>
-            <p>The aggregate reports discovered, selected, completed, skipped, failed, inconclusive, unavailable, and rejected counts. An inconclusive paired comparison does not fail by default. The maintained main maps a failing final status to <code>Ada.Command_Line.Failure</code>.</p>
+            <p>The aggregate reports discovered, selected, completed, skipped, failed, inconclusive, unavailable, and rejected counts. An inconclusive paired or multi-way comparison does not fail by default. The maintained main maps a failing final status to <code>Ada.Command_Line.Failure</code>.</p>
           </section>
 
           <section id="axes">
