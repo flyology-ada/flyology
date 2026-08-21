@@ -784,6 +784,14 @@ fields, duplicate fields and samples, unsupported versions, malformed or
 out-of-range values, incomplete samples, trailing data, and checksum failures
 with a specific `Baseline_Format_Error` message.
 
+Raw time samples are limited to values the harness can produce: no smaller
+than one nanosecond divided by the maximum iteration count and no larger than
+one complete unsigned 64-bit clock delta. This bound keeps every independent
+mean ratio, confidence endpoint, and time-change conversion finite. A current
+measurement outside that domain raises `Baseline_Comparison_Error`; the gate
+reports it as `Baseline_Error`, without publishing partial statistics, and
+applies the configured fail-open or fail-closed artifact action.
+
 `Load` also retains read compatibility with the earlier version 1 format that
 the public `Save` procedure emitted. Its fixed field order, sample count, sample
 ranges, and trailing data are validated, but that legacy format has no checksum
@@ -826,6 +834,13 @@ invalid, incompatible, and inconclusive results without rejecting.
 `Fail_Closed_Gate_Policy` rejects all four conditions. A caller can derive a
 policy that fails closed for the artifact and environment but reports an
 inconclusive statistical result.
+
+The bounded sum, mean, ratio, percentile interpolation, time-change, and
+verdict primitives live in a private SPARK unit. `./scripts/prove.sh` proves
+their bounded floating-point run-time checks and the ratio/time-change result
+contracts at level 1. File parsing, bootstrap sampling and sorting, and gate
+orchestration remain outside SPARK and are covered by the focused behavioral
+tests.
 
 Benchmark name, environment fingerprint, and clock backend comparisons are
 exact. The gate does not compare samples after any mismatch. The default

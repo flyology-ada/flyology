@@ -7,12 +7,14 @@ with Ada.IO_Exceptions;
 with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
+with Flyology_Bench.Baseline_Math;
 with Flyology_Bench.Metadata;
 with Interfaces;
 with Interfaces.C;
 with System;
 
 package body Flyology_Bench.Baselines is
+   package Safe_Math renames Flyology_Bench.Baseline_Math;
    package Math renames Ada.Numerics.Long_Elementary_Functions;
    package Unbounded renames Ada.Strings.Unbounded;
    use type Interfaces.Unsigned_64;
@@ -167,7 +169,8 @@ package body Flyology_Bench.Baselines is
       Upper : constant Positive := Positive (Long_Float'Ceiling (Position));
       Weight : constant Long_Float := Position - Long_Float (Lower);
    begin
-      return Ordered (Lower) * (1.0 - Weight) + Ordered (Upper) * Weight;
+      return Safe_Math.Interpolate
+        (Ordered (Lower), Ordered (Upper), Weight);
    end Percentile;
 
    function Next_Random
@@ -292,9 +295,10 @@ package body Flyology_Bench.Baselines is
          declare
             Value : constant Long_Float := Sample_Nanoseconds (Result, Index);
          begin
-            if not (Value > 0.0) or else Value > Long_Float'Last then
+            if not Safe_Math.Is_Supported_Sample (Value) then
                raise Constraint_Error with
-                 "baseline samples must contain positive finite times";
+                 "baseline samples must be within the supported nanosecond "
+                 & "range";
             end if;
             Append_Field
               ("sample." & Ada.Strings.Fixed.Trim
@@ -377,7 +381,7 @@ package body Flyology_Bench.Baselines is
          Parsed : Long_Float;
       begin
          Parsed := Long_Float'Value (Value);
-         if not (Parsed > 0.0) or else Parsed > Long_Float'Last then
+         if not Safe_Math.Is_Supported_Sample (Parsed) then
             raise Constraint_Error;
          end if;
          return Parsed;
@@ -385,7 +389,7 @@ package body Flyology_Bench.Baselines is
          when Constraint_Error =>
             raise Baseline_Format_Error with
               "baseline sample" & Sample_Index'Image (Index)
-              & " is malformed, nonpositive, or out of range";
+              & " is malformed or outside the supported nanosecond range";
       end Parse_Sample;
 
       procedure Parse_Legacy is
@@ -607,6 +611,8 @@ package body Flyology_Bench.Baselines is
       Saved_Count : constant Positive := Positive (Saved.Sample_Total);
       Saved_Sum : Long_Float := 0.0;
       Current_Sum : Long_Float := 0.0;
+      Saved_Mean : Long_Float;
+      Current_Mean : Long_Float;
       Bootstrap : Float_Array (1 .. Default_Bootstrap_Resamples);
       State : Interfaces.Unsigned_64 :=
         16#94D0_49BB_1331_11EB# xor Interfaces.Unsigned_64 (Random_Seed);
@@ -637,19 +643,62 @@ package body Flyology_Bench.Baselines is
       if not Result.Is_Compatible then
          return Result;
       end if;
+
       for Index in 1 .. Saved_Count loop
-         Saved_Sum := Saved_Sum + Saved.Values (Sample_Index (Index));
+         declare
+            Value : constant Long_Float :=
+              Saved.Values (Sample_Index (Index));
+         begin
+            if not Safe_Math.Is_Supported_Sample (Value) then
+               raise Baseline_Comparison_Error with
+                 "saved baseline contains a sample outside the supported "
+                 & "nanosecond range";
+            end if;
+            if not Safe_Math.Can_Add_To_Sum (Saved_Sum, Value)
+              or else not Safe_Math.Is_Supported_Sum (Saved_Sum + Value)
+            then
+               raise Baseline_Comparison_Error with
+                 "saved baseline sample sum is outside the supported range";
+            end if;
+            Safe_Math.Add_To_Sum (Saved_Sum, Value);
+         end;
       end loop;
       for Index in 1 .. Current_Count loop
-         Current_Sum :=
-           Current_Sum + Sample_Nanoseconds (Current, Sample_Index (Index));
+         declare
+            Value : constant Long_Float :=
+              Sample_Nanoseconds (Current, Sample_Index (Index));
+         begin
+            if not Safe_Math.Is_Supported_Sample (Value) then
+               raise Baseline_Comparison_Error with
+                 "current measurement contains a sample outside the supported "
+                 & "nanosecond range";
+            end if;
+            if not Safe_Math.Can_Add_To_Sum (Current_Sum, Value)
+              or else not Safe_Math.Is_Supported_Sum (Current_Sum + Value)
+            then
+               raise Baseline_Comparison_Error with
+                 "current measurement sample sum is outside the supported "
+                 & "range";
+            end if;
+            Safe_Math.Add_To_Sum (Current_Sum, Value);
+         end;
       end loop;
-      if Saved_Sum <= 0.0 or else Current_Sum <= 0.0 then
-         raise Program_Error with "baseline comparison contains nonpositive time";
+      if Saved_Sum < Safe_Math.Minimum_Sample_Nanoseconds
+        or else Current_Sum < Safe_Math.Minimum_Sample_Nanoseconds
+      then
+         raise Baseline_Comparison_Error with
+           "baseline sample sum is below the supported range";
+      end if;
+      Saved_Mean := Safe_Math.Mean (Saved_Sum, Saved.Sample_Total);
+      Current_Mean := Safe_Math.Mean (Current_Sum, Samples (Current));
+      if not Safe_Math.Is_Supported_Sample (Saved_Mean)
+        or else not Safe_Math.Is_Supported_Sample (Current_Mean)
+      then
+         raise Baseline_Comparison_Error with
+           "baseline mean is outside the supported nanosecond range";
       end if;
       Result.Speedup_Value :=
-        (Saved_Sum / Long_Float (Saved_Count))
-        / (Current_Sum / Long_Float (Current_Count));
+        Safe_Math.Ratio (Saved_Mean, Current_Mean);
 
       for Resample in Bootstrap'Range loop
          Saved_Sum := 0.0;
@@ -666,10 +715,22 @@ package body Flyology_Bench.Baselines is
                begin
                   for Offset in 0 .. Saved_Block_Length - 1 loop
                      exit when Drawn = Saved_Count;
-                     Saved_Sum := Saved_Sum
-                       + Saved.Values
-                           (Sample_Index
-                              (((Start - 1 + Offset) mod Saved_Count) + 1));
+                     declare
+                        Value : constant Long_Float :=
+                          Saved.Values
+                            (Sample_Index
+                               (((Start - 1 + Offset) mod Saved_Count) + 1));
+                     begin
+                        if not Safe_Math.Can_Add_To_Sum (Saved_Sum, Value)
+                          or else not Safe_Math.Is_Supported_Sum
+                            (Saved_Sum + Value)
+                        then
+                           raise Baseline_Comparison_Error with
+                             "bootstrap baseline sum is outside the supported "
+                             & "range";
+                        end if;
+                        Safe_Math.Add_To_Sum (Saved_Sum, Value);
+                     end;
                      Drawn := Drawn + 1;
                   end loop;
                end;
@@ -687,19 +748,45 @@ package body Flyology_Bench.Baselines is
                begin
                   for Offset in 0 .. Current_Block_Length - 1 loop
                      exit when Drawn = Current_Count;
-                     Current_Sum := Current_Sum
-                       + Sample_Nanoseconds
-                           (Current,
-                            Sample_Index
-                              (((Start - 1 + Offset) mod Current_Count) + 1));
+                     declare
+                        Value : constant Long_Float :=
+                          Sample_Nanoseconds
+                            (Current,
+                             Sample_Index
+                               (((Start - 1 + Offset) mod Current_Count) + 1));
+                     begin
+                        if not Safe_Math.Can_Add_To_Sum
+                          (Current_Sum, Value)
+                          or else not Safe_Math.Is_Supported_Sum
+                            (Current_Sum + Value)
+                        then
+                           raise Baseline_Comparison_Error with
+                             "bootstrap current sum is outside the supported "
+                             & "range";
+                        end if;
+                        Safe_Math.Add_To_Sum (Current_Sum, Value);
+                     end;
                      Drawn := Drawn + 1;
                   end loop;
                end;
             end loop;
          end;
+         if Saved_Sum < Safe_Math.Minimum_Sample_Nanoseconds
+           or else Current_Sum < Safe_Math.Minimum_Sample_Nanoseconds
+         then
+            raise Baseline_Comparison_Error with
+              "bootstrap sample sum is below the supported range";
+         end if;
+         Saved_Mean := Safe_Math.Mean (Saved_Sum, Saved.Sample_Total);
+         Current_Mean := Safe_Math.Mean (Current_Sum, Samples (Current));
+         if not Safe_Math.Is_Supported_Sample (Saved_Mean)
+           or else not Safe_Math.Is_Supported_Sample (Current_Mean)
+         then
+            raise Baseline_Comparison_Error with
+              "bootstrap mean is outside the supported nanosecond range";
+         end if;
          Bootstrap (Resample) :=
-           (Saved_Sum / Long_Float (Saved_Count))
-           / (Current_Sum / Long_Float (Current_Count));
+           Safe_Math.Ratio (Saved_Mean, Current_Mean);
       end loop;
       Sort (Bootstrap);
       declare
@@ -709,21 +796,24 @@ package body Flyology_Bench.Baselines is
          Result.CI_Low := Percentile (Bootstrap, Tail);
          Result.CI_High := Percentile (Bootstrap, 1.0 - Tail);
       end;
+      if not Safe_Math.Is_Supported_Speedup (Result.Speedup_Value)
+        or else not Safe_Math.Is_Supported_Speedup (Result.CI_Low)
+        or else not Safe_Math.Is_Supported_Speedup (Result.CI_High)
+      then
+         raise Baseline_Comparison_Error with
+           "baseline interval is outside the supported speedup range";
+      end if;
       declare
-         Change_Low : constant Long_Float :=
-           100.0 * (1.0 / Result.CI_High - 1.0);
-         Change_High : constant Long_Float :=
-           100.0 * (1.0 / Result.CI_Low - 1.0);
+         Change_Low : Long_Float;
+         Change_High : Long_Float;
       begin
-         if Change_High < -Practical_Threshold_Percent then
-            Result.Verdict_Value := Contender_Faster;
-         elsif Change_Low > Practical_Threshold_Percent then
-            Result.Verdict_Value := Reference_Faster;
-         elsif Change_Low >= -Practical_Threshold_Percent
-           and then Change_High <= Practical_Threshold_Percent
-         then
-            Result.Verdict_Value := Practically_Equivalent;
-         end if;
+         Change_Low := Safe_Math.Time_Change (Result.CI_High);
+         Change_High := Safe_Math.Time_Change (Result.CI_Low);
+         Result.Verdict_Value :=
+           Safe_Math.Classify
+             (Change_Low,
+              Change_High,
+              Threshold_Percentage (Practical_Threshold_Percent));
       end;
       return Result;
    end Compare;
@@ -750,15 +840,15 @@ package body Flyology_Bench.Baselines is
      (Result.CI_High);
 
    function Time_Change_Percent (Result : Regression) return Long_Float is
-     (100.0 * (1.0 / Result.Speedup_Value - 1.0));
+     (Safe_Math.Time_Change (Result.Speedup_Value));
 
    function Time_Change_Confidence_Low
      (Result : Regression) return Long_Float is
-     (100.0 * (1.0 / Result.CI_High - 1.0));
+     (Safe_Math.Time_Change (Result.CI_High));
 
    function Time_Change_Confidence_High
      (Result : Regression) return Long_Float is
-     (100.0 * (1.0 / Result.CI_Low - 1.0));
+     (Safe_Math.Time_Change (Result.CI_Low));
 
    function Verdict (Result : Regression) return Comparison_Verdict is
      (Result.Verdict_Value);
@@ -845,7 +935,6 @@ package body Flyology_Bench.Baselines is
          end if;
 
          Result.Compatible_Value := True;
-         Result.Statistics_Ready := True;
          Result.Regression_Data :=
            Compare
              (Saved,
@@ -854,6 +943,7 @@ package body Flyology_Bench.Baselines is
               Practical_Threshold_Percent =>
                 Policy.Practical_Threshold_Percent,
               Random_Seed => Random_Seed);
+         Result.Statistics_Ready := True;
          case Verdict (Result.Regression_Data) is
             when Contender_Faster =>
                Set_Result
@@ -892,6 +982,12 @@ package body Flyology_Bench.Baselines is
                Ada.Exceptions.Exception_Message (Error));
             return Result;
          when Error : Baseline_IO_Error =>
+            Set_Result
+              (Baseline_Error,
+               Policy.On_Invalid = Reject,
+               Ada.Exceptions.Exception_Message (Error));
+            return Result;
+         when Error : Baseline_Comparison_Error =>
             Set_Result
               (Baseline_Error,
                Policy.On_Invalid = Reject,

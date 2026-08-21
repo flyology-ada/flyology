@@ -85,14 +85,27 @@ then
   printf '%s\n' "baseline example did not report environment mismatch" >&2
   exit 1
 fi
-FLYOLOGY_BENCH_OUTPUT=json \
+if FLYOLOGY_BENCH_OUTPUT=json \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
-  "$gate_identity" \
-  >"$work_dir/gate.jsonl"
-FLYOLOGY_BENCH_OUTPUT=csv \
+  "$gate_identity" >"$work_dir/gate.jsonl"
+then
+  :
+elif ! grep -q '"status":"regression","rejected":true' \
+  "$work_dir/gate.jsonl"
+then
+  printf '%s\n' "baseline JSON example failed without reporting regression" >&2
+  exit 1
+fi
+if FLYOLOGY_BENCH_OUTPUT=csv \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
-  "$gate_identity" \
-  >"$work_dir/gate.csv"
+  "$gate_identity" >"$work_dir/gate.csv"
+then
+  :
+elif ! grep -q ',regression,true,true,' "$work_dir/gate.csv"
+then
+  printf '%s\n' "baseline CSV example failed without reporting regression" >&2
+  exit 1
+fi
 if FLYOLOGY_BENCH_GATE_REGRESSION=1 \
   "$crate_root/examples/bin/baseline_gate" check "$gate_baseline" \
   "$gate_identity" \
