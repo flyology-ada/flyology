@@ -44,6 +44,9 @@ The initial API provides:
   which never adjusts a reported statistic;
 - an optional host CPU claim that coordinates with any other tool following
   the same convention;
+- fresh-process ordinary and paired workers with deterministic repetitions,
+  isolated environments, monotonic deadlines, bounded diagnostics, and crash
+  containment;
 - ANSI console result cards, in-place terminal progress, CSV, and
   newline-delimited JSON reporters; and
 - explicit optimization and memory barriers.
@@ -1111,6 +1114,66 @@ status and failure reasons. The multi-way long-form reporter emits those rows
 for every contender. JSON measurement, comparison, multi-way, and recording
 objects include a `statistics` object alongside their metric, environment,
 clock, and latency data.
+
+## Fresh-process workers
+
+`Flyology_Bench.Workers` runs one exact benchmark identity in each new process.
+The parent invokes the same executable through `posix_spawn` without a shell or
+PATH search. The executable checks `Worker_Mode` before its ordinary CLI path,
+uses `Current_Request` to obtain the exact identity and configuration, calls
+`Announce_Ready`, and returns one `Measurement` or paired `Comparison` through
+`Return_Result`.
+
+`Launch_Configuration.Repetitions` creates independent worker processes. Each
+worker performs its own host setup, warmup, calibration, and timed sampling.
+The returned array retains that hierarchy. Do not concatenate raw samples from
+several workers into one paired sample stream. If a caller estimates an effect
+across processes, the worker is the resampling unit and fewer than two completed
+workers are insufficient for an across-worker interval.
+
+`Strict_Mode` is the default environment policy. It starts with `PATH` and the
+standard temporary-directory variables. Locale and timezone variables require
+the explicit `Preserve_Locale` and `Preserve_Timezone` policies. `Inherit_Mode`
+copies the complete parent environment and is an explicit opt-in. `Add` and
+`Remove` apply exact bounded changes. The result reports the selected policy
+and a stable hash of the effective name/value set, but it never reports the
+values themselves. The hash is compatibility metadata, not a secret-storage or
+authentication mechanism.
+
+The working directory is inherited under `Inherit_Directory` or resolved and
+validated before spawn under `Use_Directory`. The child inherits only standard
+output, standard error, and the dedicated result endpoint. Standard streams are
+drained without waiting for the child to exit, retained to a caller-selected
+bound, and report exact omitted byte counts.
+
+`Startup_Timeout` covers spawn through the ready marker. `Total_Timeout` starts
+before spawn and covers the complete worker. On timeout, the parent sends
+`SIGTERM` to the anchored process group, waits `Termination_Grace`, sends
+`SIGKILL` when required, and reaps the root before releasing its PID identity.
+The result distinguishes startup timeout, execution timeout, signal crash,
+nonzero exit, benchmark exception, invalid configuration, malformed protocol,
+and parent I/O failure. A suite decides whether one such result stops later
+cases. The host `posix_spawn` call is synchronous and cannot be interrupted by
+this API. Its elapsed time is charged to both deadlines, so an overrun expires
+as soon as the call returns rather than extending the worker budget.
+
+Host-lock acquisition, placement, quiescence, interference observation, and
+metric-session setup occur inside the worker that measures. Spawn and setup
+durations are reported separately and are not included in per-operation time.
+Process isolation controls contamination from mutable process-global state. It
+does not make a noisy host quiet.
+
+The maintained example compares both modes:
+
+```sh
+./examples/bin/fresh_process
+```
+
+The native-boundary rationale and retained C mechanisms are documented in
+[`docs/worker-native-boundary.md`](docs/worker-native-boundary.md).
+Fresh workers are supported on Darwin and glibc Linux hosts that provide the
+required close-from spawn action. A missing host extension fails the spawn; the
+implementation never falls back to `fork`. Windows remains unsupported.
 
 ## Build and test
 

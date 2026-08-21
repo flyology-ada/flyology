@@ -633,8 +633,27 @@ FLYOLOGY_BENCH_OUTPUT=json \
             <p>Use a direct paired comparison when both implementations can run in one process. Pairing retains the balanced collection schedule. The saved-baseline gate uses the existing independent-run bootstrap because its runs occurred at different times. Its bounded sum, mean, ratio, interpolation, time-change, and interval-verdict primitives form a private SPARK unit whose floating run-time checks are proved by the repository proof suite; file I/O and bootstrap orchestration remain behaviorally tested boundaries. One artifact represents one named reference. Longer histories, dashboards, commit-range analysis, and change-point detection remain separate work.</p>
           </section>
 
-          <section id="correctness">
+          <section id="fresh-processes">
             <span class="step-label">BENCH 11</span>
+            <h2>Use fresh processes to isolate process-global state.</h2>
+            <p><a href="../../api/flyology_bench/c4c0e76529dab572583b8159bab61baddf38a2920e3e252fa191fa01cc290e67.html"><code>Flyology_Bench.Workers</code></a> invokes the same executable directly through <code>posix_spawn</code>. Each worker executes one exact ordinary or paired case. A paired comparison stays inside one worker, so reference and contender retain their shared order and sample schedule.</p>
+            <figure class="code-panel">
+              <figcaption>compare in-process and fresh-process modes</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+./examples/bin/fresh_process</code></pre>
+            </figure>
+            <p>Each repetition performs its own host setup, warmup, calibration, and timed sampling. Keep the returned worker results separate. If you compute an across-worker interval, resample workers rather than flattening their internal samples. Spawn and setup durations are metadata outside per-operation time.</p>
+            <p>Strict environment mode keeps only execution and temporary-directory variables by default. Locale and timezone require an explicit preservation policy. The parent captures standard output and error separately with bounded retention and exact omitted-byte counts. Startup and total deadlines terminate the anchored process group, apply a bounded grace period, and reap the root process.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Isolation is not quiescence.</strong> A fresh process prevents one repetition's mutable globals, allocator state, or runtime caches from contaminating the next repetition. It does not control frequency scaling, thermal state, interrupts, or competing host work.</p>
+            </aside>
+          </section>
+
+          <section id="correctness">
+            <span class="step-label">BENCH 12</span>
             <h2>Treat fractional nanoseconds as amortized throughput.</h2>
             <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
             <div class="decision-list">
@@ -652,7 +671,7 @@ FLYOLOGY_BENCH_OUTPUT=json \
           </section>
 
           <section id="platforms">
-            <span class="step-label">BENCH 12</span>
+            <span class="step-label">BENCH 13</span>
             <h2>Repeat on the host you intend to describe.</h2>
             <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
             <figure class="code-panel">
@@ -660,9 +679,11 @@ FLYOLOGY_BENCH_OUTPUT=json \
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>cd flyology_bench
 alr test
-./examples/bin/basic</code></pre>
+./examples/bin/basic
+./examples/bin/fresh_process</code></pre>
             </figure>
             <p><code>alr test</code> also checks the published machine-readable schemas. Every CSV row must contain the columns declared by its header. Long-form metric rows must agree between <code>available</code> and <code>status</code>. Each JSON object must parse. The test uses <code>jq</code> when available and reports when it uses structural checks instead.</p>
+            <p>Fresh-process workers use Darwin's close-on-exec spawn policy or glibc Linux's close-from spawn action. An unavailable extension fails the launch instead of using <code>fork</code>. Windows remains unsupported.</p>
             <p>From the repository root, <code>FLYOLOGY_LINUX_PERF=1 ./scripts/test-linux-docker.sh</code> grants Docker's <code>PERFMON</code> capability and makes the example require real hardware-counter samples. It also makes the smoke test compare a serial batch against one that starts four worker tasks, so inherited attribution is measured rather than assumed. A virtualized Linux host must also expose its PMU; the capability alone cannot provide missing virtual hardware. A guest kernel without one lists no CPU entry under <code>/sys/bus/event_source/devices</code> and rejects every hardware event, and the run then reports the specific unavailable status instead of passing.</p>
             <p>For a shared report, keep the raw machine output, record the exact command and environment, repeat the full run, and describe only the tested host. Direct <code>Compare</code> or <code>Compare_Many</code> is preferable whenever all implementations can run in one process.</p>
             <aside class="callout callout-teal">
