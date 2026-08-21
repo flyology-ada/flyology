@@ -2248,6 +2248,40 @@ package body Flyology.IO.Sockets is
          raise;
    end Start_Scoped_Datagram;
 
+   procedure Start_Scoped_Connect
+     (Item    : in out Connect_Operation;
+      Socket  : not null access Socket_Type;
+      Server  : Endpoint;
+      Timeout : Duration)
+   is
+   begin
+      Prepare (Socket.all);
+      Item.Kind := Connect_Internet;
+      Item.Socket := Socket.all'Unchecked_Access;
+      Item.Array_Item := null;
+      Item.Buffer_Item := null;
+      Item.Transferred := 0;
+      Item.Error_Code := 0;
+      Item.Failure := No_Failure;
+      Item.Destination := Server;
+      Flyology.Operations.Drivers.Start (Item);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Item),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Item) then
+            Flyology.Operations.Cancel (Item);
+         end if;
+         if Flyology.Operations.Is_Terminal (Item) then
+            Flyology.Operations.Consume (Item);
+         end if;
+         raise;
+   end Start_Scoped_Connect;
+
    overriding procedure Drive
      (Item  : in out Socket_Operation;
       Event : Flyology.Operations.Driver_Event)
@@ -2412,6 +2446,67 @@ package body Flyology.IO.Sockets is
          end case;
       else
          raise Program_Error with "socket operation has no buffer";
+      end if;
+   end Drive;
+
+   overriding procedure Drive
+     (Item  : in out Connect_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Error   : aliased Interfaces.C.int := 0;
+      Pending : aliased Interfaces.C.int := 0;
+      Result  : Interfaces.C.int;
+
+      procedure Fail (Code : Interfaces.C.int) is
+      begin
+         Item.Failure := Socket_Failure;
+         Item.Error_Code := Code;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      end Fail;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Item.Failure := Deadline_Failure;
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+         return;
+      elsif Event = Flyology.Operations.Start_Operation then
+         Result := C_Connect
+           (Item.Socket.Value,
+            Family_Code (Item.Destination.Family),
+            Address_Data (Item.Destination.Address),
+            Interfaces.C.unsigned (Item.Destination.Port),
+            Interfaces.C.unsigned (Item.Destination.Scope),
+            Error'Access);
+         if Result = 0 then
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+            return;
+         end if;
+         case Flyology.Socket_Policy.Classify_Connect_Error
+           (Policy_Error_Kind (Error))
+         is
+            when Flyology.Socket_Policy.Wait_For_Connection =>
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Item.Socket.Value, For_Write => True);
+            when Flyology.Socket_Policy.Connected =>
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Succeeded);
+            when Flyology.Socket_Policy.Fail_Connect =>
+               Fail (Error);
+         end case;
+         return;
+      end if;
+
+      Result := C_Pending_Error
+        (Item.Socket.Value, Pending'Access, Error'Access);
+      if Result /= 0 then
+         Fail (Error);
+      elsif Pending /= 0 then
+         Fail (Pending);
+      else
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Succeeded);
       end if;
    end Drive;
 
@@ -2736,6 +2831,28 @@ package body Flyology.IO.Sockets is
       end return;
    end Send_Datagram;
 
+   procedure Connect
+     (Socket    : not null access Socket_Type;
+      Server    : Endpoint;
+      Timeout   : Duration := Infinite;
+      Operation : in out Connect_Operation)
+   is
+   begin
+      Start_Scoped_Connect (Operation, Socket, Server, Timeout);
+   end Connect;
+
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Server  : Endpoint;
+      Timeout : Duration := Infinite) return Connect_Operation
+   is
+   begin
+      return Result : Connect_Operation (Set) do
+         Connect (Socket, Server, Timeout, Result);
+      end return;
+   end Connect;
+
    procedure Receive
      (Socket    : not null access Socket_Type;
       Item      : not null access Flyology.Buffers.Unique_Buffer;
@@ -2838,6 +2955,7 @@ package body Flyology.IO.Sockets is
                   Raise_Error
                     ((if Operation.Kind = Datagram_Send then "sendmsg"
                       elsif Operation.Kind = Datagram_Receive then "recvmsg"
+                      elsif Operation.Kind = Connect_Internet then "connect"
                       elsif Sending then "send"
                       else "recv"),
                      Error);
@@ -2971,6 +3089,11 @@ package body Flyology.IO.Sockets is
          then Operation.Datagram_Item.all'First - 1
          else Operation.Datagram_Item.all'First
            + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
+      Finish_Common (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Connect_Operation) is
+   begin
       Finish_Common (Operation);
    end Finish;
 

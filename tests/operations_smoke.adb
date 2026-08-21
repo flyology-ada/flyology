@@ -27,6 +27,7 @@ procedure Operations_Smoke is
    --  Sockets.Send_All (Unique_Buffer)          All                     both
    --  Sockets.Receive_Datagram (array)          Successes (2)           both
    --  Sockets.Send_Datagram (array)             Successes (2)           both
+   --  Sockets.Connect (Internet stream)         Successes (2), All      both
    --  Files.Read_At (array)                     All                     lightweight
    --  Files.Write_At (array)                    Successes (2)           lightweight
    use type Ada.Streams.Stream_Element;
@@ -1052,6 +1053,123 @@ procedure Operations_Smoke is
             raise;
       end;
       Check (Passed, "datagram operation overload gates failed");
+
+      --  Internet connect operations retain the kernel's asynchronous
+      --  handshake result and compose without a helper task or nested wait.
+      declare
+         Listener : aliased Flyology.IO.Sockets.Socket_Type;
+         First_Client, Second_Client, Third_Client : aliased
+           Flyology.IO.Sockets.Socket_Type;
+         Refused_Client : aliased Flyology.IO.Sockets.Socket_Type;
+         First_Peer, Second_Peer, Third_Peer :
+           Flyology.IO.Sockets.Socket_Type;
+         Bound, Destination : Flyology.IO.Sockets.Endpoint;
+      begin
+         Flyology.IO.Sockets.Create_Socket (Listener);
+         Flyology.IO.Sockets.Set_Socket_Option
+           (Listener,
+            (Name => Flyology.IO.Sockets.Reuse_Address, Enabled => True));
+         Flyology.IO.Sockets.Bind_Socket
+           (Listener,
+            Flyology.IO.Sockets.Network_Endpoint
+              (Flyology.IO.Sockets.Loopback_IPv4,
+               Flyology.IO.Sockets.Any_Port));
+         Flyology.IO.Sockets.Listen_Socket (Listener, 4);
+         Bound := Flyology.IO.Sockets.Get_Socket_Name (Listener);
+         Destination := Flyology.IO.Sockets.Network_Endpoint
+           (Flyology.IO.Sockets.Loopback_IPv4, Bound.Port);
+
+         Flyology.IO.Sockets.Create_Socket (First_Client);
+         Flyology.IO.Sockets.Create_Socket (Second_Client);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (3);
+            First : aliased Flyology.IO.Sockets.Connect_Operation :=
+              Flyology.IO.Sockets.Connect
+                (Set'Access, First_Client'Access, Destination, 1.0);
+            Second : aliased Flyology.IO.Sockets.Connect_Operation :=
+              Flyology.IO.Sockets.Connect
+                (Set'Access, Second_Client'Access, Destination, 1.0);
+            Both : Flyology.Operations.Gate_Operation :=
+              Flyology.Operations.Wait_For_Successes
+                (Set'Access, [Ref (First), Ref (Second)], 2);
+            Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+         begin
+            Flyology.IO.Sockets.Accept_Connection
+              (Listener, First_Peer, Timeout => 1.0);
+            Flyology.IO.Sockets.Accept_Connection
+              (Listener, Second_Peer, Timeout => 1.0);
+            while not Flyology.Operations.Is_Terminal (Both) loop
+               Flyology.Operations.Wait_Some (Set, Batch);
+            end loop;
+            Flyology.Operations.Finish (Both, Matches);
+            Flyology.IO.Sockets.Finish (First);
+            Flyology.IO.Sockets.Finish (Second);
+            Passed := Passed
+              and then Matches.Count = 2
+              and then Flyology.IO.Sockets.Get_Peer_Name (First_Client).Port =
+                Destination.Port
+              and then Flyology.IO.Sockets.Get_Peer_Name (Second_Client).Port =
+                Destination.Port;
+         end;
+
+         Flyology.IO.Sockets.Create_Socket (Third_Client);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Connection : Flyology.IO.Sockets.Connect_Operation (Set'Access);
+         begin
+            Flyology.IO.Sockets.Connect
+              (Third_Client'Access, Destination, 1.0, Connection);
+            Flyology.IO.Sockets.Accept_Connection
+              (Listener, Third_Peer, Timeout => 1.0);
+            Flyology.Operations.Wait_All (Set);
+            Flyology.IO.Sockets.Finish (Connection);
+         end;
+
+         Flyology.IO.Sockets.Close_Socket (First_Peer);
+         Flyology.IO.Sockets.Close_Socket (Second_Peer);
+         Flyology.IO.Sockets.Close_Socket (Third_Peer);
+         Flyology.IO.Sockets.Close_Socket (First_Client);
+         Flyology.IO.Sockets.Close_Socket (Second_Client);
+         Flyology.IO.Sockets.Close_Socket (Third_Client);
+         Flyology.IO.Sockets.Close_Socket (Listener);
+
+         --  Provider failure is a terminal member outcome; only typed Finish
+         --  reconstructs the synchronous Socket_Error.
+         Flyology.IO.Sockets.Create_Socket (Refused_Client);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Connection : Flyology.IO.Sockets.Connect_Operation :=
+              Flyology.IO.Sockets.Connect
+                (Set'Access, Refused_Client'Access, Destination, 1.0);
+            Failed_At_Finish : Boolean := False;
+         begin
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed
+              and then Flyology.Operations.Outcome (Connection) =
+                Flyology.Operations.Failed;
+            begin
+               Flyology.IO.Sockets.Finish (Connection);
+            exception
+               when Flyology.IO.Sockets.Socket_Error =>
+                  Failed_At_Finish := True;
+            end;
+            Passed := Passed and then Failed_At_Finish;
+         end;
+         Flyology.IO.Sockets.Close_Socket (Refused_Client);
+      exception
+         when others =>
+            Flyology.IO.Sockets.Close_Socket (First_Peer);
+            Flyology.IO.Sockets.Close_Socket (Second_Peer);
+            Flyology.IO.Sockets.Close_Socket (Third_Peer);
+            Flyology.IO.Sockets.Close_Socket (First_Client);
+            Flyology.IO.Sockets.Close_Socket (Second_Client);
+            Flyology.IO.Sockets.Close_Socket (Third_Client);
+            Flyology.IO.Sockets.Close_Socket (Refused_Client);
+            Flyology.IO.Sockets.Close_Socket (Listener);
+            raise;
+      end;
+      Check (Passed, "Internet connect operation overload gates failed");
 
       if Model = Flyology.Lightweight_Task then
          declare

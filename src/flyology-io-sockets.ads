@@ -720,6 +720,8 @@ package Flyology.IO.Sockets is
    type Receive_Datagram_Operation is new Datagram_Operation with private;
    --  Scoped send of one complete datagram.
    type Send_Datagram_Operation is new Datagram_Operation with private;
+   --  Scoped Internet-stream connection attempt.
+   type Connect_Operation is new Socket_Operation with private;
 
    --  Start one nonblocking receive operation. Socket and Item must outlive
    --  the returned operation. Item is exclusively borrowed until Finish.
@@ -981,6 +983,31 @@ package Flyology.IO.Sockets is
       Operation   : in out Send_Datagram_Operation)
      with Pre => Source.Family = Destination.Family;
 
+   --  Start one Internet-stream connection attempt. Socket remains borrowed
+   --  until Finish; cancellation does not roll back kernel connection effects.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open unconnected Internet socket
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited connect operation
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Server  : Endpoint;
+      Timeout : Duration := Infinite) return Connect_Operation;
+
+   --  Start or restart one Internet-stream connection attempt in an
+   --  established operation object.
+   --  @param Socket Aliased open unconnected Internet socket
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed connect operation
+   procedure Connect
+     (Socket    : not null access Socket_Type;
+      Server    : Endpoint;
+      Timeout   : Duration := Infinite;
+      Operation : in out Connect_Operation);
+
    --  Consume one terminal partial receive and publish its Last value.
    --  @param Operation Terminal receive operation
    --  @param Last Last received element, or Item'First - 1 on closure
@@ -1037,6 +1064,10 @@ package Flyology.IO.Sockets is
    procedure Finish
      (Operation : in out Send_Datagram_Operation;
       Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal Internet-stream connection attempt.
+   --  @param Operation Terminal connect operation
+   procedure Finish (Operation : in out Connect_Operation);
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
@@ -1144,7 +1175,8 @@ private
       Buffer_Send_One,
       Buffer_Send_Complete,
       Datagram_Receive,
-      Datagram_Send);
+      Datagram_Send,
+      Connect_Internet);
    type Scoped_Failure is
      (No_Failure, Socket_Failure, Deadline_Failure,
       Peer_Closed_Failure, No_Progress_Failure,
@@ -1195,6 +1227,17 @@ private
    --  @param Event Driver event to process
    overriding procedure Drive
      (Item  : in out Datagram_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Connect_Operation is new Socket_Operation with record
+      Destination : Endpoint := No_Endpoint;
+   end record;
+
+   --  @exclude
+   --  @param Item Connect operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Connect_Operation;
       Event : Flyology.Operations.Driver_Event);
 
    type Receive_Operation is new Socket_Operation with null record;
