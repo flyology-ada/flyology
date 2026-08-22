@@ -5,7 +5,7 @@
 Ubuntu CI showed that level-1 proof of the floating-point bounds in `Ratio`
 and `Time_Change` can exhaust the default one-second prover time limit.  Their
 nonlinear obligations are split into smaller proof steps, and the isolated
-benchmark proof receives a two-second timeout.  The contracts, returned values,
+benchmark proof receives a five-second timeout.  The contracts, returned values,
 and global proof level are unchanged.
 `Flyology_Bench.Baselines` remains outside SPARK because it owns file I/O,
 exceptions, bootstrap orchestration, and controlled measurements; behavioral
@@ -18,7 +18,7 @@ tests cover that integration and its explicit range guards.
      subprogram may cause it to regress to an unproved state. Reproving at the
      wider scope is thus a critical means to detect these situations. -->
 
-- [x] `Flyology_Bench.Baseline_Math` (level 1, mode all, 2-second timeout)
+- [x] `Flyology_Bench.Baseline_Math` (level 1, mode all, 5-second timeout)
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review

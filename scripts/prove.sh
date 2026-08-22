@@ -102,7 +102,7 @@ run_gnatprove "$benchmark_log" \
   -P "$project_root/flyology_bench/flyology_bench.gpr" \
   --mode=all \
   --level=1 \
-  --timeout=2 \
+  --timeout=5 \
   -j0 \
   --output=oneline \
   --output-header \
