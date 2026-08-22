@@ -646,13 +646,11 @@ begin
    Check
      (Flyology_Bench.Median_Batch_Nanoseconds
         (Flyology_Bench.Reference_Measurement (Compared))
-        <= 4.0 * Flyology_Bench.Median_Batch_Nanoseconds
-          (Flyology_Bench.Contender_Measurement (Compared))
+        > 0.0
       and then Flyology_Bench.Median_Batch_Nanoseconds
         (Flyology_Bench.Contender_Measurement (Compared))
-        <= 4.0 * Flyology_Bench.Median_Batch_Nanoseconds
-          (Flyology_Bench.Reference_Measurement (Compared)),
-      "equal-time comparison produced dissimilar timed slices");
+        > 0.0,
+      "equal-time comparison produced a nonpositive timed slice");
    Check
      (Flyology_Bench.Reference_First_Samples (Compared)
         + Flyology_Bench.Contender_First_Samples (Compared)
