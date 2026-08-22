@@ -8,11 +8,13 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench;
 with Flyology_Bench.Baselines;
+with Flyology_Bench.Baselines.Testing;
 with Flyology_Bench.Reporters;
 with Interfaces;
 
 procedure Baseline_Gate_Smoke is
    package Baselines renames Flyology_Bench.Baselines;
+   package Baseline_Testing renames Flyology_Bench.Baselines.Testing;
    package Unbounded renames Ada.Strings.Unbounded;
    use type Baselines.Gate_Status;
    use type Baselines.Compatibility_Issue;
@@ -24,6 +26,7 @@ procedure Baseline_Gate_Smoke is
    Baseline_Path : constant String := Root & ".baseline";
    Legacy_Path : constant String := Root & ".v1.baseline";
    Slow_Path : constant String := Root & ".slow.baseline";
+   Synthetic_Path : constant String := Root & ".synthetic.baseline";
    Clock_Path : constant String := Root & ".clock.baseline";
    Extreme_Path : constant String := Root & ".extreme.baseline";
    Output_Path : constant String := Root & ".output";
@@ -58,6 +61,12 @@ procedure Baseline_Gate_Smoke is
         Random_Seed             => 73);
    Fast : Flyology_Bench.Measurement;
    Slow : Flyology_Bench.Measurement;
+   Synthetic : constant Flyology_Bench.Measurement :=
+     Baseline_Testing.Measurement_From
+       ([100.0, 101.0, 99.0, 102.0, 98.0,
+         100.5, 99.5, 101.5, 98.5, 100.0,
+         102.0, 98.0, 101.0, 99.0, 100.0,
+         100.5, 99.5, 101.5, 98.5, 100.0]);
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -243,6 +252,7 @@ begin
    Delete_If_Present (Baseline_Path);
    Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
+   Delete_If_Present (Synthetic_Path);
    Delete_If_Present (Clock_Path);
    Delete_If_Present (Extreme_Path);
    Delete_If_Present (Output_Path);
@@ -354,6 +364,9 @@ begin
 
    Baselines.Save
      (Slow_Path, "gate,""case", Slow, "host=exact;switches=-O2");
+   Baselines.Save
+     (Synthetic_Path, "gate,""case", Synthetic,
+      "host=exact;switches=-O2");
    declare
       Improved : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
@@ -363,11 +376,9 @@ begin
            Random_Seed => 102);
       Equivalent : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Slow_Path, "gate,""case", Slow,
+          (Synthetic_Path, "gate,""case", Synthetic,
            Fingerprint => "host=exact;switches=-O2",
-           Policy =>
-             (Baselines.Fail_Closed_Gate_Policy with delta
-                Practical_Threshold_Percent => 20.0),
+           Policy => Baselines.Fail_Closed_Gate_Policy,
            Random_Seed => 103);
    begin
       Check
@@ -381,10 +392,10 @@ begin
    end;
 
    declare
-      Saved : constant Baselines.Baseline := Baselines.Load (Slow_Path);
+      Saved : constant Baselines.Baseline := Baselines.Load (Synthetic_Path);
       Zero : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Slow,
+          (Saved, Synthetic,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => 0.0,
            Random_Seed => 105);
@@ -396,13 +407,13 @@ begin
         Long_Float'Max (abs Change_Low, abs Change_High);
       At_Boundary : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Slow,
+          (Saved, Synthetic,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => Boundary,
            Random_Seed => 105);
       Below_Boundary : constant Baselines.Regression :=
         Baselines.Compare
-          (Saved, Slow,
+          (Saved, Synthetic,
            Fingerprint => "host=exact;switches=-O2",
            Practical_Threshold_Percent => Boundary * 0.999,
            Random_Seed => 105);
@@ -433,7 +444,7 @@ begin
            Policy => Baselines.Fail_Closed_Gate_Policy);
       Inconclusive : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Slow_Path, "gate,""case", Slow,
+          (Synthetic_Path, "gate,""case", Synthetic,
            Fingerprint => "host=exact;switches=-O2",
            Policy =>
              (Baselines.Fail_Closed_Gate_Policy with delta
@@ -627,11 +638,9 @@ begin
    declare
       Escaped : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate
-          (Slow_Path, "gate,""case", Slow,
+          (Synthetic_Path, "gate,""case", Synthetic,
            Fingerprint => "host=exact;switches=-O2",
-           Policy =>
-             (Baselines.Permissive_Gate_Policy with delta
-                Practical_Threshold_Percent => 20.0),
+           Policy => Baselines.Permissive_Gate_Policy,
            Random_Seed => 103);
       File : Ada.Text_IO.File_Type;
    begin
@@ -676,6 +685,7 @@ begin
    Delete_If_Present (Baseline_Path);
    Delete_If_Present (Legacy_Path);
    Delete_If_Present (Slow_Path);
+   Delete_If_Present (Synthetic_Path);
    Delete_If_Present (Clock_Path);
    Delete_If_Present (Extreme_Path);
    Delete_If_Present (Output_Path);
@@ -686,6 +696,7 @@ exception
       Delete_If_Present (Baseline_Path);
       Delete_If_Present (Legacy_Path);
       Delete_If_Present (Slow_Path);
+      Delete_If_Present (Synthetic_Path);
       Delete_If_Present (Clock_Path);
       Delete_If_Present (Extreme_Path);
       Delete_If_Present (Output_Path);
