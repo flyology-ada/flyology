@@ -601,8 +601,8 @@ procedure Managed_Connection_Connect_Smoke is
          raise;
    end Run_Transfer_Failure;
 
-begin
-   for Model in Flyology.Execution_Model loop
+   procedure Run_All (Model : Flyology.Execution_Model) is
+   begin
       Run_Composition (Model, Secure => False);
       Run_Composition (Model, Secure => True);
       for Trigger in Admission_Trigger loop
@@ -612,5 +612,9 @@ begin
          Run_Connected_Interruption (Model, Trigger);
       end loop;
       Run_Transfer_Failure (Model);
-   end loop;
+   end Run_All;
+
+begin
+   Run_All (Flyology.Lightweight_Task);
+   Run_All (Flyology.Native_Task);
 end Managed_Connection_Connect_Smoke;
