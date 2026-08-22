@@ -7,6 +7,7 @@ with Flyology.IO.Connections.Testing;
 with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
+with Flyology.IO.Timers;
 with Flyology.Operations;
 with Interfaces.C;
 with TLS_Test_Provider;
@@ -18,6 +19,7 @@ procedure Managed_Connection_Connect_Smoke is
    package Testing renames Flyology.IO.Connections.Testing;
    package Connection_TLS renames Flyology.IO.Connections.TLS;
    package TLS renames Flyology.IO.TLS;
+   package Timers renames Flyology.IO.Timers;
    package Operations renames Flyology.Operations;
    package Provider renames TLS_Test_Provider;
 
@@ -831,6 +833,128 @@ procedure Managed_Connection_Connect_Smoke is
       end;
    end Run_Scoped_Child_Capacity;
 
+   procedure Run_Scoped_Selective_Wait
+     (Model : Flyology.Execution_Model)
+   is
+      Manager  : aliased Connections.Server (Capacity => 1);
+      Listener : Sockets.Socket_Type;
+      Address  : Sockets.Endpoint;
+      Client_Result : Result_Box;
+      Server_Result : Result_Box;
+   begin
+      Open_Listener (Listener, Address);
+      declare
+         task Server is
+            pragma Task_Info (Model);
+         end Server;
+
+         task Client is
+            pragma Task_Info (Model);
+         end Client;
+
+         task body Server is
+            Peer   : Sockets.Socket_Type;
+            Remote : Sockets.Endpoint;
+            Data   : Stream_Element_Array (1 .. 1);
+            Last   : Stream_Element_Offset;
+         begin
+            begin
+               Sockets.Accept_Connection
+                 (Listener, Peer, Remote, Timeout => 1.0);
+               Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
+               Close_If_Open (Peer);
+               Server_Result.Set
+                 (if Last < Data'First then Succeeded else Failed);
+            exception
+               when others =>
+                  Close_If_Open (Peer);
+                  Server_Result.Set (Failed);
+            end;
+         end Server;
+
+         task body Client is
+            Item : Connections.Connection (Manager'Access);
+         begin
+            begin
+               declare
+                  Set : aliased Operations.Completion_Set (4);
+                  Attempt : aliased Connections.Connect_Operation :=
+                    Connections.Connect
+                      (Set'Access,
+                       Manager'Access,
+                       Address,
+                       Timeout => 1.0);
+                  Alarm : aliased Timers.Timer_Operation :=
+                    Timers.Sleep_For (Set'Access, 1.0);
+                  First : Operations.Gate_Operation :=
+                    Operations.Wait_For_Success
+                      (Set'Access,
+                       [Operations.Reference (Attempt),
+                        Operations.Reference (Alarm)]);
+                  Batch : Operations.Completion_Batch (Set.Capacity);
+                  Matches : Operations.Completion_Batch (Set.Capacity);
+               begin
+                  while not Operations.Is_Terminal (First) loop
+                     Operations.Wait_Some (Set, Batch);
+                  end loop;
+                  Operations.Finish (First, Matches);
+                  if Matches.Count /= 1
+                    or else Matches.Ids (1) /= Operations.Id (Attempt)
+                    or else not Operations.Is_Terminal (Attempt)
+                    or else Operations.Outcome (Attempt) /=
+                      Operations.Succeeded
+                  then
+                     raise Program_Error with
+                       "managed connect did not win selective wait";
+                  end if;
+
+                  Connections.Finish (Attempt, Item);
+                  if not Connections.Is_Open (Item)
+                    or else Manager.Active /= 1
+                  then
+                     raise Program_Error with
+                       "selective wait did not transfer managed ownership";
+                  end if;
+
+                  if Operations.Is_Active (Alarm) then
+                     Operations.Cancel (Alarm);
+                  end if;
+                  begin
+                     Timers.Finish (Alarm);
+                  exception
+                     when Operations.Operation_Cancelled =>
+                        null;
+                  end;
+               end;
+               Connections.Close (Item);
+               Client_Result.Set
+                 (if Manager.Active = 0 then Succeeded else Failed);
+            exception
+               when others =>
+                  Client_Result.Set (Failed);
+            end;
+         end Client;
+      begin
+         Await_Result
+           (Client_Result,
+            Succeeded,
+            "scoped managed selective wait/" & Model'Image);
+         Await_Result
+           (Server_Result,
+            Succeeded,
+            "scoped managed selective wait peer/" & Model'Image);
+      end;
+      Close_If_Open (Listener);
+      if Manager.Active /= 0 then
+         raise Program_Error with
+           "selective managed wait leaked admission";
+      end if;
+   exception
+      when others =>
+         Close_If_Open (Listener);
+         raise;
+   end Run_Scoped_Selective_Wait;
+
    procedure Run_Scoped_Abort_Boundary
      (Model : Flyology.Execution_Model;
       Point : Testing.Barrier_Point)
@@ -1014,6 +1138,7 @@ procedure Managed_Connection_Connect_Smoke is
       end loop;
       Run_Scoped_Abandonment (Model);
       Run_Scoped_Child_Capacity (Model);
+      Run_Scoped_Selective_Wait (Model);
       Run_Scoped_Abort_Boundary
         (Model, Testing.Managed_Connect_Child_Started);
       Run_Scoped_Abort_Boundary
