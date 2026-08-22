@@ -86,8 +86,14 @@ package Flyology_Bench.Reporters is
    --  @param File Destination text file.
    --  @param Context Optional suite context.
    procedure Put_CSV_Header
-     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the suite-context schema header expected by contextual CSV rows.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the schema.
+   procedure Put_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print one benchmark as a CSV row with nanosecond-valued statistics.
    --  @param Name Benchmark name.
@@ -97,15 +103,31 @@ package Flyology_Bench.Reporters is
    procedure Put_CSV
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one benchmark as a suite-context CSV row.
+   --  @param Name Benchmark name.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the row.
+   procedure Put_CSV
+     (Name    : String;
+      Result  : Measurement;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print the long-form schema header used by Put_Metrics_CSV rows.
    --  @param File Destination text file.
    --  @param Context Optional suite context.
    procedure Put_Metrics_CSV_Header
-     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the suite-context long-form metric schema header.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the schema.
+   procedure Put_Metrics_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print one row per requested metric axis. Unavailable axes retain their
    --  identity, scope, unit, and specific status with an available=false
@@ -117,8 +139,18 @@ package Flyology_Bench.Reporters is
    procedure Put_Metrics_CSV
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print requested metrics as suite-context CSV rows.
+   --  @param Name Benchmark name.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to every row.
+   procedure Put_Metrics_CSV
+     (Name    : String;
+      Result  : Measurement;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Versioned long-form schema for built-in and custom axes. The original
    --  Put_Metrics_CSV schema remains unchanged.
@@ -151,8 +183,18 @@ package Flyology_Bench.Reporters is
    procedure Put_JSON
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one benchmark as a suite-context JSON object.
+   --  @param Name Benchmark name.
+   --  @param Result Completed measurement.
+   --  @param File Destination text file.
+   --  @param Context Suite context to add to the object.
+   procedure Put_JSON
+     (Name    : String;
+      Result  : Measurement;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print one compact paired-comparison summary. Speedup greater than one
    --  and negative time change both mean the contender was faster. When an
@@ -174,8 +216,14 @@ package Flyology_Bench.Reporters is
    --  @param File Destination text file.
    --  @param Context Optional suite context.
    procedure Put_Comparison_CSV_Header
-     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the suite-context paired-comparison CSV header.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the schema.
+   procedure Put_Comparison_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print one paired comparison as a CSV row.
    --  @param Reference_Name Name of the existing or baseline operation.
@@ -187,15 +235,33 @@ package Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context        : Machine_Context := No_Machine_Context);
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one paired comparison as a suite-context CSV row.
+   --  @param Reference_Name Reference benchmark name.
+   --  @param Contender_Name Contender benchmark name.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the row.
+   procedure Put_Comparison_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context);
 
    --  Print the long-form schema header used by comparison metric rows.
    --  @param File Destination text file.
    --  @param Context Optional suite context.
    procedure Put_Comparison_Metrics_CSV_Header
-     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the suite-context paired metric CSV header.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the schema.
+   procedure Put_Comparison_Metrics_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    --  Print one row per requested paired metric comparison.
    --  @param Reference_Name Reference implementation name.
@@ -207,8 +273,20 @@ package Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context        : Machine_Context := No_Machine_Context);
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print paired metric results as suite-context CSV rows.
+   --  @param Reference_Name Reference benchmark name.
+   --  @param Contender_Name Contender benchmark name.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to every row.
+   procedure Put_Comparison_Metrics_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context);
 
    --  Print the versioned built-in/custom comparison schema, including
    --  distinct reference and contender resolutions.
@@ -247,8 +325,20 @@ package Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context        : Machine_Context := No_Machine_Context);
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print one paired comparison as a suite-context JSON object.
+   --  @param Reference_Name Reference benchmark name.
+   --  @param Contender_Name Contender benchmark name.
+   --  @param Result Completed paired comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to add to the object.
+   procedure Put_Comparison_JSON
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context);
 
    --  Print one human-readable saved-baseline gate decision.
    --  @param Result Completed gate evaluation.
@@ -302,8 +392,14 @@ package Flyology_Bench.Reporters is
    --  @param File Destination text file.
    --  @param Context Optional suite context.
    procedure Put_Multi_Comparison_CSV_Header
-     (File    : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   --  Print the suite-context multi-way CSV header.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to the schema.
+   procedure Put_Multi_Comparison_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    generic
       --  Same enumeration used to instantiate Compare_Many.
@@ -314,8 +410,19 @@ package Flyology_Bench.Reporters is
    --  @param Context Optional suite context.
    procedure Put_Multi_Comparison_CSV
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   generic
+      --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
+   --  Print suite-context multi-way CSV rows.
+   --  @param Result Completed multi-way comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to every row.
+   procedure Put_Multi_Comparison_CSV_With_Context
+     (Result  : Multi_Comparison;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    generic
       --  Same enumeration used to instantiate Compare_Many.
@@ -327,8 +434,19 @@ package Flyology_Bench.Reporters is
    --  @param Context Optional suite context.
    procedure Put_Multi_Comparison_Metrics_CSV
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   generic
+      --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
+   --  Print suite-context multi-way metric CSV rows.
+   --  @param Result Completed multi-way comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to prefix to every row.
+   procedure Put_Multi_Comparison_Metrics_CSV_With_Context
+     (Result  : Multi_Comparison;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
    generic
       --  Same enumeration used to instantiate Compare_Many.
@@ -339,8 +457,19 @@ package Flyology_Bench.Reporters is
    --  @param Context Optional suite context.
    procedure Put_Multi_Comparison_JSON
      (Result : Multi_Comparison;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
-      Context : Machine_Context := No_Machine_Context);
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+
+   generic
+      --  Same enumeration used to instantiate Compare_Many.
+      type Case_Id is (<>);
+   --  Print one suite-context multi-way JSON object.
+   --  @param Result Completed multi-way comparison.
+   --  @param File Destination text file.
+   --  @param Context Suite context to add to the object.
+   procedure Put_Multi_Comparison_JSON_With_Context
+     (Result  : Multi_Comparison;
+      File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context);
 
 private
    type Machine_Context is record
