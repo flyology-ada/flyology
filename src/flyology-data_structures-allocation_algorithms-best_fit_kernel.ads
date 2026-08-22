@@ -6,7 +6,6 @@ with Flyology_Allocators.Allocation_Algorithms.Best_Fit;
 --  version-2 invariant so older Flyology readers reject newer images before
 --  reaching the standalone attachment path.
 --  @exclude
-
 package Flyology.Data_Structures.Allocation_Algorithms.Best_Fit_Kernel is new
   Flyology.Data_Structures.Allocation_Algorithms.Adapter
     (Algorithm_Magic   => 16#4644_5342_4654_3031#,

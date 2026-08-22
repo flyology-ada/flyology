@@ -49,6 +49,10 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   parent is not. Run `scripts/check-test-hook-elision.sh` after changing a hook,
   its GPR selection, or a guarded call site; it checks every selection and the
   supported optimization modes.
+- GNATformat can insert a blank line between a leading GNATdoc `@exclude` tag
+  and the declaration it annotates. Remove that blank line after formatting;
+  otherwise GNATdoc treats the declaration as undocumented public API and the
+  Pages build fails.
 - Runtime units retain GNAT's `-gnatg` style profile, but every authoritative
   compile command in `prepare-rts.sh` must follow it with `-gnatyM110` so the
   compiler enforces the repository's 110-column limit instead of GNAT's

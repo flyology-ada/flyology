@@ -6,7 +6,6 @@ with Flyology_Allocators.Allocation_Algorithms.TLSF;
 --  may contain adjacent free blocks, from version 2 images whose validator
 --  required every such pair to be coalesced on release.
 --  @exclude
-
 package Flyology.Data_Structures.Allocation_Algorithms.TLSF_Kernel is new
   Flyology.Data_Structures.Allocation_Algorithms.Adapter
     (Algorithm_Magic   => 16#4644_5354_4C53_4631#,
