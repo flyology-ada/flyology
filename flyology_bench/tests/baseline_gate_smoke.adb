@@ -308,6 +308,24 @@ begin
    end;
 
    declare
+      Configured : constant Baselines.Gate_Result :=
+        Baselines.Evaluate_Gate
+          (Baseline_Path, "gate,""case", Fast,
+           Fingerprint => "host=exact;switches=-O2",
+           Policy =>
+             (Baselines.Permissive_Gate_Policy with delta
+                Practical_Threshold_Percent => 20.0),
+           Random_Seed => 100,
+           Confidence_Level_Percent => 80.0,
+           Bootstrap_Resamples => 100);
+   begin
+      Check
+        (Baselines.Confidence_Level_Percent (Configured) = 80.0
+         and then Baselines.Bootstrap_Resamples (Configured) = 100,
+         "gate did not retain its configured statistical policy");
+   end;
+
+   declare
       Before : constant String := Read_All (Baseline_Path);
       Regressed : constant Baselines.Gate_Result :=
         Baselines.Evaluate_Gate

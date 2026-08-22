@@ -217,14 +217,21 @@ package Flyology_Bench.Baselines is
    --  default metadata fingerprint.
    --  @param Policy Gate threshold and exceptional-state actions.
    --  @param Random_Seed Deterministic bootstrap seed.
+   --  @param Confidence_Level_Percent Central interval coverage in percent.
+   --  @param Bootstrap_Resamples Number of bootstrap distributions to draw.
    --  @return Status, decision, diagnostics, and optional statistics.
+   --  @exception Constraint_Error Compatible samples request more than the
+   --  bounded bootstrap analysis work.
    function Evaluate_Gate
      (Path         : String;
       Current_Name : String;
       Current      : Measurement;
       Fingerprint  : String := "";
       Policy       : Gate_Policy := Permissive_Gate_Policy;
-      Random_Seed  : Long_Long_Integer := 1) return Gate_Result;
+      Random_Seed  : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
+      return Gate_Result;
 
    --  Raise Regression_Gate_Failure when Result is rejected.
    --  @param Result Completed gate evaluation.
@@ -314,13 +321,13 @@ package Flyology_Bench.Baselines is
    --  @exception Program_Error Has_Statistics is False.
    function Speedup (Result : Gate_Result) return Long_Float;
 
-   --  Return the lower 95% independent-bootstrap speedup bound.
+   --  Return the lower configured-confidence bootstrap speedup bound.
    --  @param Result Gate result with statistics.
    --  @return Lower speedup bound.
    --  @exception Program_Error Has_Statistics is False.
    function Speedup_Confidence_Low (Result : Gate_Result) return Long_Float;
 
-   --  Return the upper 95% independent-bootstrap speedup bound.
+   --  Return the upper configured-confidence bootstrap speedup bound.
    --  @param Result Gate result with statistics.
    --  @return Upper speedup bound.
    --  @exception Program_Error Has_Statistics is False.
@@ -385,8 +392,8 @@ private
       Threshold_Value    : Long_Float := 1.0;
       Bootstrap_Method_Value : Bootstrap_Method_Id :=
         Circular_Block_Mean_Ratio;
-      Confidence_Level_Value : Long_Float := 95.0;
-      Bootstrap_Resample_Total : Positive := 2_000;
+      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
       Random_Seed_Value  : Long_Long_Integer := 1;
       Regression_Data    : Regression;
    end record;
