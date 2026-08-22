@@ -88,7 +88,15 @@ jobs:
         run: alr test
       - name: Test flyology_bench
         working-directory: flyology_bench
-        run: alr test
+        run: |
+          alr test || {
+            status=$?
+            if [ -f alire/alr_test_local.log ]; then
+              printf '%s\n' '--- flyology_bench local test log (last 300 lines) ---' >&2
+              tail -n 300 alire/alr_test_local.log >&2
+            fi
+            exit "$status"
+          }
       - name: Run runtime tests
         run: ./scripts/test.sh
       - name: Build connection-density showcase

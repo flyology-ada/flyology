@@ -25,9 +25,19 @@ trap cleanup_work_dir EXIT
 build -q -p -P "$crate_root/tests/flyology_bench_tests.gpr"
 # Redirect rather than pipe: a pipeline would report tee's exit status and
 # hide a failing smoke test.
-"$crate_root/tests/bin/flyology_bench_smoke" >"$work_dir/smoke.out"
+printf '%s\n' "Running $crate_root/tests/bin/flyology_bench_smoke"
+"$crate_root/tests/bin/flyology_bench_smoke" >"$work_dir/smoke.out" || {
+  status=$?
+  cat "$work_dir/smoke.out"
+  exit "$status"
+}
 cat "$work_dir/smoke.out"
-"$crate_root/tests/bin/recording_smoke" >"$work_dir/recording.out"
+printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
+"$crate_root/tests/bin/recording_smoke" >"$work_dir/recording.out" || {
+  status=$?
+  cat "$work_dir/recording.out"
+  exit "$status"
+}
 cat "$work_dir/recording.out"
 build -q -p -P "$crate_root/examples/flyology_bench_examples.gpr"
 "$crate_root/examples/bin/basic"
