@@ -6,6 +6,7 @@ with Ada.Exceptions;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench;
+with Flyology_Bench.Suites;
 with Flyology_Bench.Workers;
 
 procedure Fresh_Process is
@@ -21,6 +22,8 @@ procedure Fresh_Process is
    end Increment;
 
    procedure Benchmark is new Flyology_Bench.Measure (Increment);
+   package Runner is new Flyology_Bench.Suites (Maximum_Cases => 1);
+   Target : Runner.Suite;
 
    Config : constant Flyology_Bench.Configuration :=
      (Flyology_Bench.Default_Configuration with delta
@@ -29,18 +32,13 @@ procedure Fresh_Process is
         Samples          => Flyology_Bench.Sample_Count'First,
         Random_Seed      => 2026);
 begin
+   Runner.Register (Target, "increment", Benchmark'Access);
    if W.Worker_Mode then
       declare
          Request : W.Worker_Request;
       begin
          Request := W.Current_Request;
-         W.Announce_Ready (Request);
-         declare
-            Result : Flyology_Bench.Measurement;
-         begin
-            Benchmark (W.Requested_Configuration (Request), Result);
-            W.Return_Result (Request, Result);
-         end;
+         Runner.Execute_Worker_Request (Target, Request);
       exception
          when Error : others =>
             W.Return_Benchmark_Exception

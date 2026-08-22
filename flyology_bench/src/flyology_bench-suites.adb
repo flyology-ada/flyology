@@ -7,6 +7,7 @@ with Ada.Exceptions;
 with Ada.Strings;
 with Ada.Strings.Fixed;
 with Flyology_Bench.Baselines;
+with Flyology_Bench.Workers;
 
 package body Flyology_Bench.Suites is
 
@@ -317,6 +318,61 @@ package body Flyology_Bench.Suites is
       raise Constraint_Error with
         "benchmark identity is not registered: " & Full_Name;
    end Execute_One_Multi;
+
+   procedure Execute_Worker_Request
+     (Target   : Suite;
+      Request  : Flyology_Bench.Workers.Worker_Request;
+      Template : Configuration := Default_Configuration)
+   is
+      Identity : constant String :=
+        Flyology_Bench.Workers.Requested_Identity (Request);
+      Found : Natural := 0;
+   begin
+      for Index in 1 .. Target.Count loop
+         if To_String (Target.Cases (Index).Full) = Identity then
+            Found := Index;
+            exit;
+         end if;
+      end loop;
+      if Found = 0 then
+         raise Constraint_Error with
+           "benchmark identity is not registered: " & Identity;
+      end if;
+      case Flyology_Bench.Workers.Requested_Kind (Request) is
+         when Flyology_Bench.Workers.Ordinary_Measurement =>
+            if Target.Cases (Found).Result /= Ordinary_Measurement then
+               raise Constraint_Error with
+                 "worker result kind does not match registered case: "
+                 & Identity;
+            end if;
+         when Flyology_Bench.Workers.Paired_Comparison =>
+            if Target.Cases (Found).Result /= Paired_Comparison then
+               raise Constraint_Error with
+                 "worker result kind does not match registered case: "
+                 & Identity;
+            end if;
+      end case;
+      declare
+         Config : constant Configuration :=
+           Flyology_Bench.Workers.Requested_Configuration
+             (Request, Template);
+         Result : Registered_Result;
+      begin
+         Flyology_Bench.Workers.Announce_Ready (Request);
+         Execute_One (Target, Identity, Config, Result);
+         case Result.Result is
+            when Ordinary_Measurement =>
+               Flyology_Bench.Workers.Return_Result
+                 (Request, Result.Measured);
+            when Paired_Comparison =>
+               Flyology_Bench.Workers.Return_Result
+                 (Request, Result.Compared);
+            when Multi_Way_Comparison =>
+               raise Program_Error with
+                 "multi-way result entered the worker protocol";
+         end case;
+      end;
+   end Execute_Worker_Request;
 
    function Kind (Result : Registered_Result) return Result_Kind is
      (Result.Result);

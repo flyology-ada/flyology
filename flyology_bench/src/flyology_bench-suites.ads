@@ -5,6 +5,7 @@ with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology_Bench.Baselines;
 with Flyology_Bench.Reporters;
+with Flyology_Bench.Workers;
 
 --  Builds and runs an explicitly registered benchmark suite.
 --
@@ -244,6 +245,20 @@ package Flyology_Bench.Suites is
       Full_Name : String;
       Config    : Configuration;
       Result    : out Multi_Comparison);
+
+   --  Execute one validated worker request through the same exact suite
+   --  registry used by parent-side selection. The request kind and identity
+   --  are checked before readiness is announced. Multi-way cases are not part
+   --  of the current worker protocol. Benchmark exceptions propagate so the
+   --  worker main can return their exact name and message.
+   --  @param Target Registry containing the requested callback.
+   --  @param Request Validated worker-side protocol request.
+   --  @param Template Worker-local callback sources retained in configuration.
+   --  @exception Constraint_Error If identity or kind does not match.
+   procedure Execute_Worker_Request
+     (Target   : Suite;
+      Request  : Flyology_Bench.Workers.Worker_Request;
+      Template : Configuration := Default_Configuration);
 
    --  Return the kind stored in one exact execution result.
    --  @param Result Exact execution result.
