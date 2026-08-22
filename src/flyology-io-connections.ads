@@ -12,7 +12,7 @@ private with Flyology.IO.TLS;
 --
 --  Example:
 --
---     Flyology.IO.Connections.Take (Manager, Socket, Client);
+--     Flyology.IO.Connections.Connect (Manager, Server, Client);
 package Flyology.IO.Connections is
 
    --  Raised when a Server no longer admits connections.
@@ -77,6 +77,44 @@ package Flyology.IO.Connections is
      (Manager : aliased in out Server;
       Socket  : in out Flyology.IO.Sockets.Socket_Type;
       Item    : in out Connection);
+
+   --  Reserve one Manager permit, create an Internet stream socket for
+   --  Server's address family, connect it, and transfer sole closing ownership
+   --  to Item. One monotonic Timeout spans admission, socket creation, and the
+   --  task-aware connection attempt. Negative is unlimited and zero is
+   --  immediate. Manager shutdown closes a pending admission with
+   --  Admission_Closed; after admission, shutdown and Token cancellation
+   --  interrupt the connection attempt with Operation_Cancelled. Lightweight
+   --  tasks suspend; native tasks block only their pthreads.
+   --
+   --  On every failure before adoption, cleanup releases the permit and closes
+   --  any created socket. If admission readiness signalling fails, the permit
+   --  remains released. Ada finalization rules determine the observable
+   --  exception occurrence when that cleanup failure accompanies a timeout,
+   --  cancellation, socket failure, or another exception.
+   --  @param Manager Admission controller that must outlive Item, and that
+   --     must be Item's Manager discriminant when Item has one
+   --  @param Server Destination endpoint
+   --  @param Item Closed Connection that receives the connected socket
+   --  @param Timeout Shared admission-and-connect deadline in seconds
+   --  @param Token Optional one-shot cancellation source that must outlive
+   --     the call
+   --  @exception Admission_Closed Manager closes a pending admission
+   --  @exception Operation_Cancelled Manager shutdown or Token interrupts an
+   --     admitted connection attempt
+   --  @exception Timeout_Error The shared deadline expires
+   --  @exception Device_Error Readiness polling fails
+   --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
+   --     socket creation, connection, or setup fails
+   --  @exception Program_Error Item is open, Item is bound to a different
+   --     Manager, a wake source cannot be created, or cleanup releases its
+   --     permit but cannot signal admission readiness
+   procedure Connect
+     (Manager : aliased in out Server;
+      Server  : Flyology.IO.Sockets.Endpoint;
+      Item    : in out Connection;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null);
 
    --  Acquire capacity before accepting, so a full Manager backpressures the
    --  listening socket. Transient aborted admissions are retried; descriptor

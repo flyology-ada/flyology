@@ -881,6 +881,51 @@ package body Flyology.IO.Connections is
 #end if;
    end Take;
 
+   procedure Connect
+     (Manager : aliased in out Server;
+      Server  : Sockets.Endpoint;
+      Item    : in out Connection;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null)
+   is
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Guard           : Admission_Guard (Manager'Unchecked_Access);
+      Interrupts      : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+   begin
+      Check_Binding (Item, Guard.Owner);
+      if Is_Open (Item) then
+         raise Program_Error with "connection already owns a socket";
+      end if;
+      Reserve_Interruptibly (Manager, Started, Timeout, Token, Guard);
+
+      Sockets.Create_Socket
+        (Guard.Socket, Family => Server.Family, Mode => Sockets.Socket_Stream);
+      Interrupt_Sources
+        (Guard.Owner, Token, Interrupts, Interrupt_Count);
+      begin
+         Sockets.Connect
+           (Guard.Socket, Server, Remaining (Started, Timeout),
+            Interrupts (1 .. Interrupt_Count));
+      exception
+         when Sockets.Operation_Interrupted =>
+            raise Operation_Cancelled;
+      end;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      Test_Barrier (18);
+#end if;
+      if Manager.Shutdown_Requested
+        or else (Token /= null and then Token.Requested)
+      then
+         raise Operation_Cancelled;
+      end if;
+      Item.Controller.Adopt
+        (Sockets.Native_Descriptor (Guard.Socket),
+         Guard.Socket,
+         Guard.Owner,
+         Guard.Armed'Access);
+   end Connect;
+
    procedure Upgrade_TLS
      (Item        : in out Connection;
       Backend     : in out TLS.Provider'Class;

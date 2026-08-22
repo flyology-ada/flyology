@@ -1417,8 +1417,9 @@ Flyology exposes synchronous operations in:
   timer sets.
 - `Flyology.IO.Sockets`: connect, accept, partial/exact receive, and partial/all
   send operations.
-- `Flyology.IO.Connections`: bounded admission, single-owner sockets,
-  cancellation tokens, and descriptor-generation-safe close.
+- `Flyology.IO.Connections`: task-aware managed client connection, bounded
+  admission, single-owner sockets, cancellation tokens, and
+  descriptor-generation-safe close.
 - `Flyology.IO.Connections.Drivers`: scoped, bounded full-duplex transport
   progress for a single protocol pump without descriptor extraction.
 - `Flyology.IO.Connections.TLS`: ownership-preserving TLS replacement for an
@@ -1984,13 +1985,32 @@ that lookup on an explicitly native task.
 ### Connection lifecycle
 
 `Flyology.IO.Connections.Server` puts a bounded admission gate in front of
-socket ownership. `Take` transfers an existing socket into a limited
-`Connection` after waiting indefinitely for capacity; its compatibility
-signature has no timeout or token. `Accept_Connection` acquires capacity before
-accepting from the listener, so overload remains in the kernel backlog instead
-of becoming an unbounded user-space task or socket queue. Its one monotonic
-`Timeout` covers both a full-capacity admission wait and the subsequent socket
-accept work, while its token can cancel either phase without polling.
+socket ownership. For an Internet client that needs managed connection I/O,
+`Connect` is the direct path. It reserves capacity, creates the stream socket
+for the endpoint family, connects it, and transfers ownership to the limited
+`Connection`. One monotonic deadline covers admission, creation, and connect.
+Manager shutdown and an optional token can interrupt the work without polling.
+
+```ada
+Manager : aliased Flyology.IO.Connections.Server (Capacity => 1);
+Client  : aliased Flyology.IO.Connections.Connection (Manager'Access);
+
+Flyology.IO.Connections.Connect
+  (Manager, Database_Endpoint, Client, Timeout => 5.0);
+```
+
+`Take` remains the adoption path for a socket that the application created,
+configured, or connected itself. It waits indefinitely for capacity, and its
+compatibility signature has no timeout or token. `Flyology.IO.Sockets` remains
+the foundational public API for simple synchronous clients, datagrams, Unix
+sockets, custom socket setup, and protocol adapters that operate directly on a
+socket. Managed connections do not deprecate that layer.
+
+`Accept_Connection` acquires capacity before accepting from the listener, so
+overload remains in the kernel backlog instead of becoming an unbounded
+user-space task or socket queue. Its one monotonic `Timeout` covers both a
+full-capacity admission wait and the subsequent socket accept work, while its
+token can cancel either phase without polling.
 
 ```ada
 Manager : aliased Flyology.IO.Connections.Server (Capacity => 256);
