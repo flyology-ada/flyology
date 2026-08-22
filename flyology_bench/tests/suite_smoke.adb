@@ -393,6 +393,44 @@ begin
    end;
 
    declare
+      Gate_Target   : Runner.Suite;
+      Baseline_Path : constant String := "suite-gate-missing.baseline";
+      Output_Path   : constant String := "suite-gate.jsonl";
+      Progress_Path : constant String := "suite-gate.progress";
+      Progress      : Ada.Text_IO.File_Type;
+      Summary       : Runner.Run_Summary;
+      Options       : constant Runner.Runner_Options :=
+        Runner.Parse
+          ([U ("--output-style=json"), U ("--output=" & Output_Path)],
+           Base_Config);
+   begin
+      Remove (Baseline_Path);
+      Remove (Output_Path);
+      Remove (Progress_Path);
+      Runner.Register_Gated
+        (Gate_Target, "missing", Run_Measurement'Access, Baseline_Path,
+         Group => "core", Tags => "gate,smoke");
+      Ada.Text_IO.Create (Progress, Ada.Text_IO.Out_File, Progress_Path);
+      Runner.Execute
+        (Gate_Target, "gate_suite", Options, Summary, Progress => Progress);
+      Ada.Text_IO.Close (Progress);
+      Check
+        (Summary.Completed = 1
+         and then Summary.Rejected = 1
+         and then Summary.Status = Runner.Regression_Rejected,
+         "fail-closed baseline gate did not reject the suite");
+      Check
+        (Ada.Strings.Fixed.Index
+           (Read_All (Output_Path), """status"":""missing_baseline""") /= 0,
+         "suite did not report the baseline gate result");
+      Check
+        (not Ada.Directories.Exists (Baseline_Path),
+         "suite gate created a missing baseline");
+      Remove (Output_Path);
+      Remove (Progress_Path);
+   end;
+
+   declare
       Path : constant String := "suite-config.csv";
       File : Ada.Text_IO.File_Type;
       Summary : Runner.Run_Summary;

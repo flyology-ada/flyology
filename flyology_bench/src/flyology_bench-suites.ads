@@ -3,6 +3,7 @@
 
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
+with Flyology_Bench.Baselines;
 with Flyology_Bench.Reporters;
 
 --  Builds and runs an explicitly registered benchmark suite.
@@ -52,9 +53,9 @@ package Flyology_Bench.Suites is
    --  @enum Fail_Fast Stop before the next selected case.
    type Error_Policy is (Continue_After_Error, Fail_Fast);
 
-   --  Final runner classification. Inconclusive paired or multi-way results do not
-   --  fail a run. Regression_Rejected is reserved for the baseline gate
-   --  adapter and remains zero until that adapter is installed.
+   --  Final runner classification. Inconclusive paired or multi-way results do
+   --  not fail a run. A gated ordinary measurement fails only when its explicit
+   --  baseline policy rejects the result.
    --  @enum Succeeded Every applicable success condition passed.
    --  @enum No_Matching_Cases Selection was empty without --allow-empty.
    --  @enum Benchmark_Failed At least one callback raised an exception.
@@ -133,6 +134,29 @@ package Flyology_Bench.Suites is
       Run    : not null Measurement_Callback;
       Group  : String := "";
       Tags   : String := "");
+
+   --  Register one ordinary measurement with a read-only saved-baseline gate.
+   --  The gate runs after successful collection, uses the effective suite
+   --  confidence, resample, and random-seed policy, and never creates or
+   --  updates Baseline_Path. An empty Fingerprint selects benchmark metadata.
+   --  @param Target Registry to extend.
+   --  @param Name Case identity segment and baseline benchmark identity.
+   --  @param Run Already-instantiated measurement wrapper.
+   --  @param Baseline_Path Existing or policy-handled baseline artifact path.
+   --  @param Policy Regression threshold and exceptional-state actions.
+   --  @param Fingerprint Exact environment identity, or empty for metadata.
+   --  @param Group Optional identity parent segment.
+   --  @param Tags Optional comma-separated selection tags.
+   procedure Register_Gated
+     (Target        : in out Suite;
+      Name          : String;
+      Run           : not null Measurement_Callback;
+      Baseline_Path : String;
+      Policy        : Flyology_Bench.Baselines.Gate_Policy :=
+        Flyology_Bench.Baselines.Fail_Closed_Gate_Policy;
+      Fingerprint   : String := "";
+      Group         : String := "";
+      Tags          : String := "");
 
    --  Register one paired comparison. Reference_Name and Contender_Name are
    --  reporter labels and follow the identity-segment grammar.
@@ -356,6 +380,11 @@ private
       case Result is
          when Ordinary_Measurement =>
             Measurement_Run : Measurement_Callback;
+            Gate_Enabled    : Boolean := False;
+            Gate_Path       : Unbounded_String;
+            Gate_Fingerprint : Unbounded_String;
+            Gate_Policy     : Flyology_Bench.Baselines.Gate_Policy :=
+              Flyology_Bench.Baselines.Fail_Closed_Gate_Policy;
          when Paired_Comparison =>
             Reference_Name : Unbounded_String;
             Contender_Name : Unbounded_String;
