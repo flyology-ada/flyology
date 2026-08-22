@@ -1910,7 +1910,8 @@ package body Flyology.IO.Sockets is
       Socket      : not null access Socket_Type;
       Array_Item  : access Ada.Streams.Stream_Element_Array;
       Buffer_Item : access Flyology.Buffers.Unique_Buffer;
-      Timeout     : Duration) is
+      Timeout     : Duration;
+      Interrupts  : Interrupt_Set := No_Interrupts) is
    begin
       Prepare (Socket.all);
       Item.Kind := Kind;
@@ -1921,6 +1922,11 @@ package body Flyology.IO.Sockets is
       Item.Transferred := 0;
       Item.Error_Code := 0;
       Item.Failure := No_Failure;
+      Item.Interrupts := (others => Invalid_Descriptor);
+      Item.Interrupt_Count := Interrupts'Length;
+      for Offset in 0 .. Interrupts'Length - 1 loop
+         Item.Interrupts (Item.Interrupts'First + Offset) := Interrupts (Interrupts'First + Offset);
+      end loop;
       Flyology.Operations.Drivers.Start (Item);
       if Timeout >= 0.0 then
          Flyology.Operations.Drivers.Arm_Deadline (Item, Timeout);
@@ -1969,7 +1975,8 @@ package body Flyology.IO.Sockets is
       Destination   : Endpoint;
       Source        : Endpoint;
       Select_Source : Boolean;
-      Timeout       : Duration) is
+      Timeout       : Duration;
+      Interrupts    : Interrupt_Set := No_Interrupts) is
    begin
       Prepare (Socket.all);
       Item.Kind := Kind;
@@ -1981,6 +1988,11 @@ package body Flyology.IO.Sockets is
       Item.Transferred := 0;
       Item.Error_Code := 0;
       Item.Failure := No_Failure;
+      Item.Interrupts := (others => Invalid_Descriptor);
+      Item.Interrupt_Count := Interrupts'Length;
+      for Offset in 0 .. Interrupts'Length - 1 loop
+         Item.Interrupts (Item.Interrupts'First + Offset) := Interrupts (Interrupts'First + Offset);
+      end loop;
       Item.Source_Family := 0;
       Item.Source_Address := (others => 0);
       Item.Source_Port := 0;
@@ -2161,6 +2173,25 @@ package body Flyology.IO.Sockets is
          Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
       end Fail;
 
+      function Interrupted return Boolean is
+         Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+      begin
+         for Index in Requests'Range loop
+            Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
+         end loop;
+         return Requests'Length > 0 and then Wait_Any (Requests, Timeout => 0.0) /= 0;
+      end Interrupted;
+
+      procedure Arm_IO (For_Write : Boolean) is
+         Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. Item.Interrupt_Count + 1);
+      begin
+         Sources (1) := (Descriptor => Item.Socket.Value, For_Write => For_Write);
+         for Index in 1 .. Item.Interrupt_Count loop
+            Sources (Index + 1) := (Descriptor => Item.Interrupts (Index), For_Write => False);
+         end loop;
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+      end Arm_IO;
+
       procedure Attempt
         (Data_First : Ada.Streams.Stream_Element_Offset;
          Data_Last  : Ada.Streams.Stream_Element_Offset;
@@ -2200,7 +2231,7 @@ package body Flyology.IO.Sockets is
                exit when Action /= Flyology.Socket_Policy.Retry_Operation;
                Retry_Attempt := Retry_Attempt + 1;
                if not Flyology.Socket_Policy.Retry_IO_Immediately (Retry_Attempt) then
-                  Flyology.Operations.Drivers.Arm_Readiness (Item, Item.Socket.Value, Sending);
+                  Arm_IO (Sending);
                   return;
                end if;
             end;
@@ -2209,7 +2240,7 @@ package body Flyology.IO.Sockets is
          if Result < 0 then
             case Flyology.Socket_Policy.Classify_IO_Error (Policy_Error_Kind (Error)) is
                when Flyology.Socket_Policy.Wait_For_Ready  =>
-                  Flyology.Operations.Drivers.Arm_Readiness (Item, Item.Socket.Value, Sending);
+                  Arm_IO (Sending);
 
                when Flyology.Socket_Policy.Retry_Operation =>
                   raise Program_Error with "socket driver retained an interrupted result";
@@ -2232,7 +2263,7 @@ package body Flyology.IO.Sockets is
             if Item.Cursor > Data_Last then
                Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
             else
-               Flyology.Operations.Drivers.Arm_Readiness (Item, Item.Socket.Value, Sending);
+               Arm_IO (Sending);
             end if;
          end if;
       end Attempt;
@@ -2256,6 +2287,8 @@ package body Flyology.IO.Sockets is
    begin
       if Event = Flyology.Operations.Deadline_Reached then
          Fail (Deadline_Failure);
+      elsif Interrupted then
+         Fail (Interrupted_Failure);
       elsif Item.Array_Item /= null then
          Attempt
            (Item.Array_Item.all'First,
@@ -2277,6 +2310,9 @@ package body Flyology.IO.Sockets is
       else
          raise Program_Error with "socket operation has no buffer";
       end if;
+   exception
+      when Device_Error =>
+         Fail (Device_Failure);
    end Drive;
 
    overriding
@@ -2559,6 +2595,25 @@ package body Flyology.IO.Sockets is
       Result        : Interfaces.C.long;
       Retry_Attempt : Natural := 0;
 
+      function Interrupted return Boolean is
+         Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+      begin
+         for Index in Requests'Range loop
+            Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
+         end loop;
+         return Requests'Length > 0 and then Wait_Any (Requests, Timeout => 0.0) /= 0;
+      end Interrupted;
+
+      procedure Arm_IO is
+         Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. Item.Interrupt_Count + 1);
+      begin
+         Sources (1) := (Descriptor => Item.Socket.Value, For_Write => Sending);
+         for Index in 1 .. Item.Interrupt_Count loop
+            Sources (Index + 1) := (Descriptor => Item.Interrupts (Index), For_Write => False);
+         end loop;
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+      end Arm_IO;
+
       procedure Fail (Reason : Scoped_Failure; Code : Interfaces.C.int := 0) is
       begin
          Item.Failure := Reason;
@@ -2568,6 +2623,9 @@ package body Flyology.IO.Sockets is
    begin
       if Event = Flyology.Operations.Deadline_Reached then
          Fail (Deadline_Failure);
+         return;
+      elsif Interrupted then
+         Fail (Interrupted_Failure);
          return;
       end if;
 
@@ -2613,7 +2671,7 @@ package body Flyology.IO.Sockets is
             exit when Action /= Flyology.Socket_Policy.Retry_Operation;
             Retry_Attempt := Retry_Attempt + 1;
             if not Flyology.Socket_Policy.Retry_IO_Immediately (Retry_Attempt) then
-               Flyology.Operations.Drivers.Arm_Readiness (Item, Item.Socket.Value, Sending);
+               Arm_IO;
                return;
             end if;
          end;
@@ -2622,7 +2680,7 @@ package body Flyology.IO.Sockets is
       if Result < 0 then
          case Flyology.Socket_Policy.Classify_IO_Error (Policy_Error_Kind (Error)) is
             when Flyology.Socket_Policy.Wait_For_Ready  =>
-               Flyology.Operations.Drivers.Arm_Readiness (Item, Item.Socket.Value, Sending);
+               Arm_IO;
 
             when Flyology.Socket_Policy.Retry_Operation =>
                raise Program_Error with "datagram driver retained an interrupted result";
@@ -2644,6 +2702,9 @@ package body Flyology.IO.Sockets is
          Item.Datagram_Length := Natural (Result);
       end if;
       Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
+   exception
+      when Device_Error =>
+         Fail (Device_Failure);
    end Drive;
 
    overriding
@@ -2653,103 +2714,122 @@ package body Flyology.IO.Sockets is
    end Request_Cancellation;
 
    procedure Receive
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Operation) is
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts) is
    begin
-      Start_Scoped (Operation, Receive_One, Socket, Item, null, Timeout);
+      Start_Scoped (Operation, Receive_One, Socket, Item, null, Timeout, Interrupts);
    end Receive;
 
    function Receive
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Operation is
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Operation is
    begin
       return Result : Receive_Operation (Set) do
-         Receive (Socket, Item, Timeout, Result);
+         Receive (Socket, Item, Timeout, Result, Interrupts);
       end return;
    end Receive;
 
    procedure Receive_Exactly
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Exactly_Operation) is
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Exactly_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts) is
    begin
-      Start_Scoped (Operation, Receive_Exact, Socket, Item, null, Timeout);
+      Start_Scoped (Operation, Receive_Exact, Socket, Item, null, Timeout, Interrupts);
    end Receive_Exactly;
 
    function Receive_Exactly
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Exactly_Operation is
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Exactly_Operation is
    begin
       return Result : Receive_Exactly_Operation (Set) do
-         Receive_Exactly (Socket, Item, Timeout, Result);
+         Receive_Exactly (Socket, Item, Timeout, Result, Interrupts);
       end return;
    end Receive_Exactly;
 
    procedure Send
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Send_Operation) is
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Send_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts) is
    begin
-      Start_Scoped (Operation, Send_One, Socket, Item, null, Timeout);
+      Start_Scoped (Operation, Send_One, Socket, Item, null, Timeout, Interrupts);
    end Send;
 
    function Send
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Send_Operation is
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Send_Operation is
    begin
       return Result : Send_Operation (Set) do
-         Send (Socket, Item, Timeout, Result);
+         Send (Socket, Item, Timeout, Result, Interrupts);
       end return;
    end Send;
 
    procedure Send_All
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Send_All_Operation) is
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Send_All_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts) is
    begin
-      Start_Scoped (Operation, Send_Complete, Socket, Item, null, Timeout);
+      Start_Scoped (Operation, Send_Complete, Socket, Item, null, Timeout, Interrupts);
    end Send_All;
 
    function Send_All
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Send_All_Operation is
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Send_All_Operation is
    begin
       return Result : Send_All_Operation (Set) do
-         Send_All (Socket, Item, Timeout, Result);
+         Send_All (Socket, Item, Timeout, Result, Interrupts);
       end return;
    end Send_All;
 
    procedure Receive_Datagram
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Datagram_Operation) is
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Datagram_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts) is
    begin
       Start_Scoped_Datagram
-        (Operation, Datagram_Receive, Socket, Item, null, No_Endpoint, No_Endpoint, False, Timeout);
+        (Operation,
+         Datagram_Receive,
+         Socket,
+         Item,
+         null,
+         No_Endpoint,
+         No_Endpoint,
+         False,
+         Timeout,
+         Interrupts);
    end Receive_Datagram;
 
    function Receive_Datagram
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Datagram_Operation is
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Datagram_Operation is
    begin
       return Result : Receive_Datagram_Operation (Set) do
-         Receive_Datagram (Socket, Item, Timeout, Result);
+         Receive_Datagram (Socket, Item, Timeout, Result, Interrupts);
       end return;
    end Receive_Datagram;
 
@@ -2967,6 +3047,9 @@ package body Flyology.IO.Sockets is
 
                when Interrupted_Failure      =>
                   raise Operation_Interrupted with "socket operation interrupted";
+
+               when Device_Failure           =>
+                  raise Device_Error with "socket readiness polling failed";
 
                when Peer_Closed_Failure      =>
                   raise Device_Error with "socket closed while receiving";
