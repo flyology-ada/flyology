@@ -173,6 +173,8 @@
             <li><a href="#first">Measure one operation</a></li>
             <li><a href="#read">Read the report</a></li>
             <li><a href="#compare">Compare implementations</a></li>
+            <li><a href="#sweeps">Sweep parameters and analyze scaling</a></li>
+            <li><a href="#suites">Run a benchmark suite</a></li>
             <li><a href="#axes">Select measurement axes</a></li>
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
@@ -337,6 +339,56 @@ Put_All (Result, Show_Individual_Details =&gt; True);</code></pre>
             <p>The confidence interval comes from deterministic circular-block resampling of paired log-ratios. A practical verdict appears only when the complete interval clears the configured effect threshold. <code>Show_Individual_Details</code> appends the full latency, sampling, clock, CPU, memory, and elapsed card for every implementation.</p>
           </section>
 
+          <section id="sweeps">
+            <span class="step-label">SWEEPS</span>
+            <h2>Sweep exact parameters without changing the timed operation.</h2>
+            <p><code>Flyology_Bench.Sweeps</code> retains an explicit ordered set of positive <code>size:</code> or <code>count:</code> points. Each canonical point identity contains the parameter kind and full unsigned decimal value; an optional bounded label is display metadata. Duplicate identities and invalid labels fail before collection.</p>
+            <p>The sweep generic selects a point and states its work outside the timed batch, then invokes an already-instantiated <code>Measure</code>, <code>Compare</code>, or <code>Compare_Batched</code> procedure once. The operation inside that procedure stays statically bound. A paired sweep therefore performs the existing adjacent, order-balanced comparison independently at every point; it does not compare two later blocks.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Work identity</dt><dd>Every logical operation carries an exact positive integral amount in items, bytes, or a caller-named unit. Console work amounts and rates use the selected decimal or binary prefix; CSV retains decimal integer text, while newline-delimited JSON adds exact decimal-string companions to its numeric parameter, work, and scaling-range fields. A point skipped before setup or rejected while stating work carries no fabricated default amount.</dd></div>
+                <div class="decision-row"><dt>Throughput</dt><dd>Operations per second and work units per second are derived by inverting the same wall nanoseconds-per-operation samples. There is no separately timed throughput measurement. Mean-time confidence endpoints are inverted in reverse order. Console and machine reporters retain the exact rate-availability state; paired rows do so independently for each side.</dd></div>
+                <div class="decision-row"><dt>Budgets and failures</dt><dd>A per-point budget applies the runner limit independently. A whole-sweep budget includes selection, warmup, calibration, and collection and passes each point the remaining collection limit. Setup failure, measurement failure, unavailable wall time, overflow, dry run, and budget exhaustion remain distinct inspectable statuses; callers choose stop or continue. Collection and derived-rate availability remain separate, so a throughput-only overflow retains valid elapsed data and a paired verdict. A runner that raises after partially writing its output leaves reset default storage in the failed point.</dd></div>
+                <div class="decision-row"><dt>Suite identity</dt><dd>A suite full case name is supplied as <code>Case_Name</code> and remains the registration and filter identity. Machine rows add a separate stable <code>point</code> field; the sweep layer does not create another suite runner.</dd></div>
+              </dl>
+            </div>
+            <p><code>Flyology_Bench.Scaling</code> analyzes stored or deterministic synthetic observations after collection. One analysis has one coherent size or count parameter kind; mixing the two is rejected. It fits constant, logarithmic, linear, n log n, quadratic, and cubic candidates in log space and reports the parameter kind, every coefficient, nominal exponent, R-squared value, RMS and maximum log residual, selected model, and observed input range. Rejected nonempty data retains its factual range, while empty input reports the kind and range unavailable. A rejected analysis marks no diagnostic selected; when fitting reached model comparison, the API still retains the lowest-residual candidate for callers that inspect the rejection status first. Fewer than four distinct positive points, a range below twofold, invalid observations, numerical overflow, poor fit, or poor identifiability produce an explicit unavailable state. The twofold boundary is decided with exact integer arithmetic before floating-point fitting. The result is empirical scaling over the observed range, not proof of big-O.</p>
+            <figure class="code-panel">
+              <figcaption>run the maintained paired size sweep</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+./examples/bin/sweep_comparison</code></pre>
+            </figure>
+            <p>The example compares insertion sort and Shell sort over five input sizes, prints median elapsed time, confidence bounds, operations per second, work units per second, and the paired verdict at every point, then analyzes each implementation's stored medians. It reports that invocation and makes no host performance claim.</p>
+          </section>
+
+          <section id="suites">
+            <span class="step-label">SUITE</span>
+            <h2>Register and select a benchmark suite.</h2>
+            <p><a href="../../api/flyology_bench/14e8355037c37505e5d1422f2b73ec8ce45d51601ed49d8a9cd79a63a7fb26de.html"><code>Flyology_Bench.Suites</code></a> builds a bounded explicit registry. Ada provides no required reflection or linker-discovered inventory, so each case has a stable registered identity. The runner preserves registration order unless <code>--order=name</code> requests lexical full-identity order.</p>
+            <figure class="code-panel">
+              <figcaption>discover and validate the maintained suite</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./examples/bin/suite_runner --list
+./examples/bin/suite_runner --filter='integer/*' --skip='*comparison'
+./examples/bin/suite_runner --exact=integer/mix --output-style=csv
+./examples/bin/suite_runner --dry-run --output-style=json \
+  --output=suite.ndjson</code></pre>
+            </figure>
+            <p>Names, groups, tags, and matching are case-sensitive. A filter without <code>*</code> or <code>?</code> is a substring match. A glob uses only those two portable wildcards. A no-match selection returns a failing status unless <code>--allow-empty</code> is explicit.</p>
+            <p>Every selected callback receives one shared <code>Configuration</code>. The callback wraps an existing generic <code>Measure</code>, <code>Compare</code>, or <code>Compare_Many</code> instantiation. Multi-way registration also binds the case enumeration to the existing generic reporters. Indirect dispatch occurs before collection, while the timed operation inside that instantiation remains statically bound.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Serial process</dt><dd>Cases execute serially. Global state, caches, and host conditions carry between cases.</dd></div>
+                <div class="decision-row"><dt>Exceptions</dt><dd>The default continues after a callback exception and reports its full identity. <code>--fail-fast</code> stops before the next case.</dd></div>
+                <div class="decision-row"><dt>Dry run</dt><dd><code>--dry-run</code> invokes each callback with ten time-only samples, a finite collection cap, and optional host gates, telemetry, scheduler probes, and progress disabled. Output is validation-only and contains no performance numbers.</dd></div>
+                <div class="decision-row"><dt>Machine files</dt><dd><code>--output</code> writes plain human output, typed CSV table sections, or newline-delimited JSON. Suite context prefixes the complete existing latency and metric schemas. Configured terminal progress and ANSI sequences stay outside machine output.</dd></div>
+              </dl>
+            </div>
+            <p>The aggregate reports discovered, selected, completed, skipped, failed, inconclusive, unavailable, and rejected counts. An inconclusive paired or multi-way comparison does not fail by default. The maintained main maps a failing final status to <code>Ada.Command_Line.Failure</code>.</p>
+          </section>
+
           <section id="axes">
             <span class="step-label">BENCH 05</span>
             <h2>Measure resources with the same sample schedule.</h2>
@@ -363,6 +415,11 @@ Config.Metrics :=
               <p><strong>Scope is part of the result.</strong> Thread CPU covers only the executing pthread. Linux PMU rows include native children created after counter initialization. For a lightweight task, keep the sample on one event-loop pthread and do not suspend while unrelated fibers can run. Use a thread pin or dedicated execution group when the experiment requires that constraint.</p>
             </aside>
             <p>An unavailable axis reports why: unsupported platform, permission denial, unsupported event, unavailable counter resources, or probe failure. The API exposes the same value through <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#3ad7205e3a4387bfe49e383f8ee9ea296720467190a46fb5d01c683b6a8b9af0"><code>Metric_Status</code></a>. Console, CSV, and JSON output preserve the value instead of substituting zero.</p>
+            <h3>Custom axes and alternate timing</h3>
+            <p><code>Custom_Metric_Registry</code> adds up to eight caller-defined axes in deterministic registration order without extending <code>Metric_Axis</code>. Each descriptor fixes a bounded stable name and unit, scope, attribution, direction, cumulative-delta or explicit absolute/completed-elapsed semantics, per-batch or per-operation normalization, and relative-positive or absolute comparison. Duplicate names, built-in collisions, invalid metadata, resets, non-finite values, and conversion overflow are rejected or retained as statuses; unavailable samples are never replaced with zero.</p>
+            <p>The provider callback runs immediately before and after each retained batch. Built-in begin probes precede the custom begin; the harness wall timestamp then surrounds the batch; the custom end precedes built-in ending probes. This ordering is reported rather than corrected for cross-probe perturbation. Providers declare attribution explicitly. A thread-scoped provider must detect migration or otherwise establish that both boundaries used the same native thread.</p>
+            <p><code>Flyology_Bench.Manual_Timing</code> and <code>Manual_Timing_Comparison</code> are static generic adapters for caller-completed elapsed values. The batch must synchronize device, accelerator, or simulated work before returning. Harness wall time remains a distinct axis and remains the clock for warmup, equal-wall calibration, collection limits, interference windows, and progress. Wall timestamp-cost subtraction is never reused for the alternate source. Each invocation owns its adapter state and composes with an existing custom provider while consuming one registry slot. Reported resolution is normalized by the retained iteration count, with distinct reference and contender resolutions after unequal calibration. Compact console output places the primary timer first with its source and resolution, then labels harness wall as calibration; paired output identifies the primary axes-table verdict. The maintained example uses a deterministic simulated clock and does not claim GPU support.</p>
+            <p>The versioned extended CSV and NDJSON reporters identify built-in versus custom axes, timing role and source, output unit and resolution, calibration clock, semantics, attribution, status, summaries, paired method, interval, and verdict. Existing CSV schemas remain unchanged. Custom providers are not part of <code>Recording</code>: overlapping and migrating spans require a separate bounded concurrency and ownership design before per-span custom attribution can be coherent.</p>
             <p><code>perf_event_open</code> returns <code>EINVAL</code> for an unsupported event and for a rejected attribute combination. The harness repeats that probe with only permission-related attributes before it classifies the result. This check distinguishes a missing counter from a harness defect.</p>
             <p>All probes and counter controls stay outside the wall-clock timestamps, and setup or teardown hooks stay outside every selected axis. Probe families can still perturb one another at their boundaries. Adaptive batches amortize that fixed work, but a small resource difference should be repeated with only the relevant metric family selected.</p>
             <p>Flyology scheduler axes include dispatches, poll batches, poll events, wakeups, and migration boundary crossings. They use <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Scheduler_Probe</code></a>. A library-level adapter can copy cumulative values from one or more <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Flyology.Observability.Group_Snapshot</code></a> records. The callback runs outside the timed interval, and the standalone benchmark crate keeps no dependency on the Flyology runtime.</p>
@@ -507,7 +564,7 @@ end;</code></pre>
             <div class="decision-list">
               <dl>
                 <div class="decision-row"><dt>Individual spans</dt><dd>Recorded p50, p95, and p99 describe individual application spans. They are not the runner's per-operation batch means.</dd></div>
-                <div class="decision-row"><dt>Independent comparison</dt><dd><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#5ba052e7e20ef2b82786892f0c697cf67542df68ec5230cc0475e794bd5fc3be"><code>Compare_Independent</code></a> resamples separately observed distributions. It does not reuse the runner's paired bootstrap or claim correlation that the load schedule did not establish.</dd></div>
+                <div class="decision-row"><dt>Independent comparison</dt><dd><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#ca49694723032b139c9bcac0606f64a19737943ea92989163dad73de9a858663"><code>Compare_Independent</code></a> resamples separately observed distributions. It does not reuse the runner's paired bootstrap or claim correlation that the load schedule did not establish.</dd></div>
                 <div class="decision-row"><dt>Partial samples</dt><dd>If only some retained spans have an axis, its status is <code>partially_collected</code> and valid and unavailable counts are reported separately. Raw rows remain aligned, but an independent comparison uses an axis only when both inputs are complete.</dd></div>
                 <div class="decision-row"><dt>Bounded retention</dt><dd><a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>Reservoir</code></a> keeps a bounded sample across the complete session. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>First_N</code></a> and <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#2a9e71e2880096b0d64fbe1aaaeaed1271918618daa698ff398dd5ccf74521fd"><code>Latest_N</code></a> are available when the beginning or end is the intended window. Aggregate lifecycle and outcome counts still cover every completed span.</dd></div>
                 <div class="decision-row"><dt>Attribution</dt><dd>Wall time has exact span boundaries. Thread CPU requires the same native thread at both boundaries. Process CPU, RSS, faults, switches, and I/O include concurrent process work. Linux PMU values use recorder-owned per-worker groups and retain native task-tree scope; worker exit closes its group.</dd></div>
@@ -551,11 +608,53 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
 ./examples/bin/basic --metrics=perf --require-perf
 ./examples/bin/basic --metrics=perf --require-perf=core</code></pre>
             </figure>
-            <p>The existing CSV tables keep their latency schemas. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#b19a4d68647c7803ecd5581d1d1d976168b4b9a12bf7d7ab1829153992189c4e"><code>Put_Metrics_CSV</code></a>, <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#7ea8208f1eaae6d66aa4e8b177e8e5603a8c7c27578b24512b81c1c9b873ab92"><code>Put_Comparison_Metrics_CSV</code></a>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. For regression history, <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a> stores raw time samples and rejects a comparison when the clock backend or environment fingerprint differs.</p>
+            <p>The existing CSV tables keep their latency schemas. <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#b19a4d68647c7803ecd5581d1d1d976168b4b9a12bf7d7ab1829153992189c4e"><code>Put_Metrics_CSV</code></a>, <a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#7ea8208f1eaae6d66aa4e8b177e8e5603a8c7c27578b24512b81c1c9b873ab92"><code>Put_Comparison_Metrics_CSV</code></a>, and the multi-way long-form reporter emit one row per requested axis with scope, unit, availability status, summaries, confidence bounds, and verdict. JSON measurement, comparison, and multi-way objects include the same status and metric arrays alongside clock and host/toolchain metadata. <a href="../../api/flyology_bench/824910ac59ceb8fae65b3b9e981bf121c47de3294e68865c509cb3665fa0c62d.html"><code>Flyology_Bench.Baselines</code></a> records one named raw-sample artifact and gates a later compatible run.</p>
+            <figure class="code-panel">
+              <figcaption>record and check one durable baseline</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>identity='cpu=ci-runner-1;policy=cpu-2;switches=-O3;benchmark=v1'
+./examples/bin/baseline_gate record build/integer_mix.baseline "$identity"
+./examples/bin/baseline_gate check  build/integer_mix.baseline "$identity"
+
+FLYOLOGY_BENCH_OUTPUT=csv \
+  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
+FLYOLOGY_BENCH_OUTPUT=json \
+  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"</code></pre>
+            </figure>
+            <p>Record mode is explicit. Check mode never updates its reference, including after rejection. The writer flushes a unique same-directory temporary file before an atomic POSIX rename. A failure before publication leaves the earlier artifact intact. The version 2 artifact has exact benchmark and environment identities, the clock backend, raw time samples, a checksum, and a commit footer. The reader also accepts the earlier public version 1 format without silently upgrading it; version 1 has no checksum or commit footer. Raw times must lie within the range the harness can produce, from one nanosecond divided by the maximum iteration count through one complete unsigned 64-bit clock delta. Out-of-range artifacts fail with a format diagnostic. An invalid current measurement becomes a gate error with no partial statistics, so fail-closed CI rejects it without an escaping arithmetic exception. The example combines its required caller identity with the default OS, architecture, and GNAT fingerprint. Include the stable CPU or runner class, placement policy, compiler switches, and benchmark contract rather than a changing contender revision.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Regression</dt><dd>The gate rejects only when the complete 95% confidence interval establishes a slowdown beyond the practical threshold. It does not reject a noisy point estimate.</dd></div>
+                <div class="decision-row"><dt>Other verdicts</dt><dd>Improvement, practical equivalence, and inconclusive remain distinct. Policy decides whether an inconclusive result rejects the run.</dd></div>
+                <div class="decision-row"><dt>Artifact policy</dt><dd>Interactive policy can report a missing, invalid, or incompatible artifact. CI can reject those states. The implementation never compares different benchmark names, fingerprints, or clock backends.</dd></div>
+                <div class="decision-row"><dt>Output</dt><dd>Console, CSV, and newline-delimited JSON retain status, rejection, compatibility, speedup and time-change intervals, threshold, bootstrap method, confidence level, resample count, seed, and reason. Confidence-neutral machine field names prevent a configured interval from being mislabeled. A suite can count each status and use the rejection field for its final process status.</dd></div>
+              </dl>
+            </div>
+            <p>Use a direct paired comparison when both implementations can run in one process. Pairing retains the balanced collection schedule. The saved-baseline gate uses the existing independent-run bootstrap because its runs occurred at different times. Its bounded sum, mean, ratio, interpolation, time-change, and interval-verdict primitives form a private SPARK unit whose floating run-time checks are proved by the repository proof suite; file I/O and bootstrap orchestration remain behaviorally tested boundaries. One artifact represents one named reference. Longer histories, dashboards, commit-range analysis, and change-point detection remain separate work.</p>
+          </section>
+
+          <section id="fresh-processes">
+            <span class="step-label">BENCH 11</span>
+            <h2>Use fresh processes to isolate process-global state.</h2>
+            <p><a href="../../api/flyology_bench/c4c0e76529dab572583b8159bab61baddf38a2920e3e252fa191fa01cc290e67.html"><code>Flyology_Bench.Workers</code></a> invokes the same executable directly through <code>posix_spawn</code>. Each worker executes one exact ordinary or paired case. A paired comparison stays inside one worker, so reference and contender retain their shared order and sample schedule.</p>
+            <figure class="code-panel">
+              <figcaption>compare in-process and fresh-process modes</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>cd flyology_bench
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+./examples/bin/fresh_process</code></pre>
+            </figure>
+            <p>Each repetition performs its own host setup, warmup, calibration, and timed sampling. Keep the returned worker results separate. If you compute an across-worker interval, resample workers rather than flattening their internal samples. Spawn and setup durations are metadata outside per-operation time.</p>
+            <p>Strict environment mode keeps only execution and temporary-directory variables by default. Locale and timezone require an explicit preservation policy, and worker results retain the effective mode and both policies. The reported environment fingerprint covers variable names but deliberately excludes their values, so a shared report cannot be used to test guesses for inherited credentials. For the internal exact-value check, the worker computes a separate digest and returns it only through the dedicated result channel; it is absent from process arguments and public results. The parent captures standard output and error separately with bounded retention and exact omitted-byte counts. Startup and total deadlines terminate the anchored process group, apply a bounded grace period, and reap the root process.</p>
+            <p>The caller must retain exclusive child-reaping ownership while a worker run is active. Detected ownership loss fails as parent I/O and disarms the PID guard, but a concurrent external reaper violates the API contract and can race the observation-to-reap interval. Successful envelopes are accepted only when their raw samples reproduce the reported statistics and their telemetry, host-control, interference, and metric metadata match the requested configuration. Inactive and unavailable sections must remain canonically empty.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Isolation is not quiescence.</strong> A fresh process prevents one repetition's mutable globals, allocator state, or runtime caches from contaminating the next repetition. It does not control frequency scaling, thermal state, interrupts, or competing host work.</p>
+            </aside>
           </section>
 
           <section id="correctness">
-            <span class="step-label">BENCH 11</span>
+            <span class="step-label">BENCH 12</span>
             <h2>Treat fractional nanoseconds as amortized throughput.</h2>
             <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
             <div class="decision-list">
@@ -573,7 +672,7 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
           </section>
 
           <section id="platforms">
-            <span class="step-label">BENCH 12</span>
+            <span class="step-label">BENCH 13</span>
             <h2>Repeat on the host you intend to describe.</h2>
             <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
             <figure class="code-panel">
@@ -581,9 +680,11 @@ FLYOLOGY_BENCH_OUTPUT=json     ./examples/bin/basic &gt; results.ndjson
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code>cd flyology_bench
 alr test
-./examples/bin/basic</code></pre>
+./examples/bin/basic
+./examples/bin/fresh_process</code></pre>
             </figure>
             <p><code>alr test</code> also checks the published machine-readable schemas. Every CSV row must contain the columns declared by its header. Long-form metric rows must agree between <code>available</code> and <code>status</code>. Each JSON object must parse. The test uses <code>jq</code> when available and reports when it uses structural checks instead.</p>
+            <p>Fresh-process workers use Darwin's close-on-exec spawn policy or glibc Linux's close-from spawn action. An unavailable extension fails the launch instead of using <code>fork</code>. Windows remains unsupported.</p>
             <p>From the repository root, <code>FLYOLOGY_LINUX_PERF=1 ./scripts/test-linux-docker.sh</code> grants Docker's <code>PERFMON</code> capability and makes the example require real hardware-counter samples. It also makes the smoke test compare a serial batch against one that starts four worker tasks, so inherited attribution is measured rather than assumed. A virtualized Linux host must also expose its PMU; the capability alone cannot provide missing virtual hardware. A guest kernel without one lists no CPU entry under <code>/sys/bus/event_source/devices</code> and rejects every hardware event, and the run then reports the specific unavailable status instead of passing.</p>
             <p>For a shared report, keep the raw machine output, record the exact command and environment, repeat the full run, and describe only the tested host. Direct <code>Compare</code> or <code>Compare_Many</code> is preferable whenever all implementations can run in one process.</p>
             <aside class="callout callout-teal">

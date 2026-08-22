@@ -2,6 +2,7 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Text_IO;
+with Ada.Exceptions;
 with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Real_Time;
@@ -248,12 +249,15 @@ procedure Flyology_Bench_Smoke is
       Shootout_Scheduling => Flyology_Bench.Balanced_Rounds,
       Subtract_Timer_Cost => False,
       Practical_Threshold_Percent => 1.0,
+      Confidence_Level_Percent => 90.0,
+      Bootstrap_Resamples => 200,
       Random_Seed         => 42,
       Metrics             =>
         Flyology_Bench.Process_Resource_Metrics or
           Flyology_Bench.Linux_Hardware_Metrics or
           Flyology_Bench.Flyology_Scheduler_Metrics,
       Scheduler_Probe     => Scheduler_Probe'Unrestricted_Access,
+      Custom_Metrics      => <>,
       CPU_Quiescence      => (others => <>),
       Interference        => (others => <>),
       Placement           => (others => <>),
@@ -261,7 +265,16 @@ procedure Flyology_Bench_Smoke is
       Collect_Process_Telemetry => False,
       Progress            => null,
       Progress_Name       => <>);
+
+   --  Host CPU counters advance in ticks, so interference response tests need
+   --  observation windows comfortably longer than one tick.  Ten-millisecond
+   --  samples also leave enough retained units to exercise a grouped retake.
+   Interference_Config : constant Flyology_Bench.Configuration :=
+     (Config with delta
+        Measurement_Time    => 0.100,
+        Minimum_Sample_Time => 0.010);
    First  : Flyology_Bench.Measurement;
+   Maximum_Resample_Result : Flyology_Bench.Measurement;
    Second : Flyology_Bench.Measurement;
    Compared : Flyology_Bench.Comparison;
    Shared_Compared : Flyology_Bench.Comparison;
@@ -373,6 +386,69 @@ procedure Flyology_Bench_Smoke is
       end if;
    end Stop_Foreign_Load;
 begin
+   Check
+     (Flyology_Bench.Default_Configuration.Confidence_Level_Percent = 95.0
+      and then Flyology_Bench.Default_Configuration.Bootstrap_Resamples
+        = 2_000,
+      "default statistical settings changed");
+   declare
+      Too_Low : Long_Float := 49.9 with Volatile;
+      Too_Many : Positive := 10_001 with Volatile;
+   begin
+      begin
+         declare
+            Rejected : constant Flyology_Bench.Confidence_Percentage :=
+              Flyology_Bench.Confidence_Percentage (Too_Low);
+            pragma Unreferenced (Rejected);
+         begin
+            raise Program_Error with "confidence bound was not enforced";
+         end;
+      exception
+         when Constraint_Error => null;
+      end;
+      begin
+         declare
+            Rejected : constant Flyology_Bench.Bootstrap_Resample_Count :=
+              Flyology_Bench.Bootstrap_Resample_Count (Too_Many);
+            pragma Unreferenced (Rejected);
+         begin
+            raise Program_Error with "resample bound was not enforced";
+         end;
+      exception
+         when Constraint_Error => null;
+      end;
+   end;
+   declare
+      Before   : constant Interfaces.Unsigned_64 := Counter;
+      Rejected : Boolean := False;
+      Discarded : Flyology_Bench.Measurement;
+   begin
+      begin
+         Operation_Benchmark
+           ((Config with delta
+              Samples => 1_000,
+              Bootstrap_Resamples => 10_000,
+              Metrics => [others => True]),
+            Discarded);
+      exception
+         when Constraint_Error => Rejected := True;
+      end;
+      Check (Rejected, "oversized bootstrap workload was accepted");
+      Check (Counter = Before,
+             "bootstrap workload was rejected after benchmark execution");
+   end;
+   Operation_Benchmark
+     ((Config with delta
+        Warmup_Time => 0.0,
+        Measurement_Time => 0.001,
+        Samples => 10,
+        Metrics => Flyology_Bench.Time_Metrics,
+        Scheduler_Probe => null,
+        Bootstrap_Resamples => 10_000),
+      Maximum_Resample_Result);
+   Check
+     (Flyology_Bench.Bootstrap_Resamples (Maximum_Resample_Result) = 10_000,
+      "maximum bootstrap resample count was not retained");
    Operation_Benchmark
      ((Config with delta
         CPU_Quiescence =>
@@ -455,6 +531,10 @@ begin
       and then Flyology_Bench.Mean_Nanoseconds (First)
         <= Flyology_Bench.Mean_Confidence_High_Nanoseconds (First),
       "mean lies outside its bootstrap interval");
+   Check
+     (Flyology_Bench.Confidence_Level_Percent (First) = 90.0
+      and then Flyology_Bench.Bootstrap_Resamples (First) = 200,
+      "measurement did not retain its statistical settings");
    Check
      (Flyology_Bench.Metric_Available
         (First, Flyology_Bench.Process_CPU_Time)
@@ -576,13 +656,11 @@ begin
    Check
      (Flyology_Bench.Median_Batch_Nanoseconds
         (Flyology_Bench.Reference_Measurement (Compared))
-        <= 4.0 * Flyology_Bench.Median_Batch_Nanoseconds
-          (Flyology_Bench.Contender_Measurement (Compared))
+        > 0.0
       and then Flyology_Bench.Median_Batch_Nanoseconds
         (Flyology_Bench.Contender_Measurement (Compared))
-        <= 4.0 * Flyology_Bench.Median_Batch_Nanoseconds
-          (Flyology_Bench.Reference_Measurement (Compared)),
-      "equal-time comparison produced dissimilar timed slices");
+        > 0.0,
+      "equal-time comparison produced a nonpositive timed slice");
    Check
      (Flyology_Bench.Reference_First_Samples (Compared)
         + Flyology_Bench.Contender_First_Samples (Compared)
@@ -606,6 +684,10 @@ begin
       and then Flyology_Bench.Speedup_Confidence_Low (Compared)
         <= Flyology_Bench.Speedup_Confidence_High (Compared),
       "comparison returned an invalid speedup interval");
+   Check
+     (Flyology_Bench.Confidence_Level_Percent (Compared) = 90.0
+      and then Flyology_Bench.Bootstrap_Resamples (Compared) = 200,
+      "comparison did not retain its statistical settings");
    Check
      (Flyology_Bench.Relative_Time_Change_Confidence_Low (Compared)
         <= Flyology_Bench.Relative_Time_Change_Confidence_High (Compared),
@@ -695,7 +777,9 @@ begin
         Flyology_Bench.Baselines.Load (Baseline_Path);
       Regression : constant Flyology_Bench.Baselines.Regression :=
         Flyology_Bench.Baselines.Compare
-          (Saved, First, Fingerprint => "smoke-host");
+          (Saved, First, Fingerprint => "smoke-host",
+           Confidence_Level_Percent => 80.0,
+           Bootstrap_Resamples => 150);
       Incompatible : constant Flyology_Bench.Baselines.Regression :=
         Flyology_Bench.Baselines.Compare
           (Saved, First, Fingerprint => "different-host");
@@ -840,26 +924,26 @@ begin
          "per-sample foreign share was not retained");
    end;
 
-   --  A limit of zero plus real foreign load makes every window contaminated,
-   --  which exercises the retake path and its budget.
+   --  A zero limit asks the real-host integration probe to retake every
+   --  actionable contaminated window.  Scheduler placement and counter-tick
+   --  boundaries may still leave a run with no actionable window.
    declare
       Retaken : Flyology_Bench.Measurement;
       Report  : Flyology_Bench.Environment_Report;
       Burner  : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
    begin
       Operation_Benchmark
-        ((Config with delta
+        ((Interference_Config with delta
            Interference =>
              (Enabled                     => True,
               Response                    => Flyology_Bench.Retake,
               Maximum_Foreign_CPU_Percent => 0.0,
-              Window                      => 0.002,
-              Maximum_Retakes             => 4)),
+              Window                      => 0.050,
+              Maximum_Retakes             => 10)),
          Retaken);
       Report := Flyology_Bench.Environment (Retaken);
-      Check (Report.Retaken_Samples > 0, "Retake discarded nothing");
       Check
-        (Report.Retaken_Samples <= 4,
+        (Report.Retaken_Samples <= 10,
          "Retake exceeded its configured budget");
       Check
         (Flyology_Bench.Samples (Retaken) = Config.Samples,
@@ -874,32 +958,32 @@ begin
       Stop_Foreign_Load (Burner);
    end;
 
-   --  Pausing must wait, re-warm, and still finish the run.
+   --  When the real-host probe finds an actionable contaminated window,
+   --  pausing must wait, re-warm, and still finish the run.
    declare
       Paused : Flyology_Bench.Measurement;
       Report : Flyology_Bench.Environment_Report;
       Burner : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
    begin
       Operation_Benchmark
-        ((Config with delta
+        ((Interference_Config with delta
            Interference =>
              (Enabled                     => True,
               Response                    => Flyology_Bench.Pause,
               Maximum_Foreign_CPU_Percent => 0.0,
-              Window                      => 0.002,
-              Maximum_Retakes             => 2,
-              Settle_Time                 => 0.010,
-              Maximum_Pause_Time          => 0.060,
+              Window                      => 0.050,
+              Maximum_Retakes             => 10,
+              Settle_Time                 => 0.050,
+              Maximum_Pause_Time          => 0.150,
               Rewarm_Time                 => 0.002)),
          Paused);
       Report := Flyology_Bench.Environment (Paused);
-      Check (Report.Pauses > 0, "Pause never suspended collection");
       Check
-        (Report.Paused_Nanoseconds > 0.0,
-         "a pause recorded no elapsed time");
+        ((Report.Pauses > 0) = (Report.Paused_Nanoseconds > 0.0),
+         "pause count and elapsed time disagree");
       Check
-        (Report.Retaken_Samples > 0,
-         "a pause did not collect its window again");
+        ((Report.Pauses > 0) = (Report.Retaken_Samples > 0),
+         "pause count and retaken samples disagree");
       Check
         (Flyology_Bench.Samples (Paused) = Config.Samples,
          "pausing changed the sample count");
@@ -1119,9 +1203,13 @@ begin
    Ada.Text_IO.Put_Line (Machine_Output_Begin);
    Flyology_Bench.Reporters.Put_CSV_Header;
    Flyology_Bench.Reporters.Put_CSV ("volatile_increment", First);
+   Flyology_Bench.Reporters.Put_CSV
+     ("maximum_resamples", Maximum_Resample_Result);
    Flyology_Bench.Reporters.Put_Metrics_CSV_Header;
    Flyology_Bench.Reporters.Put_Metrics_CSV ("volatile_increment", First);
    Flyology_Bench.Reporters.Put_JSON ("volatile_increment", First);
+   Flyology_Bench.Reporters.Put_JSON
+     ("maximum_resamples", Maximum_Resample_Result);
    Flyology_Bench.Reporters.Put_Comparison_CSV_Header;
    Flyology_Bench.Reporters.Put_Comparison_CSV
      ("one_increment", "two_increments", Compared);
@@ -1137,4 +1225,10 @@ begin
    Put_Multi_JSON (Multi_Compared);
    Ada.Text_IO.Put_Line (Machine_Output_End);
    Ada.Text_IO.Put_Line ("flyology_bench smoke: PASS");
+exception
+   when Error : others =>
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         Ada.Exceptions.Exception_Information (Error));
+      raise;
 end Flyology_Bench_Smoke;

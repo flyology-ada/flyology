@@ -109,12 +109,16 @@ rm -rf "$project_root/docs/api/flyology_bench"
       cat "$bench_gnatdoc_log" >&2
       exit 1
    fi
-   #  GNATdoc 26.0 does not associate leading comments with formals of nested
-   #  generic subprograms. Their adjacent source comments and names still
-   #  render, but --warnings reports the formals as undocumented. Keep this
-   #  exception narrow; every other public benchmark entity remains enforced.
+   #  GNATdoc 26.0 does not associate leading comments with formals or nested
+   #  declarations inside generic units. Their adjacent source comments and
+   #  names still render, but --warnings reports them as undocumented. Keep
+   #  this exception narrow; every other public benchmark entity is enforced.
    sed -E \
-     -e '/^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$/d' \
+     -e '/^flyology_bench\.ads:[0-9]+:[0-9]+: warning: generic formal `(Operation|Batch|Setup|Teardown|Element|Reference_Operation|Contender_Operation|Reference_Batch|Contender_Batch|Case_Id)` is not documented$/d' \
+     -e '/^flyology_bench-reporters\.ads:[0-9]+:[0-9]+: warning: generic formal `Case_Id` is not documented$/d' \
+     -e '/^flyology_bench-sweeps\.ads:[0-9]+:[0-9]+: warning: generic formal `(Select_Point|Work_For|Run_Point)` is not documented$/d' \
+     -e '/^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: generic formal `(Maximum_Cases|Case_Id|Run)` is not documented$/d' \
+     -e '/^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: (entity `Register`|parameter `(Target|Name|Group|Tags)`) is not documented$/d' \
      "$bench_gnatdoc_log"
 )
 
@@ -144,12 +148,12 @@ rm -f "$runtime_documentation_warnings"
 
 if grep -E 'warning:' "$bench_gnatdoc_log" \
   | grep -E -v -q \
-    '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$'
+    '^flyology_bench\.ads:[0-9]+:[0-9]+: warning: generic formal `(Operation|Batch|Setup|Teardown|Element|Reference_Operation|Contender_Operation|Reference_Batch|Contender_Batch|Case_Id)` is not documented$|^flyology_bench-reporters\.ads:[0-9]+:[0-9]+: warning: generic formal `Case_Id` is not documented$|^flyology_bench-sweeps\.ads:[0-9]+:[0-9]+: warning: generic formal `(Select_Point|Work_For|Run_Point)` is not documented$|^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: generic formal `(Maximum_Cases|Case_Id|Run)` is not documented$|^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: (entity `Register`|parameter `(Target|Name|Group|Tags)`) is not documented$'
 then
    printf '%s\n' "unexpected warning in benchmark GNATdoc output" >&2
    grep -E 'warning:' "$bench_gnatdoc_log" \
      | grep -E -v \
-       '^flyology_bench(-reporters)?\.ads:[0-9]+:[0-9]+: warning: generic formal `[^`]+` is not documented$' >&2
+       '^flyology_bench\.ads:[0-9]+:[0-9]+: warning: generic formal `(Operation|Batch|Setup|Teardown|Element|Reference_Operation|Contender_Operation|Reference_Batch|Contender_Batch|Case_Id)` is not documented$|^flyology_bench-reporters\.ads:[0-9]+:[0-9]+: warning: generic formal `Case_Id` is not documented$|^flyology_bench-sweeps\.ads:[0-9]+:[0-9]+: warning: generic formal `(Select_Point|Work_For|Run_Point)` is not documented$|^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: generic formal `(Maximum_Cases|Case_Id|Run)` is not documented$|^flyology_bench-suites\.ads:[0-9]+:[0-9]+: warning: (entity `Register`|parameter `(Target|Name|Group|Tags)`) is not documented$' >&2
    exit 1
 fi
 

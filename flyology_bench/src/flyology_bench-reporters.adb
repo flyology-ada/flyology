@@ -3,7 +3,6 @@
 
 with Ada.Strings;
 with Ada.Strings.Fixed;
-with Ada.Strings.Unbounded;
 with Ada.Environment_Variables;
 with Ada.Characters.Handling;
 with Flyology_Bench.Internal_Probes;
@@ -12,6 +11,7 @@ with Interfaces.C;
 
 package body Flyology_Bench.Reporters is
    package Float_IO is new Ada.Text_IO.Float_IO (Long_Float);
+   use Ada.Strings.Unbounded;
    use type Interfaces.C.int;
    use type Interfaces.Unsigned_64;
 
@@ -38,9 +38,13 @@ package body Flyology_Bench.Reporters is
    function Comparison_Metric_Status_Name
      (Result : Comparison;
       Axis   : Metric_Axis) return String;
+   function Custom_Comparison_Status_Name
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return String;
 
    function Memory_Image (Bytes : Long_Float) return String;
    function Pad (Value : String; Width : Positive) return String;
+   function Full_Pad (Value : String; Width : Positive) return String;
    function Left_Pad (Value : String; Width : Positive) return String;
    function Elapsed_Image
      (Nanoseconds : Interfaces.Unsigned_64) return String;
@@ -269,6 +273,21 @@ package body Flyology_Bench.Reporters is
       end case;
    end Verdict_Name;
 
+   function Compatibility_Name
+     (Value : Flyology_Bench.Baselines.Compatibility_Issue) return String is
+   begin
+      case Value is
+         when Flyology_Bench.Baselines.No_Compatibility_Issue =>
+            return "none";
+         when Flyology_Bench.Baselines.Benchmark_Identity_Mismatch =>
+            return "benchmark_identity";
+         when Flyology_Bench.Baselines.Environment_Fingerprint_Mismatch =>
+            return "environment_fingerprint";
+         when Flyology_Bench.Baselines.Clock_Backend_Mismatch =>
+            return "clock_backend";
+      end case;
+   end Compatibility_Name;
+
    function Schedule_Name (Value : Shootout_Schedule_Policy) return String is
      (if Value = Balanced_Rounds then "balanced rounds" else "sequential cases");
 
@@ -283,8 +302,54 @@ package body Flyology_Bench.Reporters is
          when Current_Native_Thread => return "thread";
          when Native_Task_Tree     => return "task tree";
          when Flyology_Runtime     => return "runtime";
+         when Caller_Defined_Window => return "caller window";
+         when Device_Or_Accelerator => return "device or accelerator";
+         when Simulated_Clock       => return "simulated clock";
       end case;
    end Scope_Name;
+
+   function Attribution_Name (Value : Metric_Attribution) return String is
+   begin
+      case Value is
+         when Exact_Window => return "exact_window";
+         when Same_Native_Thread_Window => return "same_native_thread_window";
+         when Native_Task_Tree_Window => return "native_task_tree_window";
+         when Shared_Process_Window => return "shared_process_window";
+         when Shared_Runtime_Window => return "shared_runtime_window";
+         when Unattributable => return "unattributable";
+      end case;
+   end Attribution_Name;
+
+   function Builtin_Attribution (Axis : Metric_Axis)
+      return Metric_Attribution is
+   begin
+      case Scope (Axis) is
+         when Batch_Wall_Clock => return Exact_Window;
+         when Current_Native_Thread => return Same_Native_Thread_Window;
+         when Native_Task_Tree => return Native_Task_Tree_Window;
+         when Benchmark_Process => return Shared_Process_Window;
+         when Flyology_Runtime => return Shared_Runtime_Window;
+         when Caller_Defined_Window | Device_Or_Accelerator |
+              Simulated_Clock => return Unattributable;
+      end case;
+   end Builtin_Attribution;
+
+   function Direction_Name (Value : Metric_Direction) return String is
+     (case Value is
+         when Lower_Is_Better => "lower_is_better",
+         when Higher_Is_Better => "higher_is_better",
+         when Diagnostic => "diagnostic");
+
+   function Semantics_Name (Value : Custom_Sample_Semantics) return String is
+     (case Value is
+         when Cumulative_Delta => "cumulative_delta",
+         when Absolute_Sample => "absolute_sample",
+         when Completed_Elapsed => "completed_elapsed");
+
+   function Normalization_Name (Value : Custom_Normalization) return String is
+     (case Value is
+         when Per_Batch => "per_batch",
+         when Per_Operation => "per_operation");
 
    function Metric_Status_Name (Value : Metric_Availability) return String is
    begin
@@ -297,6 +362,9 @@ package body Flyology_Bench.Reporters is
          when Counter_Resources_Unavailable =>
             return "counter resources unavailable";
          when Probe_Failed => return "probe failed";
+         when Counter_Reset => return "counter reset";
+         when Invalid_Value => return "invalid value";
+         when Conversion_Overflow => return "conversion overflow";
          when Metric_Partially_Collected => return "partially collected";
       end case;
    end Metric_Status_Name;
@@ -321,6 +389,34 @@ package body Flyology_Bench.Reporters is
            & "; contender " & Metric_Status_Name (Contender_Status);
       end if;
    end Comparison_Metric_Status_Name;
+
+   function Custom_Comparison_Status_Name
+     (Result : Comparison;
+      Axis   : Custom_Metric_Index) return String
+   is
+      Reference_Status : constant Metric_Availability :=
+        Custom_Metric_Status (Reference_Measurement (Result), Axis);
+      Contender_Status : constant Metric_Availability :=
+        Custom_Metric_Status (Contender_Measurement (Result), Axis);
+   begin
+      if Reference_Status = Metric_Collected
+        and then Contender_Status = Metric_Collected
+      then
+         return
+           (if Compare_Custom_Metric (Result, Axis).Available
+            then Metric_Status_Name (Metric_Collected)
+            else Metric_Status_Name (Invalid_Value));
+      elsif Reference_Status = Contender_Status then
+         return Metric_Status_Name (Reference_Status);
+      elsif Reference_Status = Metric_Collected then
+         return "contender " & Metric_Status_Name (Contender_Status);
+      elsif Contender_Status = Metric_Collected then
+         return "reference " & Metric_Status_Name (Reference_Status);
+      else
+         return "reference " & Metric_Status_Name (Reference_Status)
+           & "; contender " & Metric_Status_Name (Contender_Status);
+      end if;
+   end Custom_Comparison_Status_Name;
 
    function Metric_Method_Name
      (Value : Metric_Comparison_Method) return String is
@@ -396,6 +492,9 @@ package body Flyology_Bench.Reporters is
       end if;
       return Value & (1 .. Width - Value'Length => ' ');
    end Pad;
+
+   function Full_Pad (Value : String; Width : Positive) return String is
+     (if Value'Length >= Width then Value & " " else Pad (Value, Width));
 
    function Left_Pad (Value : String; Width : Positive) return String is
    begin
@@ -710,7 +809,8 @@ package body Flyology_Bench.Reporters is
    end Put_Telemetry_Summary;
 
    function JSON_String (Value : String) return String is
-      Buffer : String (1 .. Value'Length * 2 + 2);
+      Hex    : constant String := "0123456789abcdef";
+      Buffer : String (1 .. Value'Length * 6 + 2);
       Last   : Natural := 1;
    begin
       Buffer (1) := '"';
@@ -718,12 +818,35 @@ package body Flyology_Bench.Reporters is
          if Character = '"' or else Character = '\' then
             Last := Last + 1;
             Buffer (Last) := '\';
+            Last := Last + 1;
+            Buffer (Last) := Character;
+         elsif Character = ASCII.BS
+           or else Character = ASCII.FF
+           or else Character = ASCII.LF
+           or else Character = ASCII.CR
+           or else Character = ASCII.HT
+         then
+            Last := Last + 1;
+            Buffer (Last) := '\';
+            Last := Last + 1;
+            Buffer (Last) :=
+              (case Character is
+                  when ASCII.BS => 'b',
+                  when ASCII.FF => 'f',
+                  when ASCII.LF => 'n',
+                  when ASCII.CR => 'r',
+                  when others   => 't');
          elsif Character < ' ' then
-            raise Constraint_Error with
-              "benchmark names must not contain control characters";
+            Buffer (Last + 1 .. Last + 4) := "\u00";
+            Buffer (Last + 5) :=
+              Hex (Standard.Character'Pos (Character) / 16 + Hex'First);
+            Buffer (Last + 6) :=
+              Hex (Standard.Character'Pos (Character) mod 16 + Hex'First);
+            Last := Last + 6;
+         else
+            Last := Last + 1;
+            Buffer (Last) := Character;
          end if;
-         Last := Last + 1;
-         Buffer (Last) := Character;
       end loop;
       Last := Last + 1;
       Buffer (Last) := '"';
@@ -740,7 +863,8 @@ package body Flyology_Bench.Reporters is
             Quote := True;
          else
             Count := Count + 1;
-            Quote := Quote or else Character = ',' or else Character = ASCII.LF;
+            Quote := Quote or else Character = ','
+              or else Character = ASCII.LF or else Character = ASCII.CR;
          end if;
       end loop;
       if not Quote then
@@ -764,6 +888,44 @@ package body Flyology_Bench.Reporters is
          return Buffer (1 .. Last);
       end;
    end CSV_String;
+
+   function Make_Machine_Context
+     (Suite_Name      : String;
+      Benchmark_Name  : String;
+      Result_Kind     : String;
+      Outcome         : String;
+      Dry_Run         : Boolean := False) return Machine_Context is
+     ((Suite_Name     => To_Unbounded_String (Suite_Name),
+       Benchmark_Name => To_Unbounded_String (Benchmark_Name),
+       Result_Kind    => To_Unbounded_String (Result_Kind),
+       Outcome        => To_Unbounded_String (Outcome),
+       Dry_Run        => Dry_Run,
+       Present        => True));
+
+   function CSV_Context_Header (Context : Machine_Context) return String is
+     (if not Context.Present then ""
+      else "suite,benchmark,result_kind,outcome,dry_run,row_kind,");
+
+   function CSV_Context_Prefix
+     (Context  : Machine_Context;
+      Row_Kind : String) return String is
+     (if not Context.Present then ""
+      else CSV_String (To_String (Context.Suite_Name)) & ","
+        & CSV_String (To_String (Context.Benchmark_Name)) & ","
+        & CSV_String (To_String (Context.Result_Kind)) & ","
+        & CSV_String (To_String (Context.Outcome)) & ","
+        & (if Context.Dry_Run then "true" else "false") & ","
+        & CSV_String (Row_Kind) & ",");
+
+   function JSON_Context_Prefix (Context : Machine_Context) return String is
+     (if not Context.Present then ""
+      else """suite"":" & JSON_String (To_String (Context.Suite_Name))
+        & ",""benchmark"":"
+        & JSON_String (To_String (Context.Benchmark_Name))
+        & ",""result_kind"":" & JSON_String (To_String (Context.Result_Kind))
+        & ",""outcome"":" & JSON_String (To_String (Context.Outcome))
+        & ",""dry_run"":" & (if Context.Dry_Run then "true" else "false")
+        & ",");
 
    procedure Put_Metric_Summaries
      (File   : Ada.Text_IO.File_Type;
@@ -813,6 +975,60 @@ package body Flyology_Bench.Reporters is
             end if;
          end if;
       end loop;
+      if Custom_Metric_Total (Result) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Result) loop
+            declare
+               Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
+               Summary : constant Metric_Summary :=
+                 Custom_Metric_Statistics (Result, Axis);
+               Status : constant Metric_Availability :=
+                 Custom_Metric_Status (Result, Axis);
+            begin
+               if not Header_Printed then
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Magenta & Bold else "")
+                     & "   " & Pad ("additional axes", 32)
+                     & Pad ("scope", 15) & Pad ("median", 15)
+                     & Pad ("mean", 15) & Pad ("p95", 15) & "unit"
+                     & End_Style);
+                  Header_Printed := True;
+               end if;
+               if Summary.Available then
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Cyan else "")
+                     & "   " & Full_Pad
+                         (Custom_Metric_Name (Result, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                             then " [primary]" else ""),
+                          32)
+                     & End_Style
+                     & Full_Pad
+                         (Scope_Name (Custom_Metric_Scope (Result, Axis)), 15)
+                     & Pad (Image (Summary.Median), 15)
+                     & Pad (Image (Summary.Mean), 15)
+                     & Pad (Image (Summary.P95), 15)
+                     & Custom_Metric_Unit (Result, Axis)
+                     & (if Status = Metric_Collected then ""
+                        else " (" & Metric_Status_Name (Status) & ")"));
+               else
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Dim else "")
+                     & "   " & Full_Pad
+                         (Custom_Metric_Name (Result, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                             then " [primary]" else ""),
+                          32)
+                     & Full_Pad
+                         (Scope_Name (Custom_Metric_Scope (Result, Axis)), 15)
+                     & "unavailable: " & Metric_Status_Name (Status)
+                     & End_Style);
+               end if;
+            end;
+         end loop;
+      end if;
    end Put_Metric_Summaries;
 
    procedure Put_Metric_Comparison_Table
@@ -848,7 +1064,10 @@ package body Flyology_Bench.Reporters is
                   (if Color then Dim else "")
                   & "   " & Pad ("axis", 32) & Pad ("unit", 20)
                   & Pad ("reference", 14) & Pad ("contender", 14)
-                  & Pad ("change", 16) & Pad ("95% CI", 24)
+                  & Pad ("change", 16)
+                  & Pad
+                      (Image (Confidence_Level_Percent (Reference), 1)
+                       & "% CI", 24)
                   & "verdict" & End_Style);
                Header_Printed := True;
             end if;
@@ -889,6 +1108,70 @@ package body Flyology_Bench.Reporters is
             end;
          end if;
       end loop;
+      if Custom_Metric_Total (Reference) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Reference) loop
+            declare
+               Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
+               Item : constant Metric_Comparison_Result :=
+                 Compare_Custom_Metric (Result, Axis);
+            begin
+               if not Header_Printed then
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Magenta & Bold else "")
+                     & "   axes: " & Contender_Name & " vs " & Reference_Name
+                     & End_Style);
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Dim else "")
+                     & "   " & Pad ("axis", 32) & Pad ("unit", 20)
+                     & Pad ("reference", 14) & Pad ("contender", 14)
+                     & Pad ("change", 16) & Pad ("95% CI", 24)
+                     & "verdict" & End_Style);
+                  Header_Printed := True;
+               end if;
+               if Item.Available then
+                  declare
+                     Change : constant String :=
+                       (if Item.Method = Relative_Ratio
+                        then Time_Change_Image (Item.Change)
+                        else Image (Item.Change));
+                     Interval : constant String :=
+                       "[" & Image (Item.Confidence_Low) & ", "
+                       & Image (Item.Confidence_High) & "]";
+                  begin
+                     Ada.Text_IO.Put_Line
+                       (File, Row_Color (Item.Verdict)
+                        & "   " & Full_Pad
+                            (Custom_Metric_Name (Reference, Axis)
+                             & (if Custom_Metric_Is_Primary_Timing
+                                     (Reference, Axis)
+                                then " [primary]" else ""),
+                             32)
+                        & Full_Pad (Custom_Metric_Unit (Reference, Axis), 20)
+                        & Pad (Image (Item.Reference_Median), 14)
+                        & Pad (Image (Item.Contender_Median), 14)
+                        & Pad (Change, 16) & Pad (Interval, 24)
+                        & Metric_Verdict_Name (Item.Verdict) & End_Style);
+                  end;
+               else
+                  Ada.Text_IO.Put_Line
+                    (File,
+                     (if Color then Dim else "")
+                     & "   " & Full_Pad
+                         (Custom_Metric_Name (Reference, Axis)
+                          & (if Custom_Metric_Is_Primary_Timing
+                                  (Reference, Axis)
+                             then " [primary]" else ""),
+                          32)
+                     & Full_Pad (Custom_Metric_Unit (Reference, Axis), 20)
+                     & "unavailable: "
+                     & Custom_Comparison_Status_Name (Result, Axis)
+                     & End_Style);
+               end if;
+            end;
+         end loop;
+      end if;
    end Put_Metric_Comparison_Table;
 
    procedure Put_Console
@@ -904,6 +1187,8 @@ package body Flyology_Bench.Reporters is
       Accent : constant String := (if Color then Green & Bold else "");
       Muted  : constant String := (if Color then Dim else "");
       End_Style : constant String := (if Color then Reset else "");
+      Primary_Position : constant Custom_Metric_Count :=
+        Primary_Timing_Axis (Result);
       Quality_Color : constant String :=
         (if not Color then ""
          elsif Coefficient_Of_Variation_Percent (Result) > 10.0
@@ -917,15 +1202,50 @@ package body Flyology_Bench.Reporters is
          Prefix & "-- " & Name & " "
          & (1 .. (if Name'Length < 52 then 52 - Name'Length else 1) => '-')
          & End_Style);
+      if Primary_Position > 0 then
+         declare
+            Axis : constant Custom_Metric_Index :=
+              Custom_Metric_Index (Primary_Position);
+            Summary : constant Metric_Summary :=
+              Custom_Metric_Statistics (Result, Axis);
+            Status : constant Metric_Availability :=
+              Custom_Metric_Status (Result, Axis);
+         begin
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Accent & Pad ("primary", 10) & End_Style & " | "
+               & Accent & Custom_Metric_Name (Result, Axis) & End_Style
+               & (if Summary.Available
+                  then " median " & Image (Summary.Median) & " "
+                    & Custom_Metric_Unit (Result, Axis)
+                    & "  mean " & Image (Summary.Mean) & " "
+                    & Custom_Metric_Unit (Result, Axis)
+                  else " unavailable: " & Metric_Status_Name (Status)));
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Muted & Pad ("source", 10) & End_Style & " | "
+               & Custom_Metric_Timing_Source (Result, Axis)
+               & "  resolution " & Image (Custom_Metric_Resolution (Result, Axis))
+               & " " & Custom_Metric_Unit (Result, Axis)
+               & "  calibration harness wall");
+         end;
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Muted & Pad ("wall basis", 10) & End_Style & " | "
+            & "harness wall median " & Duration_Image (Median_Nanoseconds (Result))
+            & "/op  mean " & Duration_Image (Mean_Nanoseconds (Result)));
+      else
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Accent & Pad ("latency", 10) & End_Style & " | "
+            & Accent & "median " & Duration_Image (Median_Nanoseconds (Result))
+            & "/op" & End_Style & "  mean "
+            & Duration_Image (Mean_Nanoseconds (Result)));
+      end if;
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Accent & Pad ("latency", 10) & End_Style & " | "
-         & Accent & "median " & Duration_Image (Median_Nanoseconds (Result))
-         & "/op" & End_Style & "  mean "
-         & Duration_Image (Mean_Nanoseconds (Result)));
-      Ada.Text_IO.Put_Line
-        (File,
-         "   " & (if Color then Cyan else "") & Pad ("tails", 10)
+         "   " & (if Color then Cyan else "")
+         & Pad ((if Primary_Position > 0 then "wall tails" else "tails"), 10)
          & End_Style & " | p95 "
          & Duration_Image (P95_Nanoseconds (Result))
          & "  p99 " & Duration_Image (P99_Nanoseconds (Result))
@@ -933,12 +1253,15 @@ package body Flyology_Bench.Reporters is
          & " .. " & Duration_Image (Maximum_Nanoseconds (Result)));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & (if Color then Cyan else "") & Pad ("sampling", 10)
+         "   " & (if Color then Cyan else "")
+         & Pad ((if Primary_Position > 0 then "wall batch" else "sampling"), 10)
          & End_Style & " |"
          & Iterations_Per_Sample (Result)'Image & " iter/sample x"
          & Samples (Result)'Image & " samples"
          & "  median batch "
-         & Duration_Image (Median_Batch_Nanoseconds (Result)));
+         & Duration_Image (Median_Batch_Nanoseconds (Result))
+         & "  " & Image (Confidence_Level_Percent (Result), 1) & "% CI /"
+         & Bootstrap_Resamples (Result)'Image & " resamples");
       Ada.Text_IO.Put_Line
         (File,
          "   " & Quality_Color & Pad ("quality", 10) & End_Style & " | CV "
@@ -951,11 +1274,15 @@ package body Flyology_Bench.Reporters is
          & Image (Sample_Lag_One_Correlation (Result), 2));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Muted & Pad ("clock", 10) & End_Style & " | "
+         "   " & Muted
+         & Pad ((if Primary_Position > 0 then "wall clock" else "clock"), 10)
+         & End_Style & " | "
          & Clock_Backend (Result));
       Ada.Text_IO.Put_Line
         (File,
-         "   " & Muted & Pad ("resolution", 10) & End_Style & " | nominal "
+         "   " & Muted
+         & Pad ((if Primary_Position > 0 then "wall timer" else "resolution"), 10)
+         & End_Style & " | nominal "
          & Duration_Image (Clock_Resolution_Nanoseconds (Result))
          & "  observed "
          & Duration_Image (Observed_Clock_Resolution_Nanoseconds (Result))
@@ -965,6 +1292,13 @@ package body Flyology_Bench.Reporters is
          & "/op"
          & End_Style);
       Put_Metric_Summaries (File, Result, Style);
+      if Custom_Metric_Total (Result) > 0 then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Muted & Pad ("probe order", 10) & End_Style
+            & " | built-in begin, custom begin, wall, batch, wall, custom end,"
+            & " built-in end; cross-probe perturbation is uncorrected");
+      end if;
       if Include_Telemetry then
          Put_Result_Environment (File, Result, Style);
       end if;
@@ -978,10 +1312,19 @@ package body Flyology_Bench.Reporters is
    procedure Put_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_CSV_Header (File, No_Machine_Context);
+   end Put_CSV_Header;
+
+   procedure Put_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,iterations,samples,timer_cost_ns,min_ns,median_ns,mean_ns,"
-         & "mean_ci95_low_ns,mean_ci95_high_ns,p95_ns,p99_ns,max_ns,"
+         CSV_Context_Header (Context)
+         & "name,iterations,samples,confidence_level_percent,bootstrap_resamples,"
+         & "timer_cost_ns,min_ns,median_ns,mean_ns,"
+         & "mean_ci_low_ns,mean_ci_high_ns,p95_ns,p99_ns,max_ns,"
          & "stddev_ns,mad_ns,cv_percent,low_severe,low_mild,high_mild,"
          & "high_severe,clock_backend,clock_resolution_ns,"
          & "observed_clock_resolution_ns,median_timer_cost_ns,median_batch_ns,"
@@ -997,15 +1340,26 @@ package body Flyology_Bench.Reporters is
    procedure Put_CSV
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Put_CSV (Name, Result, File, No_Machine_Context);
+   end Put_CSV;
+
+   procedure Put_CSV
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context)
    is
       Counts : constant Outlier_Counts := Outliers (Result);
    begin
       Ada.Text_IO.Put_Line
         (File,
-         CSV_String (Name)
+         CSV_Context_Prefix (Context, "measurement") & CSV_String (Name)
          & "," & Iterations_Per_Sample (Result)'Image
          & "," & Samples (Result)'Image
+         & "," & JSON_Number (Confidence_Level_Percent (Result))
+         & "," & Bootstrap_Resamples (Result)'Image
          & "," & JSON_Number (Timer_Cost_Nanoseconds (Result))
          & "," & JSON_Number (Minimum_Nanoseconds (Result))
          & "," & JSON_Number (Median_Nanoseconds (Result))
@@ -1052,10 +1406,19 @@ package body Flyology_Bench.Reporters is
    procedure Put_Metrics_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_Metrics_CSV_Header (File, No_Machine_Context);
+   end Put_Metrics_CSV_Header;
+
+   procedure Put_Metrics_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       Ada.Text_IO.Put_Line
         (File,
-         "name,axis,scope,unit,available,status,samples,min,median,mean,"
-         & "mean_ci95_low,mean_ci95_high,p95,p99,max");
+         CSV_Context_Header (Context)
+         & "name,confidence_level_percent,bootstrap_resamples,axis,scope,unit,"
+         & "available,status,samples,min,median,mean,mean_ci_low,mean_ci_high,"
+         & "p95,p99,max");
    end Put_Metrics_CSV_Header;
 
    procedure Put_Metrics_CSV
@@ -1063,11 +1426,24 @@ package body Flyology_Bench.Reporters is
       Result : Measurement;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_Metrics_CSV (Name, Result, File, No_Machine_Context);
+   end Put_Metrics_CSV;
+
+   procedure Put_Metrics_CSV
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       for Axis in Metric_Axis loop
          if Metric_Requested (Result, Axis) then
             Ada.Text_IO.Put
               (File,
-               CSV_String (Name) & "," & CSV_String (Metric_Name (Axis))
+               CSV_Context_Prefix (Context, "metric")
+               & CSV_String (Name)
+               & "," & JSON_Number (Confidence_Level_Percent (Result))
+               & "," & Bootstrap_Resamples (Result)'Image
+               & "," & CSV_String (Metric_Name (Axis))
                & "," & CSV_String (Scope_Name (Scope (Axis)))
                & "," & CSV_String (Metric_Unit (Axis)) & ","
                & (if Metric_Available (Result, Axis) then "true" else "false")
@@ -1097,6 +1473,189 @@ package body Flyology_Bench.Reporters is
          end if;
       end loop;
    end Put_Metrics_CSV;
+
+   procedure Put_Extended_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Ada.Text_IO.Put_Line
+        (File,
+         "schema,name,kind,axis,unit,scope,attribution,direction,semantics,"
+         & "normalization,timer_role,timing_source,resolution,calibration_clock,"
+         & "available,status,samples,min,median,mean,interval_low,interval_high,"
+         & "p95,p99,max");
+   end Put_Extended_Metrics_CSV_Header;
+
+   procedure Put_Extended_Metrics_CSV
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      procedure Finish_Row (Summary : Metric_Summary) is
+      begin
+         if Summary.Available then
+            Ada.Text_IO.Put
+              (File, "," & Natural'Image (Summary.Samples)
+               & "," & JSON_Number (Summary.Minimum)
+               & "," & JSON_Number (Summary.Median)
+               & "," & JSON_Number (Summary.Mean)
+               & "," & JSON_Number (Summary.Confidence_Low)
+               & "," & JSON_Number (Summary.Confidence_High)
+               & "," & JSON_Number (Summary.P95)
+               & "," & JSON_Number (Summary.P99)
+               & "," & JSON_Number (Summary.Maximum));
+         else
+            Ada.Text_IO.Put (File, ",,,,,,,,,");
+         end if;
+         Ada.Text_IO.New_Line (File);
+      end Finish_Row;
+   begin
+      for Axis in Metric_Axis loop
+         if Metric_Requested (Result, Axis) then
+            Ada.Text_IO.Put
+              (File, "flyology_bench.metrics.v2," & CSV_String (Name)
+               & ",builtin," & CSV_String (Metric_Name (Axis))
+               & "," & CSV_String (Metric_Unit (Axis))
+               & "," & CSV_String (Scope_Name (Scope (Axis)))
+               & "," & Attribution_Name (Builtin_Attribution (Axis))
+               & "," & Direction_Name (Direction (Axis))
+               & "," & (if Axis = Wall_Time then "completed_elapsed"
+                         else "cumulative_delta")
+               & "," & (if Axis = Process_RSS then "per_batch"
+                         else "per_operation")
+               & "," & (if Axis = Wall_Time then "harness_wall" else "metric")
+               & "," & (if Axis = Wall_Time
+                          then CSV_String (Clock_Backend (Result)) else "")
+               & "," & (if Axis = Wall_Time
+                          then JSON_Number (Clock_Resolution_Nanoseconds (Result))
+                          else "0")
+               & ",harness_wall,"
+               & (if Metric_Available (Result, Axis) then "true" else "false")
+               & "," & CSV_String
+                   (Metric_Status_Name (Metric_Status (Result, Axis))));
+            Finish_Row (Metric_Statistics (Result, Axis));
+         end if;
+      end loop;
+      if Custom_Metric_Total (Result) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Result) loop
+            declare
+               Axis : constant Custom_Metric_Index :=
+                 Custom_Metric_Index (Position);
+               Status : constant Metric_Availability :=
+                 Custom_Metric_Status (Result, Axis);
+            begin
+               Ada.Text_IO.Put
+                 (File, "flyology_bench.metrics.v2," & CSV_String (Name)
+                  & ",custom," & CSV_String (Custom_Metric_Name (Result, Axis))
+                  & "," & CSV_String (Custom_Metric_Unit (Result, Axis))
+                  & "," & CSV_String
+                      (Scope_Name (Custom_Metric_Scope (Result, Axis)))
+                  & "," & Attribution_Name
+                      (Custom_Metric_Attribution (Result, Axis))
+                  & "," & Direction_Name
+                      (Custom_Metric_Direction (Result, Axis))
+                  & "," & Semantics_Name
+                      (Custom_Metric_Semantics (Result, Axis))
+                  & "," & Normalization_Name
+                      (Custom_Metric_Normalization (Result, Axis))
+                  & "," & (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                            then "primary_alternate" else "metric")
+                  & "," & CSV_String
+                      (Custom_Metric_Timing_Source (Result, Axis))
+                  & "," & JSON_Number
+                      (Custom_Metric_Resolution (Result, Axis))
+                  & ",harness_wall,"
+                  & (if Status = Metric_Collected then "true" else "false")
+                  & "," & CSV_String (Metric_Status_Name (Status)));
+               Finish_Row (Custom_Metric_Statistics (Result, Axis));
+            end;
+         end loop;
+      end if;
+   end Put_Extended_Metrics_CSV;
+
+   procedure Put_Metrics_NDJSON
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      procedure Put_Summary (Summary : Metric_Summary) is
+      begin
+         if Summary.Available then
+            Ada.Text_IO.Put
+              (File, ",""samples"":" & Natural'Image (Summary.Samples)
+               & ",""min"":" & JSON_Number (Summary.Minimum)
+               & ",""median"":" & JSON_Number (Summary.Median)
+               & ",""mean"":" & JSON_Number (Summary.Mean)
+               & ",""interval_low"":" & JSON_Number (Summary.Confidence_Low)
+               & ",""interval_high"":" & JSON_Number (Summary.Confidence_High)
+               & ",""p95"":" & JSON_Number (Summary.P95)
+               & ",""p99"":" & JSON_Number (Summary.P99)
+               & ",""max"":" & JSON_Number (Summary.Maximum));
+         end if;
+         Ada.Text_IO.Put_Line (File, "}");
+      end Put_Summary;
+   begin
+      for Axis in Metric_Axis loop
+         if Metric_Requested (Result, Axis) then
+            Ada.Text_IO.Put
+              (File, "{""schema"":""flyology_bench.metrics.v2"",""name"":"
+               & JSON_String (Name) & ",""kind"":""builtin"",""axis"":"
+               & JSON_String (Metric_Name (Axis)) & ",""unit"":"
+               & JSON_String (Metric_Unit (Axis)) & ",""scope"":"
+               & JSON_String (Scope_Name (Scope (Axis)))
+               & ",""attribution"":"
+               & JSON_String (Attribution_Name (Builtin_Attribution (Axis)))
+               & ",""direction"":" & JSON_String (Direction_Name (Direction (Axis)))
+               & ",""calibration_clock"":""harness_wall"",""timer_role"":"
+               & JSON_String (if Axis = Wall_Time then "harness_wall" else "metric")
+               & ",""available"":"
+               & (if Metric_Available (Result, Axis) then "true" else "false")
+               & ",""status"":"
+               & JSON_String (Metric_Status_Name (Metric_Status (Result, Axis))));
+            Put_Summary (Metric_Statistics (Result, Axis));
+         end if;
+      end loop;
+      if Custom_Metric_Total (Result) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Result) loop
+            declare
+               Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
+               Status : constant Metric_Availability :=
+                 Custom_Metric_Status (Result, Axis);
+            begin
+               Ada.Text_IO.Put
+                 (File, "{""schema"":""flyology_bench.metrics.v2"",""name"":"
+                  & JSON_String (Name) & ",""kind"":""custom"",""axis"":"
+                  & JSON_String (Custom_Metric_Name (Result, Axis))
+                  & ",""unit"":" & JSON_String (Custom_Metric_Unit (Result, Axis))
+                  & ",""scope"":"
+                  & JSON_String (Scope_Name (Custom_Metric_Scope (Result, Axis)))
+                  & ",""attribution"":"
+                  & JSON_String (Attribution_Name
+                      (Custom_Metric_Attribution (Result, Axis)))
+                  & ",""direction"":"
+                  & JSON_String (Direction_Name
+                      (Custom_Metric_Direction (Result, Axis)))
+                  & ",""semantics"":"
+                  & JSON_String (Semantics_Name
+                      (Custom_Metric_Semantics (Result, Axis)))
+                  & ",""normalization"":"
+                  & JSON_String (Normalization_Name
+                      (Custom_Metric_Normalization (Result, Axis)))
+                  & ",""timer_role"":"
+                  & JSON_String
+                      (if Custom_Metric_Is_Primary_Timing (Result, Axis)
+                       then "primary_alternate" else "metric")
+                  & ",""timing_source"":"
+                  & JSON_String (Custom_Metric_Timing_Source (Result, Axis))
+                  & ",""resolution"":"
+                  & JSON_Number (Custom_Metric_Resolution (Result, Axis))
+                  & ",""calibration_clock"":""harness_wall"",""available"":"
+                  & (if Status = Metric_Collected then "true" else "false")
+                  & ",""status"":" & JSON_String (Metric_Status_Name (Status)));
+               Put_Summary (Custom_Metric_Statistics (Result, Axis));
+            end;
+         end loop;
+      end if;
+   end Put_Metrics_NDJSON;
 
    procedure Put_Metrics_JSON
      (File   : Ada.Text_IO.File_Type;
@@ -1131,9 +1690,9 @@ package body Flyology_Bench.Reporters is
                      & ",""min"":" & JSON_Number (Summary.Minimum)
                      & ",""median"":" & JSON_Number (Summary.Median)
                      & ",""mean"":" & JSON_Number (Summary.Mean)
-                     & ",""mean_ci95_low"":"
+                     & ",""mean_ci_low"":"
                      & JSON_Number (Summary.Confidence_Low)
-                     & ",""mean_ci95_high"":"
+                     & ",""mean_ci_high"":"
                      & JSON_Number (Summary.Confidence_High)
                      & ",""p95"":" & JSON_Number (Summary.P95)
                      & ",""p99"":" & JSON_Number (Summary.P99)
@@ -1184,9 +1743,9 @@ package body Flyology_Bench.Reporters is
                      & ",""contender_median"":"
                      & JSON_Number (Item.Contender_Median)
                      & ",""change"":" & JSON_Number (Item.Change)
-                     & ",""ci95_low"":"
+                     & ",""ci_low"":"
                      & JSON_Number (Item.Confidence_Low)
-                     & ",""ci95_high"":"
+                     & ",""ci_high"":"
                      & JSON_Number (Item.Confidence_High)
                      & ",""verdict"":"
                      & JSON_String (Metric_Verdict_Name (Item.Verdict)));
@@ -1201,13 +1760,23 @@ package body Flyology_Bench.Reporters is
    procedure Put_JSON
      (Name   : String;
       Result : Measurement;
-      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Put_JSON (Name, Result, File, No_Machine_Context);
+   end Put_JSON;
+
+   procedure Put_JSON
+     (Name   : String;
+      Result : Measurement;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context)
    is
       Counts : constant Outlier_Counts := Outliers (Result);
    begin
       Ada.Text_IO.Put
         (File,
-         "{""name"":" & JSON_String (Name)
+         "{" & JSON_Context_Prefix (Context)
+         & """name"":" & JSON_String (Name)
          & ",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
@@ -1216,13 +1785,17 @@ package body Flyology_Bench.Reporters is
          & JSON_String (Flyology_Bench.Metadata.Compiler) & "}"
          & ",""iterations"":" & Iterations_Per_Sample (Result)'Image
          & ",""samples"":" & Samples (Result)'Image
+         & ",""statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":" & Bootstrap_Resamples (Result)'Image
+         & ",""bootstrap"":""circular_block""}"
          & ",""timer_cost_ns"":" & JSON_Number (Timer_Cost_Nanoseconds (Result))
          & ",""min_ns"":" & JSON_Number (Minimum_Nanoseconds (Result))
          & ",""median_ns"":" & JSON_Number (Median_Nanoseconds (Result))
          & ",""mean_ns"":" & JSON_Number (Mean_Nanoseconds (Result))
-         & ",""mean_ci95_low_ns"":"
+         & ",""mean_ci_low_ns"":"
          & JSON_Number (Mean_Confidence_Low_Nanoseconds (Result))
-         & ",""mean_ci95_high_ns"":"
+         & ",""mean_ci_high_ns"":"
          & JSON_Number (Mean_Confidence_High_Nanoseconds (Result))
          & ",""p95_ns"":" & JSON_Number (P95_Nanoseconds (Result))
          & ",""p99_ns"":" & JSON_Number (P99_Nanoseconds (Result))
@@ -1248,7 +1821,6 @@ package body Flyology_Bench.Reporters is
          & JSON_Number (Quantization_Floor_Nanoseconds (Result))
          & ",""lag_one_correlation"":"
          & JSON_Number (Sample_Lag_One_Correlation (Result))
-         & ",""bootstrap"":""circular_block"""
          & ",""outliers"":{""low_severe"":" & Counts.Low_Severe'Image
          & ",""low_mild"":" & Counts.Low_Mild'Image
          & ",""high_mild"":" & Counts.High_Mild'Image
@@ -1307,6 +1879,8 @@ package body Flyology_Bench.Reporters is
          else Yellow & Bold);
       Muted : constant String := (if Color then Dim else "");
       End_Style : constant String := (if Color then Reset else "");
+      Primary_Position : constant Custom_Metric_Count :=
+        Primary_Timing_Axis (Reference_Data);
    begin
       Ada.Text_IO.Put_Line
         (File,
@@ -1317,11 +1891,47 @@ package body Flyology_Bench.Reporters is
                then 45 - Contender_Name'Length - Reference_Name'Length
                else 1) => '-')
          & End_Style);
+      if Primary_Position > 0 then
+         declare
+            Axis : constant Custom_Metric_Index :=
+              Custom_Metric_Index (Primary_Position);
+            Reference_Resolution : constant Long_Float :=
+              Custom_Metric_Resolution (Reference_Data, Axis);
+            Contender_Resolution : constant Long_Float :=
+              Custom_Metric_Resolution (Contender_Data, Axis);
+         begin
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & (if Color then Cyan & Bold else "")
+               & "primary timer: "
+               & Custom_Metric_Name (Reference_Data, Axis)
+               & End_Style & "  source "
+               & Custom_Metric_Timing_Source (Reference_Data, Axis)
+               & (if Reference_Resolution = Contender_Resolution
+                  then "  resolution " & Image (Reference_Resolution)
+                    & " " & Custom_Metric_Unit (Reference_Data, Axis)
+                  else "  reference resolution "
+                    & Image (Reference_Resolution) & " "
+                    & Custom_Metric_Unit (Reference_Data, Axis)
+                    & "  contender resolution "
+                    & Image (Contender_Resolution) & " "
+                    & Custom_Metric_Unit (Contender_Data, Axis))
+               & "  calibration harness wall");
+            Ada.Text_IO.Put_Line
+              (File,
+               "   " & Muted
+               & "primary comparison is reported in the axes table; "
+               & "the comparison below is harness wall" & End_Style);
+         end;
+      end if;
       Ada.Text_IO.Put_Line
         (File,
          Muted & "   " & Pad ("implementation", 22)
          & Pad ("median", 13) & Pad ("speedup", 11)
-         & Pad ("elapsed time", 18) & Pad ("95% CI", 20)
+         & Pad ("elapsed time", 18)
+         & Pad
+             (Image (Confidence_Level_Percent (Reference_Data), 1)
+              & "% CI", 20)
          & "verdict" & End_Style);
       Ada.Text_IO.Put_Line
         (File,
@@ -1362,6 +1972,13 @@ package body Flyology_Bench.Reporters is
       end if;
       Put_Metric_Comparison_Table
         (File, Reference_Name, Contender_Name, Result, Style);
+      if Custom_Metric_Total (Reference_Data) > 0 then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   " & Muted & "probe order: built-in begin, custom begin, wall,"
+            & " batch, wall, custom end, built-in end; cross-probe"
+            & " perturbation is uncorrected" & End_Style);
+      end if;
       --  Both sides share one observation window schedule, so the host
       --  environment is reported once for the pair.
       Put_Result_Environment
@@ -1372,13 +1989,22 @@ package body Flyology_Bench.Reporters is
    procedure Put_Comparison_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_Comparison_CSV_Header (File, No_Machine_Context);
+   end Put_Comparison_CSV_Header;
+
+   procedure Put_Comparison_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,reference_iterations,contender_iterations,"
-         & "samples,reference_median_ns,"
+         CSV_Context_Header (Context)
+         & "reference,contender,reference_iterations,contender_iterations,"
+         & "samples,confidence_level_percent,bootstrap_resamples,"
+         & "reference_median_ns,"
          & "contender_median_ns,geometric_mean_speedup,median_speedup,"
-         & "speedup_ci95_low,speedup_ci95_high,time_change_percent,"
-         & "time_change_ci95_low,time_change_ci95_high,mean_difference_ns,"
+         & "speedup_ci_low,speedup_ci_high,time_change_percent,"
+         & "time_change_ci_low,time_change_ci_high,mean_difference_ns,"
          & "contender_wins,reference_wins,ties,reference_first,"
          & "contender_first,verdict,practical_threshold_percent,"
          & "order_effect_percent,lag_one_correlation");
@@ -1388,20 +2014,34 @@ package body Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Put_Comparison_CSV
+        (Reference_Name, Contender_Name, Result, File, No_Machine_Context);
+   end Put_Comparison_CSV;
+
+   procedure Put_Comparison_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context)
    is
       Reference_Data : constant Measurement := Reference_Measurement (Result);
       Contender_Data : constant Measurement := Contender_Measurement (Result);
    begin
       Ada.Text_IO.Put_Line
         (File,
-         CSV_String (Reference_Name)
+         CSV_Context_Prefix (Context, "comparison")
+         & CSV_String (Reference_Name)
          & "," & CSV_String (Contender_Name)
          & "," & Iteration_Count'Image
              (Iterations_Per_Sample (Reference_Data))
          & "," & Iteration_Count'Image
              (Iterations_Per_Sample (Contender_Data))
          & "," & Sample_Count'Image (Samples (Reference_Data))
+         & "," & JSON_Number (Confidence_Level_Percent (Reference_Data))
+         & "," & Bootstrap_Resamples (Reference_Data)'Image
          & "," & JSON_Number (Median_Nanoseconds (Reference_Data))
          & "," & JSON_Number (Median_Nanoseconds (Contender_Data))
          & "," & JSON_Number (Geometric_Mean_Speedup (Result))
@@ -1428,10 +2068,19 @@ package body Flyology_Bench.Reporters is
    procedure Put_Comparison_Metrics_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_Comparison_Metrics_CSV_Header (File, No_Machine_Context);
+   end Put_Comparison_Metrics_CSV_Header;
+
+   procedure Put_Comparison_Metrics_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,axis,scope,unit,available,status,method,"
-         & "reference_median,contender_median,change,ci95_low,ci95_high,"
+         CSV_Context_Header (Context)
+         & "reference,contender,confidence_level_percent,bootstrap_resamples,"
+         & "axis,scope,unit,available,status,method,"
+         & "reference_median,contender_median,change,ci_low,ci_high,"
          & "verdict");
    end Put_Comparison_Metrics_CSV_Header;
 
@@ -1439,7 +2088,18 @@ package body Flyology_Bench.Reporters is
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
-      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Put_Comparison_Metrics_CSV
+        (Reference_Name, Contender_Name, Result, File, No_Machine_Context);
+   end Put_Comparison_Metrics_CSV;
+
+   procedure Put_Comparison_Metrics_CSV
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context)
    is
       Reference : constant Measurement := Reference_Measurement (Result);
    begin
@@ -1451,8 +2111,11 @@ package body Flyology_Bench.Reporters is
             begin
                Ada.Text_IO.Put
                  (File,
-                  CSV_String (Reference_Name) & ","
+                  CSV_Context_Prefix (Context, "comparison_metric")
+                  & CSV_String (Reference_Name) & ","
                   & CSV_String (Contender_Name) & ","
+                  & JSON_Number (Confidence_Level_Percent (Reference)) & ","
+                  & Bootstrap_Resamples (Reference)'Image & ","
                   & CSV_String (Metric_Name (Axis)) & ","
                   & CSV_String (Scope_Name (Scope (Axis))) & ","
                   & CSV_String (Metric_Unit (Axis)) & ","
@@ -1479,18 +2142,239 @@ package body Flyology_Bench.Reporters is
       end loop;
    end Put_Comparison_Metrics_CSV;
 
-   procedure Put_Comparison_JSON
+   procedure Put_Extended_Comparison_Metrics_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Ada.Text_IO.Put_Line
+        (File, "schema,reference,contender,kind,axis,unit,scope,attribution,"
+         & "direction,semantics,normalization,timer_role,timing_source,"
+         & "reference_resolution,contender_resolution,calibration_clock,"
+         & "available,status,method,"
+         & "reference_median,contender_median,change,interval_low,interval_high,"
+         & "verdict");
+   end Put_Extended_Comparison_Metrics_CSV_Header;
+
+   procedure Put_Extended_Comparison_Metrics_CSV
      (Reference_Name : String;
       Contender_Name : String;
       Result         : Comparison;
       File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      Reference : constant Measurement := Reference_Measurement (Result);
+      Prefix : constant String := "flyology_bench.comparison_metrics.v2,"
+        & CSV_String (Reference_Name) & "," & CSV_String (Contender_Name);
+
+      procedure Finish (Item : Metric_Comparison_Result) is
+      begin
+         if Item.Available then
+            Ada.Text_IO.Put_Line
+              (File, "," & Metric_Method_Name (Item.Method)
+               & "," & JSON_Number (Item.Reference_Median)
+               & "," & JSON_Number (Item.Contender_Median)
+               & "," & JSON_Number (Item.Change)
+               & "," & JSON_Number (Item.Confidence_Low)
+               & "," & JSON_Number (Item.Confidence_High)
+               & "," & Metric_Verdict_Name (Item.Verdict));
+         else
+            Ada.Text_IO.Put_Line (File, ",,,,,,,");
+         end if;
+      end Finish;
+   begin
+      for Axis in Metric_Axis loop
+         if Metric_Requested (Reference, Axis) then
+            declare
+               Item : constant Metric_Comparison_Result :=
+                 Compare_Metric (Result, Axis);
+            begin
+               Ada.Text_IO.Put
+                 (File, Prefix & ",builtin," & CSV_String (Metric_Name (Axis))
+                  & "," & CSV_String (Metric_Unit (Axis))
+                  & "," & CSV_String (Scope_Name (Scope (Axis)))
+                  & "," & Attribution_Name (Builtin_Attribution (Axis))
+                  & "," & Direction_Name (Direction (Axis))
+                  & "," & (if Axis = Wall_Time then "completed_elapsed"
+                            else "cumulative_delta")
+                  & "," & (if Axis = Process_RSS then "per_batch"
+                            else "per_operation")
+                  & "," & (if Axis = Wall_Time then "harness_wall" else "metric")
+                  & "," & (if Axis = Wall_Time
+                             then CSV_String (Clock_Backend (Reference)) else "")
+                  & "," & (if Axis = Wall_Time then JSON_Number
+                      (Clock_Resolution_Nanoseconds (Reference)) else "0")
+                  & "," & (if Axis = Wall_Time then JSON_Number
+                      (Clock_Resolution_Nanoseconds
+                         (Contender_Measurement (Result))) else "0")
+                  & ",harness_wall,"
+                  & (if Item.Available then "true" else "false")
+                  & "," & CSV_String
+                      (Comparison_Metric_Status_Name (Result, Axis)));
+               Finish (Item);
+            end;
+         end if;
+      end loop;
+      if Custom_Metric_Total (Reference) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Reference) loop
+            declare
+               Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
+               Item : constant Metric_Comparison_Result :=
+                 Compare_Custom_Metric (Result, Axis);
+            begin
+               Ada.Text_IO.Put
+                 (File, Prefix & ",custom,"
+                  & CSV_String (Custom_Metric_Name (Reference, Axis))
+                  & "," & CSV_String (Custom_Metric_Unit (Reference, Axis))
+                  & "," & CSV_String
+                      (Scope_Name (Custom_Metric_Scope (Reference, Axis)))
+                  & "," & Attribution_Name
+                      (Custom_Metric_Attribution (Reference, Axis))
+                  & "," & Direction_Name
+                      (Custom_Metric_Direction (Reference, Axis))
+                  & "," & Semantics_Name
+                      (Custom_Metric_Semantics (Reference, Axis))
+                  & "," & Normalization_Name
+                      (Custom_Metric_Normalization (Reference, Axis))
+                  & "," & (if Custom_Metric_Is_Primary_Timing (Reference, Axis)
+                            then "primary_alternate" else "metric")
+                  & "," & CSV_String
+                      (Custom_Metric_Timing_Source (Reference, Axis))
+                  & "," & JSON_Number
+                      (Custom_Metric_Resolution (Reference, Axis))
+                  & "," & JSON_Number
+                      (Custom_Metric_Resolution
+                         (Contender_Measurement (Result), Axis))
+                  & ",harness_wall,"
+                  & (if Item.Available then "true" else "false")
+                  & "," & CSV_String
+                      (Custom_Comparison_Status_Name (Result, Axis)));
+               Finish (Item);
+            end;
+         end loop;
+      end if;
+   end Put_Extended_Comparison_Metrics_CSV;
+
+   procedure Put_Comparison_Metrics_NDJSON
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      Reference : constant Measurement := Reference_Measurement (Result);
+      procedure Finish
+        (Kind, Axis, Unit, Scope_Text, Attribution_Text, Direction_Text,
+         Semantics_Text, Normalization_Text, Timer_Role, Timing_Source : String;
+         Reference_Resolution, Contender_Resolution : Long_Float;
+         Status : String;
+         Item : Metric_Comparison_Result) is
+      begin
+         Ada.Text_IO.Put
+           (File, "{""schema"":""flyology_bench.comparison_metrics.v2"""
+            & ",""reference"":" & JSON_String (Reference_Name)
+            & ",""contender"":" & JSON_String (Contender_Name)
+            & ",""kind"":" & JSON_String (Kind)
+            & ",""axis"":" & JSON_String (Axis)
+            & ",""unit"":" & JSON_String (Unit)
+            & ",""scope"":" & JSON_String (Scope_Text)
+            & ",""attribution"":" & JSON_String (Attribution_Text)
+            & ",""direction"":" & JSON_String (Direction_Text)
+            & ",""semantics"":" & JSON_String (Semantics_Text)
+            & ",""normalization"":" & JSON_String (Normalization_Text)
+            & ",""timer_role"":" & JSON_String (Timer_Role)
+            & ",""timing_source"":" & JSON_String (Timing_Source)
+            & ",""reference_resolution"":"
+            & JSON_Number (Reference_Resolution)
+            & ",""contender_resolution"":"
+            & JSON_Number (Contender_Resolution)
+            & ",""calibration_clock"":""harness_wall"",""available"":"
+            & (if Item.Available then "true" else "false")
+            & ",""status"":" & JSON_String (Status));
+         if Item.Available then
+            Ada.Text_IO.Put
+              (File, ",""method"":" & JSON_String (Metric_Method_Name (Item.Method))
+               & ",""reference_median"":" & JSON_Number (Item.Reference_Median)
+               & ",""contender_median"":" & JSON_Number (Item.Contender_Median)
+               & ",""change"":" & JSON_Number (Item.Change)
+               & ",""interval_low"":" & JSON_Number (Item.Confidence_Low)
+               & ",""interval_high"":" & JSON_Number (Item.Confidence_High)
+               & ",""verdict"":" & JSON_String (Metric_Verdict_Name (Item.Verdict)));
+         end if;
+         Ada.Text_IO.Put_Line (File, "}");
+      end Finish;
+   begin
+      for Axis in Metric_Axis loop
+         if Metric_Requested (Reference, Axis) then
+            declare
+               Item : constant Metric_Comparison_Result := Compare_Metric (Result, Axis);
+            begin
+               Finish
+                 ("builtin", Metric_Name (Axis), Metric_Unit (Axis),
+                  Scope_Name (Scope (Axis)),
+                  Attribution_Name (Builtin_Attribution (Axis)),
+                  Direction_Name (Direction (Axis)),
+                  (if Axis = Wall_Time then "completed_elapsed"
+                   else "cumulative_delta"),
+                  (if Axis = Process_RSS then "per_batch" else "per_operation"),
+                  (if Axis = Wall_Time then "harness_wall" else "metric"),
+                  (if Axis = Wall_Time then Clock_Backend (Reference) else ""),
+                  (if Axis = Wall_Time
+                   then Clock_Resolution_Nanoseconds (Reference) else 0.0),
+                  (if Axis = Wall_Time
+                   then Clock_Resolution_Nanoseconds
+                     (Contender_Measurement (Result)) else 0.0),
+                  Comparison_Metric_Status_Name (Result, Axis), Item);
+            end;
+         end if;
+      end loop;
+      if Custom_Metric_Total (Reference) > 0 then
+         for Position in 1 .. Custom_Metric_Total (Reference) loop
+            declare
+               Axis : constant Custom_Metric_Index := Custom_Metric_Index (Position);
+               Item : constant Metric_Comparison_Result :=
+                 Compare_Custom_Metric (Result, Axis);
+            begin
+               Finish
+                 ("custom", Custom_Metric_Name (Reference, Axis),
+                  Custom_Metric_Unit (Reference, Axis),
+                  Scope_Name (Custom_Metric_Scope (Reference, Axis)),
+                  Attribution_Name (Custom_Metric_Attribution (Reference, Axis)),
+                  Direction_Name (Custom_Metric_Direction (Reference, Axis)),
+                  Semantics_Name (Custom_Metric_Semantics (Reference, Axis)),
+                  Normalization_Name (Custom_Metric_Normalization (Reference, Axis)),
+                  (if Custom_Metric_Is_Primary_Timing (Reference, Axis)
+                   then "primary_alternate" else "metric"),
+                  Custom_Metric_Timing_Source (Reference, Axis),
+                  Custom_Metric_Resolution (Reference, Axis),
+                  Custom_Metric_Resolution
+                    (Contender_Measurement (Result), Axis),
+                  Custom_Comparison_Status_Name (Result, Axis), Item);
+            end;
+         end loop;
+      end if;
+   end Put_Comparison_Metrics_NDJSON;
+
+   procedure Put_Comparison_JSON
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Put_Comparison_JSON
+        (Reference_Name, Contender_Name, Result, File, No_Machine_Context);
+   end Put_Comparison_JSON;
+
+   procedure Put_Comparison_JSON
+     (Reference_Name : String;
+      Contender_Name : String;
+      Result         : Comparison;
+      File           : Ada.Text_IO.File_Type;
+      Context        : Machine_Context)
    is
       Reference_Data : constant Measurement := Reference_Measurement (Result);
       Contender_Data : constant Measurement := Contender_Measurement (Result);
    begin
       Ada.Text_IO.Put
         (File,
-         "{""type"":""comparison"""
+         "{" & JSON_Context_Prefix (Context)
+         & """type"":""comparison"""
          & ",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
@@ -1504,6 +2388,11 @@ package body Flyology_Bench.Reporters is
          & ",""contender_iterations"":" & Iteration_Count'Image
              (Iterations_Per_Sample (Contender_Data))
          & ",""samples"":" & Sample_Count'Image (Samples (Reference_Data))
+         & ",""statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Reference_Data))
+         & ",""bootstrap_resamples"":"
+         & Bootstrap_Resamples (Reference_Data)'Image
+         & ",""bootstrap"":""circular_block""}"
          & ",""reference_median_ns"":"
          & JSON_Number (Median_Nanoseconds (Reference_Data))
          & ",""contender_median_ns"":"
@@ -1511,15 +2400,15 @@ package body Flyology_Bench.Reporters is
          & ",""geometric_mean_speedup"":"
          & JSON_Number (Geometric_Mean_Speedup (Result))
          & ",""median_speedup"":" & JSON_Number (Median_Speedup (Result))
-         & ",""speedup_ci95_low"":"
+         & ",""speedup_ci_low"":"
          & JSON_Number (Speedup_Confidence_Low (Result))
-         & ",""speedup_ci95_high"":"
+         & ",""speedup_ci_high"":"
          & JSON_Number (Speedup_Confidence_High (Result))
          & ",""time_change_percent"":"
          & JSON_Number (Relative_Time_Change_Percent (Result))
-         & ",""time_change_ci95_low"":"
+         & ",""time_change_ci_low"":"
          & JSON_Number (Relative_Time_Change_Confidence_Low (Result))
-         & ",""time_change_ci95_high"":"
+         & ",""time_change_ci_high"":"
          & JSON_Number (Relative_Time_Change_Confidence_High (Result))
          & ",""mean_difference_ns"":"
          & JSON_Number (Mean_Time_Difference_Nanoseconds (Result))
@@ -1537,10 +2426,210 @@ package body Flyology_Bench.Reporters is
          & JSON_Number (Order_Effect_Percent (Result))
          & ",""lag_one_correlation"":"
          & JSON_Number (Lag_One_Correlation (Result))
-         & ",""bootstrap"":""circular_block"",""metrics"":");
+         & ",""metrics"":");
       Put_Comparison_Metrics_JSON (File, Result);
       Ada.Text_IO.Put_Line (File, "}");
    end Put_Comparison_JSON;
+
+   procedure Put_Gate_Console
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output;
+      Style  : Console_Style := Auto)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+      use type Baselines.Gate_Status;
+      Color : constant Boolean := Styled (Style);
+      Status_Color : constant String :=
+        (if not Color then ""
+         elsif Baselines.Rejected (Result) then Red & Bold
+         elsif Baselines.Status (Result) = Baselines.Inconclusive then Yellow & Bold
+         else Green & Bold);
+      Muted : constant String := (if Color then Dim else "");
+      End_Style : constant String := (if Color then Reset else "");
+      Saved_Name : constant String :=
+        (if Baselines.Baseline_Name (Result)'Length = 0
+         then "(unavailable)"
+         else Baselines.Baseline_Name (Result));
+   begin
+      Ada.Text_IO.Put_Line
+        (File,
+         (if Color then Magenta & Bold else "")
+         & "-- baseline gate: " & Baselines.Current_Name (Result) & " "
+         & (1 ..
+              (if Baselines.Current_Name (Result)'Length < 48
+               then 48 - Baselines.Current_Name (Result)'Length
+               else 1) => '-')
+         & End_Style);
+      Ada.Text_IO.Put_Line
+        (File,
+         "   status     | " & Status_Color
+         & Baselines.Status_Name (Result)
+         & (if Baselines.Rejected (Result) then " (rejected)" else " (accepted)")
+         & End_Style);
+      Ada.Text_IO.Put_Line
+        (File, Muted & "   baseline   | " & Saved_Name & End_Style);
+      Ada.Text_IO.Put_Line
+        (File, Muted & "   artifact   | "
+         & Baselines.Baseline_Path (Result) & End_Style);
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   comparison | " & Image (Baselines.Speedup (Result)) & "x"
+            & "  " & Image (Baselines.Confidence_Level_Percent (Result), 1)
+            & "% CI ["
+            & Image (Baselines.Speedup_Confidence_Low (Result)) & ", "
+            & Image (Baselines.Speedup_Confidence_High (Result)) & "]");
+         Ada.Text_IO.Put_Line
+           (File,
+            "   time change | "
+            & Time_Change_Image (Baselines.Time_Change_Percent (Result))
+            & "  " & Image (Baselines.Confidence_Level_Percent (Result), 1)
+            & "% CI ["
+            & Image (Baselines.Time_Change_Confidence_Low (Result), 2)
+            & "%, "
+            & Image (Baselines.Time_Change_Confidence_High (Result), 2)
+            & "%]");
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         Muted & "   statistics | " & Baselines.Bootstrap_Method (Result)
+         & ", "
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & " resamples, seed "
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
+         & End_Style);
+      Ada.Text_IO.Put_Line
+        (File,
+         "   threshold  | +/-"
+         & Image (Baselines.Practical_Threshold_Percent (Result), 2) & "%");
+      Ada.Text_IO.Put_Line
+        (File, "   reason     | " & Baselines.Reason (Result));
+   end Put_Gate_Console;
+
+   procedure Put_Gate_CSV_Header
+     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   begin
+      Ada.Text_IO.Put_Line
+        (File,
+         "type,schema_version,baseline_path,baseline_name,current_name,status,"
+         & "rejected,compatible,compatibility_issue,bootstrap_method,"
+         & "confidence_level_percent,bootstrap_resamples,random_seed,speedup,"
+         & "speedup_ci_low,speedup_ci_high,time_change_percent,"
+         & "time_change_ci_low,time_change_ci_high,"
+         & "practical_threshold_percent,reason");
+   end Put_Gate_CSV_Header;
+
+   procedure Put_Gate_CSV
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+   begin
+      Ada.Text_IO.Put
+        (File,
+         "baseline_gate,2,"
+         & CSV_String (Baselines.Baseline_Path (Result)) & ","
+         & CSV_String (Baselines.Baseline_Name (Result)) & ","
+         & CSV_String (Baselines.Current_Name (Result)) & ","
+         & CSV_String (Baselines.Status_Name (Result)) & ","
+         & (if Baselines.Rejected (Result) then "true" else "false") & ","
+         & (if Baselines.Compatible (Result) then "true" else "false") & ","
+         & CSV_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & "," & CSV_String (Baselines.Bootstrap_Method (Result)) & ","
+         & JSON_Number (Baselines.Confidence_Level_Percent (Result)) & ","
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & ","
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
+         & ",");
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put
+           (File,
+            JSON_Number (Baselines.Speedup (Result)) & ","
+            & JSON_Number (Baselines.Speedup_Confidence_Low (Result)) & ","
+            & JSON_Number (Baselines.Speedup_Confidence_High (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Percent (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Confidence_Low (Result)) & ","
+            & JSON_Number (Baselines.Time_Change_Confidence_High (Result))
+            & ",");
+      else
+         Ada.Text_IO.Put (File, ",,,,,,");
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         JSON_Number (Baselines.Practical_Threshold_Percent (Result)) & ","
+         & CSV_String (Baselines.Reason (Result)));
+   end Put_Gate_CSV;
+
+   procedure Put_Gate_JSON
+     (Result : Flyology_Bench.Baselines.Gate_Result;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      package Baselines renames Flyology_Bench.Baselines;
+   begin
+      Ada.Text_IO.Put
+        (File,
+         "{""type"":""baseline_gate"",""schema_version"":2"
+         & ",""baseline_path"":" & JSON_String
+             (Baselines.Baseline_Path (Result))
+         & ",""baseline_name"":" & JSON_String
+             (Baselines.Baseline_Name (Result))
+         & ",""current_name"":" & JSON_String
+             (Baselines.Current_Name (Result))
+         & ",""status"":" & JSON_String (Baselines.Status_Name (Result))
+         & ",""rejected"":"
+         & (if Baselines.Rejected (Result) then "true" else "false")
+         & ",""compatible"":"
+         & (if Baselines.Compatible (Result) then "true" else "false")
+         & ",""compatibility_issue"":"
+         & JSON_String (Compatibility_Name (Baselines.Compatibility (Result)))
+         & ",""bootstrap_method"":"
+         & JSON_String (Baselines.Bootstrap_Method (Result))
+         & ",""confidence_level_percent"":"
+         & JSON_Number (Baselines.Confidence_Level_Percent (Result))
+         & ",""bootstrap_resamples"":"
+         & Ada.Strings.Fixed.Trim
+             (Positive'Image (Baselines.Bootstrap_Resamples (Result)),
+              Ada.Strings.Both)
+         & ",""random_seed"":"
+         & Ada.Strings.Fixed.Trim
+             (Long_Long_Integer'Image (Baselines.Random_Seed (Result)),
+              Ada.Strings.Both)
+         & ",""speedup"":");
+      if Baselines.Has_Statistics (Result) then
+         Ada.Text_IO.Put
+           (File,
+            JSON_Number (Baselines.Speedup (Result))
+            & ",""speedup_ci_low"":"
+            & JSON_Number (Baselines.Speedup_Confidence_Low (Result))
+            & ",""speedup_ci_high"":"
+            & JSON_Number (Baselines.Speedup_Confidence_High (Result))
+            & ",""time_change_percent"":"
+            & JSON_Number (Baselines.Time_Change_Percent (Result))
+            & ",""time_change_ci_low"":"
+            & JSON_Number (Baselines.Time_Change_Confidence_Low (Result))
+            & ",""time_change_ci_high"":"
+            & JSON_Number (Baselines.Time_Change_Confidence_High (Result)));
+      else
+         Ada.Text_IO.Put
+           (File,
+            "null,""speedup_ci_low"":null,""speedup_ci_high"":null,"
+            & """time_change_percent"":null,""time_change_ci_low"":null,"
+            & """time_change_ci_high"":null");
+      end if;
+      Ada.Text_IO.Put_Line
+        (File,
+         ",""practical_threshold_percent"":"
+         & JSON_Number (Baselines.Practical_Threshold_Percent (Result))
+         & ",""reason"":" & JSON_String (Baselines.Reason (Result)) & "}");
+   end Put_Gate_JSON;
 
    procedure Put_Multi_Comparison_Console
      (Result : Multi_Comparison;
@@ -1576,7 +2665,9 @@ package body Flyology_Bench.Reporters is
          & Pad ("median", 13)
          & Pad ("speedup", 11)
          & Pad ("elapsed time", 18)
-         & Pad ("95% CI", 20)
+         & Pad
+             (Image (Confidence_Level_Percent (Reference), 1)
+              & "% CI", 20)
          & "verdict" & End_Style);
       Ada.Text_IO.Put_Line
         (File,
@@ -1647,12 +2738,21 @@ package body Flyology_Bench.Reporters is
    procedure Put_Multi_Comparison_CSV_Header
      (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
+      Put_Multi_Comparison_CSV_Header (File, No_Machine_Context);
+   end Put_Multi_Comparison_CSV_Header;
+
+   procedure Put_Multi_Comparison_CSV_Header
+     (File    : Ada.Text_IO.File_Type;
+      Context : Machine_Context) is
+   begin
       Ada.Text_IO.Put_Line
         (File,
-         "reference,contender,reference_iterations,contender_iterations,"
-         & "samples,schedule,batching,reference_median_ns,"
+         CSV_Context_Header (Context)
+         & "reference,contender,reference_iterations,contender_iterations,"
+         & "samples,schedule,batching,confidence_level_percent,"
+         & "bootstrap_resamples,reference_median_ns,"
          & "contender_median_ns,reference_mean_ns,contender_mean_ns,"
-         & "geometric_mean_speedup,speedup_ci95_low,speedup_ci95_high,"
+         & "geometric_mean_speedup,speedup_ci_low,speedup_ci_high,"
          & "time_change_percent,verdict,practical_threshold_percent,"
          & "order_effect_percent,lag_one_correlation,clock_backend,"
          & "clock_resolution_ns,quantization_floor_ns");
@@ -1661,6 +2761,17 @@ package body Flyology_Bench.Reporters is
    procedure Put_Multi_Comparison_CSV
      (Result : Multi_Comparison;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      procedure Put_With_Context is new
+        Put_Multi_Comparison_CSV_With_Context (Case_Id);
+   begin
+      Put_With_Context (Result, File, No_Machine_Context);
+   end Put_Multi_Comparison_CSV;
+
+   procedure Put_Multi_Comparison_CSV_With_Context
+     (Result : Multi_Comparison;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference : constant Measurement := Case_Measurement (Result, 1);
@@ -1680,7 +2791,8 @@ package body Flyology_Bench.Reporters is
          begin
             Ada.Text_IO.Put_Line
               (File,
-               CSV_String (Reference_Name) & ","
+               CSV_Context_Prefix (Context, "multi_comparison")
+               & CSV_String (Reference_Name) & ","
                & CSV_String
                    (Pretty_Name (Case_Id'Image (Case_Id'Val (Index - 1))))
                & "," & Iterations_Per_Sample (Reference)'Image
@@ -1688,6 +2800,8 @@ package body Flyology_Bench.Reporters is
                & "," & Samples (Data)'Image
                & "," & CSV_String (Schedule_Name (Shootout_Schedule (Result)))
                & "," & CSV_String (Batching_Name (Shootout_Batching (Result)))
+               & "," & JSON_Number (Confidence_Level_Percent (Reference))
+               & "," & Bootstrap_Resamples (Reference)'Image
                & "," & JSON_Number (Median_Nanoseconds (Reference))
                & "," & JSON_Number (Median_Nanoseconds (Data))
                & "," & JSON_Number (Mean_Nanoseconds (Reference))
@@ -1705,11 +2819,22 @@ package body Flyology_Bench.Reporters is
                & "," & JSON_Number (Quantization_Floor_Nanoseconds (Data)));
          end;
       end loop;
-   end Put_Multi_Comparison_CSV;
+   end Put_Multi_Comparison_CSV_With_Context;
 
    procedure Put_Multi_Comparison_Metrics_CSV
      (Result : Multi_Comparison;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      procedure Put_With_Context is new
+        Put_Multi_Comparison_Metrics_CSV_With_Context (Case_Id);
+   begin
+      Put_With_Context (Result, File, No_Machine_Context);
+   end Put_Multi_Comparison_Metrics_CSV;
+
+   procedure Put_Multi_Comparison_Metrics_CSV_With_Context
+     (Result : Multi_Comparison;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference_Name : constant String :=
@@ -1724,13 +2849,25 @@ package body Flyology_Bench.Reporters is
            (Reference_Name,
             Pretty_Name (Case_Id'Image (Case_Id'Val (Index - 1))),
             Versus_Reference (Result, Comparison_Case_Index (Index)),
-            File);
+            File,
+            Context);
       end loop;
-   end Put_Multi_Comparison_Metrics_CSV;
+   end Put_Multi_Comparison_Metrics_CSV_With_Context;
 
    procedure Put_Multi_Comparison_JSON
      (Result : Multi_Comparison;
       File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+   is
+      procedure Put_With_Context is new
+        Put_Multi_Comparison_JSON_With_Context (Case_Id);
+   begin
+      Put_With_Context (Result, File, No_Machine_Context);
+   end Put_Multi_Comparison_JSON;
+
+   procedure Put_Multi_Comparison_JSON_With_Context
+     (Result : Multi_Comparison;
+      File   : Ada.Text_IO.File_Type;
+      Context : Machine_Context)
    is
       Count : constant Positive := Case_Id'Pos (Case_Id'Last) + 1;
       Reference : constant Measurement := Case_Measurement (Result, 1);
@@ -1741,7 +2878,8 @@ package body Flyology_Bench.Reporters is
       end if;
       Ada.Text_IO.Put
         (File,
-         "{""type"":""multi_comparison"",""context"":{""os"":"
+         "{" & JSON_Context_Prefix (Context)
+         & """type"":""multi_comparison"",""context"":{""os"":"
          & JSON_String (Flyology_Bench.Metadata.Operating_System)
          & ",""architecture"":"
          & JSON_String (Flyology_Bench.Metadata.Architecture)
@@ -1751,6 +2889,10 @@ package body Flyology_Bench.Reporters is
          & JSON_String (Schedule_Name (Shootout_Schedule (Result)))
          & ",""batching"":"
          & JSON_String (Batching_Name (Shootout_Batching (Result))) & ","
+         & """statistics"":{""confidence_level_percent"":"
+         & JSON_Number (Confidence_Level_Percent (Reference))
+         & ",""bootstrap_resamples"":" & Bootstrap_Resamples (Reference)'Image
+         & ",""bootstrap"":""circular_block""},"
          & """reference"":{""name"":"
          & JSON_String (Pretty_Name (Case_Id'Image (Case_Id'First)))
          & ",""iterations"":" & Iterations_Per_Sample (Reference)'Image
@@ -1778,9 +2920,9 @@ package body Flyology_Bench.Reporters is
                & ",""median_ns"":" & JSON_Number (Median_Nanoseconds (Data))
                & ",""mean_ns"":" & JSON_Number (Mean_Nanoseconds (Data))
                & ",""speedup"":" & JSON_Number (Geometric_Mean_Speedup (Pair))
-               & ",""speedup_ci95_low"":"
+               & ",""speedup_ci_low"":"
                & JSON_Number (Speedup_Confidence_Low (Pair))
-               & ",""speedup_ci95_high"":"
+               & ",""speedup_ci_high"":"
                & JSON_Number (Speedup_Confidence_High (Pair))
                & ",""time_change_percent"":"
                & JSON_Number (Relative_Time_Change_Percent (Pair))
@@ -1801,6 +2943,6 @@ package body Flyology_Bench.Reporters is
          "],""clock"":{""backend"":" & JSON_String (Clock_Backend (Reference))
          & ",""resolution_ns"":"
          & JSON_Number (Clock_Resolution_Nanoseconds (Reference))
-         & "},""bootstrap"":""circular_block""}");
-   end Put_Multi_Comparison_JSON;
+         & "}}");
+   end Put_Multi_Comparison_JSON_With_Context;
 end Flyology_Bench.Reporters;

@@ -96,6 +96,14 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Topology changes—group allocation, dedicated reservations, migration, and
   destruction—may briefly use the global topology/registry lock. Ordinary
   scheduling and I/O remain per-group.
+- `flyology_bench` custom metrics are registered before collection in a bounded
+  eight-axis registry. One begin/end provider snapshot surrounds each retained
+  batch outside harness wall timestamps; unavailable, reset, invalid, and
+  overflowed values remain statuses rather than zero. Alternate/manual timing
+  retains harness wall time for calibration, budgets, interference, and
+  progress, and wall timer-cost subtraction never applies to another source.
+  Custom providers are not supported by `Recording` until overlapping-span
+  ownership and attribution have a separate coherent design.
 
 ## I/O invariants
 
@@ -466,8 +474,31 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - `flyology_debug/`: independent bounded in-memory tracing and gauge crate,
   smoke tests, producer-cost benchmark, and example.
 - `flyology_bench/`: independent adaptive and paired-comparison benchmark
-  crate, reporters, smoke tests, and examples.
-- `proof/`: SPARK-only development crate plus runtime and debug policy proofs.
+  crate, reporters, fresh-process worker protocol, smoke tests, and examples.
+  Parameter sweeps retain explicit ordered exact points and exact work per
+  logical operation. Throughput is derived only from the same per-operation
+  wall samples, paired sweeps invoke the adjacent order-balanced comparison at
+  every point, and post-collection model fitting is described as empirical
+  scaling over one coherent parameter kind and the observed range rather than
+  as proof of big-O. Work, collection, wall, and derived-rate availability
+  remain independent so failed setup cannot fabricate work and rate overflow
+  cannot erase valid collected data. Exact range qualification is a proved
+  integer policy decision. Sweep NDJSON keeps numeric fields for convenience
+  and exact decimal-string companions for unsigned 64-bit identities, work,
+  and scaling ranges.
+  Fresh workers use `posix_spawn`, execute one exact registered case per
+  process, and retain process repetitions separately from within-worker
+  samples. Host controls and metric sessions belong in the measuring worker;
+  parent spawn/setup time never enters per-operation samples. The parent
+  compares the worker-computed exact environment digest from the private
+  result channel; never place a value-derived digest in process arguments or
+  reports. Worker results retain the effective mode, locale, and timezone
+  policies. The parent must retain exclusive child-reaping ownership. Detected
+  loss of that ownership disarms the PID guard and fails without signaling a
+  potentially reused identity; a concurrent external reaper violates the
+  exclusion contract.
+- `proof/`: SPARK-only development crate plus runtime, debug, and benchmark
+  policy proofs.
 - `formal/tla/`: bounded TLA+ concurrency models, TLC configurations, and
   reviewed mappings back to production state transitions.
 - `scripts/`: all supported build, runtime preparation, test, docs, and proof
@@ -592,7 +623,8 @@ required by the changed boundary.
   native-clock, shared-store, and sharded concurrent tracing. Re-run it before
   making a tracer hot-path performance claim.
 - `cd flyology_bench && alr test`: build and run the standalone benchmark
-  crate's smoke tests and example, and check the published CSV/JSON schemas.
+  crate's smoke tests, fresh-process containment fixtures, ABI probe, and
+  examples, and check the published CSV/JSON schemas.
   Set `FLYOLOGY_BENCH_REQUIRE_PERF=1` to also require Linux hardware counters
   and the inherited worker-task attribution check.
 - `./scripts/test-linux-docker.sh`: Linux test on the host’s native architecture.

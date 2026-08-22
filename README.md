@@ -2993,6 +2993,20 @@ the infinite-timeout sentinel, non-expired timeout, expiration, remaining-time
 cases, rounding up to poll milliseconds, and saturation at the `poll(2)` integer
 limit.
 
+The standalone `flyology_bench` crate also uses a private SPARK numeric kernel
+for saved-baseline regression gates. Bounds derived from the unsigned clock
+delta and maximum iteration count keep its sample sums, means, independent-run
+ratios, percentile interpolation, time-change conversion, and interval verdict
+free of floating overflow. The proof covers those deterministic primitives;
+artifact I/O, bootstrap orchestration, and reporter formatting remain
+behaviorally tested boundaries.
+
+The standalone benchmark crate uses the same narrow boundary for its exact
+empirical-scaling range classifier. GNATprove establishes the overflow-free
+decision between a sub-twofold and at-least-twofold unsigned 64-bit input range;
+floating-point model fitting and benchmark collection remain outside SPARK and
+are covered by deterministic synthetic-data and behavioral tests.
+
 The public-library proof boundary also covers native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling. Socket policy
 proves the IPv4/IPv6 and stream/datagram ABI encodings, maps host-supplied errno
@@ -3199,7 +3213,8 @@ rather than hidden behind a claim of universal portability.
   comparison benchmarking crate for Ada and Flyology workloads. The website's
   [benchmarking guide](https://flyology.org/guide/benchmarking/) covers the
   runnable API, multi-way comparisons, telemetry, machine output, and the
-  interpretation of fractional nanosecond results.
+  interpretation of fractional nanosecond results, bounded custom axes, and
+  caller-synchronized alternate timing.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
 - [`docker`](docker): native-architecture Linux validation Dockerfile.
 

@@ -23,21 +23,30 @@ The initial API provides:
 - raw per-operation samples;
 - minimum, median, mean, p95, p99, maximum, standard deviation, median absolute
   deviation, and coefficient of variation;
-- deterministic circular-block bootstrap 95% confidence intervals;
+- deterministic circular-block bootstrap confidence intervals with bounded,
+  configurable coverage and resample count;
 - Tukey mild and severe outlier diagnostics without silently dropping samples;
 - optional measured timestamp-cost subtraction, disabled by default;
-- persisted raw-sample baselines with compatibility fingerprints;
+- atomically published raw-sample baselines with exact compatibility
+  fingerprints and CI regression gates;
+- an explicit bounded suite registry with stable identities, deterministic
+  list/filter/skip selection, shared configuration, and aggregate status;
 - host/toolchain metadata and optional strict Linux or advisory Darwin thread
   placement;
 - selectable wall-time, CPU-time, RSS, fault, context-switch, storage-I/O,
   Linux hardware-counter, and Flyology scheduler axes sampled around the same
   retained batches;
+- up to eight bounded caller-defined axes and a static adapter for synchronized
+  caller-supplied elapsed values, while retaining harness wall time;
 - an optional sustained low-host-CPU gate before warmup;
 - an optional watch for foreign CPU load arriving after that gate, which can
   annotate, collect a contaminated window again, or pause and re-warm, and
   which never adjusts a reported statistic;
 - an optional host CPU claim that coordinates with any other tool following
   the same convention;
+- fresh-process ordinary and paired workers with deterministic repetitions,
+  isolated environments, monotonic deadlines, bounded diagnostics, and crash
+  containment;
 - ANSI console result cards, in-place terminal progress, CSV, and
   newline-delimited JSON reporters; and
 - explicit optimization and memory barriers.
@@ -243,6 +252,25 @@ reports lag-one correlation and the difference between reference-first and
 contender-first ratio groups. These diagnostics flag drift; they do not prove a
 particular physical cause.
 
+`Confidence_Level_Percent` defaults to 95.0 and accepts 50.0 through 99.9.
+`Bootstrap_Resamples` defaults to 2,000 and accepts 100 through 10,000. Both
+are fields of the runner and recording configurations; recorded independent
+comparisons and saved-baseline comparisons accept the same bounded settings as
+parameters. A wider interval or more resamples increases analysis work but
+does not collect additional workload samples. Results retain the settings, and
+console, CSV, and JSON reporters identify them alongside each interval.
+
+One public analysis call may draw at most 100,000,000 source samples across
+all of its bootstrap intervals. Runner preflight counts every requested axis
+because it may be available when collection completes; recorded snapshots and
+independent comparisons count the axes and valid samples actually retained.
+Saved-baseline comparisons count both distributions. A configuration above
+the ceiling raises `Constraint_Error` instead of silently reducing its
+resample count, so retained settings and reporter metadata always describe the
+calculation that was performed. Runner preflight happens before warmup or timed
+work begins. The work-product ceiling also prevents multiplication overflow
+when several individually bounded settings are combined.
+
 `Practical_Threshold_Percent` defaults to one percent. A verdict is
 `Contender_Faster` or `Reference_Faster` only when the entire confidence
 interval clears that threshold. It is `Practically_Equivalent` only when the
@@ -293,6 +321,92 @@ putting it inside a nanosecond operation would measure the out-of-line barrier
 call as part of that operation. Volatile state is often clearer for a first
 benchmark. `Clobber_Memory` prevents motion of memory operations across a
 chosen boundary.
+
+## Run an explicit suite
+
+`Flyology_Bench.Suites` is a generic bounded registry. Instantiate it at the
+same scope as wrapper procedures around existing `Measure`, `Compare`, or
+`Compare_Many`
+instantiations. The wrapper call is indirect, but the timed `Operation` or
+`Batch` inside the existing generic remains statically bound:
+
+```ada
+package Benchmarks is new Flyology_Bench.Suites (Maximum_Cases => 8);
+
+procedure Run_Mix
+  (Config : Flyology_Bench.Configuration;
+   Result : out Flyology_Bench.Measurement) is
+begin
+   Measure_Mix (Config, Result);
+end Run_Mix;
+
+Suite : Benchmarks.Suite;
+
+Benchmarks.Register
+  (Suite, "mix", Run_Mix'Access,
+   Group => "integer", Tags => "arithmetic,smoke");
+
+package Shootout is new Benchmarks.Multi_Way_Registration
+  (Case_Id => Candidate, Run => Run_All);
+Shootout.Register
+  (Suite, "shootout", Group => "integer", Tags => "multi,smoke");
+```
+
+Names, groups, and tags are case-sensitive. Each segment starts with an ASCII
+letter or digit and continues with ASCII letters, digits, `.`, `_`, or `-`.
+The full identity is `group/name`, or only `name` when the group is empty.
+Duplicate full identities fail during registration. Registration order is the
+default discovery and execution order.
+
+`Parse` accepts an explicit argument array for tests. `Parse_Command_Line` is
+only a wrapper around it. Selection supports exact full identity, substring or
+small-glob filters (`*` and `?`), exact groups and tags, and exclusion filters.
+Repeated filters are alternatives; repeated tags must all match. `--order=name`
+requests lexical full-identity order. A no-match run fails unless
+`--allow-empty` is explicit.
+
+Every selected callback receives one effective `Configuration`. The CLI can
+override warmup, measurement time, maximum sampling time, sample count,
+minimum sample time, practical threshold, and random seed. Durations require a
+strict decimal plus `ns`, `us`, `ms`, or `s`. Fields without an override retain
+the supplied base configuration.
+
+The runner executes cases serially in one process. Global state, caches, and
+host conditions therefore carry between cases. `--fail-fast` stops after the
+first callback exception; the default continues and reports the stable full
+identity with each exception. An inconclusive paired or multi-way result is
+counted but does not fail the suite. `--require-metrics` makes an unavailable requested
+built-in axis fail the final status. `Run_Summary` reports discovered,
+selected, completed, skipped, failed, inconclusive, unavailable, and rejected
+counts. Map `not Successful (Summary)` to `Ada.Command_Line.Failure` in a main
+procedure.
+
+`--dry-run` applies a bounded validation policy to every selected callback: ten
+time-only samples, a 10 ms collection cap, no host gate, placement, lock,
+interference watch, telemetry, scheduler probe, or progress callback. Its
+output is marked `dry_run`, contains no performance numbers, and must not be
+recorded as a baseline. Machine runs also suppress configured terminal
+progress. An explicit `--output` file contains only plain human output, typed
+CSV table sections, or newline-delimited JSON. Contextual CSV prefixes the
+existing latency and metric schemas with suite identity, full benchmark
+identity, result kind, outcome, dry marker, and row kind. Contextual JSON adds
+the same suite fields to the complete existing reporter object. Progress and
+ANSI sequences remain outside machine output.
+
+The maintained `suite_runner` example demonstrates discovery, selection,
+machine output, and dry validation:
+
+```sh
+./examples/bin/suite_runner --list
+./examples/bin/suite_runner --filter='integer/*' --skip='*comparison'
+./examples/bin/suite_runner --exact=integer/mix --output-style=csv
+./examples/bin/suite_runner --dry-run --output-style=json \
+  --output=suite.ndjson
+```
+
+Baseline recording and checking remain explicit follow-up modes. The suite
+will consume `Flyology_Bench.Baselines.Evaluate_Gate` after that additive gate
+API lands; it does not duplicate artifact formats or regression statistics.
 
 ## Resource and runtime axes
 
@@ -400,6 +514,189 @@ the optimizer must retain the computation without charging the barrier call to
 the measured interval. `Measure_With_Hooks` likewise runs setup before the
 starting timestamp and teardown after the ending timestamp.
 
+## Custom metrics and alternate timing
+
+`Custom_Metric_Registry` adds at most eight axes without extending the
+`Metric_Axis` enumeration or changing existing long-form schemas. Register
+every axis and install one bounded snapshot callback before calling a runner:
+
+```ada
+Flyology_Bench.Register_Custom_Metric
+  (Config.Custom_Metrics,
+   Name        => "cache_lookups",
+   Unit        => "lookups/op",
+   Scope       => Flyology_Bench.Caller_Defined_Window,
+   Attribution => Flyology_Bench.Shared_Process_Window,
+   Direction   => Flyology_Bench.Lower_Is_Better);
+Flyology_Bench.Set_Custom_Probe
+  (Config.Custom_Metrics, Probe'Access);
+```
+
+Names are stable lowercase ASCII identifiers of at most 48 characters. They
+begin with a letter and contain only letters, digits, `.`, `_`, or `-`.
+Built-in identities use their lowercase underscore spelling, such as
+`wall_time`, for collision checks. Units are at most 24 printable ASCII
+characters and exclude comma, quote, and backslash. Registration order is
+reporting order; duplicates and built-in collisions raise `Constraint_Error`,
+and the ninth axis raises `Capacity_Error`.
+
+The default `Cumulative_Delta` semantics reads a signed cumulative counter at
+both boundaries, rejects a decrease as `Counter_Reset`, checks subtraction and
+floating conversion, and optionally divides the delta by the exact batch
+iteration count. `Absolute_Sample` explicitly retains the ending signed or
+zero value. `Completed_Elapsed` requires a finite nonnegative ending value.
+NaN, infinity, conversion overflow, a failed callback, and provider-reported
+unavailability remain statuses; they never become numeric zero. A partial run
+retains every per-sample status, summarizes only collected values, and is not
+eligible for a paired comparison. `Relative_Positive` rejects a pair
+containing zero or a negative value; choose `Absolute` explicitly for signed
+contender-minus-reference comparisons.
+
+Probe order is fixed. Built-in begin snapshots run first, followed by the
+custom begin snapshot and harness wall start. After the batch, the harness wall
+timestamp runs first, then the custom end snapshot, Linux counter stop/read,
+scheduler end snapshot, and process-resource end snapshot. This keeps custom
+callback cost outside wall time. It does not make probe families independent:
+one family can perturb the machine state observed by a later family, and the
+reporter does not “correct” that interaction. Providers must declare scope and
+attribution; a returned number does not imply `Exact_Window`. A current-thread
+provider must either establish that both callbacks ran on the same native
+thread or report the sample unavailable. Registration and result-store
+allocation precede collection; the retained-batch path performs no allocation.
+
+`Flyology_Bench.Manual_Timing` is a generic/static adapter for a simulated,
+device, accelerator, or other caller-owned source. Its batch returns a
+completed elapsed value and status. The caller must synchronize measured work
+before returning; queue submission latency must not be described as device
+execution. `Scale_To_Unit` performs a checked conversion and the retained
+resolution uses the same output unit. The adapter keeps `wall time` as a
+separate built-in axis for warmup, equal-wall calibration, sampling budgets,
+interference windows, and progress. It never applies wall timestamp-cost
+subtraction to the alternate value. `Manual_Timing_Comparison` applies the
+same contract to adjacent paired batches. Both use equal harness-wall slices;
+there is currently no equal-alternate-time calibration mode. Compact console
+output places the declared primary timer first with its source and resolution,
+then labels harness wall time as calibration; paired output identifies which
+axes-table verdict belongs to the primary timer. Each adapter invocation owns
+its mutable bridge state and may run concurrently through the same generic
+instance. A configured custom provider remains active and the timer consumes
+one free registry slot. Reported resolution is divided by the exact retained
+iteration denominator; paired schemas retain separate reference and contender
+resolutions when equal-wall calibration selects different counts.
+
+Use the versioned `Put_Extended_Metrics_CSV` and
+`Put_Extended_Comparison_Metrics_CSV` schemas, or the corresponding NDJSON
+procedures, for built-in and custom axes together. They retain kind, name,
+unit, scope, attribution, direction, sample semantics, normalization, timing
+role/source/resolution, calibration clock, availability, status, summaries,
+comparison method, interval, and verdict. The older CSV procedures remain
+unchanged. `examples/custom_metrics.adb` demonstrates a domain counter and a
+deterministic simulated timer; it makes no claim about untested GPU support.
+
+Custom providers are not currently integrated with `Recording`. A recording
+span can overlap other spans and migrate independently, so reusing one
+runner-style begin/end snapshot would not provide coherent per-span ownership,
+bounded concurrency, or attribution. The registry and retained per-sample
+status model are the integration seam for a future recording-specific design;
+until then, record domain observations separately rather than labeling them as
+Flyology_Bench recording axes.
+
+## Parameter sweeps, work, and empirical scaling
+
+`Flyology_Bench.Sweeps` runs an explicit ordered set of exact positive
+`size:` or `count:` points. A point may also carry a stable display label. The
+canonical identity is the parameter kind and full unsigned decimal value; a
+duplicate numeric identity is rejected even when its label differs. Labels use
+the bounded portable grammar `[A-Za-z0-9][A-Za-z0-9_.-]*`.
+
+The sweep executor is generic over three statically bound operations:
+`Select_Point`, `Work_For`, and an already-instantiated `Measure`, `Compare`, or
+`Compare_Batched` procedure. Selection and the one call through the sweep layer
+occur outside timed batches. The logical operation inside the measurement
+generic remains statically bound; there is no access-to-subprogram dispatch per
+operation.
+
+Every point states exact integral work per logical operation as items, bytes,
+or a bounded caller-named unit. Decimal and binary display scaling affect only
+human rendering: raw machine output always retains the exact value, unit, and
+scaling choice. Throughput is derived from the same wall-time per-operation
+batch means already retained by `Measurement`:
+
+```text
+operations/s = 1_000_000_000 / nanoseconds-per-operation
+work/s       = operations/s * work-per-operation
+```
+
+There is no second timing interval. Median rates invert median wall time. Rate
+confidence endpoints invert and reverse the existing mean-time confidence
+interval. Zero, negative, fractional, non-finite, unrepresentable, or
+incoherently named work amounts are rejected; unavailable wall data and rate
+overflow remain explicit unavailable states. Work availability, completed
+collection, valid wall data, and derived-rate availability are separate:
+skipped or failed work is never rendered as a default amount, and a
+throughput-only overflow does not discard a valid elapsed result or paired
+verdict. If a runner raises after writing part of its `out` value, the sweep
+resets that storage before retaining the failed point.
+
+`Measure_Sweep` and `Compare_Sweep` return bounded inspectable results for
+every attempted point. The paired executor invokes one existing adjacent,
+order-balanced comparison at each point; it never assembles a verdict from
+separately collected blocks. Point setup, measurement, wall availability,
+throughput overflow, dry-run, and whole-budget exhaustion are distinct
+statuses. Stop-on-failure and continue-after-failure are explicit policies.
+
+With `Per_Point_Budget`, `Configuration.Maximum_Sampling_Time` applies
+independently to each point under the normal runner rules. With
+`Whole_Sweep_Budget`, the same value is an outer elapsed-time limit including
+selection, warmup, calibration, and collection. Each point receives the
+remaining value as its collection limit; a point already in flight completes,
+and later points are marked budget-exhausted. Zero remains unlimited.
+
+Collection and empirical scaling analysis are separate.
+`Flyology_Bench.Scaling` accepts stored or deterministic synthetic observations
+with one coherent parameter kind and fits constant, logarithmic, linear, n log
+n, quadratic, and cubic models in log space. Mixing size and count observations
+is rejected. It reports the parameter kind, every model's coefficient, nominal
+exponent, R-squared, RMS and maximum log residual, selection state, and observed
+input range. Rejected nonempty data retains its factual range; empty data marks
+the kind and range unavailable instead of publishing sentinel values. Rejected
+analyses leave every diagnostic's `Selected` field false; when fitting reached
+model comparison, `Selected_Model` still exposes the lowest-residual candidate
+for callers that first inspect the status. At least four distinct positive
+points spanning a factor of two are required; the range threshold is classified
+with exact integer arithmetic before model fitting. Invalid observations,
+numeric overflow, poor fit, and poor identifiability produce explicit
+unavailable states. A selected model describes only the observed range; it is
+empirical scaling, not proof of big-O.
+
+`Flyology_Bench.Sweeps.Reporters` defines new console, CSV, and newline-delimited
+JSON schemas rather than changing the existing measurement formats. Rows carry
+the suite-compatible full `benchmark` name supplied as `Case_Name`, a separate
+canonical `point`, raw parameter and label, work identity/value/scaling, the
+`per_operation_batch_mean` sample semantics, separate work/collection/result
+availability, exact throughput availability, status, time, throughput,
+direction, and paired verdict. Paired machine rows retain throughput
+availability independently for the reference and contender. Console work
+amounts and work rates use the requested decimal or binary prefix. CSV keeps
+decimal integer text. Newline-delimited JSON retains numeric fields for
+convenience and adds decimal-string `parameter_value_exact`, `raw_value_exact`,
+`minimum_input_exact`, and `maximum_input_exact` companions so consumers backed
+by IEEE-754 numbers do not lose unsigned 64-bit values. Suite registration and
+filtering remain case-level; a sweep is one registered case unless callers
+explicitly register its points as separate cases.
+
+The maintained example compares insertion sort and Shell sort over five sizes,
+prints elapsed and work-normalized throughput at every adjacent paired point,
+and then analyzes each stored result independently:
+
+```sh
+alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
+examples/bin/sweep_comparison
+```
+
+Its output is a factual report of that invocation and publishes no host
+performance claim.
+
 ## Measurement model
 
 The harness characterizes its platform clock, warms the operation, and
@@ -437,10 +734,14 @@ phase changes; they are not permission to discard inconvenient runs.
 
 `Configuration` carries its own rules rather than checking them on entry to a
 run. Fields whose meaning excludes a value use a subtype that excludes it:
-`Nonnegative_Duration`, `Positive_Duration`, `Percentage`, and
-`Threshold_Percentage`, which excludes 100 percent. A literal outside a bound
-is a compile-time diagnostic; a computed one raises `Constraint_Error` at the
-assignment or aggregate that produced it, naming the offending line.
+`Nonnegative_Duration`, `Positive_Duration`, `Percentage`,
+`Threshold_Percentage`, which excludes 100 percent,
+`Confidence_Percentage`, and `Bootstrap_Resample_Count`. A literal outside a
+bound is a compile-time diagnostic; a computed one raises `Constraint_Error`
+at the assignment or aggregate that produced it, naming the offending line.
+The bootstrap work-product ceiling is a separate call-level rule because it
+combines sample count, resample count, analysis shape, and available or
+requested axes.
 
 Each optional policy takes its `Enabled` flag, and `Interference` also its
 `Response`, as a discriminant, so a policy's settings exist only while they
@@ -660,13 +961,107 @@ is worse than a failed one.
 The maintained example enables the interference watch only when
 `FLYOLOGY_BENCH_INTERFERENCE=1`, mirroring how it gates the preflight.
 
-Wall-clock timing is the default for Flyology waits and cross-task work.
-`Flyology_Bench.Baselines` persists raw samples and refuses a regression
-comparison when the clock backend or environment fingerprint differs. Its
-default fingerprint contains OS, architecture, and GNAT version; callers should
-add CPU policy, compiler switches, revision, and other locally relevant state.
-Direct paired `Compare` is preferable whenever both implementations can run in
-one process.
+## Saved baseline gates
+
+`Flyology_Bench.Baselines.Save` records an explicitly named baseline artifact.
+The version 2 artifact keeps the exact benchmark identity, environment
+fingerprint, clock backend, independent-comparison contract, and every retained
+time sample. It has a checksum and commit footer. `Load` rejects missing
+fields, duplicate fields and samples, unsupported versions, malformed or
+out-of-range values, incomplete samples, trailing data, and checksum failures
+with a specific `Baseline_Format_Error` message.
+
+Raw time samples are limited to values the harness can produce: no smaller
+than one nanosecond divided by the maximum iteration count and no larger than
+one complete unsigned 64-bit clock delta. This bound keeps every independent
+mean ratio, confidence endpoint, and time-change conversion finite. A current
+measurement outside that domain raises `Baseline_Comparison_Error`; the gate
+reports it as `Baseline_Error`, without publishing partial statistics, and
+applies the configured fail-open or fail-closed artifact action.
+
+`Load` also retains read compatibility with the earlier version 1 format that
+the public `Save` procedure emitted. Its fixed field order, sample count, sample
+ranges, and trailing data are validated, but that legacy format has no checksum
+or commit footer. Recording is the explicit way to publish a version 2
+replacement; checking a version 1 artifact never upgrades it in place.
+
+`Save` writes a unique temporary artifact in the destination directory. It
+flushes the complete file before an atomic POSIX `rename` publishes it. A
+process failure before publication cannot truncate the earlier baseline. A
+filesystem's power-loss guarantee for the containing directory remains a host
+property. Record mode is a separate call: `Evaluate_Gate` only reads the
+artifact and never updates it, including after a rejected run.
+
+```ada
+Flyology_Bench.Baselines.Save
+  ("build/integer_mix.baseline",
+   "integer_mix",
+   Result,
+   Fingerprint => Full_Environment_Identity);
+
+Gate := Flyology_Bench.Baselines.Evaluate_Gate
+  ("build/integer_mix.baseline",
+   "integer_mix",
+   Current,
+   Fingerprint => Full_Environment_Identity,
+   Policy => Flyology_Bench.Baselines.Fail_Closed_Gate_Policy);
+
+Flyology_Bench.Reporters.Put_Gate_JSON (Gate);
+if Flyology_Bench.Baselines.Rejected (Gate) then
+   Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+end if;
+```
+
+The gate uses the existing independent circular-block bootstrap of
+arithmetic-mean ratios. A regression rejects only when the complete 95%
+confidence interval establishes a slowdown beyond
+`Practical_Threshold_Percent`. Improvement, practical equivalence, and
+inconclusive results remain distinct. `Permissive_Gate_Policy` reports missing,
+invalid, incompatible, and inconclusive results without rejecting.
+`Fail_Closed_Gate_Policy` rejects all four conditions. A caller can derive a
+policy that fails closed for the artifact and environment but reports an
+inconclusive statistical result.
+
+The bounded sum, mean, ratio, percentile interpolation, time-change, and
+verdict primitives live in a private SPARK unit. `./scripts/prove.sh` proves
+their bounded floating-point run-time checks and the ratio/time-change result
+contracts at level 1. File parsing, bootstrap sampling and sorting, and gate
+orchestration remain outside SPARK and are covered by the focused behavioral
+tests.
+
+Benchmark name, environment fingerprint, and clock backend comparisons are
+exact. The gate does not compare samples after any mismatch. The default
+fingerprint contains OS, architecture, and GNAT version. Add CPU policy,
+compiler switches, revision, and all other locally relevant state. Direct
+paired `Compare` remains preferable whenever both implementations can run in
+one process because it preserves the collection schedule's pairing.
+
+The maintained example separates recording from checking and maps rejection to
+`Ada.Command_Line.Failure`:
+
+```sh
+identity='cpu=ci-runner-1;policy=cpu-2;switches=-O3;benchmark=v1'
+./examples/bin/baseline_gate record build/integer_mix.baseline "$identity"
+./examples/bin/baseline_gate check  build/integer_mix.baseline "$identity"
+FLYOLOGY_BENCH_OUTPUT=csv  ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
+FLYOLOGY_BENCH_OUTPUT=json ./examples/bin/baseline_gate check build/integer_mix.baseline "$identity"
+```
+
+The example combines that required caller identity with the default OS,
+architecture, and GNAT fingerprint. Use a stable description of the actual CPU
+or runner class, placement policy, compiler switches, and benchmark contract;
+do not use a changing build number or the contender revision being measured.
+
+The console, CSV, and newline-delimited JSON gate reporters retain the status,
+policy decision, compatibility issue, speedup and time-change intervals,
+threshold, bootstrap method, confidence level, resample count, seed, and
+reason. The machine schema uses confidence-neutral interval field names plus an
+explicit confidence level so later statistical-policy configuration does not
+mislabel an interval. Aggregation across a suite can use `Rejected` for the
+final process status while counting each `Gate_Status` separately. A baseline
+gate compares one named reference with one current run. Longer histories,
+dashboards, commit-range runners, and change-point detection are separate
+facilities.
 
 `Flyology_Bench.Host_Control.Pin_Current_Thread` is the low-level primitive
 under `Config.Placement`. Placement cannot by itself control frequency
@@ -711,12 +1106,99 @@ FLYOLOGY_BENCH_OUTPUT=csv examples/bin/basic
 FLYOLOGY_BENCH_OUTPUT=json examples/bin/basic
 ```
 
-The original CSV reporters retain their stable latency schemas. The long-form
-`Put_Metrics_CSV` and `Put_Comparison_Metrics_CSV` reporters emit one row per
-axis, including availability status and failure reasons. The multi-way
-long-form reporter emits
-those rows for every contender. JSON measurement, comparison, and multi-way
-objects include metric arrays alongside environment, clock, and latency data.
+CSV summary and long-form schemas include `confidence_level_percent` and
+`bootstrap_resamples`; interval columns use generic `ci_low`/`ci_high` names
+because coverage is configurable. `Put_Metrics_CSV` and
+`Put_Comparison_Metrics_CSV` emit one row per axis, including availability
+status and failure reasons. The multi-way long-form reporter emits those rows
+for every contender. JSON measurement, comparison, multi-way, and recording
+objects include a `statistics` object alongside their metric, environment,
+clock, and latency data.
+
+## Fresh-process workers
+
+`Flyology_Bench.Workers` runs one exact benchmark identity in each new process.
+The parent invokes the same executable through `posix_spawn` without a shell or
+PATH search. The executable checks `Worker_Mode` before its ordinary CLI path,
+uses `Current_Request` to obtain the exact identity and configuration, calls
+`Announce_Ready`, and returns one `Measurement` or paired `Comparison` through
+`Return_Result`.
+
+`Launch_Configuration.Repetitions` creates independent worker processes. Each
+worker performs its own host setup, warmup, calibration, and timed sampling.
+The returned array retains that hierarchy. Do not concatenate raw samples from
+several workers into one paired sample stream. If a caller estimates an effect
+across processes, the worker is the resampling unit and fewer than two completed
+workers are insufficient for an across-worker interval.
+
+`Strict_Mode` is the default environment policy. It starts with `PATH` and the
+standard temporary-directory variables. Locale and timezone variables require
+the explicit `Preserve_Locale` and `Preserve_Timezone` policies. `Inherit_Mode`
+copies the complete parent environment and is an explicit opt-in. `Add` and
+`Remove` apply exact bounded changes. The result reports the selected mode,
+locale policy, timezone policy, and a stable hash of the effective
+variable-name set. Values are deliberately excluded, so a shared report cannot
+be used to test guesses for an inherited credential. The name-set hash is
+compatibility metadata, not an authentication mechanism; two environments that
+differ only in values have the same reported fingerprint. For the internal
+exact-value check, the worker computes a separate digest and returns it through
+the dedicated result channel for comparison by the parent. That digest is not
+placed in process arguments or exposed through `Worker_Result`.
+
+The working directory is inherited under `Inherit_Directory` or resolved and
+validated before spawn under `Use_Directory`. The child inherits only standard
+output, standard error, and the dedicated result endpoint. Standard streams are
+drained without waiting for the child to exit, retained to a caller-selected
+bound, and report exact omitted byte counts. Each drain turn is finite, so a
+worker that writes continuously cannot postpone deadline or process-state
+checks.
+
+`Startup_Timeout` covers spawn through the ready marker. `Total_Timeout` starts
+before spawn and covers the complete worker. On timeout, the parent sends
+`SIGTERM` to the anchored process group, waits `Termination_Grace`, sends
+`SIGKILL` when required, and reaps the root before releasing its PID identity.
+The result distinguishes startup timeout, execution timeout, signal crash,
+nonzero exit, benchmark exception, invalid configuration, malformed protocol,
+and parent I/O failure. A suite decides whether one such result stops later
+cases. The host `posix_spawn` call is synchronous and cannot be interrupted by
+this API. Its elapsed time is charged to both deadlines, so an overrun expires
+as soon as the call returns rather than extending the worker budget.
+
+The parent must retain exclusive reaping ownership for these worker children:
+do not install automatic `SIGCHLD` reaping or let another child manager consume
+them while `Run` is active. If `Run` detects that ownership was lost, the worker
+result is `Parent_IO_Failure`; the implementation disarms the PID guard and does
+not signal an identity the operating system may already have reused. A
+concurrent external reaper violates the exclusion contract and can race the
+observation-to-reap interval on hosts without a stable process handle.
+
+Protocol field bounds are published as `Maximum_*` constants. `Run` rejects a
+configuration that cannot fit before spawning. Failure reasons are truncated
+to their published envelope limits. A worker that needs to retain the full text
+writes it to the separately bounded standard-error capture. The parent also
+rejects result seeds, sample and iteration counts, telemetry, host-control and
+interference metadata, metric presence and availability, and sample-derived
+statistics that disagree with the requested worker configuration and metadata.
+Inactive and unavailable result sections must retain their canonical empty
+representation.
+
+Host-lock acquisition, placement, quiescence, interference observation, and
+metric-session setup occur inside the worker that measures. Spawn and setup
+durations are reported separately and are not included in per-operation time.
+Process isolation controls contamination from mutable process-global state. It
+does not make a noisy host quiet.
+
+The maintained example compares both modes:
+
+```sh
+./examples/bin/fresh_process
+```
+
+The native-boundary rationale and retained C mechanisms are documented in
+[`docs/worker-native-boundary.md`](docs/worker-native-boundary.md).
+Fresh workers are supported on Darwin and glibc Linux hosts that provide the
+required close-from spawn action. A missing host extension fails the spawn; the
+implementation never falls back to `fork`. Windows remains unsupported.
 
 ## Build and test
 
