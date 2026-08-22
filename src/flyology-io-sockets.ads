@@ -996,12 +996,17 @@ package Flyology.IO.Sockets is
    --  @param Socket Aliased open unconnected Internet socket
    --  @param Server Destination endpoint copied into the operation
    --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed until completion
    --  @return Started limited connect operation
    function Connect
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Socket  : not null access Socket_Type;
       Server  : Endpoint;
-      Timeout : Duration := Infinite) return Connect_Operation;
+      Timeout : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
+     with Pre =>
+       Interrupts'Length <
+         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart one Internet-stream connection attempt in an
    --  established operation object.
@@ -1009,34 +1014,49 @@ package Flyology.IO.Sockets is
    --  @param Server Destination endpoint copied into the operation
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh, released, or consumed connect operation
+   --  @param Interrupts Readable lifecycle sources borrowed until completion
    procedure Connect
      (Socket    : not null access Socket_Type;
       Server    : Endpoint;
       Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation);
+      Operation : in out Connect_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre =>
+       Interrupts'Length <
+         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one Unix-stream connection attempt.
    --  @param Set Completion set that owns the operation slot
    --  @param Socket Aliased open unconnected Unix-stream socket
    --  @param Server Validated destination pathname copied into the operation
    --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed until completion
    --  @return Started limited connect operation
    function Connect
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Socket  : not null access Socket_Type;
       Server  : Unix_Path;
-      Timeout : Duration := Infinite) return Connect_Operation;
+      Timeout : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
+     with Pre =>
+       Interrupts'Length <
+         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart one Unix-stream connection attempt.
    --  @param Socket Aliased open unconnected Unix-stream socket
    --  @param Server Validated destination pathname copied into the operation
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh, released, or consumed connect operation
+   --  @param Interrupts Readable lifecycle sources borrowed until completion
    procedure Connect
      (Socket    : not null access Socket_Type;
       Server    : Unix_Path;
       Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation);
+      Operation : in out Connect_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+     with Pre =>
+       Interrupts'Length <
+         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one Internet-stream accept. Server remains borrowed until Finish;
    --  the accepted socket and peer endpoint are retained by the operation.
@@ -1135,8 +1155,9 @@ package Flyology.IO.Sockets is
      (Operation : in out Send_Datagram_Operation;
       Last      : out Ada.Streams.Stream_Element_Offset);
 
-   --  Consume one terminal Internet-stream connection attempt.
+   --  Consume one terminal Internet- or Unix-stream connection attempt.
    --  @param Operation Terminal connect operation
+   --  @exception Operation_Interrupted An interrupt descriptor became ready
    procedure Finish (Operation : in out Connect_Operation);
 
    --  Consume one successful Internet-stream accept and transfer ownership.
@@ -1273,6 +1294,7 @@ private
       Accept_Unix);
    type Scoped_Failure is
      (No_Failure, Socket_Failure, Deadline_Failure,
+      Interrupted_Failure,
       Peer_Closed_Failure, No_Progress_Failure,
       Partial_Datagram_Failure);
 
@@ -1326,6 +1348,11 @@ private
    type Connect_Operation is new Socket_Operation with record
       Destination      : Endpoint := No_Endpoint;
       Unix_Destination : Unix_Path;
+      Interrupts       : Interrupt_Set
+        (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
+          (others => Invalid_Descriptor);
+      Interrupt_Count  : Natural range
+        0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
       Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout          : Duration := Infinite;
       Retry_Due        : Boolean := False;

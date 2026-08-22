@@ -7,6 +7,8 @@ with Flyology.IO.Connections.Testing;
 with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
+with Flyology.Operations;
+with Interfaces.C;
 with TLS_Test_Provider;
 
 procedure Managed_Connection_Connect_Smoke is
@@ -16,11 +18,13 @@ procedure Managed_Connection_Connect_Smoke is
    package Testing renames Flyology.IO.Connections.Testing;
    package Connection_TLS renames Flyology.IO.Connections.TLS;
    package TLS renames Flyology.IO.TLS;
+   package Operations renames Flyology.Operations;
    package Provider renames TLS_Test_Provider;
 
    use Ada.Streams;
    use type Drivers.Step_Result;
    use type Drivers.Wait_Result;
+   use type Operations.Terminal_Outcome;
 
    type Test_Result is
      (Pending,
@@ -95,7 +99,8 @@ procedure Managed_Connection_Connect_Smoke is
 
    procedure Run_Composition
      (Model  : Flyology.Execution_Model;
-      Secure : Boolean)
+      Secure : Boolean;
+      Scoped : Boolean)
    is
       Manager : aliased Connections.Server (Capacity => 1);
       Listener : Sockets.Socket_Type;
@@ -230,8 +235,23 @@ procedure Managed_Connection_Connect_Smoke is
                      end if;
                   end Pump;
                begin
-                  Connections.Connect
-                    (Manager, Address, Item, Timeout => 1.0);
+                  if Scoped then
+                     declare
+                        Set : aliased Operations.Completion_Set (2);
+                        Attempt : Connections.Connect_Operation :=
+                          Connections.Connect
+                            (Set'Access,
+                             Manager'Access,
+                             Address,
+                             Timeout => 1.0);
+                     begin
+                        Operations.Wait_All (Set);
+                        Connections.Finish (Attempt, Item);
+                     end;
+                  else
+                     Connections.Connect
+                       (Manager, Address, Item, Timeout => 1.0);
+                  end if;
                   if not Connections.Is_Open (Item)
                     or else Manager.Active /= 1
                   then
@@ -262,11 +282,13 @@ procedure Managed_Connection_Connect_Smoke is
          Await_Result
            (Client_Result,
             Succeeded,
-            "managed composition client/" & Model'Image);
+            "managed composition client/" & Model'Image
+            & "/scoped=" & Scoped'Image);
          Await_Result
            (Server_Result,
             Succeeded,
-            "managed composition server/" & Model'Image);
+            "managed composition server/" & Model'Image
+            & "/scoped=" & Scoped'Image);
       end;
 
       if Manager.Active /= 0 then
@@ -294,7 +316,8 @@ procedure Managed_Connection_Connect_Smoke is
 
    procedure Run_Admission_Wait
      (Model   : Flyology.Execution_Model;
-      Trigger : Admission_Trigger)
+      Trigger : Admission_Trigger;
+      Scoped  : Boolean)
    is
       Manager : aliased Connections.Server (Capacity => 1);
       Token   : aliased Connections.Cancellation_Token;
@@ -323,12 +346,30 @@ procedure Managed_Connection_Connect_Smoke is
             Item : Connections.Connection (Manager'Access);
          begin
             begin
-               Connections.Connect
-                 (Manager,
-                  Address,
-                  Item,
-                  Timeout => (if Trigger = Deadline then 0.050 else -1.0),
-                  Token   => Token'Access);
+               if Scoped then
+                  declare
+                     Set : aliased Operations.Completion_Set (2);
+                     Attempt : Connections.Connect_Operation :=
+                       Connections.Connect
+                         (Set'Access,
+                          Manager'Access,
+                          Address,
+                          Timeout =>
+                            (if Trigger = Deadline then 0.050 else -1.0),
+                          Token => Token'Access);
+                  begin
+                     Operations.Wait_All (Set);
+                     Connections.Finish (Attempt, Item);
+                  end;
+               else
+                  Connections.Connect
+                    (Manager,
+                     Address,
+                     Item,
+                     Timeout =>
+                       (if Trigger = Deadline then 0.050 else -1.0),
+                     Token => Token'Access);
+               end if;
                Result.Set (Succeeded);
             exception
                when Flyology.IO.Timeout_Error =>
@@ -355,7 +396,8 @@ procedure Managed_Connection_Connect_Smoke is
          Await_Result
            (Result,
             Expected,
-            "managed admission " & Trigger'Image & "/" & Model'Image);
+            "managed admission " & Trigger'Image & "/" & Model'Image
+            & "/scoped=" & Scoped'Image);
       exception
          when others =>
             Token.Request;
@@ -390,7 +432,8 @@ procedure Managed_Connection_Connect_Smoke is
 
    procedure Run_Connected_Interruption
      (Model   : Flyology.Execution_Model;
-      Trigger : Connected_Trigger)
+      Trigger : Connected_Trigger;
+      Scoped  : Boolean)
    is
       Manager  : aliased Connections.Server (Capacity => 1);
       Token    : aliased Connections.Cancellation_Token;
@@ -436,12 +479,28 @@ procedure Managed_Connection_Connect_Smoke is
             Item : Connections.Connection (Manager'Access);
          begin
             begin
-               Connections.Connect
-                 (Manager,
-                  Address,
-                  Item,
-                  Timeout => 1.0,
-                  Token   => Token'Access);
+               if Scoped then
+                  declare
+                     Set : aliased Operations.Completion_Set (2);
+                     Attempt : Connections.Connect_Operation :=
+                       Connections.Connect
+                         (Set'Access,
+                          Manager'Access,
+                          Address,
+                          Timeout => 1.0,
+                          Token => Token'Access);
+                  begin
+                     Operations.Wait_All (Set);
+                     Connections.Finish (Attempt, Item);
+                  end;
+               else
+                  Connections.Connect
+                    (Manager,
+                     Address,
+                     Item,
+                     Timeout => 1.0,
+                     Token => Token'Access);
+               end if;
                Client_Result.Set (Succeeded);
             exception
                when Connections.Operation_Cancelled =>
@@ -467,12 +526,12 @@ procedure Managed_Connection_Connect_Smoke is
            (Client_Result,
             Cancelled,
             "managed connected interruption/" & Trigger'Image & "/"
-            & Model'Image);
+            & Model'Image & "/scoped=" & Scoped'Image);
          Await_Result
            (Server_Result,
             Succeeded,
             "managed connected cleanup/" & Trigger'Image & "/"
-            & Model'Image);
+            & Model'Image & "/scoped=" & Scoped'Image);
       exception
          when others =>
             Token.Request;
@@ -496,7 +555,10 @@ procedure Managed_Connection_Connect_Smoke is
          raise;
    end Run_Connected_Interruption;
 
-   procedure Run_Transfer_Failure (Model : Flyology.Execution_Model) is
+   procedure Run_Transfer_Failure
+     (Model  : Flyology.Execution_Model;
+      Scoped : Boolean)
+   is
       Manager  : aliased Connections.Server (Capacity => 2);
       Item     : Connections.Connection (Manager'Access);
       Listener : Sockets.Socket_Type;
@@ -541,8 +603,32 @@ procedure Managed_Connection_Connect_Smoke is
          task body Client is
          begin
             begin
-               Connections.Connect
-                 (Manager, Address, Item, Timeout => 1.0);
+               if Scoped then
+                  declare
+                     Set : aliased Operations.Completion_Set (2);
+                     Attempt : Connections.Connect_Operation :=
+                       Connections.Connect
+                         (Set'Access,
+                          Manager'Access,
+                          Address,
+                          Timeout => 1.0);
+                  begin
+                     Operations.Wait_All (Set);
+                     begin
+                        Connections.Finish (Attempt, Item);
+                     exception
+                        when Program_Error =>
+                           if not Operations.Is_Terminal (Attempt) then
+                              raise Program_Error with
+                                "invalid Finish consumed managed ownership";
+                           end if;
+                           raise;
+                     end;
+                  end;
+               else
+                  Connections.Connect
+                    (Manager, Address, Item, Timeout => 1.0);
+               end if;
                Client_Result.Set (Succeeded);
             exception
                when Program_Error =>
@@ -563,11 +649,13 @@ procedure Managed_Connection_Connect_Smoke is
          Await_Result
            (Client_Result,
             Transfer_Rejected,
-            "managed transfer failure/" & Model'Image);
+            "managed transfer failure/" & Model'Image
+            & "/scoped=" & Scoped'Image);
          Await_Result
            (Server_Result,
             Succeeded,
-            "managed transfer cleanup/" & Model'Image);
+            "managed transfer cleanup/" & Model'Image
+            & "/scoped=" & Scoped'Image);
       exception
          when others =>
             Testing.Release (Testing.Managed_Connect_Connected);
@@ -601,17 +689,336 @@ procedure Managed_Connection_Connect_Smoke is
          raise;
    end Run_Transfer_Failure;
 
+   procedure Run_Scoped_Abandonment
+     (Model : Flyology.Execution_Model)
+   is
+      Manager  : aliased Connections.Server (Capacity => 1);
+      Listener : Sockets.Socket_Type;
+      Address  : Sockets.Endpoint;
+      Client_Result : Result_Box;
+      Server_Result : Result_Box;
+   begin
+      Open_Listener (Listener, Address);
+      declare
+         task Server is
+            pragma Task_Info (Model);
+         end Server;
+
+         task Client is
+            pragma Task_Info (Model);
+         end Client;
+
+         task body Server is
+            Peer   : Sockets.Socket_Type;
+            Remote : Sockets.Endpoint;
+            Data   : Stream_Element_Array (1 .. 1);
+            Last   : Stream_Element_Offset;
+         begin
+            begin
+               Sockets.Accept_Connection
+                 (Listener, Peer, Remote, Timeout => 1.0);
+               Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
+               Close_If_Open (Peer);
+               Server_Result.Set
+                 (if Last < Data'First then Succeeded else Failed);
+            exception
+               when others =>
+                  Close_If_Open (Peer);
+                  Server_Result.Set (Failed);
+            end;
+         end Server;
+
+         task body Client is
+         begin
+            begin
+               declare
+                  Set : aliased Operations.Completion_Set (2);
+                  Attempt : Connections.Connect_Operation :=
+                    Connections.Connect
+                      (Set'Access,
+                       Manager'Access,
+                       Address,
+                       Timeout => 1.0);
+               begin
+                  Operations.Wait_All (Set);
+                  if Operations.Outcome (Attempt) /= Operations.Succeeded
+                    or else Manager.Active /= 1
+                  then
+                     raise Program_Error with
+                       "successful managed operation retained wrong state";
+                  end if;
+                  --  Deliberately omit Finish. Controlled finalization must
+                  --  close the socket and release the permit.
+               end;
+               Client_Result.Set
+                 (if Manager.Active = 0 then Succeeded else Failed);
+            exception
+               when others =>
+                  Client_Result.Set (Failed);
+            end;
+         end Client;
+      begin
+         Await_Result
+           (Client_Result,
+            Succeeded,
+            "scoped managed abandonment/" & Model'Image);
+         Await_Result
+           (Server_Result,
+            Succeeded,
+            "scoped managed abandonment peer/" & Model'Image);
+      end;
+      Close_If_Open (Listener);
+      if Manager.Active /= 0 then
+         raise Program_Error with
+           "abandoned managed operation leaked admission";
+      end if;
+   exception
+      when others =>
+         Close_If_Open (Listener);
+         raise;
+   end Run_Scoped_Abandonment;
+
+   procedure Run_Scoped_Child_Capacity
+     (Model : Flyology.Execution_Model)
+   is
+      Manager : aliased Connections.Server (Capacity => 1);
+      Address : constant Sockets.Endpoint :=
+        Sockets.Network_Endpoint (Sockets.Loopback_IPv4, 1);
+      Result : Result_Box;
+   begin
+      declare
+         task Worker is
+            pragma Task_Info (Model);
+         end Worker;
+
+         task body Worker is
+            Item : Connections.Connection (Manager'Access);
+            Failed_As_Bounded : Boolean := False;
+         begin
+            begin
+               declare
+                  Set : aliased Operations.Completion_Set (1);
+                  Attempt : Connections.Connect_Operation :=
+                    Connections.Connect
+                      (Set'Access,
+                       Manager'Access,
+                       Address,
+                       Timeout => 1.0);
+               begin
+                  Operations.Wait_All (Set);
+                  begin
+                     Connections.Finish (Attempt, Item);
+                  exception
+                     when Operations.Capacity_Error =>
+                        Failed_As_Bounded := True;
+                  end;
+               end;
+               Result.Set
+                 (if Failed_As_Bounded
+                    and then Manager.Active = 0
+                  then Succeeded
+                  else Failed);
+            exception
+               when others =>
+                  Result.Set (Failed);
+            end;
+         end Worker;
+      begin
+         Await_Result
+           (Result,
+            Succeeded,
+            "scoped managed child capacity/" & Model'Image);
+      end;
+   end Run_Scoped_Child_Capacity;
+
+   procedure Run_Scoped_Abort_Boundary
+     (Model : Flyology.Execution_Model;
+      Point : Testing.Barrier_Point)
+   is
+      Manager  : aliased Connections.Server (Capacity => 1);
+      Listener : Sockets.Socket_Type;
+      Address  : Sockets.Endpoint;
+      Server_Result : Result_Box;
+   begin
+      Open_Listener (Listener, Address);
+      Testing.Reset_Barriers;
+      Testing.Arm (Point);
+
+      declare
+         task Server is
+            pragma Task_Info (Model);
+         end Server;
+
+         task Client is
+            pragma Task_Info (Model);
+         end Client;
+
+         task body Server is
+            Peer   : Sockets.Socket_Type;
+            Remote : Sockets.Endpoint;
+            Data   : Stream_Element_Array (1 .. 1);
+            Last   : Stream_Element_Offset;
+         begin
+            begin
+               Sockets.Accept_Connection
+                 (Listener, Peer, Remote, Timeout => 1.0);
+               Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
+               Close_If_Open (Peer);
+               Server_Result.Set
+                 (if Last < Data'First then Succeeded else Failed);
+            exception
+               when others =>
+                  Close_If_Open (Peer);
+                  Server_Result.Set (Failed);
+            end;
+         end Server;
+
+         task body Client is
+            Item : Connections.Connection (Manager'Access);
+         begin
+            declare
+               Set : aliased Operations.Completion_Set (2);
+               Attempt : Connections.Connect_Operation :=
+                 Connections.Connect
+                   (Set'Access,
+                    Manager'Access,
+                    Address,
+                    Timeout => 1.0);
+            begin
+               Operations.Wait_All (Set);
+               Connections.Finish (Attempt, Item);
+            end;
+         end Client;
+      begin
+         Testing.Wait_Reached (Point);
+         if Manager.Active /= 1 then
+            raise Program_Error with
+              "managed abort boundary did not retain admission";
+         end if;
+         abort Client;
+         Testing.Release (Point);
+         Await_Result
+           (Server_Result,
+            Succeeded,
+            "managed abort boundary cleanup/" & Point'Image & "/"
+            & Model'Image);
+      exception
+         when others =>
+            abort Client;
+            Testing.Release (Point);
+            raise;
+      end;
+
+      if Manager.Active /= 0 then
+         raise Program_Error with
+           "managed abort boundary leaked admission at " & Point'Image;
+      end if;
+      Close_If_Open (Listener);
+      Testing.Reset_Barriers;
+   exception
+      when others =>
+         Testing.Release (Point);
+         Close_If_Open (Listener);
+         raise;
+   end Run_Scoped_Abort_Boundary;
+
+   procedure Run_Raw_Scoped_Interruption
+     (Model : Flyology.Execution_Model)
+   is
+      Token    : aliased Connections.Cancellation_Token;
+      Listener : Sockets.Socket_Type;
+      Address  : Sockets.Endpoint;
+      Client_Result : Result_Box;
+   begin
+      Open_Listener (Listener, Address);
+      Testing.Reset_Barriers;
+      Testing.Arm (Testing.Raw_Scoped_Connect_Armed);
+
+      declare
+         task Client is
+            pragma Task_Info (Model);
+         end Client;
+
+         task body Client is
+            Socket    : aliased Sockets.Socket_Type;
+            Interrupt : Interfaces.C.int;
+            Requested : Boolean;
+         begin
+            begin
+               Token.Wait_Source (Interrupt, Requested);
+               if Requested then
+                  raise Program_Error with
+                    "raw scoped interrupt was requested before initiation";
+               end if;
+               Sockets.Create_Socket
+                 (Socket,
+                  Family => Address.Family,
+                  Mode   => Sockets.Socket_Stream);
+               declare
+                  Set : aliased Operations.Completion_Set (1);
+                  Attempt : Sockets.Connect_Operation :=
+                    Sockets.Connect
+                      (Set'Access,
+                       Socket'Access,
+                       Address,
+                       Timeout => 1.0,
+                       Interrupts => (1 => Interrupt));
+               begin
+                  Operations.Wait_All (Set);
+                  Sockets.Finish (Attempt);
+               end;
+               Client_Result.Set (Succeeded);
+            exception
+               when Sockets.Operation_Interrupted =>
+                  Client_Result.Set (Cancelled);
+               when others =>
+                  Client_Result.Set (Failed);
+            end;
+         end Client;
+      begin
+         Testing.Wait_Reached (Testing.Raw_Scoped_Connect_Armed);
+         Token.Request;
+         Testing.Release (Testing.Raw_Scoped_Connect_Armed);
+         Await_Result
+           (Client_Result,
+            Cancelled,
+            "raw scoped connect interruption/" & Model'Image);
+      exception
+         when others =>
+            Token.Request;
+            Testing.Release (Testing.Raw_Scoped_Connect_Armed);
+            raise;
+      end;
+
+      Close_If_Open (Listener);
+      Testing.Reset_Barriers;
+   exception
+      when others =>
+         Testing.Release (Testing.Raw_Scoped_Connect_Armed);
+         Close_If_Open (Listener);
+         raise;
+   end Run_Raw_Scoped_Interruption;
+
    procedure Run_All (Model : Flyology.Execution_Model) is
    begin
-      Run_Composition (Model, Secure => False);
-      Run_Composition (Model, Secure => True);
-      for Trigger in Admission_Trigger loop
-         Run_Admission_Wait (Model, Trigger);
+      for Scoped in Boolean loop
+         Run_Composition (Model, Secure => False, Scoped => Scoped);
+         Run_Composition (Model, Secure => True, Scoped => Scoped);
+         for Trigger in Admission_Trigger loop
+            Run_Admission_Wait (Model, Trigger, Scoped);
+         end loop;
+         for Trigger in Connected_Trigger loop
+            Run_Connected_Interruption (Model, Trigger, Scoped);
+         end loop;
+         Run_Transfer_Failure (Model, Scoped);
       end loop;
-      for Trigger in Connected_Trigger loop
-         Run_Connected_Interruption (Model, Trigger);
-      end loop;
-      Run_Transfer_Failure (Model);
+      Run_Scoped_Abandonment (Model);
+      Run_Scoped_Child_Capacity (Model);
+      Run_Scoped_Abort_Boundary
+        (Model, Testing.Managed_Connect_Child_Started);
+      Run_Scoped_Abort_Boundary
+        (Model, Testing.Managed_Connect_Child_Detached);
+      Run_Raw_Scoped_Interruption (Model);
    end Run_All;
 
 begin

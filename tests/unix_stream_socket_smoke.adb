@@ -431,7 +431,35 @@ procedure Unix_Stream_Socket_Smoke is
             Close_If_Open (Probe);
 
             --  The scoped overload uses a retry-timer phase for the same
-            --  Linux EAGAIN queue-full state and retains timeout for Finish.
+            --  Linux EAGAIN queue-full state. Its interrupt source participates
+            --  in that retry phase and the retained result is reported by
+            --  Finish.
+            Sockets.Create_Unix_Stream_Socket (Scoped_Probe);
+            Flyology.Wake_Sources.Signal (Wake);
+            declare
+               Set : aliased Flyology.Operations.Completion_Set (1);
+               Connection : Sockets.Connect_Operation :=
+                 Sockets.Connect
+                   (Set'Access,
+                    Scoped_Probe'Access,
+                    Path,
+                    Timeout => 1.0,
+                    Interrupts =>
+                      (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+               Scoped_Interrupted : Boolean := False;
+            begin
+               Flyology.Operations.Wait_All (Set);
+               begin
+                  Sockets.Finish (Connection);
+               exception
+                  when Sockets.Operation_Interrupted =>
+                     Scoped_Interrupted := True;
+               end;
+               pragma Assert (Scoped_Interrupted);
+            end;
+            Flyology.Wake_Sources.Consume (Wake);
+            Close_If_Open (Scoped_Probe);
+
             Sockets.Create_Unix_Stream_Socket (Scoped_Probe);
             declare
                Set : aliased Flyology.Operations.Completion_Set (1);
@@ -449,7 +477,6 @@ procedure Unix_Stream_Socket_Smoke is
                end;
                pragma Assert (Scoped_Timed_Out);
             end;
-
             Close_If_Open (Scoped_Probe);
             for Index in 1 .. Last loop
                Close_If_Open (Fillers (Index));

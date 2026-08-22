@@ -381,6 +381,26 @@ package body Flyology.IO.Sockets is
    --  returned but descriptor configuration could not make usable.
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
+   function Test_Connection_Barrier_Arrive
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_arrive";
+   function Test_Connection_Barrier_Released
+     (Point : Interfaces.C.int) return Interfaces.C.int
+     with Import,
+          Convention => C,
+          External_Name => "flyology_test_connection_barrier_released";
+
+   procedure Test_Connection_Barrier (Point : Interfaces.C.int) is
+   begin
+      if Test_Connection_Barrier_Arrive (Point) /= 0 then
+         while Test_Connection_Barrier_Released (Point) = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Test_Connection_Barrier;
+
    procedure Test_Raw_Accept_Return_Barrier
      with Import,
           Convention => C,
@@ -2263,7 +2283,8 @@ package body Flyology.IO.Sockets is
      (Item    : in out Connect_Operation;
       Socket  : not null access Socket_Type;
       Server  : Endpoint;
-      Timeout : Duration)
+      Timeout : Duration;
+      Interrupts : Interrupt_Set)
    is
    begin
       Prepare (Socket.all);
@@ -2276,6 +2297,12 @@ package body Flyology.IO.Sockets is
       Item.Failure := No_Failure;
       Item.Destination := Server;
       Item.Unix_Destination := (others => <>);
+      Item.Interrupts := (others => Invalid_Descriptor);
+      Item.Interrupt_Count := Interrupts'Length;
+      for Offset in 0 .. Interrupts'Length - 1 loop
+         Item.Interrupts (Item.Interrupts'First + Offset) :=
+           Interrupts (Interrupts'First + Offset);
+      end loop;
       Item.Started := Ada.Real_Time.Clock;
       Item.Timeout := Timeout;
       Item.Retry_Due := False;
@@ -2301,7 +2328,8 @@ package body Flyology.IO.Sockets is
      (Item    : in out Connect_Operation;
       Socket  : not null access Socket_Type;
       Server  : Unix_Path;
-      Timeout : Duration)
+      Timeout : Duration;
+      Interrupts : Interrupt_Set)
    is
    begin
       Prepare (Socket.all);
@@ -2314,6 +2342,12 @@ package body Flyology.IO.Sockets is
       Item.Failure := No_Failure;
       Item.Destination := No_Endpoint;
       Item.Unix_Destination := Server;
+      Item.Interrupts := (others => Invalid_Descriptor);
+      Item.Interrupt_Count := Interrupts'Length;
+      for Offset in 0 .. Interrupts'Length - 1 loop
+         Item.Interrupts (Item.Interrupts'First + Offset) :=
+           Interrupts (Interrupts'First + Offset);
+      end loop;
       Item.Started := Ada.Real_Time.Clock;
       Item.Timeout := Timeout;
       Item.Retry_Due := False;
@@ -2573,6 +2607,48 @@ package body Flyology.IO.Sockets is
            (Item, Flyology.Operations.Failed);
       end Fail;
 
+      function Interrupted return Boolean is
+         Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+      begin
+         for Index in Requests'Range loop
+            Requests (Index) :=
+              (FD        => Item.Interrupts (Index),
+               Condition => For_Read);
+         end loop;
+         return Requests'Length > 0
+           and then Wait_Any (Requests, Timeout => 0.0) /= 0;
+      end Interrupted;
+
+      procedure Arm_Connection_Sources is
+         Sources : Flyology.Operations.Drivers.Readiness_Source_Array
+           (1 .. Item.Interrupt_Count + 1);
+      begin
+         Sources (1) :=
+           (Descriptor => Item.Socket.Value, For_Write => True);
+         for Index in 1 .. Item.Interrupt_Count loop
+            Sources (Index + 1) :=
+              (Descriptor => Item.Interrupts (Index), For_Write => False);
+         end loop;
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         Test_Connection_Barrier (21);
+#end if;
+      end Arm_Connection_Sources;
+
+      procedure Arm_Retry_Interrupts is
+         Sources : Flyology.Operations.Drivers.Readiness_Source_Array
+           (1 .. Item.Interrupt_Count);
+      begin
+         if Item.Interrupt_Count = 0 then
+            return;
+         end if;
+         for Index in Sources'Range loop
+            Sources (Index) :=
+              (Descriptor => Item.Interrupts (Index), For_Write => False);
+         end loop;
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+      end Arm_Retry_Interrupts;
+
       function Time_Left return Duration is
         (Remaining (Item.Started, Item.Timeout));
 
@@ -2603,6 +2679,7 @@ package body Flyology.IO.Sockets is
          end if;
          Item.Retry_Due := True;
          Flyology.Operations.Drivers.Arm_Deadline (Item, Pause);
+         Arm_Retry_Interrupts;
       end Retry_Unix;
 
       procedure Start_Attempt is
@@ -2634,8 +2711,7 @@ package body Flyology.IO.Sockets is
            (Policy_Error_Kind (Error))
          is
             when Flyology.Socket_Policy.Wait_For_Connection =>
-               Flyology.Operations.Drivers.Arm_Readiness
-                 (Item, Item.Socket.Value, For_Write => True);
+               Arm_Connection_Sources;
                Arm_Overall_Deadline;
             when Flyology.Socket_Policy.Connected =>
                Flyology.Operations.Drivers.Complete
@@ -2659,6 +2735,9 @@ package body Flyology.IO.Sockets is
          return;
       elsif Event = Flyology.Operations.Start_Operation then
          Start_Attempt;
+         return;
+      elsif Interrupted then
+         Fail (Interrupted_Failure);
          return;
       end if;
 
@@ -3125,21 +3204,24 @@ package body Flyology.IO.Sockets is
      (Socket    : not null access Socket_Type;
       Server    : Endpoint;
       Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation)
+      Operation : in out Connect_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
    begin
-      Start_Scoped_Connect (Operation, Socket, Server, Timeout);
+      Start_Scoped_Connect
+        (Operation, Socket, Server, Timeout, Interrupts);
    end Connect;
 
    function Connect
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Socket  : not null access Socket_Type;
       Server  : Endpoint;
-      Timeout : Duration := Infinite) return Connect_Operation
+      Timeout : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
    is
    begin
       return Result : Connect_Operation (Set) do
-         Connect (Socket, Server, Timeout, Result);
+         Connect (Socket, Server, Timeout, Result, Interrupts);
       end return;
    end Connect;
 
@@ -3147,21 +3229,24 @@ package body Flyology.IO.Sockets is
      (Socket    : not null access Socket_Type;
       Server    : Unix_Path;
       Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation)
+      Operation : in out Connect_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
    is
    begin
-      Start_Scoped_Connect (Operation, Socket, Server, Timeout);
+      Start_Scoped_Connect
+        (Operation, Socket, Server, Timeout, Interrupts);
    end Connect;
 
    function Connect
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Socket  : not null access Socket_Type;
       Server  : Unix_Path;
-      Timeout : Duration := Infinite) return Connect_Operation
+      Timeout : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
    is
    begin
       return Result : Connect_Operation (Set) do
-         Connect (Socket, Server, Timeout, Result);
+         Connect (Socket, Server, Timeout, Result, Interrupts);
       end return;
    end Connect;
 
@@ -3301,6 +3386,9 @@ package body Flyology.IO.Sockets is
             case Failure is
                when Deadline_Failure =>
                   raise Timeout_Error with "socket operation timed out";
+               when Interrupted_Failure =>
+                  raise Operation_Interrupted with
+                    "socket operation interrupted";
                when Peer_Closed_Failure =>
                   raise Device_Error with
                     "socket closed while receiving";
