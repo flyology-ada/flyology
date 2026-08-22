@@ -16,6 +16,10 @@ project Flyology_Bench_Tests is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-O2", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa");
+        ("-O2", "-g", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa");
    end Compiler;
+
+   package Binder is
+      for Default_Switches ("Ada") use ("-Es");
+   end Binder;
 end Flyology_Bench_Tests;

@@ -2,6 +2,7 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 with Ada.Text_IO;
+with Ada.Exceptions;
 with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Real_Time;
@@ -1224,4 +1225,10 @@ begin
    Put_Multi_JSON (Multi_Compared);
    Ada.Text_IO.Put_Line (Machine_Output_End);
    Ada.Text_IO.Put_Line ("flyology_bench smoke: PASS");
+exception
+   when Error : others =>
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         Ada.Exceptions.Exception_Information (Error));
+      raise;
 end Flyology_Bench_Smoke;
