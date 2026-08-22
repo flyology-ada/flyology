@@ -101,6 +101,25 @@ package Flyology.IO.Connections.Drivers is
    procedure Arm_Transport
      (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class; Required : Step_Result);
 
+   --  Arm the outer provider operation for one transport direction, one
+   --  caller-borrowed latched descriptor, close, manager shutdown, and Token
+   --  in one bounded readiness set. Arm_Deadline may be used independently on
+   --  the same Operation. The caller owns Additional and disarms its borrow
+   --  after wakeup before querying or releasing its source again.
+   --  @param IO Acquired capability
+   --  @param Operation Outer user-visible provider operation
+   --  @param Required Need_Read or Need_Write returned by a transport step
+   --  @param Additional Valid caller-borrowed latched descriptor
+   --  @param Additional_For_Write True to observe Additional write readiness
+   --  @exception Program_Error IO is not acquired, Required is not a wait
+   --     result, or Additional is invalid
+   procedure Arm_Transport
+     (IO                   : in out Capability;
+      Operation            : in out Flyology.Operations.Operation'Class;
+      Required             : Step_Result;
+      Additional           : Flyology.IO.Descriptor;
+      Additional_For_Write : Boolean);
+
    --  Arm the outer provider operation for one transport direction, protocol
    --  output publication, close, manager shutdown, and Token in one bounded
    --  readiness set. Outbound remains opaque and consumes no completion-set
@@ -118,6 +137,29 @@ package Flyology.IO.Connections.Drivers is
       Operation : in out Flyology.Operations.Operation'Class;
       Required  : Step_Result;
       Outbound  : in out Outbound_Wakeup);
+
+   --  Arm the outer provider operation for one transport direction, protocol
+   --  output publication, one caller-borrowed latched descriptor, close,
+   --  manager shutdown, and Token in one bounded readiness set. Outbound
+   --  retains its consume-before-reschedule rule; Additional is never consumed
+   --  by this call. Arm_Deadline may be used independently on Operation. The
+   --  caller owns Additional and disarms its borrow after wakeup before
+   --  querying or releasing its source again.
+   --  @param IO Acquired capability
+   --  @param Operation Outer user-visible provider operation
+   --  @param Required Need_Read or Need_Write returned by a transport step
+   --  @param Outbound Reusable protocol-output notification
+   --  @param Additional Valid caller-borrowed latched descriptor
+   --  @param Additional_For_Write True to observe Additional write readiness
+   --  @exception Program_Error IO is not acquired, Required is not a wait
+   --     result, Additional is invalid, or wake preparation fails
+   procedure Arm_Transport
+     (IO                   : in out Capability;
+      Operation            : in out Flyology.Operations.Operation'Class;
+      Required             : Step_Result;
+      Outbound             : in out Outbound_Wakeup;
+      Additional           : Flyology.IO.Descriptor;
+      Additional_For_Write : Boolean);
 
    --  Arm the outer provider operation with the unused portion of the shared
    --  Start deadline. An infinite deadline adds no timer source.

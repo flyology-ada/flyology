@@ -1967,16 +1967,18 @@ package body Flyology.IO.Sockets is
    end Copy_Endpoint;
 
    procedure Start_Scoped_Datagram
-     (Item          : in out Datagram_Operation'Class;
-      Kind          : Scoped_IO_Kind;
-      Socket        : not null access Socket_Type;
-      Array_Item    : access Ada.Streams.Stream_Element_Array;
-      Datagram_Item : access constant Ada.Streams.Stream_Element_Array;
-      Destination   : Endpoint;
-      Source        : Endpoint;
-      Select_Source : Boolean;
-      Timeout       : Duration;
-      Interrupts    : Interrupt_Set := No_Interrupts) is
+     (Item                 : in out Datagram_Operation'Class;
+      Kind                 : Scoped_IO_Kind;
+      Socket               : not null access Socket_Type;
+      Array_Item           : access Ada.Streams.Stream_Element_Array;
+      Datagram_Item        : access constant Ada.Streams.Stream_Element_Array;
+      Destination          : Endpoint;
+      Source               : Endpoint;
+      Select_Source        : Boolean;
+      Timeout              : Duration;
+      Interrupts           : Interrupt_Set := No_Interrupts;
+      Additional           : Descriptor := Invalid_Descriptor;
+      Additional_For_Write : Boolean := False) is
    begin
       Prepare (Socket.all);
       Item.Kind := Kind;
@@ -1993,6 +1995,8 @@ package body Flyology.IO.Sockets is
       for Offset in 0 .. Interrupts'Length - 1 loop
          Item.Interrupts (Item.Interrupts'First + Offset) := Interrupts (Interrupts'First + Offset);
       end loop;
+      Item.Additional := Additional;
+      Item.Additional_For_Write := Additional_For_Write;
       Item.Source_Family := 0;
       Item.Source_Address := (others => 0);
       Item.Source_Port := 0;
@@ -2580,37 +2584,47 @@ package body Flyology.IO.Sockets is
 
    overriding
    procedure Drive (Item : in out Datagram_Operation; Event : Flyology.Operations.Driver_Event) is
-      Sending       : constant Boolean := Item.Kind = Datagram_Send;
-      Data_First    : constant Ada.Streams.Stream_Element_Offset :=
+      Sending        : constant Boolean := Item.Kind = Datagram_Send;
+      Data_First     : constant Ada.Streams.Stream_Element_Offset :=
         (if Sending then Item.Datagram_Item.all'First else Item.Array_Item.all'First);
-      Data_Length   : constant Natural :=
+      Data_Length    : constant Natural :=
         (if Sending then Item.Datagram_Item.all'Length else Item.Array_Item.all'Length);
-      Buffer        : constant System.Address :=
+      Buffer         : constant System.Address :=
         (if Data_Length = 0
          then System.Null_Address
          elsif Sending
          then Item.Datagram_Item.all (Data_First)'Address
          else Item.Array_Item.all (Data_First)'Address);
-      Error         : aliased Interfaces.C.int := 0;
-      Result        : Interfaces.C.long;
-      Retry_Attempt : Natural := 0;
+      Error          : aliased Interfaces.C.int := 0;
+      Result         : Interfaces.C.long;
+      Retry_Attempt  : Natural := 0;
+      Has_Additional : constant Boolean := Item.Additional /= Invalid_Descriptor;
+      Source_Count   : constant Natural := Item.Interrupt_Count + Boolean'Pos (Has_Additional);
 
       function Interrupted return Boolean is
-         Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+         Requests : Wait_Request_Array (1 .. Source_Count);
       begin
-         for Index in Requests'Range loop
+         for Index in 1 .. Item.Interrupt_Count loop
             Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
          end loop;
+         if Has_Additional then
+            Requests (Requests'Last) :=
+              (FD        => Item.Additional,
+               Condition => (if Item.Additional_For_Write then For_Write else For_Read));
+         end if;
          return Requests'Length > 0 and then Wait_Any (Requests, Timeout => 0.0) /= 0;
       end Interrupted;
 
       procedure Arm_IO is
-         Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. Item.Interrupt_Count + 1);
+         Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. Source_Count + 1);
       begin
          Sources (1) := (Descriptor => Item.Socket.Value, For_Write => Sending);
          for Index in 1 .. Item.Interrupt_Count loop
             Sources (Index + 1) := (Descriptor => Item.Interrupts (Index), For_Write => False);
          end loop;
+         if Has_Additional then
+            Sources (Sources'Last) := (Descriptor => Item.Additional, For_Write => Item.Additional_For_Write);
+         end if;
          Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
       end Arm_IO;
 
@@ -2830,6 +2844,50 @@ package body Flyology.IO.Sockets is
    begin
       return Result : Receive_Datagram_Operation (Set) do
          Receive_Datagram (Socket, Item, Timeout, Result, Interrupts);
+      end return;
+   end Receive_Datagram;
+
+   procedure Receive_Datagram
+     (Socket               : not null access Socket_Type;
+      Item                 : not null access Ada.Streams.Stream_Element_Array;
+      Timeout              : Duration;
+      Operation            : in out Receive_Datagram_Operation;
+      Interrupts           : Interrupt_Set;
+      Additional           : Descriptor;
+      Additional_For_Write : Boolean) is
+   begin
+      if Additional = Invalid_Descriptor then
+         raise Program_Error with "additional readiness descriptor is invalid";
+      end if;
+      Start_Scoped_Datagram
+        (Operation,
+         Datagram_Receive,
+         Socket,
+         Item,
+         null,
+         No_Endpoint,
+         No_Endpoint,
+         False,
+         Timeout,
+         Interrupts,
+         Additional,
+         Additional_For_Write);
+   end Receive_Datagram;
+
+   function Receive_Datagram
+     (Set                  : not null access Flyology.Operations.Completion_Set'Class;
+      Socket               : not null access Socket_Type;
+      Item                 : not null access Ada.Streams.Stream_Element_Array;
+      Timeout              : Duration;
+      Interrupts           : Interrupt_Set;
+      Additional           : Descriptor;
+      Additional_For_Write : Boolean) return Receive_Datagram_Operation is
+   begin
+      if Additional = Invalid_Descriptor then
+         raise Program_Error with "additional readiness descriptor is invalid";
+      end if;
+      return Result : Receive_Datagram_Operation (Set) do
+         Receive_Datagram (Socket, Item, Timeout, Result, Interrupts, Additional, Additional_For_Write);
       end return;
    end Receive_Datagram;
 

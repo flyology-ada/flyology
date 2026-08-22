@@ -102,9 +102,9 @@ package body System.Flyology.Scheduler is
    --  when several tasks wait on the same descriptor and direction.
    IO_Bucket_Count        : constant := 8_191;
    subtype IO_Bucket_Index is Natural range 0 .. IO_Bucket_Count - 1;
-   --  One completion-set operation can arm a transport plus three lifecycle
-   --  interests. Keep parity with Flyology.IO.Max_Wait_Requests.
-   Max_IO_Link_Count      : constant := 128;
+   --  One completion-set operation can arm six transport, protocol, source,
+   --  and lifecycle interests. Keep parity with Flyology.IO.Max_Wait_Requests.
+   Max_IO_Link_Count      : constant := 192;
    subtype IO_Link_Kind is Positive range 1 .. Max_IO_Link_Count;
    Primary_IO             : constant IO_Link_Kind := 1;
 

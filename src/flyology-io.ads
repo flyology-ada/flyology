@@ -66,9 +66,10 @@ is
    end record;
 
    --  Maximum number of descriptors in one allocation-free Wait_Any call.
-   --  Bound shared with completion sets: 32 operations may each retain four
-   --  transport/lifecycle descriptor interests without helper tasks.
-   Max_Wait_Requests : constant := 128;
+   --  Bound shared with completion sets: 32 operations may each retain six
+   --  transport, protocol, source, and lifecycle descriptor interests without
+   --  helper tasks.
+   Max_Wait_Requests : constant := 192;
 
    --  Report whether the calling Ada task uses a Flyology event loop.
    --  @return True for a lightweight task; False for a native task

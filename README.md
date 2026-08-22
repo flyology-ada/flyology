@@ -1505,6 +1505,11 @@ adopted socket without traffic-class delivery or a future backend without
 equivalent metadata. Flyology-created datagram sockets enable the required
 options, while
 `Enable_Datagram_Metadata` provides the same setup for adopted descriptors.
+The scoped receive overloads may add one caller-borrowed latched descriptor
+with an explicit read or write direction to the same bounded readiness set as
+UDP read readiness and the existing readable lifecycle interrupts. The socket
+operation never consumes that additional source; its owner disarms the borrow
+after wakeup before querying or releasing the source again.
 
 Socket operations use readiness, not callback delivery and not kernel
 completion queues. The lightweight path is:
@@ -1552,8 +1557,8 @@ caller-provided array of read/write interests. It allocates neither in the
 public library nor while registering a lightweight fiber, returns the exact array
 index that became ready, and returns zero on timeout. Repeated descriptors and
 separate read/write interests for one descriptor are valid; when multiple
-entries are ready together the lowest index wins. The fixed limit of 128
-supports 32 scoped operations with four lifecycle or readiness interests each.
+entries are ready together the lowest index wins. The fixed limit of 192
+supports 32 scoped operations with six lifecycle or readiness interests each.
 The lightweight RTS allocates only the link count used by the current wait on
 the suspended fiber's stack.
 
@@ -2124,7 +2129,12 @@ overload instead of `Wait`. It arms the hidden transport direction returned by
 sources, without exposing a descriptor or consuming another completion-set
 slot. A notification that is already pending is consumed before the operation
 is rescheduled; the resumed owner must exhaust all currently published output
-before rearming. A separately armed capability deadline remains in effect.
+before rearming. Additional overloads include one caller-borrowed latched
+descriptor in the same readiness set, with or without `Outbound_Wakeup`; the
+caller disarms that borrow after wakeup before querying or releasing its source
+again. A separately armed capability deadline remains in effect. One operation
+may retain at most six readiness sources, covering the token-present transport,
+outbound, source, close, and manager-shutdown combination.
 
 ```ada
 procedure Pump
