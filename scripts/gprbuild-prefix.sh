@@ -10,10 +10,16 @@ else
   #  Resolve the companion GPRbuild installation from the same Flyology
   #  environment that selects the supported GNAT provider. This also works
   #  when preparation is invoked directly rather than through `alr exec`.
+  #  A dependency pre-build action already exports Flyology's deployment
+  #  paths.  Scrub them from this nested Alire process so the root and generated
+  #  configuration cannot change the shared build hash and the generated
+  #  prefix cannot conflict with the resulting deployment.
   gprbuild_prefix=$(
     cd "$project_root"
-    "$alr" --non-interactive printenv --unix >/dev/null
-    "$alr" --non-interactive -q printenv --unix |
+    env -u FLYOLOGY_ROOT -u GPR_CONFIG -u FLYOLOGY_ALIRE_PREFIX \
+      "$alr" --non-interactive printenv --unix >/dev/null
+    env -u FLYOLOGY_ROOT -u GPR_CONFIG -u FLYOLOGY_ALIRE_PREFIX \
+      "$alr" --non-interactive -q printenv --unix |
       sed -n 's/^export GPRBUILD_ALIRE_PREFIX="\([^"]*\)"$/\1/p'
   )
 fi

@@ -118,3 +118,47 @@ if [ "$selected_prefix" != "$native_prefix" ]; then
   printf '%s\n' "Alire printenv did not resolve gnat_native exactly" >&2
   exit 1
 fi
+
+gprbuild_prefix="$test_root/gprbuild_26.0.0_test"
+mkdir -p "$gprbuild_prefix/bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$gprbuild_prefix/bin/gprconfig"
+chmod +x "$gprbuild_prefix/bin/gprconfig"
+
+fake_alr="$test_root/alr-clean-environment"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'if [ -n "${FLYOLOGY_ROOT+x}" ] || [ -n "${GPR_CONFIG+x}" ] || [ -n "${FLYOLOGY_ALIRE_PREFIX+x}" ]; then' \
+  '  printf "%s\n" "recursive Alire inherited Flyology dependency environment" >&2' \
+  '  exit 91' \
+  'fi' \
+  'printf '\''export GNAT_NATIVE_ALIRE_PREFIX="%s"\n'\'' "$FAKE_COMPILER_PREFIX"' \
+  'printf '\''export GPRBUILD_ALIRE_PREFIX="%s"\n'\'' "$FAKE_GPRBUILD_PREFIX"' \
+  >"$fake_alr"
+chmod +x "$fake_alr"
+
+selected_prefix=$(env -u GNAT_NATIVE_ALIRE_PREFIX \
+  -u GNAT_FLYOLOGY_NATIVE_ALIRE_PREFIX \
+  FLYOLOGY_ROOT=/stale/flyology \
+  GPR_CONFIG=/stale/flyology/build/flyology.cgpr \
+  FLYOLOGY_ALIRE_PREFIX=/stale/flyology \
+  FAKE_COMPILER_PREFIX="$native_prefix" \
+  FAKE_GPRBUILD_PREFIX="$gprbuild_prefix" \
+  "$project_root/scripts/gnat-native-prefix.sh" "$fake_alr")
+if [ "$selected_prefix" != "$native_prefix" ]; then
+  printf '%s\n' \
+    "compiler discovery did not isolate recursive Alire environment" >&2
+  exit 1
+fi
+
+selected_prefix=$(env \
+  FLYOLOGY_ROOT=/stale/flyology \
+  GPR_CONFIG=/stale/flyology/build/flyology.cgpr \
+  FLYOLOGY_ALIRE_PREFIX=/stale/flyology \
+  FAKE_COMPILER_PREFIX="$native_prefix" \
+  FAKE_GPRBUILD_PREFIX="$gprbuild_prefix" \
+  "$project_root/scripts/gprbuild-prefix.sh" "$fake_alr")
+if [ "$selected_prefix" != "$gprbuild_prefix" ]; then
+  printf '%s\n' \
+    "GPRbuild discovery did not isolate recursive Alire environment" >&2
+  exit 1
+fi

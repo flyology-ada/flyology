@@ -11,11 +11,18 @@ if [ -z "$native_prefix" ] && [ -z "$flyology_prefix" ]; then
   #  The first call may synchronize a freshly copied consumer and print notes.
   #  Resolve from the Flyology crate, not an arbitrary caller crate whose
   #  lockfile may name a toolchain installation unavailable on this host.
+  #  A dependency pre-build action already inherits Flyology's exported root
+  #  and generated configuration.  Do not feed those deployment-specific
+  #  paths into this nested Alire invocation: they would assign the release a
+  #  second shared build directory, whose generated prefix then conflicts with
+  #  the inherited one.
   #  Alire recommends a second quiet printenv for machine parsing.
   compiler_environment=$(
     cd "$project_root"
-    "$alr" --non-interactive printenv --unix >/dev/null
-    "$alr" --non-interactive -q printenv --unix
+    env -u FLYOLOGY_ROOT -u GPR_CONFIG -u FLYOLOGY_ALIRE_PREFIX \
+      "$alr" --non-interactive printenv --unix >/dev/null
+    env -u FLYOLOGY_ROOT -u GPR_CONFIG -u FLYOLOGY_ALIRE_PREFIX \
+      "$alr" --non-interactive -q printenv --unix
   )
   native_prefix=$(printf '%s\n' "$compiler_environment" |
     sed -n 's/^export GNAT_NATIVE_ALIRE_PREFIX="\([^"]*\)"$/\1/p')
