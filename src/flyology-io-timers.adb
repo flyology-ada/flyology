@@ -13,12 +13,10 @@ package body Flyology.IO.Timers is
 
    package Timer_Policy renames Flyology.Timer_Set_Policy;
 
-   Maximum_Wait_Slice  : constant Duration := 86_400.0;
-   Fallback_Wait_Slice : constant Duration := 1.0;
-   Preferred_Sample_Span : constant Ada.Real_Time.Time_Span :=
-     Ada.Real_Time.Milliseconds (1);
-   Maximum_Sample_Span : constant Ada.Real_Time.Time_Span :=
-     Ada.Real_Time.Seconds (1);
+   Maximum_Wait_Slice      : constant Duration := 86_400.0;
+   Fallback_Wait_Slice     : constant Duration := 1.0;
+   Preferred_Sample_Span   : constant Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (1);
+   Maximum_Sample_Span     : constant Ada.Real_Time.Time_Span := Ada.Real_Time.Seconds (1);
    Maximum_Sample_Attempts : constant Positive := 3;
 
    type Clock_Sample is record
@@ -35,7 +33,8 @@ package body Flyology.IO.Timers is
    begin
       for Attempt in 1 .. Maximum_Sample_Attempts loop
          Before := Ada.Real_Time.Clock;
-         Wall := Ada.Calendar.Clock
+         Wall :=
+           Ada.Calendar.Clock
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
            + Flyology.Wall_Clock_Testing.Offset
 #end if;
@@ -43,44 +42,32 @@ package body Flyology.IO.Timers is
          After := Ada.Real_Time.Clock;
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
          Flyology.Wall_Clock_Testing.Note_Sample_Attempt;
-         After := After + Ada.Real_Time.To_Time_Span
-           (Flyology.Wall_Clock_Testing.Sample_Bracket);
+         After := After + Ada.Real_Time.To_Time_Span (Flyology.Wall_Clock_Testing.Sample_Bracket);
 #end if;
          if After < Before then
-            raise Flyology.IO.Device_Error with
-              "monotonic clock moved backward while sampling wall clock";
+            raise Flyology.IO.Device_Error with "monotonic clock moved backward while sampling wall clock";
          end if;
-         exit when After - Before <= Preferred_Sample_Span
-           or else Attempt = Maximum_Sample_Attempts;
+         exit when After - Before <= Preferred_Sample_Span or else Attempt = Maximum_Sample_Attempts;
       end loop;
 
       if After - Before > Maximum_Sample_Span then
-         raise Flyology.IO.Device_Error with
-           "wall-clock sample bracket exceeded one second";
+         raise Flyology.IO.Device_Error with "wall-clock sample bracket exceeded one second";
       end if;
 
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
       Flyology.Wall_Clock_Testing.Note_Sample;
 #end if;
-      return
-        (Wall            => Wall,
-         Steady_Earliest => Before,
-         Steady_Latest   => After);
+      return (Wall => Wall, Steady_Earliest => Before, Steady_Latest => After);
    end Read_Clocks;
 
-   function Minimum_Steady_Elapsed
-     (Previous : Clock_Sample;
-      Current  : Clock_Sample) return Duration
-   is
+   function Minimum_Steady_Elapsed (Previous : Clock_Sample; Current : Clock_Sample) return Duration is
    begin
       if Current.Steady_Latest < Previous.Steady_Earliest then
-         raise Flyology.IO.Device_Error with
-           "monotonic clock moved backward during wall-clock wait";
+         raise Flyology.IO.Device_Error with "monotonic clock moved backward during wall-clock wait";
       elsif Current.Steady_Earliest <= Previous.Steady_Latest then
          return 0.0;
       else
-         return Ada.Real_Time.To_Duration
-           (Current.Steady_Earliest - Previous.Steady_Latest);
+         return Ada.Real_Time.To_Duration (Current.Steady_Earliest - Previous.Steady_Latest);
       end if;
    end Minimum_Steady_Elapsed;
 
@@ -98,10 +85,7 @@ package body Flyology.IO.Timers is
       delay until Deadline;
    end Sleep_Until;
 
-   procedure Sleep_For
-     (Interval  : Duration;
-      Operation : in out Timer_Operation)
-   is
+   procedure Sleep_For (Interval : Duration; Operation : in out Timer_Operation) is
    begin
       Flyology.Operations.Drivers.Start (Operation);
       Flyology.Operations.Drivers.Arm_Deadline (Operation, Interval);
@@ -114,50 +98,36 @@ package body Flyology.IO.Timers is
    end Sleep_For;
 
    function Sleep_For
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Interval : Duration) return Timer_Operation
-   is
+     (Set : not null access Flyology.Operations.Completion_Set'Class; Interval : Duration)
+      return Timer_Operation is
    begin
       return Result : Timer_Operation (Set) do
          Sleep_For (Interval, Result);
       end return;
    end Sleep_For;
 
-   procedure Sleep_Until
-     (Deadline  : Ada.Real_Time.Time;
-      Operation : in out Timer_Operation)
-   is
+   procedure Sleep_Until (Deadline : Ada.Real_Time.Time; Operation : in out Timer_Operation) is
       Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
-      Sleep_For
-        ((if Deadline <= Now
-          then 0.0
-          else Ada.Real_Time.To_Duration (Deadline - Now)),
-         Operation);
+      Sleep_For ((if Deadline <= Now then 0.0 else Ada.Real_Time.To_Duration (Deadline - Now)), Operation);
    end Sleep_Until;
 
    function Sleep_Until
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Deadline : Ada.Real_Time.Time) return Timer_Operation
-   is
+     (Set : not null access Flyology.Operations.Completion_Set'Class; Deadline : Ada.Real_Time.Time)
+      return Timer_Operation is
    begin
       return Result : Timer_Operation (Set) do
          Sleep_Until (Deadline, Result);
       end return;
    end Sleep_Until;
 
-   procedure Rearm
-     (Interval  : Duration;
-      Operation : in out Timer_Operation)
-   is
+   procedure Rearm (Interval : Duration; Operation : in out Timer_Operation) is
    begin
       Sleep_For (Interval, Operation);
    end Rearm;
 
-   overriding procedure Drive
-     (Item  : in out Timer_Operation;
-      Event : Flyology.Operations.Driver_Event)
-   is
+   overriding
+   procedure Drive (Item : in out Timer_Operation; Event : Flyology.Operations.Driver_Event) is
    begin
       Flyology.Operations.Drivers.Complete
         (Item,
@@ -166,42 +136,34 @@ package body Flyology.IO.Timers is
           else Flyology.Operations.Failed));
    end Drive;
 
-   overriding procedure Request_Cancellation
-     (Item : in out Timer_Operation)
-   is
+   overriding
+   procedure Request_Cancellation (Item : in out Timer_Operation) is
    begin
-      Flyology.Operations.Drivers.Complete
-        (Item, Flyology.Operations.Cancelled);
+      Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Cancelled);
    end Request_Cancellation;
 
    procedure Finish (Operation : in out Timer_Operation) is
-      Result : constant Flyology.Operations.Terminal_Outcome :=
-        Flyology.Operations.Outcome (Operation);
+      Result : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Operation);
    begin
       Flyology.Operations.Consume (Operation);
       case Result is
          when Flyology.Operations.Succeeded =>
             null;
+
          when Flyology.Operations.Cancelled =>
             raise Flyology.Operations.Operation_Cancelled;
-         when Flyology.Operations.Failed =>
+
+         when Flyology.Operations.Failed    =>
             raise Flyology.IO.Device_Error with "timer operation failed";
       end case;
    end Finish;
 
-   procedure Arm
-     (Timers   : in out Timer_Set;
-      Id       : Timer_Id;
-      Deadline : Ada.Real_Time.Time)
-   is
+   procedure Arm (Timers : in out Timer_Set; Id : Timer_Id; Deadline : Ada.Real_Time.Time) is
    begin
       Timer_Policy.Arm (Timers.State, Id, Deadline);
    end Arm;
 
-   procedure Replace
-     (Timers    : in out Timer_Set;
-      Deadlines : Deadline_Array)
-   is
+   procedure Replace (Timers : in out Timer_Set; Deadlines : Deadline_Array) is
    begin
       Timer_Policy.Clear (Timers.State);
       for Id in Deadlines'Range loop
@@ -209,27 +171,18 @@ package body Flyology.IO.Timers is
       end loop;
    end Replace;
 
-   procedure Cancel
-     (Timers : in out Timer_Set;
-      Id     : Timer_Id)
-   is
+   procedure Cancel (Timers : in out Timer_Set; Id : Timer_Id) is
    begin
       Timer_Policy.Cancel (Timers.State, Id);
    end Cancel;
 
-   function Is_Armed
-     (Timers : Timer_Set;
-      Id     : Timer_Id) return Boolean
-   is
-     (Timer_Policy.Is_Armed (Timers.State, Id));
+   function Is_Armed (Timers : Timer_Set; Id : Timer_Id) return Boolean
+   is (Timer_Policy.Is_Armed (Timers.State, Id));
 
-   function Armed_Count (Timers : Timer_Set) return Natural is
-     (Timer_Policy.Armed_Count (Timers.State));
+   function Armed_Count (Timers : Timer_Set) return Natural
+   is (Timer_Policy.Armed_Count (Timers.State));
 
-   procedure Publish
-     (Due       : Timer_Policy.Due_Batch;
-      Activated : out Activation_Batch)
-   is
+   procedure Publish (Due : Timer_Policy.Due_Batch; Activated : out Activation_Batch) is
    begin
       Activated.Count := Due.Count;
       Activated.Ids := (others => Timer_Id'First);
@@ -238,12 +191,9 @@ package body Flyology.IO.Timers is
       end loop;
    end Publish;
 
-   function Saturating_Deadline
-     (Started : Ada.Real_Time.Time;
-      Timeout : Duration) return Ada.Real_Time.Time
+   function Saturating_Deadline (Started : Ada.Real_Time.Time; Timeout : Duration) return Ada.Real_Time.Time
    is
-      Span : constant Ada.Real_Time.Time_Span :=
-        Ada.Real_Time.To_Time_Span (Timeout);
+      Span : constant Ada.Real_Time.Time_Span := Ada.Real_Time.To_Time_Span (Timeout);
    begin
       if Span >= Ada.Real_Time.Time_Last - Started then
          return Ada.Real_Time.Time_Last;
@@ -252,10 +202,7 @@ package body Flyology.IO.Timers is
       end if;
    end Saturating_Deadline;
 
-   procedure Wait_Next
-     (Timers    : in out Timer_Set;
-      Activated : out Activation_Batch)
-   is
+   procedure Wait_Next (Timers : in out Timer_Set; Activated : out Activation_Batch) is
       Due      : Timer_Policy.Due_Batch (Timers.Capacity);
       Observed : Ada.Real_Time.Time;
    begin
@@ -278,8 +225,7 @@ package body Flyology.IO.Timers is
       Outcome   : out Timer_Wait_Outcome)
    is
       Started    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Timeout_At : constant Ada.Real_Time.Time :=
-        Saturating_Deadline (Started, Timeout);
+      Timeout_At : constant Ada.Real_Time.Time := Saturating_Deadline (Started, Timeout);
       Due        : Timer_Policy.Due_Batch (Timers.Capacity);
       Observed   : Ada.Real_Time.Time;
       Wake_At    : Ada.Real_Time.Time;
@@ -307,26 +253,20 @@ package body Flyology.IO.Timers is
    end Wait_Next;
 
    function Wait_Until
-     (Target             : Ada.Calendar.Time;
-      Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
+     (Target : Ada.Calendar.Time; Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
       return Wall_Clock_Wait_Result
    is
       Source  : Flyology.Wall_Clock_Waits.Source;
       Initial : constant Clock_Sample := Read_Clocks;
 
       function Classify
-        (Previous : Clock_Sample;
-         Current  : Clock_Sample)
-        return Flyology.Wall_Clock_Policy.Wait_Action;
+        (Previous : Clock_Sample; Current : Clock_Sample) return Flyology.Wall_Clock_Policy.Wait_Action;
 
       function Classify
-        (Previous : Clock_Sample;
-         Current  : Clock_Sample)
-        return Flyology.Wall_Clock_Policy.Wait_Action
+        (Previous : Clock_Sample; Current : Clock_Sample) return Flyology.Wall_Clock_Policy.Wait_Action
       is
-         Wall_Elapsed : constant Duration := Current.Wall - Previous.Wall;
-         Steady_Elapsed : constant Duration :=
-           Minimum_Steady_Elapsed (Previous, Current);
+         Wall_Elapsed   : constant Duration := Current.Wall - Previous.Wall;
+         Steady_Elapsed : constant Duration := Minimum_Steady_Elapsed (Previous, Current);
       begin
          return
            Flyology.Wall_Clock_Policy.Classify
@@ -338,10 +278,7 @@ package body Flyology.IO.Timers is
    begin
       if Initial.Wall >= Target then
          delay 0.0;
-         return
-           (Outcome             => Target_Reached,
-            Observed_Time       => Initial.Wall,
-            Backward_Adjustment => 0.0);
+         return (Outcome => Target_Reached, Observed_Time => Initial.Wall, Backward_Adjustment => 0.0);
       end if;
 
       Flyology.Wall_Clock_Waits.Open (Source);
@@ -350,10 +287,7 @@ package body Flyology.IO.Timers is
       begin
          if Previous.Wall >= Target then
             delay 0.0;
-            return
-              (Outcome             => Target_Reached,
-               Observed_Time       => Previous.Wall,
-               Backward_Adjustment => 0.0);
+            return (Outcome => Target_Reached, Observed_Time => Previous.Wall, Backward_Adjustment => 0.0);
          end if;
 
          loop
@@ -363,8 +297,7 @@ package body Flyology.IO.Timers is
                   then Maximum_Wait_Slice
                   else Fallback_Wait_Slice);
                Clock_Changed : constant Boolean :=
-                 Flyology.Wall_Clock_Waits.Arm
-                   (Source, Target, Maximum_Slice);
+                 Flyology.Wall_Clock_Waits.Arm (Source, Target, Maximum_Slice);
                Current       : Clock_Sample;
             begin
                --  Close the interval between the protected baseline and the
@@ -374,27 +307,24 @@ package body Flyology.IO.Timers is
                case Classify (Previous, Current) is
                   when Flyology.Wall_Clock_Policy.Keep_Waiting =>
                      Previous := Current;
-                  when Flyology.Wall_Clock_Policy.Reached =>
+
+                  when Flyology.Wall_Clock_Policy.Reached      =>
                      return
-                       (Outcome             => Target_Reached,
-                        Observed_Time       => Current.Wall,
-                        Backward_Adjustment => 0.0);
-                  when Flyology.Wall_Clock_Policy.Backstep =>
+                       (Outcome => Target_Reached, Observed_Time => Current.Wall, Backward_Adjustment => 0.0);
+
+                  when Flyology.Wall_Clock_Policy.Backstep     =>
                      return
                        (Outcome             => Clock_Moved_Backward,
                         Observed_Time       => Current.Wall,
                         Backward_Adjustment =>
-                          Minimum_Steady_Elapsed (Previous, Current)
-                          - (Current.Wall - Previous.Wall));
+                          Minimum_Steady_Elapsed (Previous, Current) - (Current.Wall - Previous.Wall));
                end case;
 
                if not Clock_Changed then
                   if not Flyology.IO.Wait
-                    (Flyology.Wall_Clock_Waits.Descriptor (Source),
-                     Flyology.IO.For_Read)
+                           (Flyology.Wall_Clock_Waits.Descriptor (Source), Flyology.IO.For_Read)
                   then
-                     raise Flyology.IO.Device_Error with
-                       "wall-clock wait ended without an event";
+                     raise Flyology.IO.Device_Error with "wall-clock wait ended without an event";
                   end if;
                   Flyology.Wall_Clock_Waits.Consume (Source);
 
@@ -402,18 +332,19 @@ package body Flyology.IO.Timers is
                   case Classify (Previous, Current) is
                      when Flyology.Wall_Clock_Policy.Keep_Waiting =>
                         Previous := Current;
-                     when Flyology.Wall_Clock_Policy.Reached =>
+
+                     when Flyology.Wall_Clock_Policy.Reached      =>
                         return
                           (Outcome             => Target_Reached,
                            Observed_Time       => Current.Wall,
                            Backward_Adjustment => 0.0);
-                     when Flyology.Wall_Clock_Policy.Backstep =>
+
+                     when Flyology.Wall_Clock_Policy.Backstep     =>
                         return
                           (Outcome             => Clock_Moved_Backward,
                            Observed_Time       => Current.Wall,
                            Backward_Adjustment =>
-                             Minimum_Steady_Elapsed (Previous, Current)
-                             - (Current.Wall - Previous.Wall));
+                             Minimum_Steady_Elapsed (Previous, Current) - (Current.Wall - Previous.Wall));
                   end case;
                end if;
             end;

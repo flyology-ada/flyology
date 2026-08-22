@@ -22,12 +22,11 @@ use type Interfaces.Unsigned_64;
 --  @formal Arena_Provider Statically selected relocatable arena instance
 --  @formal Key Immutable key adapter bound once for this map type
 --  @formal Element Immutable mapped-value adapter bound once for this map type
+
 generic
    with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
-   with package Key is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Key is new Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every dynamic-map header.
@@ -35,21 +34,20 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
 
    --  Schema for the FNV-1a, linear-probe, arena-backed map contract.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4448_4D41_0003# xor Key.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32) xor
-     Interfaces.Rotate_Left (Element.Signature, 17) xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48) xor
-     Arena_Provider.Identity.Schema xor
-     Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19) xor
-     Interfaces.Rotate_Left
-       (Interfaces.Unsigned_64 (Arena_Provider.Identity.Version), 41);
+     16#0001_4448_4D41_0003#
+     xor Key.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32)
+     xor Interfaces.Rotate_Left (Element.Signature, 17)
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48)
+     xor Arena_Provider.Identity.Schema
+     xor Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19)
+     xor Interfaces.Rotate_Left (Interfaces.Unsigned_64 (Arena_Provider.Identity.Version), 41);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelopes and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached dynamic-map view.
    type View is limited private;
@@ -59,9 +57,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @enum Put_Replaced An existing key's value was replaced
    --  @enum Put_Arena_Exhausted No arena block can satisfy table growth
    --  @enum Put_Arena_Contended Another caller owns arena metadata
-   type Put_Result is
-     (Put_Inserted, Put_Replaced, Put_Arena_Exhausted,
-      Put_Arena_Contended);
+   type Put_Result is (Put_Inserted, Put_Replaced, Put_Arena_Exhausted, Put_Arena_Contended);
 
    --  Return the fixed outer header extent.
    --  @return Complete dynamic-map header bytes
@@ -154,11 +150,11 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Value Application mapped value
    --  @param Result Insert, replacement, exhaustion, or arena contention
    procedure Put
-     (Item   : in out View;
-      Arena  : in out Arena_Provider.View;
+     (Item     : in out View;
+      Arena    : in out Arena_Provider.View;
       Key_Data : Key.Source;
-      Value  : Element.Source;
-      Result : out Put_Result);
+      Value    : Element.Source;
+      Result   : out Put_Result);
 
    --  Look up Key and copy its value when present.
    --  @param Item Internally synchronized map view
@@ -167,11 +163,11 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Value Observation assigned only when Found is true
    --  @param Found True only when Key is present
    procedure Get
-     (Item  : View;
-      Arena : Arena_Provider.View;
+     (Item     : View;
+      Arena    : Arena_Provider.View;
       Key_Data : Key.Source;
-      Value : out Element.Observed;
-      Found : out Boolean);
+      Value    : out Element.Observed;
+      Found    : out Boolean);
 
    --  Remove Key while retaining a tombstone for probe continuity.
    --  @param Item Internally synchronized map view
@@ -179,10 +175,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    --  @param Key_Data Application key value
    --  @param Removed True only when Key was present
    procedure Remove
-     (Item    : in out View;
-      Arena   : Arena_Provider.View;
-      Key_Data : Key.Source;
-      Removed : out Boolean);
+     (Item : in out View; Arena : Arena_Provider.View; Key_Data : Key.Source; Removed : out Boolean);
 
    --  Reset every current slot to empty without releasing table capacity.
    --  @param Item Internally synchronized map view
@@ -197,20 +190,20 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
 
 private
    type View is limited record
-      Core             : Layouts.Local_View;
-      Guard_Address    : System.Address := System.Null_Address;
-      Count_Address    : System.Address := System.Null_Address;
-      Capacity_Address : System.Address := System.Null_Address;
+      Core                   : Layouts.Local_View;
+      Guard_Address          : System.Address := System.Null_Address;
+      Count_Address          : System.Address := System.Null_Address;
+      Capacity_Address       : System.Address := System.Null_Address;
       Capacity_Check_Address : System.Address := System.Null_Address;
-      Current_Address  : System.Address := System.Null_Address;
-      Retired_Address  : System.Address := System.Null_Address;
-      Initial_Value    : Interfaces.Unsigned_32 := 0;
-      Key_Value        : Interfaces.Unsigned_32 := 0;
-      Value_Value      : Interfaces.Unsigned_32 := 0;
-      Arena_ID_Value   : Interfaces.Unsigned_64 := 0;
-      Arena_Epoch_Value : Interfaces.Unsigned_32 := 0;
-      Key_Offset       : Byte_Count := 0;
-      Value_Offset     : Byte_Count := 0;
-      Stride           : Byte_Count := 0;
+      Current_Address        : System.Address := System.Null_Address;
+      Retired_Address        : System.Address := System.Null_Address;
+      Initial_Value          : Interfaces.Unsigned_32 := 0;
+      Key_Value              : Interfaces.Unsigned_32 := 0;
+      Value_Value            : Interfaces.Unsigned_32 := 0;
+      Arena_ID_Value         : Interfaces.Unsigned_64 := 0;
+      Arena_Epoch_Value      : Interfaces.Unsigned_32 := 0;
+      Key_Offset             : Byte_Count := 0;
+      Value_Offset           : Byte_Count := 0;
+      Stride                 : Byte_Count := 0;
    end record;
 end Flyology.Data_Structures.Dynamic.Hash_Maps;

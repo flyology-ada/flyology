@@ -12,10 +12,7 @@ package body Flyology_Cachelines.Platform is
       return Flyology_Cachelines.Linux.Facts.Detected (Fallback);
    exception
       when others =>
-         return (Count     => 0,
-                 Ordering  => Unordered,
-                 Line_Size => 0,
-                 Classes   => (others => (others => 0)));
+         return (Count => 0, Ordering => Unordered, Line_Size => 0, Classes => (others => (others => 0)));
    end Detect;
 
 end Flyology_Cachelines.Platform;

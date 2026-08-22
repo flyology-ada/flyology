@@ -41,15 +41,14 @@ with Interfaces;
 --  @formal Now Task-safe monotonic timestamp source for producer operations
 --  @formal Producer_Count Number of independently synchronized producer shards
 --  @formal Select_Producer Task-safe automatic producer shard selector
+
 generic
    type Message_Type is private;
    Capacity : Positive := 1_024;
    Overflow : Overflow_Policy := Overwrite_Oldest;
    with function Now return Timestamp is Flyology_Debug.Clock;
    Producer_Count : Positive := 1;
-   with function Select_Producer
-     (Producer_Count : Positive) return Positive
-     is Flyology_Debug.First_Producer;
+   with function Select_Producer (Producer_Count : Positive) return Positive is Flyology_Debug.First_Producer;
 package Flyology_Debug.Tracers is
    --  Saturating count of messages lost at a history boundary.
    subtype Loss_Count is Interfaces.Unsigned_64;
@@ -130,9 +129,7 @@ package Flyology_Debug.Tracers is
    --  @param Message Definite payload copied by the tracer
    --  @param Producer Independent producer shard receiving Message
    --  @exception Closed_Error The tracer is closed
-   procedure Trace
-     (Message  : Message_Type;
-      Producer : Producer_Id);
+   procedure Trace (Message : Message_Type; Producer : Producer_Id);
 
    --  Attempt Trace without waiting for history capacity. Overwrite_Oldest
    --  always accepts after acquiring the protected store. Drop_Newest counts
@@ -150,10 +147,7 @@ package Flyology_Debug.Tracers is
    --  @param Message Definite payload offered to the tracer
    --  @param Accepted True when Message was copied into history
    --  @param Producer Independent producer shard offered Message
-   procedure Try_Trace
-     (Message  : Message_Type;
-      Accepted : out Boolean;
-      Producer : Producer_Id);
+   procedure Try_Trace (Message : Message_Type; Accepted : out Boolean; Producer : Producer_Id);
 
    --  Reversibly allow producer operations. Enable has no effect after Close.
    procedure Enable;
@@ -183,9 +177,7 @@ package Flyology_Debug.Tracers is
    --  Transfer retained state from an explicit producer shard.
    --  @param Result Exclusive handle replaced by the detached trace batch
    --  @param Producer Producer shard whose retained state is transferred
-   procedure Take
-     (Result   : in out Batch;
-      Producer : Producer_Id);
+   procedure Take (Result : in out Batch; Producer : Producer_Id);
 
    --  Release buffers currently held by Result, then atomically reserve every
    --  producer before detaching any buffer. The subsequent producer swaps are
@@ -264,8 +256,7 @@ package Flyology_Debug.Tracers is
    --  @param Result Acquired merged batch to inspect
    --  @return Aggregate metadata from all detached producer buffers
    --  @exception Constraint_Error Result does not own all producer buffers
-   function Statistics
-     (Result : Merged_Batch) return Merged_Batch_Statistics;
+   function Statistics (Result : Merged_Batch) return Merged_Batch_Statistics;
 
    --  Return one retained record in oldest-to-newest admission order. Calls
    --  from concurrent producers may be admitted in a different order from
@@ -275,8 +266,7 @@ package Flyology_Debug.Tracers is
    --  @return Timestamped copied message
    --  @exception Constraint_Error Result is unacquired or Index exceeds its
    --  trace count
-   function Trace_At
-     (Result : Batch; Index : Positive) return Trace_Record;
+   function Trace_At (Result : Batch; Index : Positive) return Trace_Record;
 
    --  Return the producer timestamp of Record_At.
    --  @param Record_At Trace record to inspect
@@ -303,10 +293,11 @@ package Flyology_Debug.Tracers is
    --  @exception Constraint_Error Result does not own a buffer
    procedure Visit
      (Result  : Batch;
-      Process : not null access procedure
-        (Sequence    : Sequence_Number;
-         Captured_At : Flyology_Debug.Timestamp;
-         Message     : not null access constant Message_Type));
+      Process :
+        not null access procedure
+          (Sequence    : Sequence_Number;
+           Captured_At : Flyology_Debug.Timestamp;
+           Message     : not null access constant Message_Type));
 
    --  Visit all retained messages without copying records or payloads. The
    --  merge preserves each producer's admission order and selects the earliest
@@ -320,11 +311,12 @@ package Flyology_Debug.Tracers is
    --  @exception Constraint_Error Result does not own all producer buffers
    procedure Visit_Merged
      (Result  : Merged_Batch;
-      Process : not null access procedure
-        (Producer    : Producer_Id;
-         Sequence    : Sequence_Number;
-         Captured_At : Flyology_Debug.Timestamp;
-         Message     : not null access constant Message_Type));
+      Process :
+        not null access procedure
+          (Producer    : Producer_Id;
+           Sequence    : Sequence_Number;
+           Captured_At : Flyology_Debug.Timestamp;
+           Message     : not null access constant Message_Type));
 
    --  Return oldest messages replaced by newer messages. The count saturates
    --  rather than wrapping and resets when a batch is detached or through
@@ -351,10 +343,10 @@ private
 
    --  @exclude
    --  @param Result Batch finalized for internal buffer return
-   overriding procedure Finalize (Result : in out Batch);
+   overriding
+   procedure Finalize (Result : in out Batch);
 
-   type Merged_Slot_Array is
-     array (Producer_Id) of Natural range 0 .. 2;
+   type Merged_Slot_Array is array (Producer_Id) of Natural range 0 .. 2;
 
    type Merged_Batch is new Ada.Finalization.Limited_Controlled with record
       Slots    : Merged_Slot_Array := (others => 0);
@@ -364,5 +356,6 @@ private
 
    --  @exclude
    --  @param Result Merged batch finalized for internal buffer return
-   overriding procedure Finalize (Result : in out Merged_Batch);
+   overriding
+   procedure Finalize (Result : in out Merged_Batch);
 end Flyology_Debug.Tracers;

@@ -15,8 +15,8 @@ procedure Buffer_Handoff is
    package CLI renames Ada.Command_Line;
    package RT renames Ada.Real_Time;
 
-   package Value_Channels is new Flyology.Channels.Bounded
-     (Flyology.Bytes.Unbounded_Bytes, Flyology.Bytes.Empty);
+   package Value_Channels is new
+     Flyology.Channels.Bounded (Flyology.Bytes.Unbounded_Bytes, Flyology.Bytes.Empty);
    package Buffer_Channels renames Flyology.Buffers.Channels;
    package Groups renames Flyology.Execution_Groups;
    package Topology renames Flyology.Execution_Groups.Topology;
@@ -26,7 +26,7 @@ procedure Buffer_Handoff is
 
    Queue_Capacity : constant Positive := 64;
    type Size_Array is array (Positive range <>) of Positive;
-   Sizes : constant Size_Array := (64, 512, 4_096, 16_384, 65_536);
+   Sizes          : constant Size_Array := (64, 512, 4_096, 16_384, 65_536);
 
    function Iterations_For (Size : Positive) return Positive is
       Target_Bytes : constant Positive := 64 * 1_024 * 1_024;
@@ -81,9 +81,7 @@ procedure Buffer_Handoff is
          Is_Valid := False;
       end Fail;
 
-      entry Await_Finished (Succeeded : out Boolean)
-        when Finished_Count = 2
-      is
+      entry Await_Finished (Succeeded : out Boolean) when Finished_Count = 2 is
       begin
          Succeeded := Is_Valid;
       end Await_Finished;
@@ -99,44 +97,47 @@ procedure Buffer_Handoff is
       Elapsed        : Duration)
    is
       MiB_Per_Second : constant Long_Float :=
-        Long_Float (Size) * Long_Float (Iterations)
-        / Long_Float (Elapsed) / Long_Float (1_024 * 1_024);
+        Long_Float (Size) * Long_Float (Iterations) / Long_Float (Elapsed) / Long_Float (1_024 * 1_024);
    begin
       Ada.Text_IO.Put
-        (Representation & "," & Placement & ","
-         & Producer_Group'Image & "," & Consumer_Group'Image & ","
-         & Size'Image & "," & Iterations'Image & ",");
-      Ada.Long_Float_Text_IO.Put
-        (Long_Float (Elapsed), Fore => 1, Aft => 6, Exp => 0);
+        (Representation
+         & ","
+         & Placement
+         & ","
+         & Producer_Group'Image
+         & ","
+         & Consumer_Group'Image
+         & ","
+         & Size'Image
+         & ","
+         & Iterations'Image
+         & ",");
+      Ada.Long_Float_Text_IO.Put (Long_Float (Elapsed), Fore => 1, Aft => 6, Exp => 0);
       Ada.Text_IO.Put (",");
-      Ada.Long_Float_Text_IO.Put
-        (MiB_Per_Second, Fore => 1, Aft => 2, Exp => 0);
+      Ada.Long_Float_Text_IO.Put (MiB_Per_Second, Fore => 1, Aft => 2, Exp => 0);
       Ada.Text_IO.New_Line;
    end Report;
 
    procedure Run_Value
-     (Size         : Positive;
-      Iterations   : Positive;
+     (Size           : Positive;
+      Iterations     : Positive;
       Producer_Group : Topology.Shard_Id;
       Consumer_Group : Topology.Shard_Id;
-      Placement    : String)
+      Placement      : String)
    is
-      Queue   : Value_Channels.Channel (Queue_Capacity);
-      Control : Run_Control;
-      Source  : constant Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Size)) := (others => 42);
+      Queue            : Value_Channels.Channel (Queue_Capacity);
+      Control          : Run_Control;
+      Source           :
+        constant Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Size)) :=
+          (others => 42);
       Started, Stopped : RT.Time;
-      Succeeded : Boolean;
+      Succeeded        : Boolean;
 
-      task type Producer_Task
-        (Assigned_Group : Topology.Shard_Id)
-      is
+      task type Producer_Task (Assigned_Group : Topology.Shard_Id) is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Producer_Task;
 
-      task type Consumer_Task
-        (Assigned_Group : Topology.Shard_Id)
-      is
+      task type Consumer_Task (Assigned_Group : Topology.Shard_Id) is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Consumer_Task;
 
@@ -152,8 +153,7 @@ procedure Buffer_Handoff is
          Control.Start;
          for Index in 1 .. Iterations loop
             declare
-               Value : constant Flyology.Bytes.Unbounded_Bytes :=
-                 Flyology.Bytes.To_Unbounded_Bytes (Source);
+               Value : constant Flyology.Bytes.Unbounded_Bytes := Flyology.Bytes.To_Unbounded_Bytes (Source);
             begin
                Queue.Send (Value);
             end;
@@ -171,8 +171,8 @@ procedure Buffer_Handoff is
       end Producer_Task;
 
       task body Consumer_Task is
-         Value : Flyology.Bytes.Unbounded_Bytes;
-         Count : Natural := 0;
+         Value          : Flyology.Bytes.Unbounded_Bytes;
+         Count          : Natural := 0;
          Ready_Reported : Boolean := False;
       begin
          Topology.Cross_To_Shard (Assigned_Group);
@@ -186,7 +186,8 @@ procedure Buffer_Handoff is
             begin
                Queue.Receive (Value);
             exception
-               when Value_Channels.Channel_Closed => exit;
+               when Value_Channels.Channel_Closed =>
+                  exit;
             end;
             Count := Count + 1;
          end loop;
@@ -216,42 +217,41 @@ procedure Buffer_Handoff is
          raise Program_Error with "value handoff benchmark failed";
       end if;
       Report
-        ("value-copy", Placement, Producer_Group, Consumer_Group,
-         Size, Iterations,
+        ("value-copy",
+         Placement,
+         Producer_Group,
+         Consumer_Group,
+         Size,
+         Iterations,
          RT.To_Duration (Stopped - Started));
    end Run_Value;
 
    procedure Run_Buffer
-     (Size         : Positive;
-      Iterations   : Positive;
+     (Size           : Positive;
+      Iterations     : Positive;
       Producer_Group : Topology.Shard_Id;
       Consumer_Group : Topology.Shard_Id;
-      Placement    : String)
+      Placement      : String)
    is
-      Storage : aliased Flyology.Buffers.Pool
-        (Block_Size => Size, Capacity => Queue_Capacity + 2);
-      Queue   : Buffer_Channels.Channel
-        (Storage'Access, Capacity => Queue_Capacity);
-      Control : Run_Control;
-      Source  : constant Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Size)) := (others => 42);
+      Storage          : aliased Flyology.Buffers.Pool (Block_Size => Size, Capacity => Queue_Capacity + 2);
+      Queue            : Buffer_Channels.Channel (Storage'Access, Capacity => Queue_Capacity);
+      Control          : Run_Control;
+      Source           :
+        constant Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Size)) :=
+          (others => 42);
       Started, Stopped : RT.Time;
-      Succeeded : Boolean;
+      Succeeded        : Boolean;
 
-      task type Producer_Task
-        (Assigned_Group : Topology.Shard_Id)
-      is
+      task type Producer_Task (Assigned_Group : Topology.Shard_Id) is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Producer_Task;
 
-      task type Consumer_Task
-        (Assigned_Group : Topology.Shard_Id)
-      is
+      task type Consumer_Task (Assigned_Group : Topology.Shard_Id) is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Consumer_Task;
 
       task body Producer_Task is
-         Value : Flyology.Buffers.Unique_Buffer (Storage'Access);
+         Value          : Flyology.Buffers.Unique_Buffer (Storage'Access);
          Ready_Reported : Boolean := False;
       begin
          Topology.Cross_To_Shard (Assigned_Group);
@@ -279,8 +279,8 @@ procedure Buffer_Handoff is
       end Producer_Task;
 
       task body Consumer_Task is
-         Value : Flyology.Buffers.Unique_Buffer (Storage'Access);
-         Count : Natural := 0;
+         Value          : Flyology.Buffers.Unique_Buffer (Storage'Access);
+         Count          : Natural := 0;
          Ready_Reported : Boolean := False;
       begin
          Topology.Cross_To_Shard (Assigned_Group);
@@ -294,7 +294,8 @@ procedure Buffer_Handoff is
             begin
                Queue.Receive_Move (Value);
             exception
-               when Buffer_Channels.Channel_Closed => exit;
+               when Buffer_Channels.Channel_Closed =>
+                  exit;
             end;
             Count := Count + 1;
             Flyology.Buffers.Release (Value);
@@ -325,33 +326,33 @@ procedure Buffer_Handoff is
          raise Program_Error with "buffer handoff benchmark failed";
       end if;
       Report
-        ("unique-buffer", Placement, Producer_Group, Consumer_Group,
-         Size, Iterations,
+        ("unique-buffer",
+         Placement,
+         Producer_Group,
+         Consumer_Group,
+         Size,
+         Iterations,
          RT.To_Duration (Stopped - Started));
    end Run_Buffer;
 
-   Placement : constant String :=
-     (if CLI.Argument_Count = 0 then "same" else CLI.Argument (1));
+   Placement      : constant String := (if CLI.Argument_Count = 0 then "same" else CLI.Argument (1));
    Producer_Group : constant Topology.Shard_Id := 0;
    Consumer_Group : constant Topology.Shard_Id :=
-     (if Placement = "same" then 0
-      elsif Placement = "cross" then 1
+     (if Placement = "same"
+      then 0
+      elsif Placement = "cross"
+      then 1
       else raise Program_Error with "placement must be same or cross");
 
 begin
    Ada.Text_IO.Put_Line
-     ("representation,topology,producer_group,consumer_group,bytes,"
-      & "iterations,seconds,mib_per_second");
+     ("representation,topology,producer_group,consumer_group,bytes," & "iterations,seconds,mib_per_second");
    for Size of Sizes loop
       declare
          Iterations : constant Positive := Iterations_For (Size);
       begin
-         Run_Value
-           (Size, Iterations, Producer_Group, Consumer_Group,
-            "shared-" & Placement);
-         Run_Buffer
-           (Size, Iterations, Producer_Group, Consumer_Group,
-            "shared-" & Placement);
+         Run_Value (Size, Iterations, Producer_Group, Consumer_Group, "shared-" & Placement);
+         Run_Buffer (Size, Iterations, Producer_Group, Consumer_Group, "shared-" & Placement);
       end;
    end loop;
 end Buffer_Handoff;

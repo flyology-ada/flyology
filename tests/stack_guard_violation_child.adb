@@ -13,8 +13,7 @@ procedure Stack_Guard_Violation_Child is
    Jump_Distance : C.size_t := 0;
 
    procedure Sparse_Stack_Write (Distance : C.size_t);
-   pragma Import
-     (C, Sparse_Stack_Write, "flyology_test_sparse_stack_write");
+   pragma Import (C, Sparse_Stack_Write, "flyology_test_sparse_stack_write");
 
    procedure Immediate_Exit (Status : C.int);
    pragma Import (C, Immediate_Exit, "_exit");
@@ -77,9 +76,7 @@ procedure Stack_Guard_Violation_Child is
    type Victim_Access is access Victim;
    type Attacker_Access is access Attacker;
 begin
-   if Ada.Command_Line.Argument_Count = 1
-     and then Ada.Command_Line.Argument (1) = "violate"
-   then
+   if Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "violate" then
       declare
          Victim_Task   : constant Victim_Access := new Victim;
          Attacker_Task : Attacker_Access;
@@ -96,9 +93,7 @@ begin
          --  lower boundary because the active task frames already consume
          --  space. That crosses the former single-page guard but remains
          --  inside the new guard on both supported hosts.
-         Jump_Distance :=
-           C.size_t (Pool.Live_Usable_Bytes)
-           + C.size_t (Get_Page_Size);
+         Jump_Distance := C.size_t (Pool.Live_Usable_Bytes) + C.size_t (Get_Page_Size);
          Attacker_Task := new Attacker;
          for Attempt in 1 .. 5_000 loop
             if Attacker_Task.all'Terminated then

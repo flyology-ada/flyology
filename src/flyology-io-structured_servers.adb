@@ -3,6 +3,7 @@ with Flyology.Counter_Policy;
 with Flyology.Structured_Server_Test_Hooks;
 with GNAT.OS_Lib;
 with Interfaces.C;
+
 package body Flyology.IO.Structured_Servers is
    package Connections renames Flyology.IO.Connections;
    package Counters renames Flyology.Counter_Policy;
@@ -12,10 +13,8 @@ package body Flyology.IO.Structured_Servers is
    use type Interfaces.C.int;
    use type Policy.Run_Phase;
 
-   function C_Close_Listener
-     (Descriptor : Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, C_Close_Listener, "flyology_structured_listener_close");
+   function C_Close_Listener (Descriptor : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, C_Close_Listener, "flyology_structured_listener_close");
 
    type Listener_Close_Guard
      (Source : not null access Sockets.Socket_Type;
@@ -24,17 +23,21 @@ package body Flyology.IO.Structured_Servers is
       Value : Descriptor := Invalid_Descriptor;
    end record;
 
-   overriding procedure Initialize (Item : in out Listener_Close_Guard);
-   overriding procedure Finalize (Item : in out Listener_Close_Guard);
+   overriding
+   procedure Initialize (Item : in out Listener_Close_Guard);
+   overriding
+   procedure Finalize (Item : in out Listener_Close_Guard);
 
-   overriding procedure Initialize (Item : in out Listener_Close_Guard) is
+   overriding
+   procedure Initialize (Item : in out Listener_Close_Guard) is
    begin
       --  Controlled initialization is abort-deferred. Transfer both halves of
       --  socket ownership here so an abort cannot observe duplicate owners.
       Sockets.Release (Item.Source.all, Item.Value);
    end Initialize;
 
-   overriding procedure Finalize (Item : in out Listener_Close_Guard) is
+   overriding
+   procedure Finalize (Item : in out Listener_Close_Guard) is
    begin
       if Item.Value /= Invalid_Descriptor then
          Test_Hooks.Barrier (4);
@@ -68,13 +71,12 @@ package body Flyology.IO.Structured_Servers is
          null;
       end Await_Stop;
 
-      function Stop_Was_Requested return Boolean is
-        (Policy.Stop_Was_Requested (Phase));
+      function Stop_Was_Requested return Boolean
+      is (Policy.Stop_Was_Requested (Phase));
 
       procedure Mark_Accepting is
       begin
-         Accepting_Marked :=
-           Policy.Accepting_After_Worker_Start (Phase);
+         Accepting_Marked := Policy.Accepting_After_Worker_Start (Phase);
       end Mark_Accepting;
 
       procedure Handler_Started is
@@ -86,18 +88,14 @@ package body Flyology.IO.Structured_Servers is
          Accepted := Counters.Saturating_Increment (Accepted);
       end Handler_Started;
 
-      procedure Handler_Completed
-        (Cancelled : Boolean;
-         Failed    : Boolean)
-      is
+      procedure Handler_Completed (Cancelled : Boolean; Failed : Boolean) is
       begin
          if Active = 0 then
             raise Program_Error with "handler completion without admission";
          end if;
          Active := Active - 1;
          if Cancelled then
-            Lifecycle.Cancelled :=
-              Counters.Saturating_Increment (Lifecycle.Cancelled);
+            Lifecycle.Cancelled := Counters.Saturating_Increment (Lifecycle.Cancelled);
          elsif not Failed then
             Completed := Counters.Saturating_Increment (Completed);
          end if;
@@ -105,21 +103,14 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Worker_Finished is
       begin
-         if not Policy.Worker_Finish_Allowed
-           (Workers_Done, Expected_Workers)
-         then
-            raise Program_Error with
-              "structured server worker completion exceeds capacity";
+         if not Policy.Worker_Finish_Allowed (Workers_Done, Expected_Workers) then
+            raise Program_Error with "structured server worker completion exceeds capacity";
          end if;
          Workers_Done := Workers_Done + 1;
       end Worker_Finished;
 
-      procedure Record_Failure
-        (Origin      : Failure_Origin;
-         Information : String)
-      is
-         Length : constant Natural :=
-           Natural'Min (Information'Length, Failure_Text'Length);
+      procedure Record_Failure (Origin : Failure_Origin; Information : String) is
+         Length : constant Natural := Natural'Min (Information'Length, Failure_Text'Length);
       begin
          Failure_Total := Failure_Total + 1;
          if Failure_Source = No_Failure then
@@ -127,8 +118,7 @@ package body Flyology.IO.Structured_Servers is
             Failure_Text_Length := Length;
             if Length > 0 then
                Failure_Text (1 .. Length) :=
-                 Information
-                   (Information'First .. Information'First + Length - 1);
+                 Information (Information'First .. Information'First + Length - 1);
             end if;
          end if;
          Phase := Policy.Phase_After_Stop (Phase);
@@ -142,11 +132,8 @@ package body Flyology.IO.Structured_Servers is
 
       procedure Finish_Serve is
       begin
-         if not Policy.Serve_Finish_Allowed
-           (Workers_Done, Expected_Workers, Active)
-         then
-            raise Program_Error with
-              "structured server finished with live handlers";
+         if not Policy.Serve_Finish_Allowed (Workers_Done, Expected_Workers, Active) then
+            raise Program_Error with "structured server finished with live handlers";
          end if;
          Phase := Finished;
          Accepting_Marked := False;
@@ -165,26 +152,22 @@ package body Flyology.IO.Structured_Servers is
          Expected_Workers := 0;
       end Abandon_Serve;
 
-      entry Await_All_Workers
-        when Expected_Workers > 0 and then Workers_Done >= Expected_Workers
-      is
+      entry Await_All_Workers when Expected_Workers > 0 and then Workers_Done >= Expected_Workers is
       begin
          null;
       end Await_All_Workers;
 
-      function Read_Snapshot return Snapshot is
-        (Running               =>
-           Policy.Snapshot_Running (Serve_Started, Phase),
-         Accepting             =>
-           Policy.Snapshot_Accepting (Accepting_Marked, Phase),
-         Shutdown_Requested    => Policy.Snapshot_Shutdown (Phase),
-         Forced_Cancellation   => Forced,
-         Active_Handlers       => Active,
-         Accepted_Connections  => Accepted,
-         Completed_Connections => Completed,
-         Cancelled_Connections => Cancelled,
-         Failures              => Failure_Total,
-         First_Failure         => Failure_Source);
+      function Read_Snapshot return Snapshot
+      is (Running               => Policy.Snapshot_Running (Serve_Started, Phase),
+          Accepting             => Policy.Snapshot_Accepting (Accepting_Marked, Phase),
+          Shutdown_Requested    => Policy.Snapshot_Shutdown (Phase),
+          Forced_Cancellation   => Forced,
+          Active_Handlers       => Active,
+          Accepted_Connections  => Accepted,
+          Completed_Connections => Completed,
+          Cancelled_Connections => Cancelled,
+          Failures              => Failure_Total,
+          First_Failure         => Failure_Source);
 
       function Failure_Information return String is
       begin
@@ -205,19 +188,18 @@ package body Flyology.IO.Structured_Servers is
       end if;
    end Request_Shutdown;
 
-   function Current (Item : Server) return Snapshot is
-     (Item.State.Read_Snapshot);
+   function Current (Item : Server) return Snapshot
+   is (Item.State.Read_Snapshot);
 
-   function First_Failure_Information (Item : Server) return String is
-     (Item.State.Failure_Information);
+   function First_Failure_Information (Item : Server) return String
+   is (Item.State.Failure_Information);
 
    procedure Close_Owned_Listener (Item : in out Server) is
       Result : aliased Interfaces.C.int := 0;
    begin
       if Sockets.Is_Open (Item.Owned_Listener) then
          declare
-            Guard : Listener_Close_Guard
-              (Item.Owned_Listener'Access, Result'Access);
+            Guard : Listener_Close_Guard (Item.Owned_Listener'Access, Result'Access);
             pragma Unreferenced (Guard);
          begin
             --  Initialization transfers ownership and finalization performs
@@ -225,8 +207,7 @@ package body Flyology.IO.Structured_Servers is
             null;
          end;
          if Result /= 0 then
-            raise Sockets.Socket_Error with
-              "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
+            raise Sockets.Socket_Error with "listener close failed, errno=" & GNAT.OS_Lib.Errno'Image;
          end if;
       end if;
    end Close_Owned_Listener;
@@ -251,27 +232,28 @@ package body Flyology.IO.Structured_Servers is
          Manager.Request_Shutdown;
       end Force_Handlers;
 
-      type Serve_Cleanup_Guard is
-        new Ada.Finalization.Limited_Controlled with record
+      type Serve_Cleanup_Guard is new Ada.Finalization.Limited_Controlled with record
          Transfer : Descriptor := Invalid_Descriptor;
          Armed    : Boolean := False;
       end record;
 
-      overriding procedure Initialize (Guard : in out Serve_Cleanup_Guard);
-      overriding procedure Finalize (Guard : in out Serve_Cleanup_Guard);
+      overriding
+      procedure Initialize (Guard : in out Serve_Cleanup_Guard);
+      overriding
+      procedure Finalize (Guard : in out Serve_Cleanup_Guard);
       procedure Complete (Armed : in out Boolean);
 
-      type Worker_Cleanup_Guard
-        (Armed : not null access Boolean)
-      is new Ada.Finalization.Limited_Controlled with null record;
+      type Worker_Cleanup_Guard (Armed : not null access Boolean) is new Ada.Finalization.Limited_Controlled
+      with null record;
 
-      overriding procedure Finalize (Guard : in out Worker_Cleanup_Guard);
+      overriding
+      procedure Finalize (Guard : in out Worker_Cleanup_Guard);
 
-      overriding procedure Initialize (Guard : in out Serve_Cleanup_Guard) is
+      overriding
+      procedure Initialize (Guard : in out Serve_Cleanup_Guard) is
       begin
          if Sockets.Is_Open (Item.Owned_Listener) then
-            raise Program_Error with
-              "structured server already owns a listener";
+            raise Program_Error with "structured server already owns a listener";
          end if;
 
          Item.State.Begin_Serve (Item.Capacity);
@@ -296,7 +278,8 @@ package body Flyology.IO.Structured_Servers is
          end;
       end Initialize;
 
-      overriding procedure Finalize (Guard : in out Serve_Cleanup_Guard) is
+      overriding
+      procedure Finalize (Guard : in out Serve_Cleanup_Guard) is
       begin
          if not Guard.Armed then
             return;
@@ -338,7 +321,8 @@ package body Flyology.IO.Structured_Servers is
          Guard.Armed := False;
       end Finalize;
 
-      overriding procedure Finalize (Guard : in out Worker_Cleanup_Guard) is
+      overriding
+      procedure Finalize (Guard : in out Worker_Cleanup_Guard) is
       begin
          if not Guard.Armed.all then
             return;
@@ -381,8 +365,7 @@ package body Flyology.IO.Structured_Servers is
 
    begin
       if not Sockets.Is_Open (Listener) then
-         raise Program_Error with
-           "structured server requires a listening socket";
+         raise Program_Error with "structured server requires a listening socket";
       end if;
 
       Test_Hooks.Barrier (0);
@@ -398,10 +381,9 @@ package body Flyology.IO.Structured_Servers is
             end Worker;
 
             task body Worker is
-               Activation_Checked : constant Boolean :=
-                 Test_Hooks.Check_Activation;
+               Activation_Checked  : constant Boolean := Test_Hooks.Check_Activation;
                pragma Unreferenced (Activation_Checked);
-               Stop_Worker : Boolean := False;
+               Stop_Worker         : Boolean := False;
                Completion_Reported : Boolean := False;
 
                procedure Report_Completion is
@@ -412,13 +394,9 @@ package body Flyology.IO.Structured_Servers is
                   end if;
                end Report_Completion;
 
-               procedure Report
-                 (Origin : Failure_Origin;
-                  Event  : Ada.Exceptions.Exception_Occurrence)
-               is
+               procedure Report (Origin : Failure_Origin; Event : Ada.Exceptions.Exception_Occurrence) is
                begin
-                  Item.State.Record_Failure
-                    (Origin, Ada.Exceptions.Exception_Information (Event));
+                  Item.State.Record_Failure (Origin, Ada.Exceptions.Exception_Information (Event));
                   Stop_Accepting;
                end Report;
             begin
@@ -454,8 +432,7 @@ package body Flyology.IO.Structured_Servers is
                            Admitted := True;
                            Item.State.Handler_Started;
                         exception
-                           when Connections.Operation_Cancelled |
-                                Connections.Admission_Closed =>
+                           when Connections.Operation_Cancelled | Connections.Admission_Closed =>
                               Stop_Worker := True;
                            when Event : others =>
                               Report (Admission_Loop, Event);
@@ -464,11 +441,7 @@ package body Flyology.IO.Structured_Servers is
 
                         if Admitted then
                            begin
-                              Handle
-                                (Context,
-                                 Connection,
-                                 Peer,
-                                 Item.Handler_Stop'Access);
+                              Handle (Context, Connection, Peer, Item.Handler_Stop'Access);
                            exception
                               when Connections.Operation_Cancelled =>
                                  Cancelled := True;
@@ -499,9 +472,7 @@ package body Flyology.IO.Structured_Servers is
                when Event : others =>
                   --  Preserve the task-scope join even if bookkeeping itself
                   --  detects an invariant failure.
-                  Item.State.Record_Failure
-                    (Admission_Loop,
-                     Ada.Exceptions.Exception_Information (Event));
+                  Item.State.Record_Failure (Admission_Loop, Ada.Exceptions.Exception_Information (Event));
                   Report_Completion;
             end Worker;
 
@@ -510,8 +481,7 @@ package body Flyology.IO.Structured_Servers is
             Test_Hooks.Barrier (6);
             declare
                Worker_Cleanup_Armed : aliased Boolean := True;
-               Worker_Cleanup : Worker_Cleanup_Guard
-                 (Worker_Cleanup_Armed'Access);
+               Worker_Cleanup       : Worker_Cleanup_Guard (Worker_Cleanup_Armed'Access);
                pragma Unreferenced (Worker_Cleanup);
             begin
                for Index in Workers'Range loop
@@ -554,7 +524,8 @@ package body Flyology.IO.Structured_Servers is
       end if;
    end Serve;
 
-   overriding procedure Finalize (Item : in out Server) is
+   overriding
+   procedure Finalize (Item : in out Server) is
       Was_Running : constant Boolean := Item.State.Read_Snapshot.Running;
    begin
       begin

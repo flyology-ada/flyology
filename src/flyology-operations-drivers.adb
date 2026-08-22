@@ -6,20 +6,16 @@ package body Flyology.Operations.Drivers is
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
 
-   function Pending_Slot
-     (Item : Operation'Class) return Operation_Id
-   is
+   function Pending_Slot (Item : Operation'Class) return Operation_Id is
    begin
       if Item.Slot = 0 then
          raise Operation_Error with "operation has not been started";
       end if;
       declare
-         Id : constant Operation_Id := Operation_Id (Item.Slot);
+         Id   : constant Operation_Id := Operation_Id (Item.Slot);
          Slot : Slot_Record renames Item.Set.Slots (Id);
       begin
-         if Slot.Generation /= Item.Generation
-           or else Slot.State /= Pending
-         then
+         if Slot.Generation /= Item.Generation or else Slot.State /= Pending then
             raise Operation_Error with "operation is not pending";
          end if;
          return Id;
@@ -32,12 +28,11 @@ package body Flyology.Operations.Drivers is
    end Start;
 
    procedure Rollback_Start (Item : in out Operation'Class) is
-      Id : constant Operation_Id := Pending_Slot (Item);
+      Id   : constant Operation_Id := Pending_Slot (Item);
       Slot : Slot_Record renames Item.Set.Slots (Id);
    begin
       if Slot.Dependents /= 0 then
-         raise Operation_Error with
-           "operation initiation already has dependent gates";
+         raise Operation_Error with "operation initiation already has dependent gates";
       end if;
       Slot.State := Idle;
       Slot.Source := No_Source;
@@ -50,27 +45,18 @@ package body Flyology.Operations.Drivers is
       Slot.Reported := False;
    end Rollback_Start;
 
-   procedure Arm_Readiness
-     (Item       : in out Operation'Class;
-      Descriptor : Interfaces.C.int;
-      For_Write  : Boolean)
+   procedure Arm_Readiness (Item : in out Operation'Class; Descriptor : Interfaces.C.int; For_Write : Boolean)
    is
-      Sources : constant Readiness_Source_Array :=
-        (1 => (Descriptor => Descriptor, For_Write => For_Write));
+      Sources : constant Readiness_Source_Array := (1 => (Descriptor => Descriptor, For_Write => For_Write));
    begin
       Arm_Readiness (Item, Sources);
    end Arm_Readiness;
 
-   procedure Arm_Readiness
-     (Item    : in out Operation'Class;
-      Sources : Readiness_Source_Array)
-   is
-      Id : Operation_Id;
+   procedure Arm_Readiness (Item : in out Operation'Class; Sources : Readiness_Source_Array) is
+      Id       : Operation_Id;
       Position : Natural := Readiness_Source_Index'First;
    begin
-      if Sources'Length = 0
-        or else Sources'Length > Max_Readiness_Sources_Per_Operation
-      then
+      if Sources'Length = 0 or else Sources'Length > Max_Readiness_Sources_Per_Operation then
          raise Operation_Error with "invalid readiness source count";
       end if;
       for Source of Sources loop
@@ -85,25 +71,22 @@ package body Flyology.Operations.Drivers is
       Item.Set.Slots (Id).Source := Descriptor_Source;
       Item.Set.Slots (Id).Source_Count := Sources'Length;
       for Source of Sources loop
-         Item.Set.Slots (Id).Descriptors
-           (Readiness_Source_Index (Position)) := Source.Descriptor;
-         Item.Set.Slots (Id).For_Write
-           (Readiness_Source_Index (Position)) := Source.For_Write;
+         Item.Set.Slots (Id).Descriptors (Readiness_Source_Index (Position)) := Source.Descriptor;
+         Item.Set.Slots (Id).For_Write (Readiness_Source_Index (Position)) := Source.For_Write;
          Position := Position + 1;
       end loop;
    end Arm_Readiness;
 
-   procedure Arm_Deadline
-     (Item     : in out Operation'Class;
-      Interval : Duration)
-   is
+   procedure Arm_Deadline (Item : in out Operation'Class; Interval : Duration) is
       Id  : constant Operation_Id := Pending_Slot (Item);
       Now : constant Duration := Clock;
    begin
       Item.Set.Slots (Id).Has_Deadline := True;
       Item.Set.Slots (Id).Deadline :=
-        (if Interval <= 0.0 then Now
-         elsif Interval >= Duration'Last - Now then Duration'Last
+        (if Interval <= 0.0
+         then Now
+         elsif Interval >= Duration'Last - Now
+         then Duration'Last
          else Now + Interval);
    end Arm_Deadline;
 
@@ -133,8 +116,7 @@ package body Flyology.Operations.Drivers is
    begin
       Flyology.Wake_Sources.Ensure (Item.Set.Wake);
       Read_Descriptor := Flyology.Wake_Sources.Descriptor (Item.Set.Wake);
-      Signal_Descriptor :=
-        Flyology.Wake_Sources.Signal_Descriptor (Item.Set.Wake);
+      Signal_Descriptor := Flyology.Wake_Sources.Signal_Descriptor (Item.Set.Wake);
    end Completion_Source;
 
    procedure Signal_Completion (Item : in out Operation'Class) is
@@ -144,10 +126,7 @@ package body Flyology.Operations.Drivers is
       Flyology.Wake_Sources.Signal (Item.Set.Wake);
    end Signal_Completion;
 
-   procedure Complete
-     (Item   : in out Operation'Class;
-      Result : Terminal_Outcome)
-   is
+   procedure Complete (Item : in out Operation'Class; Result : Terminal_Outcome) is
    begin
       Publish_Terminal (Item, Result);
    end Complete;

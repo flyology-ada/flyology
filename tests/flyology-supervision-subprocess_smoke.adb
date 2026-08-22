@@ -13,13 +13,12 @@ procedure Flyology.Supervision.Subprocess_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type C.int;
    function Pid_Exists (Pid : C.int) return C.int;
-   pragma Import
-     (C, Pid_Exists, "flyology_test_subprocess_pid_exists");
+   pragma Import (C, Pid_Exists, "flyology_test_subprocess_pid_exists");
 
-   Fixture : constant String := Ada.Directories.Compose
-     (Ada.Directories.Containing_Directory
-        (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
-      "subprocess_fixture");
+   Fixture : constant String :=
+     Ada.Directories.Compose
+       (Ada.Directories.Containing_Directory (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
+        "subprocess_fixture");
 
    protected type Generation_State is
       procedure Started (Pid : C.int);
@@ -29,8 +28,8 @@ procedure Flyology.Supervision.Subprocess_Smoke is
       function Cleanups return Natural;
       function Replacement_Order_Valid return Boolean;
    private
-      Pid_Value : C.int := -1;
-      Count     : Natural := 0;
+      Pid_Value     : C.int := -1;
+      Count         : Natural := 0;
       Cleanup_Count : Natural := 0;
       Order_Valid   : Boolean := True;
    end Generation_State;
@@ -50,22 +49,22 @@ procedure Flyology.Supervision.Subprocess_Smoke is
          Cleanup_Count := Cleanup_Count + 1;
       end Cleaned;
 
-      function Last_Pid return C.int is (Pid_Value);
-      function Starts return Natural is (Count);
-      function Cleanups return Natural is (Cleanup_Count);
-      function Replacement_Order_Valid return Boolean is (Order_Valid);
+      function Last_Pid return C.int
+      is (Pid_Value);
+      function Starts return Natural
+      is (Count);
+      function Cleanups return Natural
+      is (Cleanup_Count);
+      function Replacement_Order_Valid return Boolean
+      is (Order_Valid);
    end Generation_State;
 
    type Context is limited record
       State : Generation_State;
    end record;
 
-   procedure Execute
-     (State   : in out Context;
-      Control : not null access Generation_Control)
-   is
-      Command : Subprocesses.Command :=
-        Subprocesses.To_Command (Fixture);
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
+      Command : Subprocesses.Command := Subprocesses.To_Command (Fixture);
       Child   : Subprocesses.Process;
       Status  : Subprocesses.Exit_Status;
       Buffer  : Ada.Streams.Stream_Element_Array (1 .. 5);
@@ -73,16 +72,14 @@ procedure Flyology.Supervision.Subprocess_Smoke is
    begin
       Subprocesses.Append_Argument (Command, "resistant");
       Subprocesses.Spawn (Command, Child);
-      Subprocesses.Read_Standard_Output
-        (Child, Buffer, Last, Timeout => 2.0);
+      Subprocesses.Read_Standard_Output (Child, Buffer, Last, Timeout => 2.0);
       if Last /= Buffer'Last then
          raise Program_Error with "subprocess readiness message incomplete";
       end if;
       State.State.Started (C.int (Subprocesses.Identifier (Child)));
       Mark_Ready (Control.all);
       begin
-         Subprocesses.Wait
-           (Child, Status, Token => Stopping (Control.all));
+         Subprocesses.Wait (Child, Status, Token => Stopping (Control.all));
       exception
          when Flyology.Cancellation.Operation_Cancelled =>
             Subprocesses.Stop (Child, Grace => 0.020, Status => Status);
@@ -93,10 +90,11 @@ procedure Flyology.Supervision.Subprocess_Smoke is
       Subprocesses.Close (Child);
    end Execute;
 
-   package Generations is new Flyology.Supervision.Children
-     (Application_Context => Context,
-      Execute             => Execute,
-      Task_Model          => Flyology.Lightweight_Task);
+   package Generations is new
+     Flyology.Supervision.Children
+       (Application_Context => Context,
+        Execute             => Execute,
+        Task_Model          => Flyology.Lightweight_Task);
 
    task type Stopper (Control : not null access Generation_Control);
 
@@ -117,11 +115,7 @@ begin
          Control : aliased Generation_Control;
          Result  : Generation_Result;
       begin
-         Open
-           (Control,
-            (Controller => Controller,
-             Id         => 8_001,
-             Generation => Number));
+         Open (Control, (Controller => Controller, Id => 8_001, Generation => Number));
          declare
             Requester : Stopper (Control'Access);
          begin

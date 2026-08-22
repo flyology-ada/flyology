@@ -4,10 +4,7 @@ package body Flyology.Cancellation is
 
 #if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
    function Test_Cancellation_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_worker_native_executor_cancellation_failure";
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_cancellation_failure";
 #end if;
 
    protected body Token is
@@ -23,8 +20,7 @@ package body Flyology.Cancellation is
             if Wake_Sources.Descriptor (Wake) >= 0 then
 #if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
                if Test_Cancellation_Failure /= 0 then
-                  raise Program_Error with
-                    "injected cancellation wake signaling failure";
+                  raise Program_Error with "injected cancellation wake signaling failure";
                end if;
 #end if;
                Wake_Sources.Signal (Wake);
@@ -37,11 +33,10 @@ package body Flyology.Cancellation is
          null;
       end Await_Request;
 
-      function Requested return Boolean is (Is_Requested);
+      function Requested return Boolean
+      is (Is_Requested);
 
-      procedure Wait_Source
-        (FD : out Interfaces.C.int; Already_Requested : out Boolean)
-      is
+      procedure Wait_Source (FD : out Interfaces.C.int; Already_Requested : out Boolean) is
       begin
          Already_Requested := Is_Requested;
          if Is_Requested then

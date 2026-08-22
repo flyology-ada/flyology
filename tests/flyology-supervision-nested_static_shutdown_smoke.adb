@@ -27,8 +27,10 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
          Stopped := Stopped + 1;
       end End_Inner;
 
-      function Starts return Natural is (Started);
-      function Stops return Natural is (Stopped);
+      function Starts return Natural
+      is (Started);
+      function Stops return Natural
+      is (Stopped);
    end Counts;
 
    type Inner_Context is limited record
@@ -39,9 +41,7 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
       Inner : aliased Inner_Context;
    end record;
 
-   procedure Execute_Inner
-     (State   : in out Inner_Context;
-      Control : not null access Generation_Control) is
+   procedure Execute_Inner (State : in out Inner_Context; Control : not null access Generation_Control) is
    begin
       State.Observed.Begin_Inner;
       Mark_Ready (Control.all);
@@ -54,19 +54,19 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
       end loop;
    end Execute_Inner;
 
-   package Inner_Child is new Flyology.Supervision.Children
-     (Application_Context => Inner_Context,
-      Execute             => Execute_Inner,
-      Task_Model          => Flyology.Native_Task);
+   package Inner_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Inner_Context,
+        Execute             => Execute_Inner,
+        Task_Model          => Flyology.Native_Task);
 
    type Inner_Kind is (Only_Inner);
 
-   function Inner_Id (Child : Inner_Kind) return Child_Id is
-     (case Child is when Only_Inner => 14_000_000_000);
+   function Inner_Id (Child : Inner_Kind) return Child_Id
+   is (case Child is
+         when Only_Inner => 14_000_000_000);
 
-   function Inner_Specification
-     (Child : Inner_Kind) return Child_Specification
-   is
+   function Inner_Specification (Child : Inner_Kind) return Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -81,9 +81,7 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
          Group             => 0);
    end Inner_Specification;
 
-   function No_Relationship
-     (Left, Right : Inner_Kind) return Boolean
-   is
+   function No_Relationship (Left, Right : Inner_Kind) return Boolean is
       pragma Unreferenced (Left, Right);
    begin
       return False;
@@ -100,43 +98,40 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
       Inner_Child.Run (State, Control, Result);
    end Run_Inner_Generation;
 
-   package Inner_Supervisors is new Flyology.Supervision.Static
-      (Child_Kind          => Inner_Kind,
-      Application_Context => Inner_Context,
-      Logical_Id          => Inner_Id,
-      Specification       => Inner_Specification,
-      Depends_On          => No_Relationship,
-      Cohort_Member       => No_Relationship,
-      Run_One_Generation  => Run_Inner_Generation);
+   package Inner_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Inner_Kind,
+        Application_Context => Inner_Context,
+        Logical_Id          => Inner_Id,
+        Specification       => Inner_Specification,
+        Depends_On          => No_Relationship,
+        Cohort_Member       => No_Relationship,
+        Run_One_Generation  => Run_Inner_Generation);
 
-   procedure Execute_Outer
-     (State   : in out Context;
-      Control : not null access Generation_Control)
-   is
-      Item : aliased Inner_Supervisors.Supervisor;
+   procedure Execute_Outer (State : in out Context; Control : not null access Generation_Control) is
+      Item   : aliased Inner_Supervisors.Supervisor;
       Result : Supervisor_Result;
    begin
       Mark_Ready (Control.all);
-      Inner_Supervisors.Run_Nested
-        (Item, State.Inner, Control.all, Result);
+      Inner_Supervisors.Run_Nested (Item, State.Inner, Control.all, Result);
       if Result.Outcome /= Shutdown_Completed then
          raise Program_Error with "nested static shutdown failed";
       end if;
    end Execute_Outer;
 
-   package Outer_Child is new Flyology.Supervision.Children
-     (Application_Context => Context,
-      Execute             => Execute_Outer,
-      Task_Model          => Flyology.Native_Task);
+   package Outer_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Context,
+        Execute             => Execute_Outer,
+        Task_Model          => Flyology.Native_Task);
 
    type Outer_Kind is (Only_Outer);
 
-   function Outer_Id (Child : Outer_Kind) return Child_Id is
-     (case Child is when Only_Outer => 15_000_000_000);
+   function Outer_Id (Child : Outer_Kind) return Child_Id
+   is (case Child is
+         when Only_Outer => 15_000_000_000);
 
-   function Outer_Specification
-     (Child : Outer_Kind) return Child_Specification
-   is
+   function Outer_Specification (Child : Outer_Kind) return Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -165,25 +160,24 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
       Outer_Child.Run (State, Control, Result);
    end Run_Outer_Generation;
 
-   function No_Outer_Relationship
-     (Left, Right : Outer_Kind) return Boolean
-   is
+   function No_Outer_Relationship (Left, Right : Outer_Kind) return Boolean is
       pragma Unreferenced (Left, Right);
    begin
       return False;
    end No_Outer_Relationship;
 
-   package Outer_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind          => Outer_Kind,
-      Application_Context => Context,
-      Logical_Id          => Outer_Id,
-      Specification       => Outer_Specification,
-      Depends_On          => No_Outer_Relationship,
-      Cohort_Member       => No_Outer_Relationship,
-      Run_One_Generation  => Run_Outer_Generation);
+   package Outer_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Outer_Kind,
+        Application_Context => Context,
+        Logical_Id          => Outer_Id,
+        Specification       => Outer_Specification,
+        Depends_On          => No_Outer_Relationship,
+        Cohort_Member       => No_Outer_Relationship,
+        Run_One_Generation  => Run_Outer_Generation);
 
-   State : aliased Context;
-   Item : aliased Outer_Supervisors.Supervisor;
+   State  : aliased Context;
+   Item   : aliased Outer_Supervisors.Supervisor;
    Result : Supervisor_Result;
 
    task Owner is
@@ -198,13 +192,11 @@ procedure Flyology.Supervision.Nested_Static_Shutdown_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (3);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (3);
 begin
    Owner.Start;
    loop
-      exit when Outer_Supervisors.Current (Item, Only_Outer).Ready
-        and then State.Inner.Observed.Starts = 1;
+      exit when Outer_Supervisors.Current (Item, Only_Outer).Ready and then State.Inner.Observed.Starts = 1;
       if Ada.Real_Time.Clock >= Deadline then
          raise Program_Error with "nested static child did not start";
       end if;

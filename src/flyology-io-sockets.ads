@@ -16,6 +16,7 @@ with Interfaces.C;
 --  close, server shutdown, and per-operation cancellation. This package never
 --  consumes or closes an interrupt source, and every owner must outlive the
 --  operation.
+
 package Flyology.IO.Sockets is
 
    --  Opaque pathname for an AF_UNIX stream socket. Unix_Pathname validates
@@ -65,6 +66,7 @@ package Flyology.IO.Sockets is
       case Family is
          when IPv4 =>
             V4 : IPv4_Octets;
+
          when IPv6 =>
             V6 : IPv6_Octets;
       end case;
@@ -90,20 +92,15 @@ package Flyology.IO.Sockets is
    end record;
 
    --  IPv4 wildcard address.
-   Any_IPv4      : constant IP_Address (IPv4) :=
-     (Family => IPv4, V4 => (others => 0));
+   Any_IPv4      : constant IP_Address (IPv4) := (Family => IPv4, V4 => (others => 0));
    --  IPv4 loopback address.
-   Loopback_IPv4 : constant IP_Address (IPv4) :=
-     (Family => IPv4, V4 => (127, 0, 0, 1));
+   Loopback_IPv4 : constant IP_Address (IPv4) := (Family => IPv4, V4 => (127, 0, 0, 1));
    --  IPv6 wildcard address.
-   Any_IPv6      : constant IP_Address (IPv6) :=
-     (Family => IPv6, V6 => (others => 0));
+   Any_IPv6      : constant IP_Address (IPv6) := (Family => IPv6, V6 => (others => 0));
    --  IPv6 loopback address.
-   Loopback_IPv6 : constant IP_Address (IPv6) :=
-     (Family => IPv6, V6 => (16 => 1, others => 0));
+   Loopback_IPv6 : constant IP_Address (IPv6) := (Family => IPv6, V6 => (16 => 1, others => 0));
    --  Sentinel endpoint used when no Internet endpoint is available.
-   No_Endpoint   : constant Endpoint :=
-     (Family => IPv4, Address => Any_IPv4, Port => Any_Port, Scope => 0);
+   No_Endpoint   : constant Endpoint := (Family => IPv4, Address => Any_IPv4, Port => Any_Port, Scope => 0);
 
    --  Explicit Congestion Notification value carried by a received IP
    --  datagram. Unavailable is retained as a narrow extension seam for an
@@ -114,12 +111,7 @@ package Flyology.IO.Sockets is
    --  @enum ECT_One The packet carries the ECT(1) codepoint
    --  @enum ECT_Zero The packet carries the ECT(0) codepoint
    --  @enum Congestion_Experienced The packet carries the CE codepoint
-   type ECN_Codepoint is
-     (ECN_Unavailable,
-      Not_ECT,
-      ECT_One,
-      ECT_Zero,
-      Congestion_Experienced);
+   type ECN_Codepoint is (ECN_Unavailable, Not_ECT, ECT_One, ECT_Zero, Congestion_Experienced);
 
    --  Addressing and delivery information for one received datagram.
    --  Source and Destination retain the peer and the local address selected by
@@ -149,8 +141,7 @@ package Flyology.IO.Sockets is
    --  @param Text Candidate numeric address
    --  @param Family Required address family
    --  @return True when Text parses in Family
-   function Is_IP_Address
-     (Text : String; Family : Address_Family) return Boolean;
+   function Is_IP_Address (Text : String; Family : Address_Family) return Boolean;
 
    --  Format an Internet address without a port.
    --  @param Value Address to format
@@ -168,10 +159,8 @@ package Flyology.IO.Sockets is
    --  @param Scope Optional IPv6 interface scope
    --  @return Endpoint containing the supplied values
    function Network_Endpoint
-     (Address : IP_Address;
-      Port    : Flyology.IO.Sockets.Port;
-      Scope   : Scope_ID := 0) return Endpoint
-     with Pre => Address.Family = IPv6 or else Scope = 0;
+     (Address : IP_Address; Port : Flyology.IO.Sockets.Port; Scope : Scope_ID := 0) return Endpoint
+   with Pre => Address.Family = IPv6 or else Scope = 0;
 
    --  Limited owning operating-system socket handle. A default-initialized
    --  handle is closed. Use Move, Adopt, or Release for explicit ownership
@@ -195,8 +184,7 @@ package Flyology.IO.Sockets is
    --  @param Target Closed handle that receives ownership
    --  @exception Program_Error Target is open
    procedure Move (Source : in out Socket_Type; Target : in out Socket_Type)
-     with Pre => not Is_Open (Target),
-          Post => not Is_Open (Source);
+   with Pre => not Is_Open (Target), Post => not Is_Open (Source);
 
    --  Transport semantics requested when a socket is created.
    --  @enum Socket_Stream Reliable byte stream
@@ -204,7 +192,7 @@ package Flyology.IO.Sockets is
    type Socket_Mode is (Socket_Stream, Socket_Datagram);
 
    --  Raised when an operating-system socket operation fails.
-   Socket_Error : exception;
+   Socket_Error          : exception;
    --  Raised when a member of an operation's interrupt set becomes readable.
    Operation_Interrupted : exception;
 
@@ -230,8 +218,7 @@ package Flyology.IO.Sockets is
    --  Recover the stable error category embedded in Socket_Error.
    --  @param Occurrence Socket_Error occurrence raised by this package
    --  @return Portable error category
-   function Resolve_Exception
-     (Occurrence : Ada.Exceptions.Exception_Occurrence) return Error_Type;
+   function Resolve_Exception (Occurrence : Ada.Exceptions.Exception_Occurrence) return Error_Type;
 
    --  Create one blocking socket. Task-aware operations configure it as
    --  nonblocking before use.
@@ -241,11 +228,8 @@ package Flyology.IO.Sockets is
    --  @exception Socket_Error Creation or descriptor configuration fails
    --  @exception Program_Error Socket is already open
    procedure Create_Socket
-     (Socket : in out Socket_Type;
-      Family : Address_Family := IPv4;
-      Mode   : Socket_Mode := Socket_Stream)
-     with Pre => not Is_Open (Socket),
-          Post => Is_Open (Socket);
+     (Socket : in out Socket_Type; Family : Address_Family := IPv4; Mode : Socket_Mode := Socket_Stream)
+   with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
    --  Create one blocking AF_UNIX SOCK_STREAM socket. Task-aware operations
    --  configure it as nonblocking before use. Unix pathname sockets are
@@ -254,8 +238,7 @@ package Flyology.IO.Sockets is
    --  @exception Socket_Error Creation or descriptor configuration fails
    --  @exception Program_Error Socket is already open
    procedure Create_Unix_Stream_Socket (Socket : in out Socket_Type)
-     with Pre => not Is_Open (Socket),
-          Post => Is_Open (Socket);
+   with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
    --  Create a connected local socket pair for IPC and testing.
    --  @param Left First socket owned by the caller
@@ -264,18 +247,17 @@ package Flyology.IO.Sockets is
    --  @exception Socket_Error Creation or descriptor configuration fails
    --  @exception Program_Error Either target is open or both targets alias
    procedure Create_Socket_Pair
-     (Left  : in out Socket_Type;
-      Right : in out Socket_Type;
-      Mode  : Socket_Mode := Socket_Stream)
-     with Pre => not Is_Open (Left) and then not Is_Open (Right),
-          Post => Is_Open (Left) and then Is_Open (Right);
+     (Left : in out Socket_Type; Right : in out Socket_Type; Mode : Socket_Mode := Socket_Stream)
+   with
+     Pre  => not Is_Open (Left) and then not Is_Open (Right),
+     Post => Is_Open (Left) and then Is_Open (Right);
 
    --  Close Socket. The handle becomes closed even when close reports an error
    --  because descriptor state is no longer safely reusable.
    --  @param Socket Sole closing owner
    --  @exception Socket_Error Close fails
    procedure Close_Socket (Socket : in out Socket_Type)
-     with Post => not Is_Open (Socket);
+   with Post => not Is_Open (Socket);
 
    --  Transfer one descriptor into a closed socket handle. Source becomes
    --  Invalid_Descriptor. The caller must ensure Source is the sole closing
@@ -284,18 +266,17 @@ package Flyology.IO.Sockets is
    --  @param Target Closed socket handle that receives ownership
    --  @exception Program_Error Source is invalid or Target is open
    procedure Adopt (Source : in out Descriptor; Target : in out Socket_Type)
-     with Pre => Source >= 0 and then not Is_Open (Target),
-          Post =>
-            Source = Invalid_Descriptor
-              and then Is_Open (Target)
-              and then Native_Descriptor (Target) = Source'Old;
+   with
+     Pre  => Source >= 0 and then not Is_Open (Target),
+     Post =>
+       Source = Invalid_Descriptor and then Is_Open (Target) and then Native_Descriptor (Target) = Source'Old;
 
    --  Transfer Socket's descriptor without closing it. Source is closed on
    --  return; Target is Invalid_Descriptor when Source was already closed.
    --  @param Source Socket whose ownership transfers
    --  @param Target Descriptor that receives ownership
    procedure Release (Source : in out Socket_Type; Target : out Descriptor)
-     with Post => not Is_Open (Source);
+   with Post => not Is_Open (Source);
 
    --  Enable nonblocking and close-on-exec modes.
    --  Configuration is retained by the owning handle and repeated calls for
@@ -325,6 +306,7 @@ package Flyology.IO.Sockets is
       case Name is
          when Reuse_Address | Reuse_Port =>
             Enabled : Boolean := False;
+
          when Receive_Timeout =>
             Timeout : Duration := 0.0;
       end case;
@@ -338,18 +320,14 @@ package Flyology.IO.Sockets is
    --  @param Socket Open socket
    --  @param Option Option value
    --  @exception Socket_Error setsockopt fails
-   procedure Set_Socket_Option
-     (Socket : Socket_Type; Option : Option_Type);
+   procedure Set_Socket_Option (Socket : Socket_Type; Option : Option_Type);
 
    --  Apply one supported option at its explicit protocol level.
    --  @param Socket Open socket
    --  @param Level Socket option level
    --  @param Option Option value
    --  @exception Socket_Error setsockopt fails
-   procedure Set_Socket_Option
-     (Socket : Socket_Type;
-      Level  : Option_Level;
-      Option : Option_Type);
+   procedure Set_Socket_Option (Socket : Socket_Type; Level : Option_Level; Option : Option_Type);
 
    --  Bind Socket to a local endpoint.
    --  @param Socket Open socket
@@ -457,6 +435,7 @@ package Flyology.IO.Sockets is
       case Name is
          when Non_Blocking_IO =>
             Enabled : Boolean := False;
+
          when N_Bytes_To_Read =>
             Size : Natural := 0;
       end case;
@@ -466,8 +445,7 @@ package Flyology.IO.Sockets is
    --  @param Socket Open socket
    --  @param Request Request and returned query value
    --  @exception Socket_Error Configuration or query fails
-   procedure Control_Socket
-     (Socket : Socket_Type; Request : in out Request_Type);
+   procedure Control_Socket (Socket : Socket_Type; Request : in out Request_Type);
 
    --  Compatibility status for bounded native accepts.
    --  @enum Completed A connection was accepted
@@ -488,8 +466,7 @@ package Flyology.IO.Sockets is
       Address : out Endpoint;
       Timeout : Duration;
       Status  : out Selector_Status)
-     with Pre => not Is_Open (Socket),
-          Post => Is_Open (Socket) = (Status = Completed);
+   with Pre => not Is_Open (Socket), Post => Is_Open (Socket) = (Status = Completed);
 
    --  Receive one available chunk with task-aware readiness and one deadline.
    --  @param Socket Open connected socket
@@ -507,7 +484,7 @@ package Flyology.IO.Sockets is
       Last       : out Ada.Streams.Stream_Element_Offset;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Receive one UDP datagram with task-aware readiness and one deadline.
    --  Source and local destination endpoints are returned atomically with the
@@ -534,7 +511,7 @@ package Flyology.IO.Sockets is
       Metadata   : out Datagram_Metadata;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Receive directly into an acquired unique buffer and replace its readable
    --  length. The buffer remains solely owned by the caller while the kernel
@@ -554,9 +531,9 @@ package Flyology.IO.Sockets is
       Received   : out Natural;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests,
-          Post => Flyology.Buffers.Length (Item) = Received;
+   with
+     Pre  => Flyology.Buffers.Has_Buffer (Item) and then Interrupts'Length < Max_Wait_Requests,
+     Post => Flyology.Buffers.Length (Item) = Received;
 
    --  Fill Item or raise. One Timeout deadline spans every partial receive.
    --  @param Socket Open connected socket
@@ -572,7 +549,7 @@ package Flyology.IO.Sockets is
       Item       : out Ada.Streams.Stream_Element_Array;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Send one available chunk with task-aware readiness and one deadline.
    --  @param Socket Open connected socket
@@ -590,7 +567,7 @@ package Flyology.IO.Sockets is
       Last       : out Ada.Streams.Stream_Element_Offset;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Send one UDP datagram to Destination with task-aware readiness and one
    --  deadline. The kernel selects the local source address. Empty Item sends
@@ -612,7 +589,7 @@ package Flyology.IO.Sockets is
       Destination : Endpoint;
       Timeout     : Duration := Infinite;
       Interrupts  : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Send one UDP datagram while selecting its local source endpoint. Source
    --  normally comes from received Metadata.Destination. Its address and IPv6
@@ -639,9 +616,7 @@ package Flyology.IO.Sockets is
       Source      : Endpoint;
       Timeout     : Duration := Infinite;
       Interrupts  : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       Source.Family = Destination.Family
-         and then Interrupts'Length < Max_Wait_Requests;
+   with Pre => Source.Family = Destination.Family and then Interrupts'Length < Max_Wait_Requests;
 
    --  Send one available chunk directly from a unique buffer. No Flyology
    --  payload copy is made and Item remains owned by the caller.
@@ -660,8 +635,7 @@ package Flyology.IO.Sockets is
       Sent       : out Natural;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests;
+   with Pre => Flyology.Buffers.Has_Buffer (Item) and then Interrupts'Length < Max_Wait_Requests;
 
    --  Send all of Item or raise. One Timeout deadline spans every partial
    --  send.
@@ -678,7 +652,7 @@ package Flyology.IO.Sockets is
       Item       : Ada.Streams.Stream_Element_Array;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Send a unique buffer's complete readable payload without a Flyology
    --  payload copy. Item remains owned until the synchronous call returns.
@@ -695,13 +669,11 @@ package Flyology.IO.Sockets is
       Item       : Flyology.Buffers.Unique_Buffer;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Flyology.Buffers.Has_Buffer (Item)
-       and then Interrupts'Length < Max_Wait_Requests;
+   with Pre => Flyology.Buffers.Has_Buffer (Item) and then Interrupts'Length < Max_Wait_Requests;
 
    --  Common limited base for scoped stream operations. Concrete operations
    --  borrow an aliased socket and buffer until Finish consumes their result.
-   type Socket_Operation is
-     abstract new Flyology.Operations.Operation with private;
+   type Socket_Operation is abstract new Flyology.Operations.Operation with private;
    --  Scoped one-step stream receive.
    type Receive_Operation is new Socket_Operation with private;
    --  Scoped stream receive that fills its array.
@@ -840,7 +812,7 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Infinite) return Buffer_Receive_Operation
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start or restart a unique-buffer receive in an established operation.
    --  @param Socket Aliased open connected socket
@@ -852,7 +824,7 @@ package Flyology.IO.Sockets is
       Item      : not null access Flyology.Buffers.Unique_Buffer;
       Timeout   : Duration := Infinite;
       Operation : in out Buffer_Receive_Operation)
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start one partial send from an acquired unique buffer.
    --  @param Set Completion set that owns the operation slot
@@ -865,7 +837,7 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Infinite) return Buffer_Send_Operation
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start or restart a unique-buffer send in an established operation.
    --  @param Socket Aliased open connected socket
@@ -877,7 +849,7 @@ package Flyology.IO.Sockets is
       Item      : not null access Flyology.Buffers.Unique_Buffer;
       Timeout   : Duration := Infinite;
       Operation : in out Buffer_Send_Operation)
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start a complete send from an acquired unique buffer.
    --  @param Set Completion set that owns the operation slot
@@ -890,7 +862,7 @@ package Flyology.IO.Sockets is
       Socket  : not null access Socket_Type;
       Item    : not null access Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Infinite) return Buffer_Send_All_Operation
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start or restart a complete unique-buffer send in an established
    --  operation object.
@@ -903,7 +875,7 @@ package Flyology.IO.Sockets is
       Item      : not null access Flyology.Buffers.Unique_Buffer;
       Timeout   : Duration := Infinite;
       Operation : in out Buffer_Send_All_Operation)
-     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+   with Pre => Flyology.Buffers.Has_Buffer (Item.all);
 
    --  Start one datagram receive. A zero-length Item still consumes one
    --  zero-length datagram. Socket and Item remain borrowed until Finish.
@@ -938,7 +910,7 @@ package Flyology.IO.Sockets is
    --  @param Timeout Relative operation deadline in seconds
    --  @return Started limited datagram send operation
    function Send_Datagram
-      (Set         : not null access Flyology.Operations.Completion_Set'Class;
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
       Socket      : not null access Socket_Type;
       Item        : not null access constant Ada.Streams.Stream_Element_Array;
       Destination : Endpoint;
@@ -972,7 +944,7 @@ package Flyology.IO.Sockets is
       Destination : Endpoint;
       Source      : Endpoint;
       Timeout     : Duration := Infinite) return Send_Datagram_Operation
-     with Pre => Source.Family = Destination.Family;
+   with Pre => Source.Family = Destination.Family;
 
    --  Start or restart one source-selected datagram send.
    --  @param Socket Aliased open datagram socket
@@ -988,7 +960,7 @@ package Flyology.IO.Sockets is
       Source      : Endpoint;
       Timeout     : Duration := Infinite;
       Operation   : in out Send_Datagram_Operation)
-     with Pre => Source.Family = Destination.Family;
+   with Pre => Source.Family = Destination.Family;
 
    --  Start one Internet-stream connection attempt. Socket remains borrowed
    --  until Finish; cancellation does not roll back kernel connection effects.
@@ -999,14 +971,12 @@ package Flyology.IO.Sockets is
    --  @param Interrupts Readable lifecycle sources borrowed until completion
    --  @return Started limited connect operation
    function Connect
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Server  : Endpoint;
-      Timeout : Duration := Infinite;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Server     : Endpoint;
+      Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
-     with Pre =>
-       Interrupts'Length <
-         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart one Internet-stream connection attempt in an
    --  established operation object.
@@ -1016,14 +986,12 @@ package Flyology.IO.Sockets is
    --  @param Operation Fresh, released, or consumed connect operation
    --  @param Interrupts Readable lifecycle sources borrowed until completion
    procedure Connect
-     (Socket    : not null access Socket_Type;
-      Server    : Endpoint;
-      Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation;
+     (Socket     : not null access Socket_Type;
+      Server     : Endpoint;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Connect_Operation;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       Interrupts'Length <
-         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one Unix-stream connection attempt.
    --  @param Set Completion set that owns the operation slot
@@ -1033,14 +1001,12 @@ package Flyology.IO.Sockets is
    --  @param Interrupts Readable lifecycle sources borrowed until completion
    --  @return Started limited connect operation
    function Connect
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Server  : Unix_Path;
-      Timeout : Duration := Infinite;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Server     : Unix_Path;
+      Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts) return Connect_Operation
-     with Pre =>
-       Interrupts'Length <
-         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart one Unix-stream connection attempt.
    --  @param Socket Aliased open unconnected Unix-stream socket
@@ -1049,14 +1015,12 @@ package Flyology.IO.Sockets is
    --  @param Operation Fresh, released, or consumed connect operation
    --  @param Interrupts Readable lifecycle sources borrowed until completion
    procedure Connect
-     (Socket    : not null access Socket_Type;
-      Server    : Unix_Path;
-      Timeout   : Duration := Infinite;
-      Operation : in out Connect_Operation;
+     (Socket     : not null access Socket_Type;
+      Server     : Unix_Path;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Connect_Operation;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       Interrupts'Length <
-         Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one Internet-stream accept. Server remains borrowed until Finish;
    --  the accepted socket and peer endpoint are retained by the operation.
@@ -1101,9 +1065,7 @@ package Flyology.IO.Sockets is
    --  Consume one terminal partial receive and publish its Last value.
    --  @param Operation Terminal receive operation
    --  @param Last Last received element, or Item'First - 1 on closure
-   procedure Finish
-     (Operation : in out Receive_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Receive_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume one terminal exact receive.
    --  @param Operation Terminal exact-receive operation
@@ -1112,9 +1074,7 @@ package Flyology.IO.Sockets is
    --  Consume one terminal partial send and publish its Last value.
    --  @param Operation Terminal send operation
    --  @param Last Last sent element, or Item'First - 1 when none
-   procedure Finish
-     (Operation : in out Send_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Send_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume one terminal complete send.
    --  @param Operation Terminal complete-send operation
@@ -1123,16 +1083,12 @@ package Flyology.IO.Sockets is
    --  Consume one unique-buffer receive and commit its readable length.
    --  @param Operation Terminal unique-buffer receive operation
    --  @param Received Number of received bytes; zero on closure
-   procedure Finish
-     (Operation : in out Buffer_Receive_Operation;
-      Received  : out Natural);
+   procedure Finish (Operation : in out Buffer_Receive_Operation; Received : out Natural);
 
    --  Consume one partial unique-buffer send.
    --  @param Operation Terminal unique-buffer send operation
    --  @param Sent Number of bytes sent
-   procedure Finish
-     (Operation : in out Buffer_Send_Operation;
-      Sent      : out Natural);
+   procedure Finish (Operation : in out Buffer_Send_Operation; Sent : out Natural);
 
    --  Consume one complete unique-buffer send.
    --  @param Operation Terminal complete unique-buffer send operation
@@ -1152,8 +1108,7 @@ package Flyology.IO.Sockets is
    --  @param Operation Terminal datagram send operation
    --  @param Last Last sent element, or Item'First - 1 for an empty datagram
    procedure Finish
-     (Operation : in out Send_Datagram_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+     (Operation : in out Send_Datagram_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume one terminal Internet- or Unix-stream connection attempt.
    --  @param Operation Terminal connect operation
@@ -1165,21 +1120,14 @@ package Flyology.IO.Sockets is
    --  @param Operation Terminal accept operation
    --  @param Socket Closed target that receives the accepted socket
    --  @param Address Accepted peer endpoint
-   procedure Finish
-     (Operation : in out Accept_Operation;
-      Socket    : in out Socket_Type;
-      Address   : out Endpoint)
-     with Pre => not Is_Open (Socket),
-          Post => Is_Open (Socket);
+   procedure Finish (Operation : in out Accept_Operation; Socket : in out Socket_Type; Address : out Endpoint)
+   with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
    --  Consume one successful Unix-stream accept and transfer ownership.
    --  @param Operation Terminal Unix accept operation
    --  @param Socket Closed target that receives the accepted socket
-   procedure Finish
-     (Operation : in out Unix_Accept_Operation;
-      Socket    : in out Socket_Type)
-     with Pre => not Is_Open (Socket),
-          Post => Is_Open (Socket);
+   procedure Finish (Operation : in out Unix_Accept_Operation; Socket : in out Socket_Type)
+   with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
@@ -1200,10 +1148,7 @@ package Flyology.IO.Sockets is
       Address    : out Endpoint;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       not Is_Open (Socket) and then
-       Interrupts'Length < Max_Wait_Requests,
-       Post => Is_Open (Socket);
+   with Pre => not Is_Open (Socket) and then Interrupts'Length < Max_Wait_Requests, Post => Is_Open (Socket);
 
    --  Accept one pathname Unix-stream connection and configure it for
    --  Flyology I/O. No peer pathname is returned because connected pathname
@@ -1224,10 +1169,7 @@ package Flyology.IO.Sockets is
       Socket     : in out Socket_Type;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre =>
-       not Is_Open (Socket) and then
-       Interrupts'Length < Max_Wait_Requests,
-       Post => Is_Open (Socket);
+   with Pre => not Is_Open (Socket) and then Interrupts'Length < Max_Wait_Requests, Post => Is_Open (Socket);
 
    --  Connect Socket to Server with task-aware readiness and one deadline. An
    --  attempt that the kernel is still establishing, including one reported as
@@ -1245,7 +1187,7 @@ package Flyology.IO.Sockets is
       Server     : Endpoint;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Connect Socket to a pathname Unix-stream server with task-aware
    --  readiness and one deadline. The pathname names a filesystem entry, not
@@ -1263,7 +1205,7 @@ package Flyology.IO.Sockets is
       Server     : Unix_Path;
       Timeout    : Duration := Infinite;
       Interrupts : Interrupt_Set := No_Interrupts)
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
 private
    Unix_Path_Storage_Capacity : constant := 108;
@@ -1293,13 +1235,15 @@ private
       Accept_Internet,
       Accept_Unix);
    type Scoped_Failure is
-     (No_Failure, Socket_Failure, Deadline_Failure,
+     (No_Failure,
+      Socket_Failure,
+      Deadline_Failure,
       Interrupted_Failure,
-      Peer_Closed_Failure, No_Progress_Failure,
+      Peer_Closed_Failure,
+      No_Progress_Failure,
       Partial_Datagram_Failure);
 
-   type Socket_Operation is
-     abstract new Flyology.Operations.Operation with record
+   type Socket_Operation is abstract new Flyology.Operations.Operation with record
       Kind        : Scoped_IO_Kind := Receive_One;
       Socket      : access Socket_Type := null;
       Array_Item  : access Ada.Streams.Stream_Element_Array := null;
@@ -1313,18 +1257,16 @@ private
    --  @exclude
    --  @param Item Socket operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Socket_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Socket_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Socket operation to cancel
-   overriding procedure Request_Cancellation
-     (Item : in out Socket_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Socket_Operation);
 
    type Datagram_Operation is abstract new Socket_Operation with record
-      Datagram_Item       : access constant
-        Ada.Streams.Stream_Element_Array := null;
+      Datagram_Item       : access constant Ada.Streams.Stream_Element_Array := null;
       Source_Family       : aliased Interfaces.C.unsigned_char := 0;
       Source_Address      : aliased IPv6_Octets := (others => 0);
       Source_Port         : aliased Interfaces.C.unsigned := 0;
@@ -1341,18 +1283,15 @@ private
    --  @exclude
    --  @param Item Datagram operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Datagram_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Datagram_Operation; Event : Flyology.Operations.Driver_Event);
 
    type Connect_Operation is new Socket_Operation with record
       Destination      : Endpoint := No_Endpoint;
       Unix_Destination : Unix_Path;
-      Interrupts       : Interrupt_Set
-        (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
-          (others => Invalid_Descriptor);
-      Interrupt_Count  : Natural range
-        0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
+      Interrupts       : Interrupt_Set (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
+        (others => Invalid_Descriptor);
+      Interrupt_Count  : Natural range 0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
       Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout          : Duration := Infinite;
       Retry_Due        : Boolean := False;
@@ -1361,9 +1300,8 @@ private
    --  @exclude
    --  @param Item Connect operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Connect_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Connect_Operation; Event : Flyology.Operations.Driver_Event);
 
    type Socket_Owner is new Ada.Finalization.Limited_Controlled with record
       Socket : Socket_Type;
@@ -1371,7 +1309,8 @@ private
 
    --  @exclude
    --  @param Item Accepted-socket owner to close during finalization
-   overriding procedure Finalize (Item : in out Socket_Owner);
+   overriding
+   procedure Finalize (Item : in out Socket_Owner);
 
    type Accept_State is record
       Accepted         : Socket_Owner;
@@ -1393,9 +1332,8 @@ private
    --  @exclude
    --  @param Item Accept operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Accept_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Accept_Operation; Event : Flyology.Operations.Driver_Event);
 
    type Unix_Accept_Operation is new Socket_Operation with record
       State : aliased Accept_State;
@@ -1404,9 +1342,8 @@ private
    --  @exclude
    --  @param Item Unix accept operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Unix_Accept_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Unix_Accept_Operation; Event : Flyology.Operations.Driver_Event);
 
    type Receive_Operation is new Socket_Operation with null record;
    type Receive_Exactly_Operation is new Socket_Operation with null record;

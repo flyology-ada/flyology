@@ -11,6 +11,7 @@ with Flyology;
 --  group and a destroyed mutex. The injected create window parks the foreign
 --  creator exactly there, and the process-exit check requires the scheduler to
 --  have refused the create and reached its normal stopped state.
+
 procedure Create_Finalize_Race_Smoke is
 
    task type Group_Starter is
@@ -26,8 +27,7 @@ procedure Create_Finalize_Race_Smoke is
 
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "create/finalize race test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "create/finalize race test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
    if not Create_Race_Support.Arm_Exit_Check then
       raise Program_Error with "cannot register create/finalize exit check";
@@ -55,12 +55,11 @@ begin
       delay 0.001;
    end loop;
    if not Parked then
-      raise Program_Error with
-        "foreign creating thread never reached the create window";
+      raise Program_Error with "foreign creating thread never reached the create window";
    end if;
 
-   --  Returning from here makes GNARL finalize global tasking, which calls
-   --  the scheduler's one-shot Finalize. Finalize sees an empty registry and a
-   --  quiescent group, stops that group, and only then releases the parked
-   --  creator.
+--  Returning from here makes GNARL finalize global tasking, which calls
+--  the scheduler's one-shot Finalize. Finalize sees an empty registry and a
+--  quiescent group, stops that group, and only then releases the parked
+--  creator.
 end Create_Finalize_Race_Smoke;

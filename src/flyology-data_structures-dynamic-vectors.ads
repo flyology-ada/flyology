@@ -17,10 +17,10 @@ use type Interfaces.Unsigned_64;
 --  A vector and its arena may be mapped at different native addresses.
 --  @formal Arena_Provider Statically selected relocatable arena instance
 --  @formal Element Immutable element adapter bound once for this vector type
+
 generic
    with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
 
    --  Eight-byte magic stored in every dynamic-vector header.
@@ -28,18 +28,18 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
 
    --  Schema identifier for the arena-backed vector layout and growth policy.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4456_4543_0003# xor Element.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32) xor
-     Arena_Provider.Identity.Schema xor
-     Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19) xor
-     Interfaces.Unsigned_64 (Arena_Provider.Identity.Version);
+     16#0001_4456_4543_0003#
+     xor Element.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32)
+     xor Arena_Provider.Identity.Schema
+     xor Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19)
+     xor Interfaces.Unsigned_64 (Arena_Provider.Identity.Version);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelopes and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached dynamic-vector view.
    type View is limited private;
@@ -145,10 +145,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Arena Matching attached arena view
    --  @param Index One-based initialized element position
    --  @return Bound immutable observation
-   function Read
-     (Item  : View;
-      Arena : Arena_Provider.View;
-      Index : Positive) return Element.Observed;
+   function Read (Item : View; Arena : Arena_Provider.View; Index : Positive) return Element.Observed;
 
    --  Replace the one-based initialized element at Index.
    --  @param Item Internally synchronized vector view
@@ -156,10 +153,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Index One-based initialized element position
    --  @param Data Application element value
    procedure Replace
-     (Item  : in out View;
-      Arena : Arena_Provider.View;
-      Index : Positive;
-      Data  : Element.Source);
+     (Item : in out View; Arena : Arena_Provider.View; Index : Positive; Data : Element.Source);
 
    --  Copy and remove the last element. Empty vectors return Popped false and
    --  do not assign Data or release their retained allocation.
@@ -168,10 +162,7 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
    --  @param Data Observation assigned only when Popped is true
    --  @param Popped True only when an element was removed
    procedure Try_Pop
-     (Item   : in out View;
-      Arena  : Arena_Provider.View;
-      Data   : out Element.Observed;
-      Popped : out Boolean);
+     (Item : in out View; Arena : Arena_Provider.View; Data : out Element.Observed; Popped : out Boolean);
 
    --  Set Length to zero without releasing current payload capacity.
    --  @param Item Internally synchronized vector view
@@ -186,17 +177,17 @@ package Flyology.Data_Structures.Dynamic.Vectors with Preelaborate is
 
 private
    type View is limited record
-      Core             : Layouts.Local_View;
-      Guard_Address    : System.Address := System.Null_Address;
-      Length_Address   : System.Address := System.Null_Address;
-      Capacity_Address : System.Address := System.Null_Address;
+      Core                   : Layouts.Local_View;
+      Guard_Address          : System.Address := System.Null_Address;
+      Length_Address         : System.Address := System.Null_Address;
+      Capacity_Address       : System.Address := System.Null_Address;
       Capacity_Check_Address : System.Address := System.Null_Address;
-      Current_Address  : System.Address := System.Null_Address;
-      Retired_Address  : System.Address := System.Null_Address;
-      Initial_Value    : Interfaces.Unsigned_32 := 0;
-      Element_Value    : Interfaces.Unsigned_32 := 0;
-      Stride_Value     : Byte_Count := 0;
-      Arena_ID_Value   : Interfaces.Unsigned_64 := 0;
-      Arena_Epoch_Value : Interfaces.Unsigned_32 := 0;
+      Current_Address        : System.Address := System.Null_Address;
+      Retired_Address        : System.Address := System.Null_Address;
+      Initial_Value          : Interfaces.Unsigned_32 := 0;
+      Element_Value          : Interfaces.Unsigned_32 := 0;
+      Stride_Value           : Byte_Count := 0;
+      Arena_ID_Value         : Interfaces.Unsigned_64 := 0;
+      Arena_Epoch_Value      : Interfaces.Unsigned_32 := 0;
    end record;
 end Flyology.Data_Structures.Dynamic.Vectors;

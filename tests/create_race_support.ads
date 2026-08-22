@@ -1,6 +1,7 @@
 --  Library-level state for scheduler Create race regression tests. The racing
 --  creator runs on a foreign (non-Ada) thread, so everything it touches must
 --  outlive the main subprogram's frame.
+
 package Create_Race_Support is
 
    function Arm_Exit_Check return Boolean;

@@ -37,14 +37,14 @@ package body System.Flyology.File_Engine is
    subtype S64 is Interfaces.Integer_64;
 
    Ring_Entries : constant U32 := 1_024;
-   ENOSYS : constant C.int := 38;
-   EPERM  : constant C.int := 1;
-   EINVAL : constant C.int := 22;
-   ENOMEM : constant C.int := 12;
-   EAGAIN : constant C.int := 11;
-   EBUSY  : constant C.int := 16;
-   ENOENT : constant C.int := 2;
-   EINPROGRESS : constant C.int := 115;
+   ENOSYS       : constant C.int := 38;
+   EPERM        : constant C.int := 1;
+   EINVAL       : constant C.int := 22;
+   ENOMEM       : constant C.int := 12;
+   EAGAIN       : constant C.int := 11;
+   EBUSY        : constant C.int := 16;
+   ENOENT       : constant C.int := 2;
+   EINPROGRESS  : constant C.int := 115;
 
    PROT_READ  : constant C.int := 1;
    PROT_WRITE : constant C.int := 2;
@@ -72,11 +72,12 @@ package body System.Flyology.File_Engine is
 
    function To_U32 is new Ada.Unchecked_Conversion (S32, U32);
 
-   Send_ZC_Copied : C.int := 0 with Atomic;
+   Send_ZC_Copied : C.int := 0
+   with Atomic;
 
-   function Send_ZC_Copy_Fallback return C.int is (Send_ZC_Copied);
-   pragma Export
-     (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
+   function Send_ZC_Copy_Fallback return C.int
+   is (Send_ZC_Copied);
+   pragma Export (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
 
    function Linux_MSG_NOSIGNAL return C.int;
    pragma Import (C, Linux_MSG_NOSIGNAL, "flyology_linux_msg_nosignal");
@@ -96,18 +97,19 @@ package body System.Flyology.File_Engine is
       Reserved     : U32;
       User_Address : U64;
    end record
-     with Convention => C, Size => 320, Alignment => 8;
-   for SQ_Ring_Offsets use record
-      Head         at 0  range 0 .. 31;
-      Tail         at 4  range 0 .. 31;
-      Ring_Mask    at 8  range 0 .. 31;
-      Ring_Entries at 12 range 0 .. 31;
-      Flags        at 16 range 0 .. 31;
-      Dropped      at 20 range 0 .. 31;
-      Array_Offset at 24 range 0 .. 31;
-      Reserved     at 28 range 0 .. 31;
-      User_Address at 32 range 0 .. 63;
-   end record;
+   with Convention => C, Size => 320, Alignment => 8;
+   for SQ_Ring_Offsets use
+     record
+       Head at 0 range 0 .. 31;
+       Tail at 4 range 0 .. 31;
+       Ring_Mask at 8 range 0 .. 31;
+       Ring_Entries at 12 range 0 .. 31;
+       Flags at 16 range 0 .. 31;
+       Dropped at 20 range 0 .. 31;
+       Array_Offset at 24 range 0 .. 31;
+       Reserved at 28 range 0 .. 31;
+       User_Address at 32 range 0 .. 63;
+     end record;
 
    type CQ_Ring_Offsets is record
       Head         : U32;
@@ -120,21 +122,21 @@ package body System.Flyology.File_Engine is
       Reserved     : U32;
       User_Address : U64;
    end record
-     with Convention => C, Size => 320, Alignment => 8;
-   for CQ_Ring_Offsets use record
-      Head         at 0  range 0 .. 31;
-      Tail         at 4  range 0 .. 31;
-      Ring_Mask    at 8  range 0 .. 31;
-      Ring_Entries at 12 range 0 .. 31;
-      Overflow     at 16 range 0 .. 31;
-      CQEs         at 20 range 0 .. 31;
-      Flags        at 24 range 0 .. 31;
-      Reserved     at 28 range 0 .. 31;
-      User_Address at 32 range 0 .. 63;
-   end record;
+   with Convention => C, Size => 320, Alignment => 8;
+   for CQ_Ring_Offsets use
+     record
+       Head at 0 range 0 .. 31;
+       Tail at 4 range 0 .. 31;
+       Ring_Mask at 8 range 0 .. 31;
+       Ring_Entries at 12 range 0 .. 31;
+       Overflow at 16 range 0 .. 31;
+       CQEs at 20 range 0 .. 31;
+       Flags at 24 range 0 .. 31;
+       Reserved at 28 range 0 .. 31;
+       User_Address at 32 range 0 .. 63;
+     end record;
 
-   type Reserved_Array is array (1 .. 3) of U32
-     with Convention => C;
+   type Reserved_Array is array (1 .. 3) of U32 with Convention => C;
 
    type Ring_Parameters is record
       SQ_Entries     : U32;
@@ -148,19 +150,20 @@ package body System.Flyology.File_Engine is
       SQ_Offsets     : SQ_Ring_Offsets;
       CQ_Offsets     : CQ_Ring_Offsets;
    end record
-     with Convention => C, Size => 960, Alignment => 8;
-   for Ring_Parameters use record
-      SQ_Entries     at 0  range 0 .. 31;
-      CQ_Entries     at 4  range 0 .. 31;
-      Flags          at 8  range 0 .. 31;
-      SQ_Thread_CPU  at 12 range 0 .. 31;
-      SQ_Thread_Idle at 16 range 0 .. 31;
-      Features       at 20 range 0 .. 31;
-      Workqueue_FD   at 24 range 0 .. 31;
-      Reserved       at 28 range 0 .. 95;
-      SQ_Offsets     at 40 range 0 .. 319;
-      CQ_Offsets     at 80 range 0 .. 319;
-   end record;
+   with Convention => C, Size => 960, Alignment => 8;
+   for Ring_Parameters use
+     record
+       SQ_Entries at 0 range 0 .. 31;
+       CQ_Entries at 4 range 0 .. 31;
+       Flags at 8 range 0 .. 31;
+       SQ_Thread_CPU at 12 range 0 .. 31;
+       SQ_Thread_Idle at 16 range 0 .. 31;
+       Features at 20 range 0 .. 31;
+       Workqueue_FD at 24 range 0 .. 31;
+       Reserved at 28 range 0 .. 95;
+       SQ_Offsets at 40 range 0 .. 319;
+       CQ_Offsets at 80 range 0 .. 319;
+     end record;
 
    --  The probe header is followed by the number of operation records passed
    --  to io_uring_register. SEND_ZC is opcode 47, so ask for the first 48
@@ -171,18 +174,18 @@ package body System.Flyology.File_Engine is
       Flags      : U16;
       Reserved_2 : U32;
    end record
-     with Convention => C, Size => 64, Alignment => 4;
-   for Probe_Operation use record
-      Opcode     at 0 range 0 .. 7;
-      Reserved   at 1 range 0 .. 7;
-      Flags      at 2 range 0 .. 15;
-      Reserved_2 at 4 range 0 .. 31;
-   end record;
+   with Convention => C, Size => 64, Alignment => 4;
+   for Probe_Operation use
+     record
+       Opcode at 0 range 0 .. 7;
+       Reserved at 1 range 0 .. 7;
+       Flags at 2 range 0 .. 15;
+       Reserved_2 at 4 range 0 .. 31;
+     end record;
 
    Probe_Operation_Count : constant := 48;
-   type Probe_Operation_Array is
-     array (Natural range 0 .. Probe_Operation_Count - 1) of Probe_Operation
-       with Convention => C;
+   type Probe_Operation_Array is array (Natural range 0 .. Probe_Operation_Count - 1) of Probe_Operation
+   with Convention => C;
 
    type Operation_Probe is record
       Last_Opcode : U8;
@@ -191,14 +194,15 @@ package body System.Flyology.File_Engine is
       Reserved_2  : Reserved_Array;
       Operation   : Probe_Operation_Array;
    end record
-     with Convention => C, Size => 3_200, Alignment => 4;
-   for Operation_Probe use record
-      Last_Opcode at 0  range 0 .. 7;
-      Operations  at 1  range 0 .. 7;
-      Reserved    at 2  range 0 .. 15;
-      Reserved_2  at 4  range 0 .. 95;
-      Operation   at 16 range 0 .. 3_071;
-   end record;
+   with Convention => C, Size => 3_200, Alignment => 4;
+   for Operation_Probe use
+     record
+       Last_Opcode at 0 range 0 .. 7;
+       Operations at 1 range 0 .. 7;
+       Reserved at 2 range 0 .. 15;
+       Reserved_2 at 4 range 0 .. 95;
+       Operation at 16 range 0 .. 3_071;
+     end record;
 
    type Submission_Entry is record
       Opcode       : U8;
@@ -216,65 +220,68 @@ package body System.Flyology.File_Engine is
       Address_3    : U64;
       Padding      : U64;
    end record
-     with Convention => C, Size => 512, Alignment => 8;
-   for Submission_Entry use record
-      Opcode       at 0  range 0 .. 7;
-      Flags        at 1  range 0 .. 7;
-      IO_Priority  at 2  range 0 .. 15;
-      Descriptor   at 4  range 0 .. 31;
-      Offset       at 8  range 0 .. 63;
-      Buffer       at 16 range 0 .. 63;
-      Length       at 24 range 0 .. 31;
-      Read_Flags   at 28 range 0 .. 31;
-      User_Data    at 32 range 0 .. 63;
-      Buffer_Index at 40 range 0 .. 15;
-      Personality  at 42 range 0 .. 15;
-      Input_FD     at 44 range 0 .. 31;
-      Address_3    at 48 range 0 .. 63;
-      Padding      at 56 range 0 .. 63;
-   end record;
+   with Convention => C, Size => 512, Alignment => 8;
+   for Submission_Entry use
+     record
+       Opcode at 0 range 0 .. 7;
+       Flags at 1 range 0 .. 7;
+       IO_Priority at 2 range 0 .. 15;
+       Descriptor at 4 range 0 .. 31;
+       Offset at 8 range 0 .. 63;
+       Buffer at 16 range 0 .. 63;
+       Length at 24 range 0 .. 31;
+       Read_Flags at 28 range 0 .. 31;
+       User_Data at 32 range 0 .. 63;
+       Buffer_Index at 40 range 0 .. 15;
+       Personality at 42 range 0 .. 15;
+       Input_FD at 44 range 0 .. 31;
+       Address_3 at 48 range 0 .. 63;
+       Padding at 56 range 0 .. 63;
+     end record;
 
    type Completion_Entry is record
       User_Data : U64;
       Result    : S32;
       Flags     : U32;
    end record
-     with Convention => C, Size => 128, Alignment => 8;
-   for Completion_Entry use record
-      User_Data at 0 range 0 .. 63;
-      Result    at 8 range 0 .. 31;
-      Flags     at 12 range 0 .. 31;
-   end record;
+   with Convention => C, Size => 128, Alignment => 8;
+   for Completion_Entry use
+     record
+       User_Data at 0 range 0 .. 63;
+       Result at 8 range 0 .. 31;
+       Flags at 12 range 0 .. 31;
+     end record;
 
    type IOCB is record
-      Data        : U64;
-      Key         : U32;
-      Read_Flags  : U32;
-      Opcode      : U16;
-      Priority    : Interfaces.Integer_16;
-      Descriptor  : U32;
-      Buffer      : U64;
-      Length      : U64;
-      Offset      : S64;
-      Reserved    : U64;
-      Flags       : U32;
-      Result_FD   : U32;
+      Data       : U64;
+      Key        : U32;
+      Read_Flags : U32;
+      Opcode     : U16;
+      Priority   : Interfaces.Integer_16;
+      Descriptor : U32;
+      Buffer     : U64;
+      Length     : U64;
+      Offset     : S64;
+      Reserved   : U64;
+      Flags      : U32;
+      Result_FD  : U32;
    end record
-     with Convention => C, Size => 512, Alignment => 8;
-   for IOCB use record
-      Data       at 0  range 0 .. 63;
-      Key        at 8  range 0 .. 31;
-      Read_Flags at 12 range 0 .. 31;
-      Opcode     at 16 range 0 .. 15;
-      Priority   at 18 range 0 .. 15;
-      Descriptor at 20 range 0 .. 31;
-      Buffer     at 24 range 0 .. 63;
-      Length     at 32 range 0 .. 63;
-      Offset     at 40 range 0 .. 63;
-      Reserved   at 48 range 0 .. 63;
-      Flags      at 56 range 0 .. 31;
-      Result_FD  at 60 range 0 .. 31;
-   end record;
+   with Convention => C, Size => 512, Alignment => 8;
+   for IOCB use
+     record
+       Data at 0 range 0 .. 63;
+       Key at 8 range 0 .. 31;
+       Read_Flags at 12 range 0 .. 31;
+       Opcode at 16 range 0 .. 15;
+       Priority at 18 range 0 .. 15;
+       Descriptor at 20 range 0 .. 31;
+       Buffer at 24 range 0 .. 63;
+       Length at 32 range 0 .. 63;
+       Offset at 40 range 0 .. 63;
+       Reserved at 48 range 0 .. 63;
+       Flags at 56 range 0 .. 31;
+       Result_FD at 60 range 0 .. 31;
+     end record;
 
    type IO_Event is record
       Data   : U64;
@@ -282,30 +289,32 @@ package body System.Flyology.File_Engine is
       Result : S64;
       Extra  : S64;
    end record
-     with Convention => C, Size => 256, Alignment => 8;
-   for IO_Event use record
-      Data   at 0  range 0 .. 63;
-      Object at 8  range 0 .. 63;
-      Result at 16 range 0 .. 63;
-      Extra  at 24 range 0 .. 63;
-   end record;
+   with Convention => C, Size => 256, Alignment => 8;
+   for IO_Event use
+     record
+       Data at 0 range 0 .. 63;
+       Object at 8 range 0 .. 63;
+       Result at 16 range 0 .. 63;
+       Extra at 24 range 0 .. 63;
+     end record;
 
    type Native_AIO_Request;
    type Native_AIO_Request_Access is access all Native_AIO_Request;
 
    type Native_AIO_Request is record
-      Control   : aliased IOCB;
-      Next_Free : Native_AIO_Request_Access;
-      Token     : System.Address;
+      Control     : aliased IOCB;
+      Next_Free   : Native_AIO_Request_Access;
+      Token       : System.Address;
       Next_Active : Native_AIO_Request_Access;
    end record
-     with Size => 704, Alignment => 8;
-   for Native_AIO_Request use record
-      Control   at 0  range 0 .. 511;
-      Next_Free at 64 range 0 .. 63;
-      Token     at 72 range 0 .. 63;
-      Next_Active at 80 range 0 .. 63;
-   end record;
+   with Size => 704, Alignment => 8;
+   for Native_AIO_Request use
+     record
+       Control at 0 range 0 .. 511;
+       Next_Free at 64 range 0 .. 63;
+       Token at 72 range 0 .. 63;
+       Next_Active at 80 range 0 .. 63;
+     end record;
 
    --  io_uring cancellation has two independent completions: one for the
    --  data operation and one for the administrative cancel request. Keep a
@@ -318,50 +327,50 @@ package body System.Flyology.File_Engine is
    type Operation_Kind is (File_Data, Socket_Send_ZC);
 
    type IO_Uring_Request is record
-      Token             : System.Address;
-      Kind              : Operation_Kind;
-      Cancel_Submitted  : Boolean;
-      Operation_Complete : Boolean;
-      Main_Complete     : Boolean;
+      Token                 : System.Address;
+      Kind                  : Operation_Kind;
+      Cancel_Submitted      : Boolean;
+      Operation_Complete    : Boolean;
+      Main_Complete         : Boolean;
       Notification_Expected : Boolean;
-      Stored_Result     : C.long_long;
-      Stored_Error      : C.int;
-      Admin_Complete    : Boolean;
+      Stored_Result         : C.long_long;
+      Stored_Error          : C.int;
+      Admin_Complete        : Boolean;
       Admin_Submit_Deferred : Boolean;
-      Next_Free         : IO_Uring_Request_Access;
-      Next_Active       : IO_Uring_Request_Access;
-      Next_Deferred     : IO_Uring_Request_Access;
+      Next_Free             : IO_Uring_Request_Access;
+      Next_Active           : IO_Uring_Request_Access;
+      Next_Deferred         : IO_Uring_Request_Access;
    end record
-     with Alignment => 8;
+   with Alignment => 8;
 
    type Backend_Kind is (IO_Uring, Native_AIO);
 
    type Engine_State is record
-      Backend           : Backend_Kind := IO_Uring;
-      AIO_Context       : C.unsigned_long := 0;
-      Wake_FD           : C.int := -1;
-      Ring_FD           : C.int := -1;
-      SQ_Mapping        : System.Address := System.Null_Address;
-      CQ_Mapping        : System.Address := System.Null_Address;
-      SQEs_Mapping      : System.Address := System.Null_Address;
-      SQ_Mapping_Size   : C.size_t := 0;
-      CQ_Mapping_Size   : C.size_t := 0;
-      SQEs_Mapping_Size : C.size_t := 0;
-      SQ_Head           : System.Address := System.Null_Address;
-      SQ_Tail           : System.Address := System.Null_Address;
-      SQ_Mask           : System.Address := System.Null_Address;
-      SQ_Entries        : System.Address := System.Null_Address;
-      SQ_Flags          : System.Address := System.Null_Address;
-      SQ_Array          : System.Address := System.Null_Address;
-      SQEs              : System.Address := System.Null_Address;
-      CQ_Head           : System.Address := System.Null_Address;
-      CQ_Tail           : System.Address := System.Null_Address;
-      CQ_Mask           : System.Address := System.Null_Address;
-      CQ_Overflow       : System.Address := System.Null_Address;
-      CQEs              : System.Address := System.Null_Address;
-      CQ_Capacity       : U32 := 0;
-      Send_ZC_Supported : Boolean := False;
-      CQ_Overflow_Seen  : U32 := 0;
+      Backend                    : Backend_Kind := IO_Uring;
+      AIO_Context                : C.unsigned_long := 0;
+      Wake_FD                    : C.int := -1;
+      Ring_FD                    : C.int := -1;
+      SQ_Mapping                 : System.Address := System.Null_Address;
+      CQ_Mapping                 : System.Address := System.Null_Address;
+      SQEs_Mapping               : System.Address := System.Null_Address;
+      SQ_Mapping_Size            : C.size_t := 0;
+      CQ_Mapping_Size            : C.size_t := 0;
+      SQEs_Mapping_Size          : C.size_t := 0;
+      SQ_Head                    : System.Address := System.Null_Address;
+      SQ_Tail                    : System.Address := System.Null_Address;
+      SQ_Mask                    : System.Address := System.Null_Address;
+      SQ_Entries                 : System.Address := System.Null_Address;
+      SQ_Flags                   : System.Address := System.Null_Address;
+      SQ_Array                   : System.Address := System.Null_Address;
+      SQEs                       : System.Address := System.Null_Address;
+      CQ_Head                    : System.Address := System.Null_Address;
+      CQ_Tail                    : System.Address := System.Null_Address;
+      CQ_Mask                    : System.Address := System.Null_Address;
+      CQ_Overflow                : System.Address := System.Null_Address;
+      CQEs                       : System.Address := System.Null_Address;
+      CQ_Capacity                : U32 := 0;
+      Send_ZC_Supported          : Boolean := False;
+      CQ_Overflow_Seen           : U32 := 0;
       --  Count every reserved CQE slot not yet consumed. SEND_ZC reserves
       --  both its primary completion and its possible notification CQE.
       --  Administrative cancellation SQEs count independently from their
@@ -369,13 +378,13 @@ package body System.Flyology.File_Engine is
       --  The event-loop thread is the only writer. Final reaping reads this
       --  while Wait_Batch has dropped the group lock, so the component must
       --  provide the same coherent single-writer access as Active_Count.
-      Uring_In_Flight   : U32 := 0 with Atomic;
+      Uring_In_Flight            : U32 := 0 with Atomic;
       Test_Backpressure_Observed : Boolean := False;
-      Free_Requests     : Native_AIO_Request_Access;
-      Active_Requests   : Native_AIO_Request_Access;
-      Active_Count      : Natural := 0 with Atomic;
-      Free_Uring_Requests   : IO_Uring_Request_Access;
-      Active_Uring_Requests : IO_Uring_Request_Access;
+      Free_Requests              : Native_AIO_Request_Access;
+      Active_Requests            : Native_AIO_Request_Access;
+      Active_Count               : Natural := 0 with Atomic;
+      Free_Uring_Requests        : IO_Uring_Request_Access;
+      Active_Uring_Requests      : IO_Uring_Request_Access;
       Deferred_Admin_Submit_Head : IO_Uring_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
@@ -383,30 +392,20 @@ package body System.Flyology.File_Engine is
    type Submission_Entry_Access is access all Submission_Entry;
    type Completion_Entry_Access is access all Completion_Entry;
 
-   type IOCB_Address_Array is array (Positive range <>) of System.Address
-     with Convention => C;
-   type IO_Event_Array is array (Positive range <>) of aliased IO_Event
-     with Convention => C;
+   type IOCB_Address_Array is array (Positive range <>) of System.Address with Convention => C;
+   type IO_Event_Array is array (Positive range <>) of aliased IO_Event with Convention => C;
 
-   function To_State is new Ada.Unchecked_Conversion
-     (System.Address, Engine_State_Access);
-   function State_Address is new Ada.Unchecked_Conversion
-     (Engine_State_Access, System.Address);
-   function To_Native_Request is new Ada.Unchecked_Conversion
-     (System.Address, Native_AIO_Request_Access);
-   function To_Uring_Request is new Ada.Unchecked_Conversion
-     (System.Address, IO_Uring_Request_Access);
-   function To_Submission_Entry is new Ada.Unchecked_Conversion
-     (System.Address, Submission_Entry_Access);
-   function To_Completion_Entry is new Ada.Unchecked_Conversion
-     (System.Address, Completion_Entry_Access);
+   function To_State is new Ada.Unchecked_Conversion (System.Address, Engine_State_Access);
+   function State_Address is new Ada.Unchecked_Conversion (Engine_State_Access, System.Address);
+   function To_Native_Request is new Ada.Unchecked_Conversion (System.Address, Native_AIO_Request_Access);
+   function To_Uring_Request is new Ada.Unchecked_Conversion (System.Address, IO_Uring_Request_Access);
+   function To_Submission_Entry is new Ada.Unchecked_Conversion (System.Address, Submission_Entry_Access);
+   function To_Completion_Entry is new Ada.Unchecked_Conversion (System.Address, Completion_Entry_Access);
 
-   procedure Free_State is new Ada.Unchecked_Deallocation
-     (Engine_State, Engine_State_Access);
-   procedure Free_Native_Request is new Ada.Unchecked_Deallocation
-     (Native_AIO_Request, Native_AIO_Request_Access);
-   procedure Free_Uring_Request is new Ada.Unchecked_Deallocation
-     (IO_Uring_Request, IO_Uring_Request_Access);
+   procedure Free_State is new Ada.Unchecked_Deallocation (Engine_State, Engine_State_Access);
+   procedure Free_Native_Request is new
+     Ada.Unchecked_Deallocation (Native_AIO_Request, Native_AIO_Request_Access);
+   procedure Free_Uring_Request is new Ada.Unchecked_Deallocation (IO_Uring_Request, IO_Uring_Request_Access);
 
    function Mmap
      (Address : System.Address;
@@ -417,31 +416,23 @@ package body System.Flyology.File_Engine is
       Offset  : C.long_long) return System.Address;
    pragma Import (C, Mmap, "mmap");
 
-   function Munmap
-     (Address : System.Address; Length : C.size_t) return C.int;
+   function Munmap (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Munmap, "munmap");
 
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
 
-   function Write
-     (Descriptor : C.int;
-      Buffer     : System.Address;
-      Length     : C.size_t) return C.long;
+   function Write (Descriptor : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
 
-   function Linux_IO_Setup
-     (Entries : C.unsigned; Context : System.Address)
-      return C.long;
+   function Linux_IO_Setup (Entries : C.unsigned; Context : System.Address) return C.long;
    pragma Import (C, Linux_IO_Setup, "flyology_linux_io_setup");
 
    function Linux_IO_Destroy (Context : C.unsigned_long) return C.long;
    pragma Import (C, Linux_IO_Destroy, "flyology_linux_io_destroy");
 
    function Linux_IO_Submit
-     (Context  : C.unsigned_long;
-      Count    : C.long;
-      Controls : System.Address) return C.long;
+     (Context : C.unsigned_long; Count : C.long; Controls : System.Address) return C.long;
    pragma Import (C, Linux_IO_Submit, "flyology_linux_io_submit");
 
    function Linux_IO_Getevents
@@ -453,64 +444,45 @@ package body System.Flyology.File_Engine is
    pragma Import (C, Linux_IO_Getevents, "flyology_linux_io_getevents");
 
    function Linux_IO_Cancel
-     (Context : C.unsigned_long;
-      Control : System.Address;
-      Event   : System.Address) return C.long;
+     (Context : C.unsigned_long; Control : System.Address; Event : System.Address) return C.long;
    pragma Import (C, Linux_IO_Cancel, "flyology_linux_io_cancel");
 
    function Linux_IO_Uring_Register
-     (Descriptor : C.int;
-      Opcode     : C.unsigned;
-      Argument   : System.Address;
-      Count      : C.unsigned) return C.long;
-   pragma Import
-     (C, Linux_IO_Uring_Register, "flyology_linux_io_uring_register");
+     (Descriptor : C.int; Opcode : C.unsigned; Argument : System.Address; Count : C.unsigned) return C.long;
+   pragma Import (C, Linux_IO_Uring_Register, "flyology_linux_io_uring_register");
 
    function Linux_IO_Uring_Enter
-     (Descriptor   : C.int;
-      To_Submit    : C.unsigned;
-      Minimum      : C.unsigned;
-      Flags        : C.unsigned;
-      Signal_Mask  : System.Address;
-      Signal_Size  : C.size_t) return C.long;
+     (Descriptor  : C.int;
+      To_Submit   : C.unsigned;
+      Minimum     : C.unsigned;
+      Flags       : C.unsigned;
+      Signal_Mask : System.Address;
+      Signal_Size : C.size_t) return C.long;
    pragma Import (C, Linux_IO_Uring_Enter, "flyology_linux_io_uring_enter");
 
-   function Linux_IO_Uring_Setup
-     (Entries : C.unsigned; Parameters : System.Address) return C.long;
+   function Linux_IO_Uring_Setup (Entries : C.unsigned; Parameters : System.Address) return C.long;
    pragma Import (C, Linux_IO_Uring_Setup, "flyology_linux_io_uring_setup");
 
    procedure Note_Backend (Backend : C.int);
    pragma Import (C, Note_Backend, "flyology_linux_note_file_backend");
 
-   procedure Note_Cancellation
-     (Backend     : C.int;
-      Disposition : C.int;
-      Terminal    : C.int);
-   pragma Import
-     (C, Note_Cancellation, "flyology_test_note_file_cancel");
+   procedure Note_Cancellation (Backend : C.int; Disposition : C.int; Terminal : C.int);
+   pragma Import (C, Note_Cancellation, "flyology_test_note_file_cancel");
 
    procedure Note_Uring_Identity (Reused : C.int);
-   pragma Import
-     (C, Note_Uring_Identity, "flyology_test_note_uring_identity");
+   pragma Import (C, Note_Uring_Identity, "flyology_test_note_uring_identity");
 
    procedure Note_Uring_Admin_Complete;
-   pragma Import
-     (C, Note_Uring_Admin_Complete,
-      "flyology_test_note_uring_admin_complete");
+   pragma Import (C, Note_Uring_Admin_Complete, "flyology_test_note_uring_admin_complete");
 
    procedure Note_Uring_CQ_Capacity (Capacity : C.unsigned);
-   pragma Import
-     (C, Note_Uring_CQ_Capacity, "flyology_test_note_uring_cq_capacity");
+   pragma Import (C, Note_Uring_CQ_Capacity, "flyology_test_note_uring_cq_capacity");
 
    procedure Note
-     (State       : not null Engine_State_Access;
-      Disposition : Cancellation_Disposition;
-      Terminal    : Boolean);
+     (State : not null Engine_State_Access; Disposition : Cancellation_Disposition; Terminal : Boolean);
 
    procedure Note
-     (State       : not null Engine_State_Access;
-      Disposition : Cancellation_Disposition;
-      Terminal    : Boolean) is
+     (State : not null Engine_State_Access; Disposition : Cancellation_Disposition; Terminal : Boolean) is
    begin
       if Faults.Enabled then
          Note_Cancellation
@@ -520,107 +492,77 @@ package body System.Flyology.File_Engine is
       end if;
    end Note;
 
-   function Load
-     (Address : System.Address;
-      Model   : AP.Mem_Model := AP.Acquire) return U32;
+   function Load (Address : System.Address; Model : AP.Mem_Model := AP.Acquire) return U32;
 
-   procedure Atomic_Store_32
-     (Address : System.Address;
-      Value   : U32;
-      Model   : AP.Mem_Model := AP.Release);
+   procedure Atomic_Store_32 (Address : System.Address; Value : U32; Model : AP.Mem_Model := AP.Release);
    pragma Import (C, Atomic_Store_32, "flyology_atomic_store_u32");
 
-   procedure Store
-     (Address : System.Address;
-      Value   : U32;
-      Model   : AP.Mem_Model := AP.Release);
+   procedure Store (Address : System.Address; Value : U32; Model : AP.Mem_Model := AP.Release);
 
-   function Acquire_Request
-     (State : not null Engine_State_Access) return Native_AIO_Request_Access;
+   function Acquire_Request (State : not null Engine_State_Access) return Native_AIO_Request_Access;
 
    procedure Recycle_Request
-     (State   : not null Engine_State_Access;
-      Request : in out Native_AIO_Request_Access);
+     (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access);
 
    procedure Unlink_Active
-     (State   : not null Engine_State_Access;
-      Request : not null Native_AIO_Request_Access);
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access);
 
-   function Acquire_Uring_Request
-     (State : not null Engine_State_Access) return IO_Uring_Request_Access;
+   function Acquire_Uring_Request (State : not null Engine_State_Access) return IO_Uring_Request_Access;
 
    procedure Recycle_Uring_Request
-     (State   : not null Engine_State_Access;
-      Request : in out IO_Uring_Request_Access);
+     (State : not null Engine_State_Access; Request : in out IO_Uring_Request_Access);
 
    procedure Unlink_Active_Uring
-     (State   : not null Engine_State_Access;
-      Request : not null IO_Uring_Request_Access);
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access);
 
    function Submit_Uring_Cancel
      (State      : not null Engine_State_Access;
       Request    : not null IO_Uring_Request_Access;
       Error_Code : out C.int) return Boolean;
 
-   procedure Submit_Deferred_Admin
-     (State : not null Engine_State_Access);
+   procedure Submit_Deferred_Admin (State : not null Engine_State_Access);
 
    function Retryable_Submit_Error (Error_Code : C.int) return C.int;
 
-   function Signal_Drain_Retry
-     (State : not null Engine_State_Access) return Boolean;
+   function Signal_Drain_Retry (State : not null Engine_State_Access) return Boolean;
 
-   function Has_Overflow_Backlog
-     (State : not null Engine_State_Access) return Boolean;
+   function Has_Overflow_Backlog (State : not null Engine_State_Access) return Boolean;
 
    procedure Release_State (State : in out Engine_State_Access);
 
-   function Supports_File_Operations
-     (Descriptor        : C.int;
-      Send_ZC_Supported : out Boolean) return Boolean;
+   function Supports_File_Operations (Descriptor : C.int; Send_ZC_Supported : out Boolean) return Boolean;
 
    function Initialize_Native_AIO
-     (Item    : in out Engine;
-      State   : in out Engine_State_Access;
-      Wake_FD : C.int) return Boolean;
+     (Item : in out Engine; State : in out Engine_State_Access; Wake_FD : C.int) return Boolean;
 
-   function Failed_Mapping return System.Address is
-     (SSE.To_Address (SSE.Integer_Address'Last));
+   function Failed_Mapping return System.Address
+   is (SSE.To_Address (SSE.Integer_Address'Last));
 
-   function Address_At
-     (Base : System.Address; Offset : U32) return System.Address
+   function Address_At (Base : System.Address; Offset : U32) return System.Address
    is (Base + Storage_Offset (Offset));
 
-   function Retryable_Submit_Error (Error_Code : C.int) return C.int is
-     (if Error_Code in EAGAIN | EBUSY then EAGAIN else Error_Code);
+   function Retryable_Submit_Error (Error_Code : C.int) return C.int
+   is (if Error_Code in EAGAIN | EBUSY then EAGAIN else Error_Code);
 
    function Load
-     (Address : System.Address;
-      Model   : AP.Mem_Model := AP.Acquire) return U32
-   --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
+     (Address : System.Address; Model : AP.Mem_Model := AP.Acquire)
+      return U32
+             --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
    is (AP.Atomic_Load_32 (Address, Model));
 
-   procedure Store
-     (Address : System.Address;
-      Value   : U32;
-      Model   : AP.Mem_Model := AP.Release)
-   --  The release store publishes SQ entries to the kernel and advances the
-   --  CQ head after Ada has consumed completion fields.
+   procedure Store (Address : System.Address; Value : U32; Model : AP.Mem_Model := AP.Release)
+     --  The release store publishes SQ entries to the kernel and advances the
+     --  CQ head after Ada has consumed completion fields.
    is
    begin
       Atomic_Store_32 (Address, Value, Model);
    end Store;
 
-   function Has_Overflow_Backlog
-     (State : not null Engine_State_Access) return Boolean
-   is
-     ((Load (State.SQ_Flags, AP.Acquire) and IORING_SQ_CQ_OVERFLOW) /= 0
-      or else
-        Load (State.CQ_Overflow, AP.Acquire) /= State.CQ_Overflow_Seen);
+   function Has_Overflow_Backlog (State : not null Engine_State_Access) return Boolean
+   is ((Load (State.SQ_Flags, AP.Acquire) and IORING_SQ_CQ_OVERFLOW) /= 0
+       or else Load (State.CQ_Overflow, AP.Acquire) /= State.CQ_Overflow_Seen);
 
-   function Acquire_Request
-     (State : not null Engine_State_Access) return Native_AIO_Request_Access
-   is
+   function Acquire_Request (State : not null Engine_State_Access) return Native_AIO_Request_Access is
       Request : constant Native_AIO_Request_Access := State.Free_Requests;
    begin
       if Request = null then
@@ -633,9 +575,7 @@ package body System.Flyology.File_Engine is
    end Acquire_Request;
 
    procedure Recycle_Request
-     (State   : not null Engine_State_Access;
-      Request : in out Native_AIO_Request_Access)
-   is
+     (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access) is
    begin
       Request.Next_Free := State.Free_Requests;
       State.Free_Requests := Request;
@@ -643,8 +583,7 @@ package body System.Flyology.File_Engine is
    end Recycle_Request;
 
    procedure Unlink_Active
-     (State   : not null Engine_State_Access;
-      Request : not null Native_AIO_Request_Access)
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access)
    is
       Position : Native_AIO_Request_Access := State.Active_Requests;
       Previous : Native_AIO_Request_Access;
@@ -663,9 +602,7 @@ package body System.Flyology.File_Engine is
       Request.Next_Active := null;
    end Unlink_Active;
 
-   function Acquire_Uring_Request
-     (State : not null Engine_State_Access) return IO_Uring_Request_Access
-   is
+   function Acquire_Uring_Request (State : not null Engine_State_Access) return IO_Uring_Request_Access is
       Request : constant IO_Uring_Request_Access := State.Free_Uring_Requests;
    begin
       if Request = null then
@@ -679,9 +616,7 @@ package body System.Flyology.File_Engine is
    end Acquire_Uring_Request;
 
    procedure Recycle_Uring_Request
-     (State   : not null Engine_State_Access;
-      Request : in out IO_Uring_Request_Access)
-   is
+     (State : not null Engine_State_Access; Request : in out IO_Uring_Request_Access) is
    begin
       Request.Next_Free := State.Free_Uring_Requests;
       State.Free_Uring_Requests := Request;
@@ -689,8 +624,7 @@ package body System.Flyology.File_Engine is
    end Recycle_Uring_Request;
 
    procedure Unlink_Active_Uring
-     (State   : not null Engine_State_Access;
-      Request : not null IO_Uring_Request_Access)
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access)
    is
       Position : IO_Uring_Request_Access := State.Active_Uring_Requests;
       Previous : IO_Uring_Request_Access;
@@ -709,17 +643,12 @@ package body System.Flyology.File_Engine is
       Request.Next_Active := null;
    end Unlink_Active_Uring;
 
-   function Signal_Drain_Retry
-     (State : not null Engine_State_Access) return Boolean
-   is
+   function Signal_Drain_Retry (State : not null Engine_State_Access) return Boolean is
       Value  : aliased C.unsigned_long_long := 1;
       Result : C.long;
    begin
       loop
-         Result := Write
-           (State.Wake_FD,
-            Value'Address,
-            C.size_t (C.unsigned_long_long'Size / 8));
+         Result := Write (State.Wake_FD, Value'Address, C.size_t (C.unsigned_long_long'Size / 8));
          if Result >= 0 then
             return True;
          elsif OSI.errno = EAGAIN then
@@ -736,8 +665,7 @@ package body System.Flyology.File_Engine is
       Request    : not null IO_Uring_Request_Access;
       Error_Code : out C.int) return Boolean
    is
-      Target     : constant SSE.Integer_Address :=
-        SSE.To_Integer (Request.all'Address);
+      Target     : constant SSE.Integer_Address := SSE.To_Integer (Request.all'Address);
       Head       : constant U32 := Load (State.SQ_Head, AP.Acquire);
       Tail       : constant U32 := Load (State.SQ_Tail, AP.Relaxed);
       Entries    : constant U32 := Load (State.SQ_Entries, AP.Acquire);
@@ -757,10 +685,9 @@ package body System.Flyology.File_Engine is
          return False;
       end if;
       Index := Tail and Mask;
-      Submission := To_Submission_Entry
-        (State.SQEs
-           + Storage_Offset (Index)
-               * Storage_Offset (Submission_Entry'Size / 8));
+      Submission :=
+        To_Submission_Entry
+          (State.SQEs + Storage_Offset (Index) * Storage_Offset (Submission_Entry'Size / 8));
       Submission.all :=
         (Opcode       => IORING_OP_ASYNC_CANCEL,
          Flags        => 0,
@@ -776,28 +703,15 @@ package body System.Flyology.File_Engine is
          Input_FD     => 0,
          Address_3    => 0,
          Padding      => 0);
-      Store
-        (State.SQ_Array
-           + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
-         Index,
-         AP.Relaxed);
+      Store (State.SQ_Array + Storage_Offset (Index) * Storage_Offset (U32'Size / 8), Index, AP.Relaxed);
       Store (State.SQ_Tail, Tail + 1, AP.Release);
       loop
-         Result := Linux_IO_Uring_Enter
-           (State.Ring_FD,
-            1,
-            0,
-            0,
-            System.Null_Address,
-            0);
+         Result := Linux_IO_Uring_Enter (State.Ring_FD, 1, 0, 0, System.Null_Address, 0);
          exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
       end loop;
       if Result /= 1 then
          Store (State.SQ_Tail, Tail, AP.Release);
-         Error_Code :=
-           (if Result < 0
-            then Retryable_Submit_Error (C.int (OSI.errno))
-            else EAGAIN);
+         Error_Code := (if Result < 0 then Retryable_Submit_Error (C.int (OSI.errno)) else EAGAIN);
          return False;
       end if;
       State.Uring_In_Flight := State.Uring_In_Flight + 1;
@@ -805,21 +719,15 @@ package body System.Flyology.File_Engine is
       return True;
    end Submit_Uring_Cancel;
 
-   procedure Submit_Deferred_Admin
-     (State : not null Engine_State_Access)
-   is
-      Request    : IO_Uring_Request_Access :=
-        State.Deferred_Admin_Submit_Head;
+   procedure Submit_Deferred_Admin (State : not null Engine_State_Access) is
+      Request    : IO_Uring_Request_Access := State.Deferred_Admin_Submit_Head;
       Error_Code : C.int;
    begin
       if Request = null then
          return;
-      elsif Faults.Enabled
-        and then Faults.Fail (Faults.File_Cancel_Admin_Delay)
-      then
+      elsif Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Admin_Delay) then
          if not Signal_Drain_Retry (State) then
-            raise Program_Error with
-              "could not signal delayed io_uring cancellation retry";
+            raise Program_Error with "could not signal delayed io_uring cancellation retry";
          end if;
          return;
       end if;
@@ -847,9 +755,9 @@ package body System.Flyology.File_Engine is
    end Submit_Deferred_Admin;
 
    procedure Release_State (State : in out Engine_State_Access) is
-      Ignored : C.int;
-      Result  : C.long;
-      Request : Native_AIO_Request_Access;
+      Ignored       : C.int;
+      Result        : C.long;
+      Request       : Native_AIO_Request_Access;
       Uring_Request : IO_Uring_Request_Access;
    begin
       if State = null then
@@ -859,17 +767,14 @@ package body System.Flyology.File_Engine is
         or else State.Deferred_Admin_Submit_Head /= null
         or else State.Uring_In_Flight /= 0
       then
-         raise Program_Error with
-           "FLYOLOGY finalized with active Linux file requests";
+         raise Program_Error with "FLYOLOGY finalized with active Linux file requests";
       elsif State.Backend = Native_AIO then
          if State.AIO_Context /= 0 then
             Result := Linux_IO_Destroy (State.AIO_Context);
             pragma Unreferenced (Result);
          end if;
       else
-         if State.SQEs_Mapping /= System.Null_Address
-           and then State.SQEs_Mapping /= Failed_Mapping
-         then
+         if State.SQEs_Mapping /= System.Null_Address and then State.SQEs_Mapping /= Failed_Mapping then
             Ignored := Munmap (State.SQEs_Mapping, State.SQEs_Mapping_Size);
          end if;
          if State.CQ_Mapping /= State.SQ_Mapping
@@ -878,9 +783,7 @@ package body System.Flyology.File_Engine is
          then
             Ignored := Munmap (State.CQ_Mapping, State.CQ_Mapping_Size);
          end if;
-         if State.SQ_Mapping /= System.Null_Address
-           and then State.SQ_Mapping /= Failed_Mapping
-         then
+         if State.SQ_Mapping /= System.Null_Address and then State.SQ_Mapping /= Failed_Mapping then
             Ignored := Munmap (State.SQ_Mapping, State.SQ_Mapping_Size);
          end if;
          if State.Ring_FD >= 0 then
@@ -901,21 +804,13 @@ package body System.Flyology.File_Engine is
       Free_State (State);
    end Release_State;
 
-   function Supports_File_Operations
-     (Descriptor        : C.int;
-      Send_ZC_Supported : out Boolean) return Boolean
-   is
-      Probe : aliased Operation_Probe :=
+   function Supports_File_Operations (Descriptor : C.int; Send_ZC_Supported : out Boolean) return Boolean is
+      Probe           : aliased Operation_Probe :=
         (Last_Opcode => 0,
          Operations  => 0,
          Reserved    => 0,
          Reserved_2  => (others => 0),
-         Operation   =>
-           (others =>
-              (Opcode     => 0,
-               Reserved   => 0,
-               Flags      => 0,
-               Reserved_2 => 0)));
+         Operation   => (others => (Opcode => 0, Reserved => 0, Flags => 0, Reserved_2 => 0)));
       Result          : C.long;
       Read_Supported  : Boolean := False;
       Write_Supported : Boolean := False;
@@ -924,31 +819,24 @@ package body System.Flyology.File_Engine is
       Send_ZC_Supported := False;
       Result :=
         Linux_IO_Uring_Register
-          (Descriptor,
-           C.unsigned (IORING_REGISTER_PROBE),
-           Probe'Address,
-           Probe_Operation_Count);
+          (Descriptor, C.unsigned (IORING_REGISTER_PROBE), Probe'Address, Probe_Operation_Count);
       if Result < 0 then
          return False;
       end if;
 
-      Returned := Natural'Min
-        (Natural (Probe.Operations), Probe_Operation_Count);
+      Returned := Natural'Min (Natural (Probe.Operations), Probe_Operation_Count);
       if Returned > 0 then
          for Index in 0 .. Returned - 1 loop
             if Probe.Operation (Index).Opcode = IORING_OP_READ
-              and then
-                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+              and then (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
             then
                Read_Supported := True;
             elsif Probe.Operation (Index).Opcode = IORING_OP_WRITE
-              and then
-                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+              and then (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
             then
                Write_Supported := True;
             elsif Probe.Operation (Index).Opcode = IORING_OP_SEND_ZC
-              and then
-                (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
+              and then (Probe.Operation (Index).Flags and IO_URING_OP_SUPPORTED) /= 0
             then
                Send_ZC_Supported := True;
             end if;
@@ -958,9 +846,7 @@ package body System.Flyology.File_Engine is
    end Supports_File_Operations;
 
    function Initialize_Native_AIO
-     (Item    : in out Engine;
-      State   : in out Engine_State_Access;
-      Wake_FD : C.int) return Boolean
+     (Item : in out Engine; State : in out Engine_State_Access; Wake_FD : C.int) return Boolean
    is
       Result : C.long;
    begin
@@ -972,9 +858,7 @@ package body System.Flyology.File_Engine is
       State.Backend := Native_AIO;
       State.Wake_FD := Wake_FD;
       State.AIO_Context := 0;
-      Result :=
-        Linux_IO_Setup
-          (C.unsigned (Ring_Entries), State.AIO_Context'Address);
+      Result := Linux_IO_Setup (C.unsigned (Ring_Entries), State.AIO_Context'Address);
       if Result < 0 then
          Release_State (State);
          return False;
@@ -988,11 +872,7 @@ package body System.Flyology.File_Engine is
          return False;
    end Initialize_Native_AIO;
 
-   function Initialize
-     (Item      : in out Engine;
-      Poller_FD : C.int;
-      Wake_FD   : C.int) return Boolean
-   is
+   function Initialize (Item : in out Engine; Poller_FD : C.int; Wake_FD : C.int) return Boolean is
       pragma Unreferenced (Poller_FD);
       State       : Engine_State_Access := null;
       Parameters  : aliased Ring_Parameters :=
@@ -1024,10 +904,7 @@ package body System.Flyology.File_Engine is
    begin
       State := new Engine_State;
       State.Wake_FD := Wake_FD;
-      Result :=
-        Linux_IO_Uring_Setup
-          (C.unsigned (Ring_Entries),
-           Parameters'Address);
+      Result := Linux_IO_Uring_Setup (C.unsigned (Ring_Entries), Parameters'Address);
       if Result < 0 then
          if C.int (OSI.errno) not in ENOSYS | EPERM then
             Release_State (State);
@@ -1037,25 +914,20 @@ package body System.Flyology.File_Engine is
       end if;
 
       State.Ring_FD := C.int (Result);
-      if not Supports_File_Operations
-        (State.Ring_FD, State.Send_ZC_Supported)
-        or else
-          (Faults.Enabled
-           and then Faults.Fail (Faults.File_Uring_Probe_Unsupported))
+      if not Supports_File_Operations (State.Ring_FD, State.Send_ZC_Supported)
+        or else (Faults.Enabled and then Faults.Fail (Faults.File_Uring_Probe_Unsupported))
       then
          return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
       State.SQ_Mapping_Size :=
         C.size_t (Parameters.SQ_Offsets.Array_Offset)
-          + C.size_t (Parameters.SQ_Entries) * C.size_t (U32'Size / 8);
+        + C.size_t (Parameters.SQ_Entries) * C.size_t (U32'Size / 8);
       State.CQ_Mapping_Size :=
         C.size_t (Parameters.CQ_Offsets.CQEs)
-          + C.size_t (Parameters.CQ_Entries)
-              * C.size_t (Completion_Entry'Size / 8);
+        + C.size_t (Parameters.CQ_Entries) * C.size_t (Completion_Entry'Size / 8);
       if (Parameters.Features and IORING_FEAT_SINGLE_MMAP) /= 0 then
-         Shared_Size := C.size_t'Max
-           (State.SQ_Mapping_Size, State.CQ_Mapping_Size);
+         Shared_Size := C.size_t'Max (State.SQ_Mapping_Size, State.CQ_Mapping_Size);
          State.SQ_Mapping_Size := Shared_Size;
          State.CQ_Mapping_Size := Shared_Size;
       end if;
@@ -1070,9 +942,7 @@ package body System.Flyology.File_Engine is
            IORING_OFF_SQ_RING);
       if State.SQ_Mapping = Failed_Mapping then
          return Initialize_Native_AIO (Item, State, Wake_FD);
-      elsif Faults.Enabled
-        and then Faults.Fail (Faults.File_Uring_Post_Setup_Failure)
-      then
+      elsif Faults.Enabled and then Faults.Fail (Faults.File_Uring_Post_Setup_Failure) then
          return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
@@ -1092,9 +962,7 @@ package body System.Flyology.File_Engine is
          end if;
       end if;
 
-      State.SQEs_Mapping_Size :=
-        C.size_t (Parameters.SQ_Entries)
-          * C.size_t (Submission_Entry'Size / 8);
+      State.SQEs_Mapping_Size := C.size_t (Parameters.SQ_Entries) * C.size_t (Submission_Entry'Size / 8);
       State.SQEs_Mapping :=
         Mmap
           (System.Null_Address,
@@ -1107,29 +975,18 @@ package body System.Flyology.File_Engine is
          return Initialize_Native_AIO (Item, State, Wake_FD);
       end if;
 
-      State.SQ_Head := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Head);
-      State.SQ_Tail := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Tail);
-      State.SQ_Mask := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Mask);
-      State.SQ_Entries := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Entries);
-      State.SQ_Flags := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Flags);
-      State.SQ_Array := Address_At
-        (State.SQ_Mapping, Parameters.SQ_Offsets.Array_Offset);
+      State.SQ_Head := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Head);
+      State.SQ_Tail := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Tail);
+      State.SQ_Mask := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Mask);
+      State.SQ_Entries := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Ring_Entries);
+      State.SQ_Flags := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Flags);
+      State.SQ_Array := Address_At (State.SQ_Mapping, Parameters.SQ_Offsets.Array_Offset);
       State.SQEs := State.SQEs_Mapping;
-      State.CQ_Head := Address_At
-        (State.CQ_Mapping, Parameters.CQ_Offsets.Head);
-      State.CQ_Tail := Address_At
-        (State.CQ_Mapping, Parameters.CQ_Offsets.Tail);
-      State.CQ_Mask := Address_At
-        (State.CQ_Mapping, Parameters.CQ_Offsets.Ring_Mask);
-      State.CQ_Overflow := Address_At
-        (State.CQ_Mapping, Parameters.CQ_Offsets.Overflow);
-      State.CQEs := Address_At
-        (State.CQ_Mapping, Parameters.CQ_Offsets.CQEs);
+      State.CQ_Head := Address_At (State.CQ_Mapping, Parameters.CQ_Offsets.Head);
+      State.CQ_Tail := Address_At (State.CQ_Mapping, Parameters.CQ_Offsets.Tail);
+      State.CQ_Mask := Address_At (State.CQ_Mapping, Parameters.CQ_Offsets.Ring_Mask);
+      State.CQ_Overflow := Address_At (State.CQ_Mapping, Parameters.CQ_Offsets.Overflow);
+      State.CQEs := Address_At (State.CQ_Mapping, Parameters.CQ_Offsets.CQEs);
       State.CQ_Capacity := Parameters.CQ_Entries;
       if State.CQ_Capacity = 0 then
          return Initialize_Native_AIO (Item, State, Wake_FD);
@@ -1139,32 +996,21 @@ package body System.Flyology.File_Engine is
          Note_Uring_CQ_Capacity (C.unsigned (State.CQ_Capacity));
       end if;
 
-      if Faults.Enabled
-        and then Faults.Fail (Faults.File_Uring_Synchronous_Eventfd)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Synchronous_Eventfd) then
          --  A fault-enabled fairness regression needs every completion,
          --  including an inline regular-file completion, to notify epoll.
          --  Production retains the lower-traffic asynchronous registration.
          Result :=
            Linux_IO_Uring_Register
-             (State.Ring_FD,
-              C.unsigned (IORING_REGISTER_EVENTFD),
-              Wake_Copy'Address,
-              1);
+             (State.Ring_FD, C.unsigned (IORING_REGISTER_EVENTFD), Wake_Copy'Address, 1);
       else
          Result :=
            Linux_IO_Uring_Register
-             (State.Ring_FD,
-              C.unsigned (IORING_REGISTER_EVENTFD_ASYNC),
-              Wake_Copy'Address,
-              1);
+             (State.Ring_FD, C.unsigned (IORING_REGISTER_EVENTFD_ASYNC), Wake_Copy'Address, 1);
          if Result < 0 and then C.int (OSI.errno) = EINVAL then
             Result :=
               Linux_IO_Uring_Register
-                (State.Ring_FD,
-                 C.unsigned (IORING_REGISTER_EVENTFD),
-                 Wake_Copy'Address,
-                 1);
+                (State.Ring_FD, C.unsigned (IORING_REGISTER_EVENTFD), Wake_Copy'Address, 1);
          end if;
       end if;
       if Result < 0 then
@@ -1193,27 +1039,22 @@ package body System.Flyology.File_Engine is
    function Supports_Send_ZC (Item : Engine) return Boolean is
       State : constant Engine_State_Access := To_State (Item.State);
    begin
-      return State /= null
-        and then State.Backend = IO_Uring
-        and then State.Send_ZC_Supported;
+      return State /= null and then State.Backend = IO_Uring and then State.Send_ZC_Supported;
    end Supports_Send_ZC;
 
    function Submit_Send_ZC
-     (Item        : in out Engine;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
+     (Item       : in out Engine;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean
    is
       State         : constant Engine_State_Access := To_State (Item.State);
       Result        : C.long;
       Uring_Request : IO_Uring_Request_Access;
    begin
-      if not Supports_Send_ZC (Item)
-        or else Length = 0
-        or else Length > C.size_t (U32'Last)
-      then
+      if not Supports_Send_ZC (Item) or else Length = 0 or else Length > C.size_t (U32'Last) then
          Error_Code := EINVAL;
          return False;
       end if;
@@ -1262,10 +1103,9 @@ package body System.Flyology.File_Engine is
          end if;
 
          Index := Tail and Mask;
-         Submission := To_Submission_Entry
-           (State.SQEs
-              + Storage_Offset (Index)
-                  * Storage_Offset (Submission_Entry'Size / 8));
+         Submission :=
+           To_Submission_Entry
+             (State.SQEs + Storage_Offset (Index) * Storage_Offset (Submission_Entry'Size / 8));
          Submission.all :=
            (Opcode       => IORING_OP_SEND_ZC,
             Flags        => 0,
@@ -1281,23 +1121,15 @@ package body System.Flyology.File_Engine is
             Input_FD     => 0,
             Address_3    => 0,
             Padding      => 0);
-         Store
-           (State.SQ_Array
-              + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
-            Index,
-            AP.Relaxed);
+         Store (State.SQ_Array + Storage_Offset (Index) * Storage_Offset (U32'Size / 8), Index, AP.Relaxed);
          Store (State.SQ_Tail, Tail + 1, AP.Release);
          loop
-            Result := Linux_IO_Uring_Enter
-              (State.Ring_FD, 1, 0, 0, System.Null_Address, 0);
+            Result := Linux_IO_Uring_Enter (State.Ring_FD, 1, 0, 0, System.Null_Address, 0);
             exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
          end loop;
          if Result /= 1 then
             Store (State.SQ_Tail, Tail, AP.Release);
-            Error_Code :=
-              (if Result < 0
-               then Retryable_Submit_Error (C.int (OSI.errno))
-               else EAGAIN);
+            Error_Code := (if Result < 0 then Retryable_Submit_Error (C.int (OSI.errno)) else EAGAIN);
             Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
@@ -1319,14 +1151,14 @@ package body System.Flyology.File_Engine is
    end Submit_Send_ZC;
 
    function Submit
-     (Item        : in out Engine;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : Boolean;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
+     (Item       : in out Engine;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Offset     : C.long_long;
+      For_Write  : Boolean;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean
    is
       State         : constant Engine_State_Access := To_State (Item.State);
       Result        : C.long;
@@ -1337,41 +1169,32 @@ package body System.Flyology.File_Engine is
          return False;
       elsif State.Backend = Native_AIO then
          declare
-            Request : Native_AIO_Request_Access := Acquire_Request (State);
-            Controls : aliased IOCB_Address_Array (1 .. 1) :=
-              [1 => Request.Control'Address];
+            Request  : Native_AIO_Request_Access := Acquire_Request (State);
+            Controls : aliased IOCB_Address_Array (1 .. 1) := [1 => Request.Control'Address];
          begin
             Request.all :=
-              (Control =>
-                 (Data        => U64 (SSE.To_Integer (Token)),
-                  Key         => 0,
-                  Read_Flags  => 0,
-                  Opcode      =>
-                    (if For_Write
-                     then IOCB_CMD_PWRITE
-                     else IOCB_CMD_PREAD),
-                  Priority    => 0,
-                  Descriptor  => U32 (Descriptor),
-                  Buffer      => U64 (SSE.To_Integer (Buffer)),
-                  Length      => U64 (Length),
-                  Offset      => S64 (Offset),
-                  Reserved    => 0,
-                  Flags       => IOCB_FLAG_RESFD,
-                  Result_FD   => U32 (State.Wake_FD)),
-               Next_Free => null,
-               Token => Token,
+              (Control     =>
+                 (Data       => U64 (SSE.To_Integer (Token)),
+                  Key        => 0,
+                  Read_Flags => 0,
+                  Opcode     => (if For_Write then IOCB_CMD_PWRITE else IOCB_CMD_PREAD),
+                  Priority   => 0,
+                  Descriptor => U32 (Descriptor),
+                  Buffer     => U64 (SSE.To_Integer (Buffer)),
+                  Length     => U64 (Length),
+                  Offset     => S64 (Offset),
+                  Reserved   => 0,
+                  Flags      => IOCB_FLAG_RESFD,
+                  Result_FD  => U32 (State.Wake_FD)),
+               Next_Free   => null,
+               Token       => Token,
                Next_Active => null);
             loop
-               Result :=
-                 Linux_IO_Submit
-                   (State.AIO_Context,
-                    1,
-                    Controls'Address);
+               Result := Linux_IO_Submit (State.AIO_Context, 1, Controls'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
             end loop;
             if Result /= 1 then
-               Error_Code :=
-                 (if Result < 0 then C.int (OSI.errno) else EAGAIN);
+               Error_Code := (if Result < 0 then C.int (OSI.errno) else EAGAIN);
                Recycle_Request (State, Request);
                return False;
             end if;
@@ -1414,30 +1237,26 @@ package body System.Flyology.File_Engine is
          end if;
          Uring_Request := Acquire_Uring_Request (State);
          Uring_Request.all :=
-           (Token              => Token,
-            Kind               => File_Data,
-            Cancel_Submitted   => False,
-            Operation_Complete => False,
-            Main_Complete      => False,
+           (Token                 => Token,
+            Kind                  => File_Data,
+            Cancel_Submitted      => False,
+            Operation_Complete    => False,
+            Main_Complete         => False,
             Notification_Expected => False,
-            Stored_Result      => 0,
-            Stored_Error       => 0,
-            Admin_Complete     => False,
+            Stored_Result         => 0,
+            Stored_Error          => 0,
+            Admin_Complete        => False,
             Admin_Submit_Deferred => False,
-            Next_Free          => null,
-            Next_Active        => null,
-            Next_Deferred      => null);
+            Next_Free             => null,
+            Next_Active           => null,
+            Next_Deferred         => null);
          Identity := SSE.To_Integer (Uring_Request.all'Address);
          if Faults.Enabled then
             Older := State.Active_Uring_Requests;
             while Older /= null loop
-               if Older.Operation_Complete
-                 and then Older.Cancel_Submitted
-                 and then not Older.Admin_Complete
+               if Older.Operation_Complete and then Older.Cancel_Submitted and then not Older.Admin_Complete
                then
-                  Note_Uring_Identity
-                    (Boolean'Pos
-                       (SSE.To_Integer (Older.all'Address) = Identity));
+                  Note_Uring_Identity (Boolean'Pos (SSE.To_Integer (Older.all'Address) = Identity));
                end if;
                Older := Older.Next_Active;
             end loop;
@@ -1452,14 +1271,10 @@ package body System.Flyology.File_Engine is
             return False;
          end if;
          Index := Tail and Mask;
-         Entry_Addr :=
-           State.SQEs
-             + Storage_Offset (Index)
-                 * Storage_Offset (Submission_Entry'Size / 8);
+         Entry_Addr := State.SQEs + Storage_Offset (Index) * Storage_Offset (Submission_Entry'Size / 8);
          Submission := To_Submission_Entry (Entry_Addr);
          Submission.all :=
-           (Opcode       =>
-              (if For_Write then IORING_OP_WRITE else IORING_OP_READ),
+           (Opcode       => (if For_Write then IORING_OP_WRITE else IORING_OP_READ),
             Flags        => 0,
             IO_Priority  => 0,
             Descriptor   => S32 (Descriptor),
@@ -1473,38 +1288,22 @@ package body System.Flyology.File_Engine is
             Input_FD     => 0,
             Address_3    => 0,
             Padding      => 0);
-         Store
-           (State.SQ_Array
-              + Storage_Offset (Index) * Storage_Offset (U32'Size / 8),
-            Index,
-            AP.Relaxed);
+         Store (State.SQ_Array + Storage_Offset (Index) * Storage_Offset (U32'Size / 8), Index, AP.Relaxed);
          Store (State.SQ_Tail, Tail + 1, AP.Release);
 
-         if Faults.Enabled
-           and then Faults.Fail (Faults.File_Uring_Submit_EBUSY)
-         then
+         if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Submit_EBUSY) then
             Store (State.SQ_Tail, Tail, AP.Release);
             Error_Code := Retryable_Submit_Error (EBUSY);
             Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
          loop
-            Result :=
-              Linux_IO_Uring_Enter
-                (State.Ring_FD,
-                 1,
-                 0,
-                 0,
-                 System.Null_Address,
-                 0);
+            Result := Linux_IO_Uring_Enter (State.Ring_FD, 1, 0, 0, System.Null_Address, 0);
             exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
          end loop;
          if Result /= 1 then
             Store (State.SQ_Tail, Tail, AP.Release);
-            Error_Code :=
-              (if Result < 0
-               then Retryable_Submit_Error (C.int (OSI.errno))
-               else EAGAIN);
+            Error_Code := (if Result < 0 then Retryable_Submit_Error (C.int (OSI.errno)) else EAGAIN);
             Recycle_Uring_Request (State, Uring_Request);
             return False;
          end if;
@@ -1531,8 +1330,7 @@ package body System.Flyology.File_Engine is
       Token          : System.Address;
       Value          : out Completion;
       Has_Completion : out Boolean;
-      Error_Code     : out C.int)
-      return Cancellation_Disposition
+      Error_Code     : out C.int) return Cancellation_Disposition
    is
       State  : constant Engine_State_Access := To_State (Item.State);
       Result : C.long;
@@ -1561,10 +1359,7 @@ package body System.Flyology.File_Engine is
                --  delivers every terminal event through the completion ring
                --  instead. The buffer is still passed because the syscall
                --  takes the pointer, but the engine never reads it.
-               Result := Linux_IO_Cancel
-                 (State.AIO_Context,
-                  Request.Control'Address,
-                  Event'Address);
+               Result := Linux_IO_Cancel (State.AIO_Context, Request.Control'Address, Event'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
             end loop;
             if Result >= 0 then
@@ -1575,22 +1370,25 @@ package body System.Flyology.File_Engine is
                return Cancellation_Submitted;
             end if;
             case C.int (OSI.errno) is
-               when EINPROGRESS =>
+               when EINPROGRESS     =>
                   --  Kernels 3.11 through 6.8 report an accepted cancellation
                   --  this way rather than with a zero result.
                   Note (State, Cancellation_Submitted, False);
                   return Cancellation_Submitted;
-               when EINVAL =>
+
+               when EINVAL          =>
                   --  Positional read and write iocbs have no cancel handler,
                   --  and they are the only opcodes this engine submits. This
                   --  is the platform's ordinary answer, not a transport
                   --  failure: the operation runs to its normal completion.
                   Note (State, Not_Cancelable, False);
                   return Not_Cancelable;
+
                when EAGAIN | ENOENT =>
                   Note (State, Already_Completing, False);
                   return Already_Completing;
-               when others =>
+
+               when others          =>
                   Error_Code := C.int (OSI.errno);
                   Note (State, Cancellation_Failed, False);
                   return Cancellation_Failed;
@@ -1615,9 +1413,7 @@ package body System.Flyology.File_Engine is
             Note (State, Already_Completing, False);
             return Already_Completing;
          end if;
-         if Faults.Enabled
-           and then Faults.Fail (Faults.File_Cancel_Admin_Delay)
-         then
+         if Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Admin_Delay) then
             --  Hold the administrative SQE itself, not a consumed CQE. This
             --  creates a deterministic test window in which the operation has
             --  completed but its request identity is still reserved.
@@ -1626,16 +1422,8 @@ package body System.Flyology.File_Engine is
             Request.Next_Deferred := State.Deferred_Admin_Submit_Head;
             State.Deferred_Admin_Submit_Head := Request;
          elsif not Submit_Uring_Cancel (State, Request, Error_Code) then
-            Note
-              (State,
-               (if Error_Code = EAGAIN
-                then Not_Cancelable
-                else Cancellation_Failed),
-               False);
-            return
-              (if Error_Code = EAGAIN
-               then Not_Cancelable
-               else Cancellation_Failed);
+            Note (State, (if Error_Code = EAGAIN then Not_Cancelable else Cancellation_Failed), False);
+            return (if Error_Code = EAGAIN then Not_Cancelable else Cancellation_Failed);
          else
             Request.Cancel_Submitted := True;
          end if;
@@ -1649,11 +1437,9 @@ package body System.Flyology.File_Engine is
       Request_Address : System.Address;
       Kernel_Result   : C.long_long;
       Kernel_Error    : C.int;
-      Value           : out Completion) return Event_Completion_Disposition
-   is
+      Value           : out Completion) return Event_Completion_Disposition is
    begin
-      pragma Unreferenced
-        (Item, Request_Address, Kernel_Result, Kernel_Error);
+      pragma Unreferenced (Item, Request_Address, Kernel_Result, Kernel_Error);
       Value := (others => <>);
       return Completion_Failed;
    end Complete_Event;
@@ -1661,17 +1447,10 @@ package body System.Flyology.File_Engine is
    function Is_Quiescent (Item : Engine) return Boolean is
       State : constant Engine_State_Access := To_State (Item.State);
    begin
-      return
-        State = null
-        or else
-          (State.Active_Count = 0 and then State.Uring_In_Flight = 0);
+      return State = null or else (State.Active_Count = 0 and then State.Uring_In_Flight = 0);
    end Is_Quiescent;
 
-   function Drain
-     (Item   : in out Engine;
-      Values : out Completion_Array;
-      Count  : out Natural) return Boolean
-   is
+   function Drain (Item : in out Engine; Values : out Completion_Array; Count : out Natural) return Boolean is
       State : constant Engine_State_Access := To_State (Item.State);
    begin
       Values := (others => <>);
@@ -1680,20 +1459,14 @@ package body System.Flyology.File_Engine is
          return False;
       elsif State.Backend = Native_AIO then
          declare
-            Events  : aliased IO_Event_Array
-              (1 .. Natural'Max (1, Values'Length));
-            Timeout : aliased Time_ABI.Timespec :=
-              Time_ABI.To_Timespec (0.0);
+            Events  : aliased IO_Event_Array (1 .. Natural'Max (1, Values'Length));
+            Timeout : aliased Time_ABI.Timespec := Time_ABI.To_Timespec (0.0);
             Result  : C.long;
          begin
             loop
                Result :=
                  Linux_IO_Getevents
-                   (State.AIO_Context,
-                    0,
-                    C.long (Values'Length),
-                    Events'Address,
-                    Timeout'Address);
+                   (State.AIO_Context, 0, C.long (Values'Length), Events'Address, Timeout'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
             end loop;
             if Result < 0 or else Result > C.long (Values'Length) then
@@ -1702,12 +1475,9 @@ package body System.Flyology.File_Engine is
             Count := Natural (Result);
             for Index in 1 .. Count loop
                Values (Values'First + Index - 1) :=
-                 (Token => SSE.To_Address
-                    (SSE.Integer_Address (Events (Index).Data)),
-                  Result =>
-                    (if Events (Index).Result >= 0
-                     then C.long_long (Events (Index).Result)
-                     else 0),
+                 (Token      => SSE.To_Address (SSE.Integer_Address (Events (Index).Data)),
+                  Result     =>
+                    (if Events (Index).Result >= 0 then C.long_long (Events (Index).Result) else 0),
                   Error_Code =>
                     (if Events (Index).Result < 0
                      then C.int (-Events (Index).Result)
@@ -1715,9 +1485,8 @@ package body System.Flyology.File_Engine is
                      then C.int (-Events (Index).Extra)
                      else 0));
                declare
-                  Request : Native_AIO_Request_Access := To_Native_Request
-                    (SSE.To_Address
-                       (SSE.Integer_Address (Events (Index).Object)));
+                  Request : Native_AIO_Request_Access :=
+                    To_Native_Request (SSE.To_Address (SSE.Integer_Address (Events (Index).Object)));
                begin
                   Unlink_Active (State, Request);
                   State.Active_Count := State.Active_Count - 1;
@@ -1744,9 +1513,7 @@ package body System.Flyology.File_Engine is
 
          function Overflow_Pending return Boolean is
          begin
-            if Faults.Enabled
-              and then Faults.Fail (Faults.File_Uring_Overflow_Flush)
-            then
+            if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Overflow_Flush) then
                return True;
             end if;
             return Has_Overflow_Backlog (State);
@@ -1758,24 +1525,16 @@ package body System.Flyology.File_Engine is
          begin
             if not Overflow_Pending then
                return No_Flush;
-            elsif Faults.Enabled
-              and then Faults.Fail (Faults.File_Uring_Flush_EBUSY)
-            then
+            elsif Faults.Enabled and then Faults.Fail (Faults.File_Uring_Flush_EBUSY) then
                return Retry;
             end if;
             loop
-               Result := Linux_IO_Uring_Enter
-                 (State.Ring_FD,
-                  0,
-                  0,
-                  IORING_ENTER_GETEVENTS,
-                  System.Null_Address,
-                  0);
+               Result :=
+                 Linux_IO_Uring_Enter (State.Ring_FD, 0, 0, IORING_ENTER_GETEVENTS, System.Null_Address, 0);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
             end loop;
             if Result >= 0 then
-               State.CQ_Overflow_Seen :=
-                 Load (State.CQ_Overflow, AP.Acquire);
+               State.CQ_Overflow_Seen := Load (State.CQ_Overflow, AP.Acquire);
                return Flushed;
             end if;
             Error := C.int (OSI.errno);
@@ -1795,26 +1554,20 @@ package body System.Flyology.File_Engine is
          begin
             while Head /= Tail and then Count < Values'Length loop
                declare
-                  Index : constant U32 := Head and Mask;
+                  Index   : constant U32 := Head and Mask;
                   CQ_Item : constant Completion_Entry_Access :=
                     To_Completion_Entry
-                      (State.CQEs
-                         + Storage_Offset (Index)
-                             * Storage_Offset (Completion_Entry'Size / 8));
+                      (State.CQEs + Storage_Offset (Index) * Storage_Offset (Completion_Entry'Size / 8));
                begin
                   if State.Uring_In_Flight = 0 then
-                     raise Program_Error with
-                       "io_uring completion exceeds submitted request count";
+                     raise Program_Error with "io_uring completion exceeds submitted request count";
                   end if;
                   State.Uring_In_Flight := State.Uring_In_Flight - 1;
                   declare
-                     Raw : constant SSE.Integer_Address :=
-                       SSE.Integer_Address (CQ_Item.User_Data);
+                     Raw            : constant SSE.Integer_Address := SSE.Integer_Address (CQ_Item.User_Data);
                      Administrative : constant Boolean := Raw mod 2 /= 0;
-                     Base : constant SSE.Integer_Address :=
-                       Raw - (if Administrative then 1 else 0);
-                     Request : IO_Uring_Request_Access :=
-                       To_Uring_Request (SSE.To_Address (Base));
+                     Base           : constant SSE.Integer_Address := Raw - (if Administrative then 1 else 0);
+                     Request        : IO_Uring_Request_Access := To_Uring_Request (SSE.To_Address (Base));
                   begin
                      if Administrative then
                         Request.Admin_Complete := True;
@@ -1829,64 +1582,48 @@ package body System.Flyology.File_Engine is
                      else
                         if Request.Kind = Socket_Send_ZC then
                            declare
-                              Phase : constant
-                                Send_ZC_Policy.Completion_Phase :=
-                                  (if not Request.Main_Complete then
-                                      Send_ZC_Policy.Waiting_For_Main
-                                   elsif Request.Notification_Expected then
-                                      Send_ZC_Policy.Waiting_For_Notification
-                                   else
-                                      Send_ZC_Policy.Terminal);
-                              Kind : constant
-                                Send_ZC_Policy.Completion_Kind :=
-                                  (if (CQ_Item.Flags
-                                       and IORING_CQE_F_NOTIF) /= 0
-                                   then
-                                      Send_ZC_Policy.Notification_Completion
-                                   else
-                                      Send_ZC_Policy.Main_Completion);
-                              More : constant Boolean :=
+                              Phase            : constant Send_ZC_Policy.Completion_Phase :=
+                                (if not Request.Main_Complete
+                                 then Send_ZC_Policy.Waiting_For_Main
+                                 elsif Request.Notification_Expected
+                                 then Send_ZC_Policy.Waiting_For_Notification
+                                 else Send_ZC_Policy.Terminal);
+                              Kind             : constant Send_ZC_Policy.Completion_Kind :=
+                                (if (CQ_Item.Flags and IORING_CQE_F_NOTIF) /= 0
+                                 then Send_ZC_Policy.Notification_Completion
+                                 else Send_ZC_Policy.Main_Completion);
+                              More             : constant Boolean :=
                                 (CQ_Item.Flags and IORING_CQE_F_MORE) /= 0;
                               Kernel_Used_Copy : constant Boolean :=
-                                (To_U32 (CQ_Item.Result)
-                                 and IORING_NOTIF_USAGE_ZC_COPIED) /= 0;
-                              Plan : constant
-                                Send_ZC_Policy.Completion_Plan :=
-                                  Send_ZC_Policy.Plan_Completion
-                                    (Phase,
-                                     Kind,
-                                     More,
-                                     Usage_Reporting  => True,
-                                     Kernel_Used_Copy => Kernel_Used_Copy);
+                                (To_U32 (CQ_Item.Result) and IORING_NOTIF_USAGE_ZC_COPIED) /= 0;
+                              Plan             : constant Send_ZC_Policy.Completion_Plan :=
+                                Send_ZC_Policy.Plan_Completion
+                                  (Phase,
+                                   Kind,
+                                   More,
+                                   Usage_Reporting  => True,
+                                   Kernel_Used_Copy => Kernel_Used_Copy);
                            begin
                               if not Plan.Valid then
-                                 raise Program_Error with
-                                   "unexpected io_uring SEND_ZC completion";
+                                 raise Program_Error with "unexpected io_uring SEND_ZC completion";
                               end if;
                               if Plan.Store_Main_Result then
                                  Request.Main_Complete := True;
                                  Request.Stored_Result :=
-                                   (if CQ_Item.Result >= 0
-                                    then C.long_long (CQ_Item.Result)
-                                    else 0);
+                                   (if CQ_Item.Result >= 0 then C.long_long (CQ_Item.Result) else 0);
                                  Request.Stored_Error :=
-                                   (if CQ_Item.Result < 0
-                                    then C.int (-CQ_Item.Result)
-                                    else 0);
+                                   (if CQ_Item.Result < 0 then C.int (-CQ_Item.Result) else 0);
                               end if;
                               Request.Notification_Expected :=
-                                Plan.Phase_After =
-                                  Send_ZC_Policy.Waiting_For_Notification;
+                                Plan.Phase_After = Send_ZC_Policy.Waiting_For_Notification;
                               if Plan.Note_Copy_Fallback then
                                  Send_ZC_Copied := 1;
                               end if;
                               if Plan.Release_Unused_Reservation then
                                  if State.Uring_In_Flight = 0 then
-                                    raise Program_Error with
-                                      "missing io_uring SEND_ZC reservation";
+                                    raise Program_Error with "missing io_uring SEND_ZC reservation";
                                  end if;
-                                 State.Uring_In_Flight :=
-                                   State.Uring_In_Flight - 1;
+                                 State.Uring_In_Flight := State.Uring_In_Flight - 1;
                               end if;
                               if Plan.Emit_Terminal_Result then
                                  Count := Count + 1;
@@ -1901,21 +1638,13 @@ package body System.Flyology.File_Engine is
                            Count := Count + 1;
                            Values (Values'First + Count - 1) :=
                              (Token      => Request.Token,
-                              Result     =>
-                                (if CQ_Item.Result >= 0
-                                 then C.long_long (CQ_Item.Result)
-                                 else 0),
-                              Error_Code =>
-                                (if CQ_Item.Result < 0
-                                 then C.int (-CQ_Item.Result)
-                                 else 0));
+                              Result     => (if CQ_Item.Result >= 0 then C.long_long (CQ_Item.Result) else 0),
+                              Error_Code => (if CQ_Item.Result < 0 then C.int (-CQ_Item.Result) else 0));
                            Request.Operation_Complete := True;
                         end if;
 
                         if Request.Operation_Complete
-                          and then
-                            (not Request.Cancel_Submitted
-                             or else Request.Admin_Complete)
+                          and then (not Request.Cancel_Submitted or else Request.Admin_Complete)
                         then
                            Unlink_Active_Uring (State, Request);
                            State.Active_Count := State.Active_Count - 1;

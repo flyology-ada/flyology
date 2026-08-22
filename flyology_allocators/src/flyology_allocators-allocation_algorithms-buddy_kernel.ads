@@ -14,6 +14,7 @@ private with System;
 --  and whole-arena quiescence; exclusive reinitialization is the only
 --  recovery.
 --  @exclude
+
 package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
 
    --  Minimum supported buddy block and guaranteed payload alignment.
@@ -27,11 +28,11 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
       Minimum_Block_Size : Positive;
    end record;
 
-   function Configuration_Usable_Capacity
-     (Value : Configuration) return Positive is (Value.Usable_Capacity);
+   function Configuration_Usable_Capacity (Value : Configuration) return Positive
+   is (Value.Usable_Capacity);
 
-   function Configuration_Minimum_Block_Size
-     (Value : Configuration) return Positive is (Value.Minimum_Block_Size);
+   function Configuration_Minimum_Block_Size (Value : Configuration) return Positive
+   is (Value.Minimum_Block_Size);
 
    --  Local attached arena view. It owns neither the backing region nor any
    --  allocation and must be detached before storage becomes unavailable.
@@ -43,8 +44,7 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    --  @param Configuration Managed capacity and minimum block size
    --  @return Required stored header, node table, padding, and payload bytes
    --  @exception Constraint_Error Geometry is invalid or cannot be represented
-   function Required_Storage
-     (Configuration : Buddy_Kernel.Configuration) return Byte_Count;
+   function Required_Storage (Configuration : Buddy_Kernel.Configuration) return Byte_Count;
 
    --  Destructively initialize an empty arena and attach Item. The caller must
    --  exclusively own the complete extent. Reinitialization invalidates every
@@ -167,18 +167,14 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    --  @param Value Live handle issued by this arena incarnation
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error Metadata contention persists through deadline
-   procedure Release
-     (Item    : in out View;
-      Value   : Allocation_Handle;
-      Timeout : Wait_Timeout);
+   procedure Release (Item : in out View; Value : Allocation_Handle; Timeout : Wait_Timeout);
 
    --  Return the rounded capacity of a live allocation.
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
    --  @return Usable bytes in the selected buddy block
    --  @exception Handle_Error Value is invalid or stale
-   function Block_Capacity
-     (Item : View; Value : Allocation_Handle) return Byte_Count;
+   function Block_Capacity (Item : View; Value : Allocation_Handle) return Byte_Count;
 
    --  Attach Region to the exact bytes of a live allocation. No native address
    --  is returned or persisted. The resulting region owns neither the arena
@@ -190,10 +186,7 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    --  @param Region Local allocation-region view attached on success
    --  @param Item Attached arena view
    --  @param Value Live allocation handle
-   procedure Attach_Allocation
-     (Region : in out Region_View;
-      Item   : View;
-      Value  : Allocation_Handle);
+   procedure Attach_Allocation (Region : in out Region_View; Item : View; Value : Allocation_Handle);
 
    --  Copy between two nonoverlapping or overlapping live allocation slices.
    --  Release of either handle must not race with this operation.
@@ -217,21 +210,19 @@ package Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel is
    procedure Destroy (Item : in out View);
 
 private
-   No_Cached_Node : constant Interfaces.Unsigned_32 :=
-     Interfaces.Unsigned_32'Last;
-   type Node_Cache is array (Natural range 0 .. 31) of
-     Interfaces.Unsigned_32;
+   No_Cached_Node : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32'Last;
+   type Node_Cache is array (Natural range 0 .. 31) of Interfaces.Unsigned_32;
 
    type View is limited record
-      Core          : Layouts.Local_View;
+      Core               : Layouts.Local_View;
       Node_Table_Address : System.Address := System.Null_Address;
-      Guard_Address : System.Address := System.Null_Address;
-      Counter_Address : System.Address := System.Null_Address;
-      Usable_Value  : Interfaces.Unsigned_32 := 0;
-      Minimum_Value : Interfaces.Unsigned_32 := 0;
-      Node_Count    : Interfaces.Unsigned_32 := 0;
-      Data_Offset   : Byte_Count := 0;
-      Instance_Value : Interfaces.Unsigned_64 := 0;
-      Cached_Nodes  : Node_Cache;
+      Guard_Address      : System.Address := System.Null_Address;
+      Counter_Address    : System.Address := System.Null_Address;
+      Usable_Value       : Interfaces.Unsigned_32 := 0;
+      Minimum_Value      : Interfaces.Unsigned_32 := 0;
+      Node_Count         : Interfaces.Unsigned_32 := 0;
+      Data_Offset        : Byte_Count := 0;
+      Instance_Value     : Interfaces.Unsigned_64 := 0;
+      Cached_Nodes       : Node_Cache;
    end record;
 end Flyology_Allocators.Allocation_Algorithms.Buddy_Kernel;

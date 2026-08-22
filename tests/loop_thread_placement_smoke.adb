@@ -36,7 +36,8 @@ procedure Loop_Thread_Placement_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result;
 
    task type Worker with CPU => 7 is
@@ -56,8 +57,7 @@ procedure Loop_Thread_Placement_Smoke is
       Reserved := Groups.Create_Dedicated;
       OK := OK and Groups.Group_Id (Reserved) = Dedicated_Group;
       Groups.Migrate (Reserved);
-      OK := OK
-        and Groups.Loop_Thread_Status (Dedicated_Group).State = Groups.Applied;
+      OK := OK and Groups.Loop_Thread_Status (Dedicated_Group).State = Groups.Applied;
       Groups.Migrate (Test_Group);
       Result.Set (OK);
    exception
@@ -73,9 +73,7 @@ procedure Loop_Thread_Placement_Smoke is
    After  : Groups.Placement_Status;
 begin
    declare
-      task type Invalid_Native with
-        CPU => System.Multiprocessors.CPU_Range'Last
-      is
+      task type Invalid_Native with CPU => System.Multiprocessors.CPU_Range'Last is
          pragma Task_Info (Flyology.Native_Task);
       end Invalid_Native;
 
@@ -98,8 +96,7 @@ begin
    end;
 
    if not Groups.Placement_Supported (Groups.No_Placement)
-     or else Groups.Configure_Loop_Thread
-       (Test_Group, Groups.No_Placement, 1) /= Groups.Invalid_Value
+     or else Groups.Configure_Loop_Thread (Test_Group, Groups.No_Placement, 1) /= Groups.Invalid_Value
    then
       raise Program_Error with "invalid neutral placement policy result";
    end if;
@@ -107,19 +104,15 @@ begin
    if Groups.Placement_Supported (Groups.Strict_CPU) then
       Kind := Groups.Strict_CPU;
       Value := 0;
-      while Value < 4_096
-        and then not Groups.Placement_Value_Available (Kind, Value)
-      loop
+      while Value < 4_096 and then not Groups.Placement_Value_Available (Kind, Value) loop
          Value := Value + 1;
       end loop;
       if Value = 4_096 then
          raise Program_Error with "no available Linux processor";
       end if;
       if Groups.Placement_Supported (Groups.Advisory_Tag)
-        or else Groups.Configure_Loop_Thread
-          (1, Groups.Advisory_Tag, 1) /= Groups.Unsupported
-        or else Groups.Placement_Value_Available
-          (Kind, Groups.Placement_Value'Last)
+        or else Groups.Configure_Loop_Thread (1, Groups.Advisory_Tag, 1) /= Groups.Unsupported
+        or else Groups.Placement_Value_Available (Kind, Groups.Placement_Value'Last)
       then
          raise Program_Error with "Linux placement capabilities are wrong";
       end if;
@@ -127,17 +120,14 @@ begin
       Kind := Groups.Advisory_Tag;
       Value := 42;
       if Groups.Placement_Supported (Groups.Strict_CPU)
-        or else Groups.Configure_Loop_Thread
-          (1, Groups.Strict_CPU, 0) /= Groups.Unsupported
+        or else Groups.Configure_Loop_Thread (1, Groups.Strict_CPU, 0) /= Groups.Unsupported
         or else Groups.Placement_Value_Available (Kind, 0)
       then
          raise Program_Error with "Darwin placement capabilities are wrong";
       end if;
    else
-      if Groups.Configure_Loop_Thread
-          (1, Groups.Strict_CPU, 0) /= Groups.Unsupported
-        or else Groups.Configure_Loop_Thread
-          (1, Groups.Advisory_Tag, 1) /= Groups.Unsupported
+      if Groups.Configure_Loop_Thread (1, Groups.Strict_CPU, 0) /= Groups.Unsupported
+        or else Groups.Configure_Loop_Thread (1, Groups.Advisory_Tag, 1) /= Groups.Unsupported
       then
          raise Program_Error with "unsupported host accepted loop placement";
       end if;
@@ -146,14 +136,10 @@ begin
 
    Before := Groups.Loop_Thread_Status (Test_Group);
    if Before.State /= Groups.Not_Requested
-     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value) /=
-       Groups.Configured
-     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value) /=
-       Groups.Unchanged
-     or else Groups.Configure_Loop_Thread (Dedicated_Group, Kind, Value) /=
-       Groups.Configured
-     or else Groups.Loop_Thread_Status (Test_Group).State /=
-       Groups.Pending_Startup
+     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value) /= Groups.Configured
+     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value) /= Groups.Unchanged
+     or else Groups.Configure_Loop_Thread (Dedicated_Group, Kind, Value) /= Groups.Configured
+     or else Groups.Loop_Thread_Status (Test_Group).State /= Groups.Pending_Startup
    then
       raise Program_Error with "pre-start placement configuration failed";
    end if;
@@ -163,9 +149,8 @@ begin
    exception
       when others =>
          After := Groups.Loop_Thread_Status (Test_Group);
-         raise Program_Error with
-           "loop startup failed: state=" & After.State'Image
-           & " error=" & After.Error_Code'Image;
+         raise Program_Error
+           with "loop startup failed: state=" & After.State'Image & " error=" & After.Error_Code'Image;
    end;
    Result.Wait;
    After := Groups.Loop_Thread_Status (Test_Group);
@@ -174,10 +159,8 @@ begin
      or else After.Value /= Value
      or else After.State /= Groups.Applied
      or else After.Error_Code /= 0
-     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value + 1) /=
-       Groups.Group_Already_Started
-     or else Groups.Configure_Loop_Thread
-       (Test_Group, Groups.No_Placement) /= Groups.Group_Already_Started
+     or else Groups.Configure_Loop_Thread (Test_Group, Kind, Value + 1) /= Groups.Group_Already_Started
+     or else Groups.Configure_Loop_Thread (Test_Group, Groups.No_Placement) /= Groups.Group_Already_Started
    then
       raise Program_Error with "applied loop placement did not remain stable";
    end if;
@@ -188,8 +171,7 @@ begin
       protected Race is
          entry Start;
          procedure Release;
-         procedure Configuration
-           (Outcome : Groups.Placement_Configuration_Result);
+         procedure Configuration (Outcome : Groups.Placement_Configuration_Result);
          procedure Activation (Passed : Boolean);
          entry Wait;
          function Passed (State : Groups.Placement_State) return Boolean;
@@ -212,9 +194,7 @@ begin
             Released := True;
          end Release;
 
-         procedure Configuration
-           (Outcome : Groups.Placement_Configuration_Result)
-         is
+         procedure Configuration (Outcome : Groups.Placement_Configuration_Result) is
          begin
             Configure_Won := Outcome = Groups.Configured;
             Configure_Lost := Outcome = Groups.Group_Already_Started;
@@ -234,12 +214,10 @@ begin
 
          function Passed (State : Groups.Placement_State) return Boolean is
          begin
-            return Activation_OK
-              and then
-                ((Configure_Won and then State = Groups.Applied)
-                 or else
-                   (Configure_Lost
-                    and then State = Groups.Not_Requested));
+            return
+              Activation_OK
+              and then ((Configure_Won and then State = Groups.Applied)
+                        or else (Configure_Lost and then State = Groups.Not_Requested));
          end Passed;
       end Race;
 
@@ -250,8 +228,7 @@ begin
       task body Configurer is
       begin
          Race.Start;
-         Race.Configuration
-           (Groups.Configure_Loop_Thread (Race_Group, Kind, Value));
+         Race.Configuration (Groups.Configure_Loop_Thread (Race_Group, Kind, Value));
       exception
          when others =>
             Race.Configuration (Groups.Runtime_Unavailable);

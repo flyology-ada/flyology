@@ -20,24 +20,21 @@ procedure Flyology.Supervision.Families_Smoke is
    type Boolean_Array is array (Request) of Boolean;
 
    protected type Counts is
-      procedure Begin_Generation
-        (Input   : Request;
-         Attempt : out Positive);
+      procedure Begin_Generation (Input : Request; Attempt : out Positive);
       function Value (Input : Request) return Natural;
    private
       Values : Count_Array := (others => 0);
    end Counts;
 
    protected body Counts is
-      procedure Begin_Generation
-        (Input   : Request;
-         Attempt : out Positive) is
+      procedure Begin_Generation (Input : Request; Attempt : out Positive) is
       begin
          Values (Input) := Values (Input) + 1;
          Attempt := Values (Input);
       end Begin_Generation;
 
-      function Value (Input : Request) return Natural is (Values (Input));
+      function Value (Input : Request) return Natural
+      is (Values (Input));
    end Counts;
 
    protected type Resource_Tracker is
@@ -55,8 +52,7 @@ procedure Flyology.Supervision.Families_Smoke is
       procedure Acquire (Input : Request) is
       begin
          if Active (Input) then
-            raise Program_Error with
-              "replacement acquired a resource before prior finalization";
+            raise Program_Error with "replacement acquired a resource before prior finalization";
          end if;
          Active (Input) := True;
          Acquired (Input) := Acquired (Input) + 1;
@@ -71,11 +67,11 @@ procedure Flyology.Supervision.Families_Smoke is
          Released (Input) := Released (Input) + 1;
       end Release;
 
-      function Acquisitions (Input : Request) return Natural is
-        (Acquired (Input));
+      function Acquisitions (Input : Request) return Natural
+      is (Acquired (Input));
 
-      function Releases (Input : Request) return Natural is
-        (Released (Input));
+      function Releases (Input : Request) return Natural
+      is (Released (Input));
    end Resource_Tracker;
 
    type Context is limited record
@@ -83,25 +79,24 @@ procedure Flyology.Supervision.Families_Smoke is
       Resources : aliased Resource_Tracker;
    end record;
 
-   type Resource_Guard is
-     limited new Ada.Finalization.Limited_Controlled with record
+   type Resource_Guard is limited new Ada.Finalization.Limited_Controlled with record
       State : access Resource_Tracker := null;
       Input : Request := Request'First;
    end record;
 
-   overriding procedure Finalize (Item : in out Resource_Guard);
+   overriding
+   procedure Finalize (Item : in out Resource_Guard);
 
-   procedure Acquire
-     (Item  : in out Resource_Guard;
-      State : not null access Resource_Tracker;
-      Input : Request) is
+   procedure Acquire (Item : in out Resource_Guard; State : not null access Resource_Tracker; Input : Request)
+   is
    begin
       State.Acquire (Input);
       Item.State := State;
       Item.Input := Input;
    end Acquire;
 
-   overriding procedure Finalize (Item : in out Resource_Guard) is
+   overriding
+   procedure Finalize (Item : in out Resource_Guard) is
    begin
       if Item.State /= null then
          Item.State.Release (Item.Input);
@@ -113,12 +108,13 @@ procedure Flyology.Supervision.Families_Smoke is
      (State   : not null access Context;
       Input   : not null access constant Request;
       Control : not null access Flyology.Supervision.Generation_Control)
-   with CPU => System.Multiprocessors.Not_A_Specific_CPU is
+     with CPU => System.Multiprocessors.Not_A_Specific_CPU
+   is
       pragma Task_Info (Flyology.Native_Task);
    end Family_Task;
 
    task body Family_Task is
-      Attempt : Positive;
+      Attempt  : Positive;
       Resource : Resource_Guard;
    begin
       Acquire (Resource, State.Resources'Access, Input.all);
@@ -138,30 +134,27 @@ procedure Flyology.Supervision.Families_Smoke is
    function Create_Family_Task
      (State   : not null access Context;
       Input   : not null access constant Request;
-      Control : not null access Flyology.Supervision.Generation_Control)
-      return Family_Task
-   is
+      Control : not null access Flyology.Supervision.Generation_Control) return Family_Task is
    begin
       return Subject : Family_Task (State, Input, Control);
    end Create_Family_Task;
 
-   function Identity
-     (Subject : in out Family_Task)
-      return Ada.Task_Identification.Task_Id is
-     (Subject'Identity);
+   function Identity (Subject : in out Family_Task) return Ada.Task_Identification.Task_Id
+   is (Subject'Identity);
 
    procedure Abort_Subject (Subject : in out Family_Task) is
    begin
       abort Subject;
    end Abort_Subject;
 
-   package Child is new Flyology.Supervision.Input_Task_Generations
-     (Input_Type          => Request,
-      Application_Context => Context,
-      Generation_Task     => Family_Task,
-      Create              => Create_Family_Task,
-      Task_Identity       => Identity,
-      Abort_Task          => Abort_Subject);
+   package Child is new
+     Flyology.Supervision.Input_Task_Generations
+       (Input_Type          => Request,
+        Application_Context => Context,
+        Generation_Task     => Family_Task,
+        Create              => Create_Family_Task,
+        Task_Identity       => Identity,
+        Abort_Task          => Abort_Subject);
 
    procedure Run_Generation
      (State   : aliased in out Context;
@@ -190,14 +183,15 @@ procedure Flyology.Supervision.Families_Smoke is
       Has_Group         => False,
       Group             => 0);
 
-   package Families is new Flyology.Supervision.Families
-     (Request            => Request,
-      Application_Context => Context,
-      Run_One_Generation => Run_Generation,
-      Policy             => Child_Policy,
-      First_Child_Id     => 4_294_967_296,
-      Maximum_Children  => 2,
-      Event_Capacity    => 4);
+   package Families is new
+     Flyology.Supervision.Families
+       (Request             => Request,
+        Application_Context => Context,
+        Run_One_Generation  => Run_Generation,
+        Policy              => Child_Policy,
+        First_Child_Id      => 4_294_967_296,
+        Maximum_Children    => 2,
+        Event_Capacity      => 4);
 
    State  : aliased Context;
    Item   : aliased Families.Family;
@@ -215,19 +209,18 @@ procedure Flyology.Supervision.Families_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
-   First  : Flyology.Supervision.Child_Handle;
-   Second : Flyology.Supervision.Child_Handle;
-   Reused : Flyology.Supervision.Child_Handle;
-   Cursor : Flyology.Supervision.Event_Sequence := 0;
-   Dropped : Flyology.Supervision.Event_Sequence;
-   Event_Count : Natural;
-   Events : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
-   Recovery_Cursor : Flyology.Supervision.Event_Sequence := 0;
-   Recovery_Dropped : Flyology.Supervision.Event_Sequence;
+   Deadline             : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   First                : Flyology.Supervision.Child_Handle;
+   Second               : Flyology.Supervision.Child_Handle;
+   Reused               : Flyology.Supervision.Child_Handle;
+   Cursor               : Flyology.Supervision.Event_Sequence := 0;
+   Dropped              : Flyology.Supervision.Event_Sequence;
+   Event_Count          : Natural;
+   Events               : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
+   Recovery_Cursor      : Flyology.Supervision.Event_Sequence := 0;
+   Recovery_Dropped     : Flyology.Supervision.Event_Sequence;
    Recovery_Event_Count : Natural;
-   Recovery_Events : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
+   Recovery_Events      : Flyology.Supervision.Supervisor_Event_Array (1 .. 4);
 begin
    Owner.Start;
    loop
@@ -245,28 +238,22 @@ begin
       --  The first generation deliberately fails immediately, so either the
       --  zero-time check wins or terminal publication wins. Both outcomes
       --  are legal; following the replacement is not.
-      if Observation.Status not in
-        Flyology.Supervision.Observation_Timed_Out |
-        Flyology.Supervision.Generation_Terminated
+      if Observation.Status
+         not in Flyology.Supervision.Observation_Timed_Out | Flyology.Supervision.Generation_Terminated
       then
-         raise Program_Error with
-           "zero-time family observation followed a replacement";
+         raise Program_Error with "zero-time family observation followed a replacement";
       end if;
    end;
    declare
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 2.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Status = Flyology.Supervision.Generation_Terminated);
       pragma Assert (Observation.Snapshot.Generation = 1);
-      pragma Assert
-        (Observation.Snapshot.Termination.Kind =
-           Flyology.Supervision.Unhandled_Exception);
+      pragma Assert (Observation.Snapshot.Termination.Kind = Flyology.Supervision.Unhandled_Exception);
    end;
    loop
-      exit when Families.Current (Item, First).State =
-        Flyology.Supervision.Backing_Off;
+      exit when Families.Current (Item, First).State = Flyology.Supervision.Backing_Off;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
@@ -280,29 +267,26 @@ begin
    begin
       if Observation.Status /= Flyology.Supervision.Generation_Terminated
         or else Observation.Snapshot.Generation /= 1
-        or else Observation.Snapshot.State /=
-          Flyology.Supervision.Backing_Off
+        or else Observation.Snapshot.State /= Flyology.Supervision.Backing_Off
       then
          Families.Request_Shutdown (Item);
          Owner.Join;
-         raise Program_Error with
-           "terminated family generation was not observable in backoff";
+         raise Program_Error with "terminated family generation was not observable in backoff";
       end if;
    end;
    begin
       Families.Stop (Item, First);
       Families.Request_Shutdown (Item);
       Owner.Join;
-      raise Program_Error with
-        "terminated generation handle was accepted during backoff";
+      raise Program_Error with "terminated generation handle was accepted during backoff";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
    loop
-      exit when Families.Current
-        (Item, Flyology.Supervision.Child (First)).Ready
-        and then Families.Current
-          (Item, Flyology.Supervision.Child (First)).Generation = 2;
+      exit when
+        Families.Current (Item, Flyology.Supervision.Child (First)).Ready
+        and then Families.Current (Item, Flyology.Supervision.Child (First)).Generation = 2;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
@@ -314,41 +298,30 @@ begin
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 0.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Generation_Replaced);
+      pragma Assert (Observation.Status = Flyology.Supervision.Generation_Replaced);
       pragma Assert (Observation.Snapshot.Generation = 2);
    end;
-   Families.Read_Events
-     (Item,
-      Recovery_Cursor,
-      Recovery_Events,
-      Recovery_Event_Count,
-      Recovery_Dropped);
+   Families.Read_Events (Item, Recovery_Cursor, Recovery_Events, Recovery_Event_Count, Recovery_Dropped);
    declare
-      Saw_Direct_Start   : Boolean := False;
-      Saw_Restarting     : Boolean := False;
+      Saw_Direct_Start : Boolean := False;
+      Saw_Restarting   : Boolean := False;
    begin
       for Index in 1 .. Recovery_Event_Count loop
-         if Recovery_Events (Index).Kind =
-           Flyology.Supervision.Lifecycle_Changed
-           and then Recovery_Events (Index).Before /=
-             Recovery_Events (Index).After
+         if Recovery_Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
+           and then Recovery_Events (Index).Before /= Recovery_Events (Index).After
          then
-            Saw_Direct_Start := Saw_Direct_Start or else
-              (Recovery_Events (Index).Before =
-                 Flyology.Supervision.Backing_Off
-               and then Recovery_Events (Index).After =
-                 Flyology.Supervision.Starting);
-            Saw_Restarting := Saw_Restarting or else
-              Recovery_Events (Index).After =
-                Flyology.Supervision.Restarting;
+            Saw_Direct_Start :=
+              Saw_Direct_Start
+              or else (Recovery_Events (Index).Before = Flyology.Supervision.Backing_Off
+                       and then Recovery_Events (Index).After = Flyology.Supervision.Starting);
+            Saw_Restarting :=
+              Saw_Restarting or else Recovery_Events (Index).After = Flyology.Supervision.Restarting;
          end if;
       end loop;
       if Saw_Direct_Start or else not Saw_Restarting then
          Families.Request_Shutdown (Item);
          Owner.Join;
-         raise Program_Error with
-           "family recovery events violate the lifecycle model";
+         raise Program_Error with "family recovery events violate the lifecycle model";
       end if;
    end;
 
@@ -371,23 +344,20 @@ begin
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 2.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Generation_Terminated);
-      pragma Assert
-        (Observation.Snapshot.Termination.Kind =
-           Flyology.Supervision.Restart_Requested);
+      pragma Assert (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Snapshot.Termination.Kind = Flyology.Supervision.Restart_Requested);
    end;
    begin
       Families.Restart (Item, First);
       raise Program_Error with "stale manual restart was accepted";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
    loop
-      exit when Families.Current
-        (Item, Flyology.Supervision.Child (First)).Ready
-        and then Families.Current
-          (Item, Flyology.Supervision.Child (First)).Generation = 3;
+      exit when
+        Families.Current (Item, Flyology.Supervision.Child (First)).Ready
+        and then Families.Current (Item, Flyology.Supervision.Child (First)).Generation = 3;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
@@ -404,20 +374,17 @@ begin
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 2.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Generation_Terminated);
-      pragma Assert
-        (Observation.Snapshot.Termination.Kind =
-           Flyology.Supervision.Unhealthy);
-      pragma Assert
-        (Flyology.Supervision.Message_Text
-           (Observation.Snapshot.Termination) = "probe rejected generation");
+      pragma Assert (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Snapshot.Termination.Kind = Flyology.Supervision.Unhealthy);
+      pragma
+        Assert
+          (Flyology.Supervision.Message_Text (Observation.Snapshot.Termination)
+             = "probe rejected generation");
    end;
    loop
-      exit when Families.Current
-        (Item, Flyology.Supervision.Child (First)).Ready
-        and then Families.Current
-          (Item, Flyology.Supervision.Child (First)).Generation = 4;
+      exit when
+        Families.Current (Item, Flyology.Supervision.Child (First)).Ready
+        and then Families.Current (Item, Flyology.Supervision.Child (First)).Generation = 4;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
@@ -431,25 +398,21 @@ begin
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, Second, Timeout => 0.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Observation_Timed_Out);
+      pragma Assert (Observation.Status = Flyology.Supervision.Observation_Timed_Out);
    end;
 
    pragma Assert (State.Started.Value (1) = 4);
-   pragma Assert
-     (Families.Current (Item, First).Task_Model = Flyology.Native_Task);
+   pragma Assert (Families.Current (Item, First).Task_Model = Flyology.Native_Task);
    Families.Stop (Item, First);
    declare
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 2.0);
    begin
-      pragma Assert
-        (Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Observation.Status = Flyology.Supervision.Generation_Terminated);
       pragma Assert (Observation.Snapshot.Generation = 4);
    end;
    loop
-      exit when Families.Current (Item, First).State =
-        Flyology.Supervision.Joined;
+      exit when Families.Current (Item, First).State = Flyology.Supervision.Joined;
       if Ada.Real_Time.Clock >= Deadline then
          Families.Request_Shutdown (Item);
          Owner.Join;
@@ -472,25 +435,20 @@ begin
             delay 0.001;
       end;
    end loop;
-   pragma Assert
-     (Flyology.Supervision.Child (Reused) =
-        Flyology.Supervision.Child (First));
-   pragma Assert
-     (Flyology.Supervision.Current_Generation (Reused) = 5);
+   pragma Assert (Flyology.Supervision.Child (Reused) = Flyology.Supervision.Child (First));
+   pragma Assert (Flyology.Supervision.Current_Generation (Reused) = 5);
    pragma Assert (Families.Current (Item, Reused).Attempts = 0);
-   pragma Assert
-     (Families.Current (Item, Reused).Backoff =
-        Ada.Real_Time.Time_Span_Zero);
+   pragma Assert (Families.Current (Item, Reused).Backoff = Ada.Real_Time.Time_Span_Zero);
    begin
       declare
-         Ignored : constant Flyology.Supervision.Child_Snapshot :=
-           Families.Current (Item, First);
+         Ignored : constant Flyology.Supervision.Child_Snapshot := Families.Current (Item, First);
       begin
          pragma Unreferenced (Ignored);
          raise Program_Error with "stale family handle was accepted";
       end;
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
 
    loop
@@ -512,13 +470,15 @@ begin
       Families.Restart (Item, Reused);
       raise Program_Error with "restart was accepted after stop";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
    begin
       Families.Report_Unhealthy (Item, Reused, "too late after stop");
       raise Program_Error with "health report was accepted after stop";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
 
    --  Shutdown closes the same gate atomically for every still-running slot.
@@ -529,29 +489,27 @@ begin
       Families.Restart (Item, Second);
       raise Program_Error with "restart was accepted after shutdown";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
    begin
       Families.Report_Unhealthy (Item, Second, "too late after shutdown");
       raise Program_Error with "health report was accepted after shutdown";
    exception
-      when Families.Stale_Handle => null;
+      when Families.Stale_Handle =>
+         null;
    end;
    Owner.Join;
    Families.Read_Events (Item, Cursor, Events, Event_Count, Dropped);
    pragma Assert (Event_Count = Events'Length);
    pragma Assert (Dropped > 0);
    for Index in Events'First + 1 .. Events'Last loop
-      pragma Assert
-        (Events (Index - 1).Sequence < Events (Index).Sequence);
+      pragma Assert (Events (Index - 1).Sequence < Events (Index).Sequence);
       pragma Assert (Events (Index).Task_Model = Flyology.Native_Task);
    end loop;
-   pragma Assert
-     (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
    for Input in Request loop
-      pragma Assert
-        (State.Resources.Acquisitions (Input) =
-           State.Resources.Releases (Input));
+      pragma Assert (State.Resources.Acquisitions (Input) = State.Resources.Releases (Input));
    end loop;
 
    declare
@@ -561,8 +519,7 @@ begin
       Families.Request_Shutdown (Pre_Shutdown);
       Families.Run (Pre_Shutdown, State, Pre_Result);
       pragma Assert (not Families.Accepting (Pre_Shutdown));
-      pragma Assert
-        (Pre_Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert (Pre_Result.Outcome = Flyology.Supervision.Shutdown_Completed);
    end;
 exception
    when others =>

@@ -22,6 +22,7 @@ with Interfaces;
 --  socket pair. Each round trip leaves both loops with nothing ready, so both
 --  take the idle path once per trip, which is close to the highest sustained
 --  rate a loop doing real work can reach.
+
 procedure Idle_Wait_Rate is
    package Observation renames Flyology.Observability;
    package Groups renames Flyology.Execution_Groups;
@@ -33,9 +34,7 @@ procedure Idle_Wait_Rate is
    use type Real_Time.Time;
 
    Window : constant Duration :=
-     (if Ada.Command_Line.Argument_Count >= 1
-      then Duration'Value (Ada.Command_Line.Argument (1))
-      else 2.0);
+     (if Ada.Command_Line.Argument_Count >= 1 then Duration'Value (Ada.Command_Line.Argument (1)) else 2.0);
 
    Left  : Sockets.Socket_Type;
    Right : Sockets.Socket_Type;
@@ -57,14 +56,14 @@ procedure Idle_Wait_Rate is
       Seconds := Long_Float (Item.Uptime_Nanoseconds) / 1.0E9;
       Ada.Text_IO.Put_Line
         (Label
-         & " idle_waits=" & Item.Idle_Waits'Image
-         & " uptime_s=" & Long_Float'Image (Seconds)
+         & " idle_waits="
+         & Item.Idle_Waits'Image
+         & " uptime_s="
+         & Long_Float'Image (Seconds)
          & " waits_per_second="
          & Long_Float'Image (Long_Float (Item.Idle_Waits) / Seconds)
          & " idle_fraction="
-         & Long_Float'Image
-             (Long_Float (Item.Idle_Nanoseconds)
-              / Long_Float (Item.Uptime_Nanoseconds)));
+         & Long_Float'Image (Long_Float (Item.Idle_Nanoseconds) / Long_Float (Item.Uptime_Nanoseconds)));
    end Show;
 
    Trips : Interfaces.Unsigned_64 := 0;
@@ -103,8 +102,7 @@ begin
       task body Driver is
          Item     : Ada.Streams.Stream_Element_Array (1 .. 1);
          Last     : Ada.Streams.Stream_Element_Offset;
-         Deadline : constant Real_Time.Time :=
-           Real_Time.Clock + Real_Time.To_Time_Span (Window);
+         Deadline : constant Real_Time.Time := Real_Time.Clock + Real_Time.To_Time_Span (Window);
          Total    : Interfaces.Unsigned_64 := 0;
       begin
          while Real_Time.Clock < Deadline loop

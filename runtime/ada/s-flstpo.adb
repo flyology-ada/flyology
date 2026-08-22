@@ -1,9 +1,7 @@
 package body System.Flyology.Stack_Policy
   with SPARK_Mode
 is
-   function Usable_Bytes
-     (Request, Page_Size, Guard_Size : Byte_Count) return Byte_Count
-   is
+   function Usable_Bytes (Request, Page_Size, Guard_Size : Byte_Count) return Byte_Count is
       Remainder : Byte_Count;
       Aligned   : Byte_Count;
    begin
@@ -13,8 +11,7 @@ is
 
       pragma Assert (Valid_Page (Page_Size));
       pragma Assert (Valid_Guard (Guard_Size));
-      pragma Assert
-        (Request <= Byte_Count'Last - 2 * Guard_Size - (Page_Size - 1));
+      pragma Assert (Request <= Byte_Count'Last - 2 * Guard_Size - (Page_Size - 1));
 
       Remainder := Request mod Page_Size;
       pragma Assert (Remainder < Page_Size);

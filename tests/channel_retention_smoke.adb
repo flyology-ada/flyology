@@ -19,13 +19,15 @@ procedure Channel_Retention_Smoke is
       Owner : Resource_Access := null;
    end record;
 
-   overriding procedure Adjust (Item : in out Tracked_Value);
-   overriding procedure Finalize (Item : in out Tracked_Value);
+   overriding
+   procedure Adjust (Item : in out Tracked_Value);
+   overriding
+   procedure Finalize (Item : in out Tracked_Value);
 
-   procedure Free is new Ada.Unchecked_Deallocation
-     (Resource, Resource_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Resource, Resource_Access);
 
-   overriding procedure Adjust (Item : in out Tracked_Value) is
+   overriding
+   procedure Adjust (Item : in out Tracked_Value) is
    begin
       if Raise_Adjust and then Item.Owner /= null then
          --  A failed Adjust must not claim the source's reference.
@@ -36,7 +38,8 @@ procedure Channel_Retention_Smoke is
       end if;
    end Adjust;
 
-   overriding procedure Finalize (Item : in out Tracked_Value) is
+   overriding
+   procedure Finalize (Item : in out Tracked_Value) is
    begin
       if Item.Owner = null then
          return;
@@ -53,9 +56,8 @@ procedure Channel_Retention_Smoke is
       end if;
    end Finalize;
 
-   function Make (Identity : Positive := 1) return Tracked_Value is
-     (Ada.Finalization.Controlled with
-        Owner => new Resource'(References => 1, Identity => Identity));
+   function Make (Identity : Positive := 1) return Tracked_Value
+   is (Ada.Finalization.Controlled with Owner => new Resource'(References => 1, Identity => Identity));
 
    function Resource_Identity (Item : Tracked_Value) return Positive is
    begin
@@ -70,12 +72,9 @@ procedure Channel_Retention_Smoke is
       Item := (Ada.Finalization.Controlled with Owner => null);
    end Drop;
 
-   Empty : constant Tracked_Value :=
-     (Ada.Finalization.Controlled with Owner => null);
+   Empty : constant Tracked_Value := (Ada.Finalization.Controlled with Owner => null);
 
-   package Channels is new Flyology.Channels.Bounded
-     (Element_Type => Tracked_Value,
-      Empty_Value  => Empty);
+   package Channels is new Flyology.Channels.Bounded (Element_Type => Tracked_Value, Empty_Value => Empty);
 
    procedure Check_Released (Expected : Natural; Path : String) is
    begin
@@ -122,7 +121,7 @@ procedure Channel_Retention_Smoke is
       Received_First  : Tracked_Value;
       Received_Second : Tracked_Value;
       Received_Third  : Tracked_Value;
-      Result           : Channels.Try_Receive_Result;
+      Result          : Channels.Try_Receive_Result;
       Before          : constant Natural := Released;
    begin
       Queue.Send (First);
@@ -297,8 +296,7 @@ procedure Channel_Retention_Smoke is
          null;
       end;
       if not Passed then
-         raise Program_Error with
-           "controlled channel checks failed in " & Model'Image;
+         raise Program_Error with "controlled channel checks failed in " & Model'Image;
       end if;
    end Run;
 

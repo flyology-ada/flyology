@@ -19,9 +19,9 @@ use type Interfaces.Unsigned_64;
 --  from every use of that same View; separate attached views may perform
 --  ordinary operations concurrently.
 --  @formal Element Immutable byte-backed element adapter stored by this vector
+
 generic
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Vectors is
 
    --  Eight-byte magic stored in every vector header.
@@ -29,15 +29,15 @@ package Flyology.Data_Structures.Vectors is
 
    --  Schema identifier composed with the immutable element identity.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_5645_4354_0004# xor Element.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
+     16#0001_5645_4354_0004#
+     xor Element.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 4;
 
    --  Complete stable layout identity for envelope instances and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached vector view.
    type View is limited private;
@@ -54,10 +54,7 @@ package Flyology.Data_Structures.Vectors is
    --  @param Location Nonzero stored offset aligned for this element type
    --  @param Capacity Maximum element count
    procedure Initialize
-     (Item     : out View;
-      Region   : Region_View;
-      Location : Region_Offset;
-      Capacity : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Initialize certified virgin bytes or attach to an exactly compatible
    --  vector. Capacity and the generic element identity must match.
@@ -80,11 +77,7 @@ package Flyology.Data_Structures.Vectors is
    --  @param Location Stored vector offset
    --  @param Capacity Expected maximum element count
    --  @exception Layout_Error Identity, geometry, or length is incompatible
-   procedure Attach
-     (Item     : out View;
-      Region   : Region_View;
-      Location : Region_Offset;
-      Capacity : Positive);
+   procedure Attach (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Detach Item without modifying stored bytes.
    --  @param Item Local view to detach
@@ -128,10 +121,7 @@ package Flyology.Data_Structures.Vectors is
    --  @param Item Internally synchronized vector view
    --  @param Data Application value accepted by the element adapter
    --  @param Appended True only when capacity was available
-   procedure Try_Append
-     (Item     : in out View;
-      Data     : Element.Source;
-      Appended : out Boolean);
+   procedure Try_Append (Item : in out View; Data : Element.Source; Appended : out Boolean);
 
    --  Append after waiting for the shared guard.
    --  @param Item Internally synchronized vector view
@@ -139,29 +129,21 @@ package Flyology.Data_Structures.Vectors is
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @param Appended True only when capacity was available
    procedure Try_Append
-     (Item     : in out View;
-      Data     : Element.Source;
-      Timeout  : Wait_Timeout;
-      Appended : out Boolean);
+     (Item : in out View; Data : Element.Source; Timeout : Wait_Timeout; Appended : out Boolean);
 
    --  Create an immutable value only after finding an unpublished tail slot.
    --  The bound creator is not called when the vector is full.
    --  @param Item Internally synchronized vector view
    --  @param Data Application value accepted by the bound creator
    --  @param Appended True only when creation completed and was published
-   procedure Try_Emplace
-     (Item        : in out View;
-      Data        : Element.Source;
-      Appended    : out Boolean);
+   procedure Try_Emplace (Item : in out View; Data : Element.Source; Appended : out Boolean);
 
    --  Observe the indexed element without copying its representation.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
    --  @return Application observation returned by the bound observer
    --  @exception Constraint_Error Index is outside the initialized range
-   function Read
-     (Item  : View;
-      Index : Positive) return Element.Observed;
+   function Read (Item : View; Index : Positive) return Element.Observed;
 
    --  Copy the indexed element into an independent immutable representation.
    --  @param Item Internally synchronized vector view
@@ -174,31 +156,21 @@ package Flyology.Data_Structures.Vectors is
    --  @param Index One-based initialized element position
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @return Application observation returned by the bound observer
-   function Read
-     (Item    : View;
-      Index   : Positive;
-      Timeout : Wait_Timeout) return Element.Observed;
+   function Read (Item : View; Index : Positive; Timeout : Wait_Timeout) return Element.Observed;
 
    --  Replace one element with another immutable value. No mutable reference
    --  to the published element is exposed.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
    --  @param Data Application value accepted by the element adapter
-   procedure Replace
-     (Item  : in out View;
-      Index : Positive;
-      Data  : Element.Source);
+   procedure Replace (Item : in out View; Index : Positive; Data : Element.Source);
 
    --  Replace after waiting for the shared guard.
    --  @param Item Internally synchronized vector view
    --  @param Index One-based initialized element position
    --  @param Data Application value accepted by the element adapter
    --  @param Timeout Maximum wait; zero permits one immediate attempt
-   procedure Replace
-     (Item    : in out View;
-      Index   : Positive;
-      Data    : Element.Source;
-      Timeout : Wait_Timeout);
+   procedure Replace (Item : in out View; Index : Positive; Data : Element.Source; Timeout : Wait_Timeout);
 
    --  Observe and remove the last element without copying its representation.
    --  The bound observer is not called for an empty vector; a raising observer
@@ -206,10 +178,7 @@ package Flyology.Data_Structures.Vectors is
    --  @param Item Internally synchronized vector view
    --  @param Data Observation assigned only when an element is consumed
    --  @param Popped True only when observation returned and length decremented
-   procedure Try_Pop
-     (Item    : in out View;
-      Data    : out Element.Observed;
-      Popped  : out Boolean);
+   procedure Try_Pop (Item : in out View; Data : out Element.Observed; Popped : out Boolean);
 
    --  Set Length to zero without rewriting immutable payload bytes.
    --  @param Item Internally synchronized vector view

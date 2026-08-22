@@ -5,26 +5,15 @@ package body Structured_Server_Test_Control is
    use type Interfaces.C.int;
 
    procedure C_Reset
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_reset";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_reset";
    procedure C_Arm (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_arm";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_arm";
    function C_Reached (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_reached";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_reached";
    procedure C_Release (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_release";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_release";
    procedure C_Fail_Activation_At (Ordinal : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_structured_server_activation_fail_at";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_activation_fail_at";
 
    procedure Reset is
    begin

@@ -9,13 +9,14 @@ pragma Elaborate (Flyology_NUMA.Uniform);
 --  nodes to it.  Reporting one node holding every processor keeps every
 --  query answerable, and Support reports Single_Domain so that a caller can
 --  tell this apart from a host that was read and found to be uniform.
+
 package body Flyology_NUMA.Platform is
 
    --------------
    -- Discover --
    --------------
 
-   function Discover return Machine_Facts is
-     (Uniform.Single_Domain_Facts);
+   function Discover return Machine_Facts
+   is (Uniform.Single_Domain_Facts);
 
 end Flyology_NUMA.Platform;

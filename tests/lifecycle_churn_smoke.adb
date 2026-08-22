@@ -58,13 +58,14 @@ procedure Lifecycle_Churn_Smoke is
          null;
       end Wait_Waiting;
 
-      function Finalizations return Natural is (Finalize_Count);
+      function Finalizations return Natural
+      is (Finalize_Count);
    end State;
 
-   type Finalization_Probe is new Ada.Finalization.Limited_Controlled
-     with null record;
+   type Finalization_Probe is new Ada.Finalization.Limited_Controlled with null record;
 
-   overriding procedure Finalize (Item : in out Finalization_Probe) is
+   overriding
+   procedure Finalize (Item : in out Finalization_Probe) is
       pragma Unreferenced (Item);
    begin
       State.Finalized;
@@ -84,23 +85,17 @@ procedure Lifecycle_Churn_Smoke is
 
    type Churn_Access is access Churn_Task;
    type Churn_Array is array (Positive range <>) of Churn_Access;
-   procedure Free_Churn is new Ada.Unchecked_Deallocation
-     (Churn_Task, Churn_Access);
+   procedure Free_Churn is new Ada.Unchecked_Deallocation (Churn_Task, Churn_Access);
 
    procedure Wait_For_Empty_Pool is
       Pool : Flyology.Observability.Stack_Pool_Snapshot;
    begin
       for Attempt in 1 .. 1_000 loop
          Pool := Flyology.Observability.Stack_Pool;
-         exit when Pool.Live_Stacks = 0
-           and then Pool.Active_Arenas = 0
-           and then Pool.Reserved_Bytes = 0;
+         exit when Pool.Live_Stacks = 0 and then Pool.Active_Arenas = 0 and then Pool.Reserved_Bytes = 0;
          delay 0.000_1;
       end loop;
-      if Pool.Live_Stacks /= 0
-        or else Pool.Active_Arenas /= 0
-        or else Pool.Reserved_Bytes /= 0
-      then
+      if Pool.Live_Stacks /= 0 or else Pool.Active_Arenas /= 0 or else Pool.Reserved_Bytes /= 0 then
          raise Program_Error with "churn retained fiber stack state";
       end if;
    end Wait_For_Empty_Pool;
@@ -146,8 +141,7 @@ procedure Lifecycle_Churn_Smoke is
    end Exceptional_Task;
 
    type Exceptional_Access is access Exceptional_Task;
-   procedure Free_Exceptional is new Ada.Unchecked_Deallocation
-     (Exceptional_Task, Exceptional_Access);
+   procedure Free_Exceptional is new Ada.Unchecked_Deallocation (Exceptional_Task, Exceptional_Access);
 
    procedure Check_Unhandled_Exception is
       Item : Exceptional_Access := new Exceptional_Task;
@@ -174,8 +168,7 @@ procedure Lifecycle_Churn_Smoke is
    end Abort_Task;
 
    type Abort_Access is access Abort_Task;
-   procedure Free_Abort is new Ada.Unchecked_Deallocation
-     (Abort_Task, Abort_Access);
+   procedure Free_Abort is new Ada.Unchecked_Deallocation (Abort_Task, Abort_Access);
 
    procedure Check_Abort is
       Item : Abort_Access := new Abort_Task;
@@ -231,13 +224,11 @@ procedure Lifecycle_Churn_Smoke is
    end Address_Task;
 
    type Address_Access is access Address_Task;
-   procedure Free_Address is new Ada.Unchecked_Deallocation
-     (Address_Task, Address_Access);
+   procedure Free_Address is new Ada.Unchecked_Deallocation (Address_Task, Address_Access);
 
    procedure Check_Task_Address_Reuse is
       Previous          : System.Address := System.Null_Address;
-      Previous_Instance : Observation.Task_Instance_Id :=
-        Observation.No_Task_Instance;
+      Previous_Instance : Observation.Task_Instance_Id := Observation.No_Task_Instance;
       Items             : Observation.Task_Snapshot_Array (1 .. 1);
       Count             : Natural;
       Total             : Observation.Counter;
@@ -245,29 +236,23 @@ procedure Lifecycle_Churn_Smoke is
    begin
       for Attempt in 1 .. 1_000 loop
          declare
-            Item : Address_Access := new Address_Task;
-            Current : constant System.Address := Item.all'Address;
+            Item             : Address_Access := new Address_Task;
+            Current          : constant System.Address := Item.all'Address;
             Current_Instance : Observation.Task_Instance_Id;
          begin
             while not Item.all'Terminated loop
                delay 0.000_1;
             end loop;
-            if not Observation.Snapshot_Tasks (0, Items, Count, Total)
-              or else Count /= 1
-              or else Total /= 1
+            if not Observation.Snapshot_Tasks (0, Items, Count, Total) or else Count /= 1 or else Total /= 1
             then
-               raise Program_Error with
-                 "finished task was not observable before deallocation";
+               raise Program_Error with "finished task was not observable before deallocation";
             end if;
             Current_Instance := Items (1).Instance;
             if Current_Instance = Observation.No_Task_Instance then
                raise Program_Error with "task snapshot identity was zero";
             end if;
-            if Current = Previous
-              and then Current_Instance = Previous_Instance
-            then
-               raise Program_Error with
-                 "task snapshot identity was reused with task address";
+            if Current = Previous and then Current_Instance = Previous_Instance then
+               raise Program_Error with "task snapshot identity was reused with task address";
             end if;
             Free_Address (Item);
             Reused := Reused or else Current = Previous;

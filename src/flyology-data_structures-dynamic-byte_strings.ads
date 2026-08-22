@@ -14,6 +14,7 @@ use type Interfaces.Unsigned_64;
 --  mappings; arena contention is reported through Growth_Result. Lifecycle
 --  operations and detachment of one local View require application exclusion.
 --  @formal Arena_Provider Statically selected relocatable arena instance
+
 generic
    with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
 package Flyology.Data_Structures.Dynamic.Byte_Strings with Preelaborate is
@@ -23,17 +24,16 @@ package Flyology.Data_Structures.Dynamic.Byte_Strings with Preelaborate is
 
    --  Schema identifier for the arena-backed byte-string growth contract.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4442_5354_0002# xor Arena_Provider.Identity.Schema xor
-     Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19) xor
-     Interfaces.Shift_Left
-       (Interfaces.Unsigned_64 (Arena_Provider.Identity.Version), 32);
+     16#0001_4442_5354_0002#
+     xor Arena_Provider.Identity.Schema
+     xor Interfaces.Rotate_Left (Arena_Provider.Identity.Magic, 19)
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Arena_Provider.Identity.Version), 32);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable layout identity for envelopes and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached dynamic byte-string view.
    type View is limited private;
@@ -143,10 +143,7 @@ package Flyology.Data_Structures.Dynamic.Byte_Strings with Preelaborate is
    --  @param Item Internally synchronized string view
    --  @param Arena Matching attached arena view
    --  @param Data Destination whose length must equal Length
-   procedure Read
-     (Item  : View;
-      Arena : Arena_Provider.View;
-      Data  : out Ada.Streams.Stream_Element_Array);
+   procedure Read (Item : View; Arena : Arena_Provider.View; Data : out Ada.Streams.Stream_Element_Array);
 
    --  Set Length to zero without releasing retained payload capacity.
    --  @param Item Internally synchronized string view
@@ -160,16 +157,16 @@ package Flyology.Data_Structures.Dynamic.Byte_Strings with Preelaborate is
 
 private
    type View is limited record
-      Core             : Layouts.Local_View;
-      Guard_Address    : System.Address := System.Null_Address;
-      Length_Address   : System.Address := System.Null_Address;
-      Capacity_Address : System.Address := System.Null_Address;
+      Core                   : Layouts.Local_View;
+      Guard_Address          : System.Address := System.Null_Address;
+      Length_Address         : System.Address := System.Null_Address;
+      Capacity_Address       : System.Address := System.Null_Address;
       Capacity_Check_Address : System.Address := System.Null_Address;
-      Current_Address  : System.Address := System.Null_Address;
-      Retired_Address  : System.Address := System.Null_Address;
-      Initial_Value    : Interfaces.Unsigned_32 := 0;
-      Element_Value    : Interfaces.Unsigned_32 := 0;
-      Arena_ID_Value   : Interfaces.Unsigned_64 := 0;
-      Arena_Epoch_Value : Interfaces.Unsigned_32 := 0;
+      Current_Address        : System.Address := System.Null_Address;
+      Retired_Address        : System.Address := System.Null_Address;
+      Initial_Value          : Interfaces.Unsigned_32 := 0;
+      Element_Value          : Interfaces.Unsigned_32 := 0;
+      Arena_ID_Value         : Interfaces.Unsigned_64 := 0;
+      Arena_Epoch_Value      : Interfaces.Unsigned_32 := 0;
    end record;
 end Flyology.Data_Structures.Dynamic.Byte_Strings;

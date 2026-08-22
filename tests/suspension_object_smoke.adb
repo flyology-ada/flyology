@@ -43,7 +43,8 @@ procedure Suspension_Object_Smoke is
    begin
       STC.Set_True (Gate);
       declare
-         task Waiter with CPU => 1 is
+         task Waiter
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Waiter;
 
@@ -66,7 +67,8 @@ procedure Suspension_Object_Smoke is
       Light_Done       : Signal;
       Native_Done      : Signal;
 
-      task Light_Waiter with CPU => 1 is
+      task Light_Waiter
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Light_Waiter;
 
@@ -74,7 +76,8 @@ procedure Suspension_Object_Smoke is
          pragma Task_Info (Flyology.Native_Task);
       end Native_Waiter;
 
-      task Light_Setter with CPU => 1 is
+      task Light_Setter
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Light_Setter;
 
@@ -119,15 +122,19 @@ procedure Suspension_Object_Smoke is
       Third_Checked   : Signal;
       First_Done      : Signal;
       Second_Done     : Signal;
-      Stop_Blocker    : Boolean := False with Atomic;
-      Third_Raised    : Boolean := False with Atomic;
+      Stop_Blocker    : Boolean := False
+      with Atomic;
+      Third_Raised    : Boolean := False
+      with Atomic;
 
-      task First with CPU => 1 is
+      task First
+        with CPU => 1 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
       end First;
 
-      task Blocker with CPU => 1 is
+      task Blocker
+        with CPU => 1 is
          pragma Priority (25);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
@@ -190,8 +197,7 @@ procedure Suspension_Object_Smoke is
       Start_Third.Set;
       Await (Third_Checked, "second-waiter check did not finish");
       if not Third_Raised then
-         raise Program_Error with
-           "a second waiter did not raise Program_Error";
+         raise Program_Error with "a second waiter did not raise Program_Error";
       end if;
 
       Stop_Blocker := True;
@@ -203,7 +209,8 @@ procedure Suspension_Object_Smoke is
    procedure Check_Parked_Abort is
       Gate    : STC.Suspension_Object;
       Started : Signal;
-      task Waiter with CPU => 1 is
+      task Waiter
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Waiter;
 
@@ -221,8 +228,7 @@ procedure Suspension_Object_Smoke is
       begin
          while not Waiter'Terminated loop
             if RT.Clock >= Deadline then
-               raise Program_Error with
-                 "aborted suspension-object waiter did not terminate";
+               raise Program_Error with "aborted suspension-object waiter did not terminate";
             end if;
             delay 0.001;
          end loop;

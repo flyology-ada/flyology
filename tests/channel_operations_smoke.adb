@@ -6,17 +6,13 @@ with Flyology.IO.Timers;
 with Flyology.Operations;
 
 procedure Channel_Operations_Smoke is
-   package Integer_Channels is new Flyology.Channels.Bounded
-     (Element_Type => Integer,
-     Empty_Value  => 0);
+   package Integer_Channels is new Flyology.Channels.Bounded (Element_Type => Integer, Empty_Value => 0);
 
    use type Integer_Channels.Try_Receive_Result;
    use type Integer_Channels.Try_Send_Result;
 
-   function Ref
-     (Item : Flyology.Operations.Operation'Class)
-      return Flyology.Operations.Operation_Reference
-      renames Flyology.Operations.Reference;
+   function Ref (Item : Flyology.Operations.Operation'Class) return Flyology.Operations.Operation_Reference
+   renames Flyology.Operations.Reference;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -59,28 +55,27 @@ procedure Channel_Operations_Smoke is
       --  the atomic subscribe/recheck path rather than a helper task.
       declare
          Channel : aliased Integer_Channels.Channel (Capacity => 2);
-         Set : aliased Flyology.Operations.Completion_Set (3);
-         Get : aliased Integer_Channels.Receive_Operation :=
+         Set     : aliased Flyology.Operations.Completion_Set (3);
+         Get     : aliased Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 1.0);
-         Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+         Alarm   : aliased Flyology.IO.Timers.Timer_Operation :=
            Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
-         Winner : Flyology.Operations.Gate_Operation :=
-           Flyology.Operations.Wait_For_Success
-             (Set'Access, [Ref (Get), Ref (Alarm)]);
-         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+         Winner  : Flyology.Operations.Gate_Operation :=
+           Flyology.Operations.Wait_For_Success (Set'Access, [Ref (Get), Ref (Alarm)]);
+         Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
          Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
-         Status : Integer_Channels.Try_Send_Result;
-         Value : Integer := 0;
+         Status  : Integer_Channels.Try_Send_Result;
+         Value   : Integer := 0;
       begin
          Channel.Try_Send (42, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "channel test publication failed");
+         Check (Status = Integer_Channels.Item_Sent, "channel test publication failed");
          while not Flyology.Operations.Is_Terminal (Winner) loop
             Flyology.Operations.Wait_Some (Set, Batch);
          end loop;
          Flyology.Operations.Finish (Winner, Matches);
          Integer_Channels.Finish (Get, Value);
-         Passed := Passed
+         Passed :=
+           Passed
            and then Value = 42
            and then Matches.Count = 1
            and then Natural (Matches.Ids (1)) = Flyology.Operations.Id (Get);
@@ -97,77 +92,68 @@ procedure Channel_Operations_Smoke is
       --  commits cascade through one shared completion source and an All gate.
       declare
          Channel : aliased Integer_Channels.Channel (Capacity => 2);
-         Set : aliased Flyology.Operations.Completion_Set (3);
-         Left : aliased Integer_Channels.Receive_Operation :=
+         Set     : aliased Flyology.Operations.Completion_Set (3);
+         Left    : aliased Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 1.0);
-         Right : aliased Integer_Channels.Receive_Operation :=
+         Right   : aliased Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 1.0);
-         Both : Flyology.Operations.Gate_Operation :=
-           Flyology.Operations.Wait_All
-             (Set'Access, [Ref (Left), Ref (Right)]);
-         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+         Both    : Flyology.Operations.Gate_Operation :=
+           Flyology.Operations.Wait_All (Set'Access, [Ref (Left), Ref (Right)]);
+         Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
          Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
-         Status : Integer_Channels.Try_Send_Result;
-         A, B : Integer := 0;
+         Status  : Integer_Channels.Try_Send_Result;
+         A, B    : Integer := 0;
       begin
          Channel.Try_Send (1, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "first fan-out publication failed");
+         Check (Status = Integer_Channels.Item_Sent, "first fan-out publication failed");
          Channel.Try_Send (2, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "second fan-out publication failed");
+         Check (Status = Integer_Channels.Item_Sent, "second fan-out publication failed");
          while not Flyology.Operations.Is_Terminal (Both) loop
             Flyology.Operations.Wait_Some (Set, Batch);
          end loop;
          Flyology.Operations.Finish (Both, Matches);
          Integer_Channels.Finish (Left, A);
          Integer_Channels.Finish (Right, B);
-         Passed := Passed
-           and then Matches.Count = 2
-           and then ((A = 1 and then B = 2) or else
-                     (A = 2 and then B = 1));
+         Passed :=
+           Passed and then Matches.Count = 2 and then ((A = 1 and then B = 2) or else (A = 2 and then B = 1));
       end;
 
       --  A full channel retains a pending send. Receiving capacity wakes it;
       --  Finish consumes the operation but the channel keeps FIFO ownership.
       declare
-         Channel : aliased Integer_Channels.Channel (Capacity => 1);
-         Set : aliased Flyology.Operations.Completion_Set (1);
-         Status : Integer_Channels.Try_Send_Result;
+         Channel        : aliased Integer_Channels.Channel (Capacity => 1);
+         Set            : aliased Flyology.Operations.Completion_Set (1);
+         Status         : Integer_Channels.Try_Send_Result;
          Receive_Status : Integer_Channels.Try_Receive_Result;
-         Value : Integer := 0;
+         Value          : Integer := 0;
       begin
          Channel.Try_Send (7, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "channel preload failed");
+         Check (Status = Integer_Channels.Item_Sent, "channel preload failed");
          declare
             Put : Integer_Channels.Send_Operation :=
               Integer_Channels.Send (Set'Access, Channel'Access, 8, 1.0);
          begin
             Channel.Try_Receive (Value, Receive_Status);
-            Check (Receive_Status = Integer_Channels.Item_Received
-                     and then Value = 7,
-                   "channel capacity release failed");
+            Check
+              (Receive_Status = Integer_Channels.Item_Received and then Value = 7,
+               "channel capacity release failed");
             Flyology.Operations.Wait_All (Set);
             Integer_Channels.Finish (Put);
          end;
          Channel.Try_Receive (Value, Receive_Status);
-         Passed := Passed
-           and then Receive_Status = Integer_Channels.Item_Received
-           and then Value = 8;
+         Passed := Passed and then Receive_Status = Integer_Channels.Item_Received and then Value = 8;
       end;
 
       --  Timeout and close are retained provider failures. The set wait does
       --  not raise them; typed Finish reconstructs the synchronous exception.
       declare
-         Channel : aliased Integer_Channels.Channel (Capacity => 1);
-         Set : aliased Flyology.Operations.Completion_Set (2);
-         Timed : Integer_Channels.Receive_Operation :=
+         Channel               : aliased Integer_Channels.Channel (Capacity => 1);
+         Set                   : aliased Flyology.Operations.Completion_Set (2);
+         Timed                 : Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 0.005);
-         Closed : Integer_Channels.Receive_Operation
-           (Set'Access);
+         Closed                : Integer_Channels.Receive_Operation (Set'Access);
          Timed_Out, Was_Closed : Boolean := False;
-         Value : Integer := 0;
+         Value                 : Integer := 0;
       begin
          Flyology.Operations.Wait_All (Set);
          begin
@@ -192,21 +178,20 @@ procedure Channel_Operations_Smoke is
       --  succeeds because it counts the provider failure as a terminal result;
       --  typed Finish alone raises Channel_Closed.
       declare
-         Channel : aliased Integer_Channels.Channel (Capacity => 1);
-         Set : aliased Flyology.Operations.Completion_Set (2);
-         Status : Integer_Channels.Try_Send_Result;
+         Channel    : aliased Integer_Channels.Channel (Capacity => 1);
+         Set        : aliased Flyology.Operations.Completion_Set (2);
+         Status     : Integer_Channels.Try_Send_Result;
          Was_Closed : Boolean := False;
       begin
          Channel.Try_Send (10, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "close-send preload failed");
+         Check (Status = Integer_Channels.Item_Sent, "close-send preload failed");
          declare
-            Put : aliased Integer_Channels.Send_Operation :=
+            Put      : aliased Integer_Channels.Send_Operation :=
               Integer_Channels.Send (Set'Access, Channel'Access, 11, 1.0);
             Terminal : Flyology.Operations.Gate_Operation :=
               Flyology.Operations.Wait_All (Set'Access, [Ref (Put)]);
-            Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
-            Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Batch    : Flyology.Operations.Completion_Batch (Set.Capacity);
+            Matches  : Flyology.Operations.Completion_Batch (Set.Capacity);
          begin
             Channel.Close;
             while not Flyology.Operations.Is_Terminal (Terminal) loop
@@ -219,9 +204,7 @@ procedure Channel_Operations_Smoke is
                when Integer_Channels.Channel_Closed =>
                   Was_Closed := True;
             end;
-            Passed := Passed
-              and then Matches.Count = 1
-              and then Was_Closed;
+            Passed := Passed and then Matches.Count = 1 and then Was_Closed;
          end;
       end;
 
@@ -229,15 +212,14 @@ procedure Channel_Operations_Smoke is
       --  pending object's finalizer does the same. Capacity-one reuse plus a
       --  later channel state change catches stale intrusive links.
       declare
-         Channel : aliased Integer_Channels.Channel (Capacity => 1);
-         Set : aliased Flyology.Operations.Completion_Set (1);
+         Channel   : aliased Integer_Channels.Channel (Capacity => 1);
+         Set       : aliased Flyology.Operations.Completion_Set (1);
          Cancelled : Boolean := False;
-         Value : Integer := 0;
-         Status : Integer_Channels.Try_Send_Result;
+         Value     : Integer := 0;
+         Status    : Integer_Channels.Try_Send_Result;
       begin
          declare
-            Get : Integer_Channels.Receive_Operation :=
-              Integer_Channels.Receive (Set'Access, Channel'Access);
+            Get : Integer_Channels.Receive_Operation := Integer_Channels.Receive (Set'Access, Channel'Access);
          begin
             Flyology.Operations.Cancel (Get);
             begin
@@ -255,8 +237,7 @@ procedure Channel_Operations_Smoke is
             null;
          end;
          Channel.Try_Send (9, Status);
-         Check (Status = Integer_Channels.Item_Sent,
-                "channel stale-subscription publication failed");
+         Check (Status = Integer_Channels.Item_Sent, "channel stale-subscription publication failed");
          declare
             Get : Integer_Channels.Receive_Operation :=
               Integer_Channels.Receive (Set'Access, Channel'Access, 0.0);
@@ -276,10 +257,10 @@ procedure Channel_Operations_Smoke is
    end Runner;
 
    type Runner_Access is access Runner;
-   Native : Runner_Access;
+   Native      : Runner_Access;
    Lightweight : Runner_Access;
    pragma Unreferenced (Native, Lightweight);
-   Passed : Boolean;
+   Passed      : Boolean;
 begin
    Native := new Runner (Flyology.Native_Task);
    Results.Await (Passed);

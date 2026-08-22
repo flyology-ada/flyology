@@ -7,8 +7,7 @@ package Flyology_Cachelines.Padded is
    --  Wraps a value in an independently spaced storage object.
    --  @formal Element_Type The definite type to store.
 
-   pragma Warnings
-     (Off, "suspiciously large alignment specified for ""Padded""");
+   pragma Warnings (Off, "suspiciously large alignment specified for ""Padded""");
 
    --  A value isolated by the destructive-interference spacing policy.
    --
@@ -24,22 +23,22 @@ package Flyology_Cachelines.Padded is
    type Padded is record
       Value : Element_Type;
    end record
-     with Alignment => Destructive_Interference_Size;
-   pragma Warnings
-     (On, "suspiciously large alignment specified for ""Padded""");
+   with Alignment => Destructive_Interference_Size;
+   pragma Warnings (On, "suspiciously large alignment specified for ""Padded""");
 
    --  Object size of Padded in System.Storage_Unit elements.
-   Padded_Size_In_Storage_Elements : constant Positive :=
-     Padded'Object_Size / System.Storage_Unit;
+   Padded_Size_In_Storage_Elements : constant Positive := Padded'Object_Size / System.Storage_Unit;
 
    --  Wrap a value in padded storage.
    --  @param Value The value to wrap.
    --  @return A padded object containing Value.
-   function Create (Value : Element_Type) return Padded is ((Value => Value));
+   function Create (Value : Element_Type) return Padded
+   is ((Value => Value));
 
    --  Extract the value from padded storage.
    --  @param Item The padded object to read.
    --  @return The contained value.
-   function Unwrap (Item : Padded) return Element_Type is (Item.Value);
+   function Unwrap (Item : Padded) return Element_Type
+   is (Item.Value);
 
 end Flyology_Cachelines.Padded;

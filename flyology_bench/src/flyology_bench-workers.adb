@@ -27,64 +27,49 @@ package body Flyology_Bench.Workers is
    use type C.long;
    use type CS.chars_ptr;
 
-   Worker_Marker : constant String :=
+   Worker_Marker                : constant String :=
      "--flyology-bench-worker="
-     & Ada.Strings.Fixed.Trim
-       (Positive'Image (Protocol_Version), Ada.Strings.Both);
-   Result_FD     : constant C.int := 3;
-   Maximum_Protocol_Bytes : constant := 4 * 1_024 * 1_024;
+     & Ada.Strings.Fixed.Trim (Positive'Image (Protocol_Version), Ada.Strings.Both);
+   Result_FD                    : constant C.int := 3;
+   Maximum_Protocol_Bytes       : constant := 4 * 1_024 * 1_024;
    Maximum_Drain_Bytes_Per_Pass : constant := 64 * 1_024;
-   Frame_Magic : constant String := "FLYBWRK1";
-   Ready_Frame : constant Interfaces.Unsigned_32 := 1;
-   Result_Frame : constant Interfaces.Unsigned_32 := 2;
-   Completion_Marker : constant Interfaces.Unsigned_64 :=
-     16#C0DE_F17E_BA5E_0001#;
+   Frame_Magic                  : constant String := "FLYBWRK1";
+   Ready_Frame                  : constant Interfaces.Unsigned_32 := 1;
+   Result_Frame                 : constant Interfaces.Unsigned_32 := 2;
+   Completion_Marker            : constant Interfaces.Unsigned_64 := 16#C0DE_F17E_BA5E_0001#;
 
    subtype Buffer is US.Unbounded_String;
    subtype U32 is Interfaces.Unsigned_32;
    subtype U64 is Interfaces.Unsigned_64;
 
-   function Float_To_Bits is new Ada.Unchecked_Conversion
-     (Long_Float, U64);
-   function Bits_To_Float is new Ada.Unchecked_Conversion
-     (U64, Long_Float);
+   function Float_To_Bits is new Ada.Unchecked_Conversion (Long_Float, U64);
+   function Bits_To_Float is new Ada.Unchecked_Conversion (U64, Long_Float);
 
-   pragma Compile_Time_Error
-     (Long_Float'Size /= 64,
-      "fresh-process worker protocol requires 64-bit Long_Float");
+   pragma
+     Compile_Time_Error (Long_Float'Size /= 64, "fresh-process worker protocol requires 64-bit Long_Float");
 
-   type Descriptor_Array is array (Natural range 0 .. 2) of aliased C.int
-     with Convention => C;
-   type Chars_Ptr_Array is array (Natural range <>) of aliased CS.chars_ptr
-     with Convention => C;
+   type Descriptor_Array is array (Natural range 0 .. 2) of aliased C.int with Convention => C;
+   type Chars_Ptr_Array is array (Natural range <>) of aliased CS.chars_ptr with Convention => C;
 
    function C_Spawn
-     (Pid                 : access C.int;
-      Parent_Descriptors  : System.Address;
-      Executable          : CS.chars_ptr;
-      Arguments           : System.Address;
-      Environment         : System.Address;
-      Working_Directory   : CS.chars_ptr) return C.int;
+     (Pid                : access C.int;
+      Parent_Descriptors : System.Address;
+      Executable         : CS.chars_ptr;
+      Arguments          : System.Address;
+      Environment        : System.Address;
+      Working_Directory  : CS.chars_ptr) return C.int;
    pragma Import (C, C_Spawn, "flyology_bench_worker_spawn");
 
    function C_Set_Nonblocking (Descriptor : C.int) return C.int;
-   pragma Import
-     (C, C_Set_Nonblocking, "flyology_bench_worker_set_nonblocking");
+   pragma Import (C, C_Set_Nonblocking, "flyology_bench_worker_set_nonblocking");
 
    function C_Observe_Exit (Pid : C.int) return C.int;
-   pragma Import
-     (C, C_Observe_Exit, "flyology_bench_worker_observe_exit");
+   pragma Import (C, C_Observe_Exit, "flyology_bench_worker_observe_exit");
 
-   function C_Read
-     (Descriptor : C.int;
-      Data       : System.Address;
-      Length     : C.size_t) return C.long;
+   function C_Read (Descriptor : C.int; Data : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, C_Read, "read");
 
-   function C_Write
-     (Descriptor : C.int;
-      Data       : System.Address;
-      Length     : C.size_t) return C.long;
+   function C_Write (Descriptor : C.int; Data : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, C_Write, "write");
 
    function C_Close (Descriptor : C.int) return C.int;
@@ -93,50 +78,31 @@ package body Flyology_Bench.Workers is
    function C_Kill (Pid, Signal : C.int) return C.int;
    pragma Import (C, C_Kill, "kill");
 
-   function C_Waitpid
-     (Pid : C.int; Status : access C.int; Options : C.int) return C.int;
+   function C_Waitpid (Pid : C.int; Status : access C.int; Options : C.int) return C.int;
    pragma Import (C, C_Waitpid, "waitpid");
 
    function C_Signal_Terminate return C.int;
-   pragma Import
-     (C, C_Signal_Terminate,
-      "flyology_bench_worker_signal_terminate");
+   pragma Import (C, C_Signal_Terminate, "flyology_bench_worker_signal_terminate");
    function C_Signal_Kill return C.int;
-   pragma Import
-     (C, C_Signal_Kill, "flyology_bench_worker_signal_kill");
+   pragma Import (C, C_Signal_Kill, "flyology_bench_worker_signal_kill");
    function C_Errno_Interrupted return C.int;
-   pragma Import
-     (C, C_Errno_Interrupted,
-      "flyology_bench_worker_errno_interrupted");
+   pragma Import (C, C_Errno_Interrupted, "flyology_bench_worker_errno_interrupted");
    function C_Errno_Would_Block return C.int;
-   pragma Import
-     (C, C_Errno_Would_Block,
-      "flyology_bench_worker_errno_would_block");
+   pragma Import (C, C_Errno_Would_Block, "flyology_bench_worker_errno_would_block");
    function C_Errno_No_Child return C.int;
-   pragma Import
-     (C, C_Errno_No_Child,
-      "flyology_bench_worker_errno_no_child");
+   pragma Import (C, C_Errno_No_Child, "flyology_bench_worker_errno_no_child");
    function C_Errno_No_Process return C.int;
-   pragma Import
-     (C, C_Errno_No_Process,
-      "flyology_bench_worker_errno_no_process");
+   pragma Import (C, C_Errno_No_Process, "flyology_bench_worker_errno_no_process");
    function C_Errno_Permission return C.int;
-   pragma Import
-     (C, C_Errno_Permission,
-      "flyology_bench_worker_errno_permission");
+   pragma Import (C, C_Errno_Permission, "flyology_bench_worker_errno_permission");
    function C_Status_Exited (Status : C.int) return C.int;
-   pragma Import
-     (C, C_Status_Exited, "flyology_bench_worker_status_exited");
+   pragma Import (C, C_Status_Exited, "flyology_bench_worker_status_exited");
    function C_Status_Exit_Code (Status : C.int) return C.int;
-   pragma Import
-     (C, C_Status_Exit_Code,
-      "flyology_bench_worker_status_exit_code");
+   pragma Import (C, C_Status_Exit_Code, "flyology_bench_worker_status_exit_code");
    function C_Status_Signaled (Status : C.int) return C.int;
-   pragma Import
-     (C, C_Status_Signaled, "flyology_bench_worker_status_signaled");
+   pragma Import (C, C_Status_Signaled, "flyology_bench_worker_status_signaled");
    function C_Status_Signal (Status : C.int) return C.int;
-   pragma Import
-     (C, C_Status_Signal, "flyology_bench_worker_status_signal");
+   pragma Import (C, C_Status_Signal, "flyology_bench_worker_status_signal");
 
    Interrupted_Error : constant C.int := C_Errno_Interrupted;
    Would_Block_Error : constant C.int := C_Errno_Would_Block;
@@ -152,20 +118,14 @@ package body Flyology_Bench.Workers is
    procedure Put_U32 (Target : in out Buffer; Value : U32) is
    begin
       for Shift in reverse 0 .. 3 loop
-         Put_U8
-           (Target,
-            Natural
-              (Interfaces.Shift_Right (Value, Shift * 8) and 16#FF#));
+         Put_U8 (Target, Natural (Interfaces.Shift_Right (Value, Shift * 8) and 16#FF#));
       end loop;
    end Put_U32;
 
    procedure Put_U64 (Target : in out Buffer; Value : U64) is
    begin
       for Shift in reverse 0 .. 7 loop
-         Put_U8
-           (Target,
-            Natural
-              (Interfaces.Shift_Right (Value, Shift * 8) and 16#FF#));
+         Put_U8 (Target, Natural (Interfaces.Shift_Right (Value, Shift * 8) and 16#FF#));
       end loop;
    end Put_U64;
 
@@ -174,8 +134,7 @@ package body Flyology_Bench.Workers is
       Put_U64 (Target, U64 (Value));
    end Put_Natural;
 
-   procedure Put_Integer
-     (Target : in out Buffer; Value : Long_Long_Integer) is
+   procedure Put_Integer (Target : in out Buffer; Value : Long_Long_Integer) is
    begin
       if Value >= 0 then
          Put_U64 (Target, U64 (Value));
@@ -189,10 +148,8 @@ package body Flyology_Bench.Workers is
       Put_U8 (Target, (if Value then 1 else 0));
    end Put_Boolean;
 
-   function Valid_Number (Value : Long_Float) return Boolean is
-     (Value = Value
-      and then Value >= -Long_Float'Last
-      and then Value <= Long_Float'Last);
+   function Valid_Number (Value : Long_Float) return Boolean
+   is (Value = Value and then Value >= -Long_Float'Last and then Value <= Long_Float'Last);
 
    procedure Put_Float (Target : in out Buffer; Value : Long_Float) is
    begin
@@ -233,8 +190,7 @@ package body Flyology_Bench.Workers is
       return Result;
    end Get_U32;
 
-   procedure Read_U64
-     (Data : String; Cursor : aliased in out Natural; Result : out U64) is
+   procedure Read_U64 (Data : String; Cursor : aliased in out Natural; Result : out U64) is
    begin
       Result := 0;
       for Index in 1 .. 8 loop
@@ -246,8 +202,7 @@ package body Flyology_Bench.Workers is
       Result : U64 := 0;
    begin
       for Index in 1 .. 8 loop
-         Result := Interfaces.Shift_Left (Result, 8)
-           or U64 (Get_U8 (Data, Cursor));
+         Result := Interfaces.Shift_Left (Result, 8) or U64 (Get_U8 (Data, Cursor));
       end loop;
       return Result;
    end Get_U64;
@@ -269,22 +224,21 @@ package body Flyology_Bench.Workers is
       return -Long_Long_Integer (U64'Last - Value) - 1;
    end To_Integer;
 
-   function Get_Boolean
-     (Data : String; Cursor : aliased in out Natural) return Boolean
-   is
+   function Get_Boolean (Data : String; Cursor : aliased in out Natural) return Boolean is
       Value : constant Natural := Get_U8 (Data, Cursor);
    begin
       if Value > 1 then
-         raise Protocol_Error with
-           "invalid worker boolean at byte"
-           & Natural'Image (Cursor - 1) & ", value" & Natural'Image (Value);
+         raise Protocol_Error
+           with
+             "invalid worker boolean at byte"
+             & Natural'Image (Cursor - 1)
+             & ", value"
+             & Natural'Image (Value);
       end if;
       return Value = 1;
    end Get_Boolean;
 
-   function Get_Float
-     (Data : String; Cursor : aliased in out Natural) return Long_Float
-   is
+   function Get_Float (Data : String; Cursor : aliased in out Natural) return Long_Float is
       Result : constant Long_Float := Bits_To_Float (Get_U64 (Data, Cursor));
    begin
       if not Valid_Number (Result) then
@@ -293,21 +247,14 @@ package body Flyology_Bench.Workers is
       return Result;
    end Get_Float;
 
-   function Get_String
-     (Data : String; Cursor : aliased in out Natural; Maximum : Natural)
-      return String
-   is
+   function Get_String (Data : String; Cursor : aliased in out Natural; Maximum : Natural) return String is
       Length : constant Natural := Natural (Get_U32 (Data, Cursor));
    begin
-      if Length > Maximum
-        or else Cursor > Data'Last + 1
-        or else Length > Data'Last - Cursor + 1
-      then
+      if Length > Maximum or else Cursor > Data'Last + 1 or else Length > Data'Last - Cursor + 1 then
          raise Protocol_Error with "invalid worker string length";
       end if;
       declare
-         Result : constant String :=
-           (if Length = 0 then "" else Data (Cursor .. Cursor + Length - 1));
+         Result : constant String := (if Length = 0 then "" else Data (Cursor .. Cursor + Length - 1));
       begin
          Cursor := Cursor + Length;
          return Result;
@@ -326,9 +273,7 @@ package body Flyology_Bench.Workers is
 
    function Valid_Environment_Name (Name : String) return Boolean is
    begin
-      if Name'Length = 0
-        or else Name'Length > Maximum_Environment_Name_Length
-        or else Contains_NUL (Name)
+      if Name'Length = 0 or else Name'Length > Maximum_Environment_Name_Length or else Contains_NUL (Name)
       then
          return False;
       end if;
@@ -343,16 +288,10 @@ package body Flyology_Bench.Workers is
    function Create_Environment
      (Mode     : Environment_Mode := Strict_Mode;
       Locale   : Locale_Policy := Clear_Locale;
-      Timezone : Timezone_Policy := Clear_Timezone) return Environment is
-     ((Selected_Mode     => Mode,
-       Selected_Locale   => Locale,
-       Selected_Timezone => Timezone,
-       others            => <>));
+      Timezone : Timezone_Policy := Clear_Timezone) return Environment
+   is ((Selected_Mode => Mode, Selected_Locale => Locale, Selected_Timezone => Timezone, others => <>));
 
-   procedure Add
-     (Item : in out Environment;
-      Name : String;
-      Value : String) is
+   procedure Add (Item : in out Environment; Name : String; Value : String) is
    begin
       if not Valid_Environment_Name (Name)
         or else Value'Length > Maximum_Environment_Value_Length
@@ -362,23 +301,19 @@ package body Flyology_Bench.Workers is
       end if;
       for Existing of Item.Additions loop
          if US.To_String (Existing.Name) = Name then
-            raise Configuration_Error with
-              "duplicate worker environment addition: " & Name;
+            raise Configuration_Error with "duplicate worker environment addition: " & Name;
          end if;
       end loop;
       for Existing of Item.Removals loop
          if Existing = Name then
-            raise Configuration_Error with
-              "worker environment name is both added and removed: " & Name;
+            raise Configuration_Error with "worker environment name is both added and removed: " & Name;
          end if;
       end loop;
       if Natural (Item.Additions.Length) >= Maximum_Environment_Entries then
          raise Configuration_Error with "too many worker environment additions";
       end if;
       Item.Additions.Append
-        (Environment_Entry'
-           (Name  => US.To_Unbounded_String (Name),
-            Value => US.To_Unbounded_String (Value)));
+        (Environment_Entry'(Name => US.To_Unbounded_String (Name), Value => US.To_Unbounded_String (Value)));
    end Add;
 
    procedure Remove (Item : in out Environment; Name : String) is
@@ -388,14 +323,12 @@ package body Flyology_Bench.Workers is
       end if;
       for Existing of Item.Removals loop
          if Existing = Name then
-            raise Configuration_Error with
-              "duplicate worker environment removal: " & Name;
+            raise Configuration_Error with "duplicate worker environment removal: " & Name;
          end if;
       end loop;
       for Existing of Item.Additions loop
          if US.To_String (Existing.Name) = Name then
-            raise Configuration_Error with
-              "worker environment name is both added and removed: " & Name;
+            raise Configuration_Error with "worker environment name is both added and removed: " & Name;
          end if;
       end loop;
       if Natural (Item.Removals.Length) >= Maximum_Environment_Entries then
@@ -404,27 +337,26 @@ package body Flyology_Bench.Workers is
       Item.Removals.Append (Name);
    end Remove;
 
-   function Mode (Item : Environment) return Environment_Mode is
-     (Item.Selected_Mode);
-   function Locale (Item : Environment) return Locale_Policy is
-     (Item.Selected_Locale);
-   function Timezone (Item : Environment) return Timezone_Policy is
-     (Item.Selected_Timezone);
+   function Mode (Item : Environment) return Environment_Mode
+   is (Item.Selected_Mode);
+   function Locale (Item : Environment) return Locale_Policy
+   is (Item.Selected_Locale);
+   function Timezone (Item : Environment) return Timezone_Policy
+   is (Item.Selected_Timezone);
 
    function Hash (Value : String) return U64 is
       Result : U64 := 16#CBF2_9CE4_8422_2325#;
    begin
       for Element of Value loop
-         Result := (Result xor U64 (Character'Pos (Element)))
-           * 16#0000_0100_0000_01B3#;
+         Result := (Result xor U64 (Character'Pos (Element))) * 16#0000_0100_0000_01B3#;
       end loop;
       return Result;
    end Hash;
 
    function Hex (Value : U64) return String is
       Hex_Chars : constant String := "0123456789abcdef";
-      Result : String (1 .. 16);
-      Work   : U64 := Value;
+      Result    : String (1 .. 16);
+      Work      : U64 := Value;
    begin
       for Index in reverse Result'Range loop
          Result (Index) := Hex_Chars (Natural (Work and 16#F#) + 1);
@@ -435,9 +367,9 @@ package body Flyology_Bench.Workers is
 
    function Hex_Encode (Value : String) return String is
       Hex_Chars : constant String := "0123456789abcdef";
-      Result : String (1 .. Value'Length * 2);
-      Cursor : Natural := 1;
-      Byte   : Natural;
+      Result    : String (1 .. Value'Length * 2);
+      Cursor    : Natural := 1;
+      Byte      : Natural;
    begin
       for Element of Value loop
          Byte := Character'Pos (Element);
@@ -451,9 +383,14 @@ package body Flyology_Bench.Workers is
    function Hex_Value (Element : Character) return Natural is
    begin
       case Element is
-         when '0' .. '9' => return Character'Pos (Element) - Character'Pos ('0');
-         when 'a' .. 'f' => return Character'Pos (Element) - Character'Pos ('a') + 10;
-         when others => raise Protocol_Error with "invalid worker hexadecimal value";
+         when '0' .. '9' =>
+            return Character'Pos (Element) - Character'Pos ('0');
+
+         when 'a' .. 'f' =>
+            return Character'Pos (Element) - Character'Pos ('a') + 10;
+
+         when others     =>
+            raise Protocol_Error with "invalid worker hexadecimal value";
       end case;
    end Hex_Value;
 
@@ -467,31 +404,23 @@ package body Flyology_Bench.Workers is
          Source : Natural := Value'First;
       begin
          for Index in Result'Range loop
-            Result (Index) := Character'Val
-              (Hex_Value (Value (Source)) * 16 + Hex_Value (Value (Source + 1)));
+            Result (Index) :=
+              Character'Val (Hex_Value (Value (Source)) * 16 + Hex_Value (Value (Source + 1)));
             Source := Source + 2;
          end loop;
          return Result;
       end;
    end Hex_Decode;
 
-   function Derive_Seed
-     (Parent_Seed : Long_Long_Integer;
-      Repetition : Positive) return Long_Long_Integer
-   is
+   function Derive_Seed (Parent_Seed : Long_Long_Integer; Repetition : Positive) return Long_Long_Integer is
       Parent_Bits : constant U64 :=
-        (if Parent_Seed >= 0 then U64 (Parent_Seed)
-         else U64'Last - U64 (-(Parent_Seed + 1)));
-      Value : U64 := Parent_Bits
-        xor (U64 (Repetition) * 16#9E37_79B9_7F4A_7C15#);
+        (if Parent_Seed >= 0 then U64 (Parent_Seed) else U64'Last - U64 (-(Parent_Seed + 1)));
+      Value       : U64 := Parent_Bits xor (U64 (Repetition) * 16#9E37_79B9_7F4A_7C15#);
    begin
-      Value := (Value xor Interfaces.Shift_Right (Value, 30))
-        * 16#BF58_476D_1CE4_E5B9#;
-      Value := (Value xor Interfaces.Shift_Right (Value, 27))
-        * 16#94D0_49BB_1331_11EB#;
+      Value := (Value xor Interfaces.Shift_Right (Value, 30)) * 16#BF58_476D_1CE4_E5B9#;
+      Value := (Value xor Interfaces.Shift_Right (Value, 27)) * 16#94D0_49BB_1331_11EB#;
       Value := Value xor Interfaces.Shift_Right (Value, 31);
-      return Long_Long_Integer
-        ((Value mod U64 (Long_Long_Integer'Last - 1)) + 1);
+      return Long_Long_Integer ((Value mod U64 (Long_Long_Integer'Last - 1)) + 1);
    end Derive_Seed;
 
    function Encode_Configuration (Config : Configuration) return String is
@@ -503,10 +432,8 @@ package body Flyology_Bench.Workers is
       Put_Natural (Data, Config.Samples);
       Put_Float (Data, Long_Float (Config.Minimum_Sample_Time));
       Put_U64 (Data, U64 (Config.Maximum_Iterations));
-      Put_Natural
-        (Data, Comparison_Batch_Policy'Pos (Config.Comparison_Batching));
-      Put_Natural
-        (Data, Shootout_Schedule_Policy'Pos (Config.Shootout_Scheduling));
+      Put_Natural (Data, Comparison_Batch_Policy'Pos (Config.Comparison_Batching));
+      Put_Natural (Data, Shootout_Schedule_Policy'Pos (Config.Shootout_Scheduling));
       Put_Boolean (Data, Config.Subtract_Timer_Cost);
       Put_Float (Data, Config.Practical_Threshold_Percent);
       Put_Integer (Data, Config.Random_Seed);
@@ -516,33 +443,23 @@ package body Flyology_Bench.Workers is
 
       Put_Boolean (Data, Config.CPU_Quiescence.Enabled);
       if Config.CPU_Quiescence.Enabled then
-         Put_Float
-           (Data, Config.CPU_Quiescence.Maximum_Average_CPU_Percent);
-         Put_Float
-           (Data, Config.CPU_Quiescence.Maximum_Core_CPU_Percent);
-         Put_Float
-           (Data, Long_Float (Config.CPU_Quiescence.Stable_Time));
-         Put_Float
-           (Data, Long_Float (Config.CPU_Quiescence.Poll_Interval));
-         Put_Float
-           (Data, Long_Float (Config.CPU_Quiescence.Timeout));
+         Put_Float (Data, Config.CPU_Quiescence.Maximum_Average_CPU_Percent);
+         Put_Float (Data, Config.CPU_Quiescence.Maximum_Core_CPU_Percent);
+         Put_Float (Data, Long_Float (Config.CPU_Quiescence.Stable_Time));
+         Put_Float (Data, Long_Float (Config.CPU_Quiescence.Poll_Interval));
+         Put_Float (Data, Long_Float (Config.CPU_Quiescence.Timeout));
       end if;
 
       Put_Boolean (Data, Config.Interference.Enabled);
-      Put_Natural
-        (Data, Interference_Response'Pos (Config.Interference.Response));
+      Put_Natural (Data, Interference_Response'Pos (Config.Interference.Response));
       if Config.Interference.Enabled then
-         Put_Float
-           (Data, Config.Interference.Maximum_Foreign_CPU_Percent);
+         Put_Float (Data, Config.Interference.Maximum_Foreign_CPU_Percent);
          Put_Float (Data, Long_Float (Config.Interference.Window));
          Put_Natural (Data, Config.Interference.Maximum_Retakes);
          if Config.Interference.Response = Pause then
-            Put_Float
-              (Data, Long_Float (Config.Interference.Settle_Time));
-            Put_Float
-              (Data, Long_Float (Config.Interference.Maximum_Pause_Time));
-            Put_Float
-              (Data, Long_Float (Config.Interference.Rewarm_Time));
+            Put_Float (Data, Long_Float (Config.Interference.Settle_Time));
+            Put_Float (Data, Long_Float (Config.Interference.Maximum_Pause_Time));
+            Put_Float (Data, Long_Float (Config.Interference.Rewarm_Time));
          end if;
       end if;
 
@@ -565,34 +482,25 @@ package body Flyology_Bench.Workers is
       return US.To_String (Data);
    end Encode_Configuration;
 
-   function Decode_Configuration
-     (Data     : String;
-      Template : Configuration) return Configuration
-   is
-      Cursor : aliased Natural := Data'First;
-      Result : Configuration := Default_Configuration;
-      Quiescence_Enabled : Boolean;
+   function Decode_Configuration (Data : String; Template : Configuration) return Configuration is
+      Cursor               : aliased Natural := Data'First;
+      Result               : Configuration := Default_Configuration;
+      Quiescence_Enabled   : Boolean;
       Interference_Enabled : Boolean;
-      Interference_Mode : Interference_Response;
-      Placement_Enabled : Boolean;
-      Lock_Enabled : Boolean;
+      Interference_Mode    : Interference_Response;
+      Placement_Enabled    : Boolean;
+      Lock_Enabled         : Boolean;
    begin
       Result.Warmup_Time := Nonnegative_Duration (Get_Float (Data, Cursor));
       Result.Measurement_Time := Positive_Duration (Get_Float (Data, Cursor));
-      Result.Maximum_Sampling_Time :=
-        Nonnegative_Duration (Get_Float (Data, Cursor));
+      Result.Maximum_Sampling_Time := Nonnegative_Duration (Get_Float (Data, Cursor));
       Result.Samples := Sample_Count (Get_Natural (Data, Cursor));
-      Result.Minimum_Sample_Time :=
-        Positive_Duration (Get_Float (Data, Cursor));
-      Result.Maximum_Iterations :=
-        Positive_Iteration_Count (Get_U64 (Data, Cursor));
-      Result.Comparison_Batching := Comparison_Batch_Policy'Val
-        (Get_Natural (Data, Cursor));
-      Result.Shootout_Scheduling := Shootout_Schedule_Policy'Val
-        (Get_Natural (Data, Cursor));
+      Result.Minimum_Sample_Time := Positive_Duration (Get_Float (Data, Cursor));
+      Result.Maximum_Iterations := Positive_Iteration_Count (Get_U64 (Data, Cursor));
+      Result.Comparison_Batching := Comparison_Batch_Policy'Val (Get_Natural (Data, Cursor));
+      Result.Shootout_Scheduling := Shootout_Schedule_Policy'Val (Get_Natural (Data, Cursor));
       Result.Subtract_Timer_Cost := Get_Boolean (Data, Cursor);
-      Result.Practical_Threshold_Percent :=
-        Threshold_Percentage (Get_Float (Data, Cursor));
+      Result.Practical_Threshold_Percent := Threshold_Percentage (Get_Float (Data, Cursor));
       declare
          Seed_Bits : U64;
       begin
@@ -607,9 +515,9 @@ package body Flyology_Bench.Workers is
       if Quiescence_Enabled then
          declare
             Average : constant Percentage := Percentage (Get_Float (Data, Cursor));
-            Core : constant Percentage := Percentage (Get_Float (Data, Cursor));
-            Stable : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
-            Poll : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+            Core    : constant Percentage := Percentage (Get_Float (Data, Cursor));
+            Stable  : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+            Poll    : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
             Timeout : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
          begin
             Result.CPU_Quiescence :=
@@ -625,19 +533,17 @@ package body Flyology_Bench.Workers is
       end if;
 
       Interference_Enabled := Get_Boolean (Data, Cursor);
-      Interference_Mode := Interference_Response'Val
-        (Get_Natural (Data, Cursor));
+      Interference_Mode := Interference_Response'Val (Get_Natural (Data, Cursor));
       if not Interference_Enabled then
-         Result.Interference :=
-           (Enabled => False, Response => Interference_Mode);
+         Result.Interference := (Enabled => False, Response => Interference_Mode);
       elsif Interference_Mode = Pause then
          declare
-            Maximum : constant Percentage := Percentage (Get_Float (Data, Cursor));
-            Window : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
-            Retakes : constant Natural := Get_Natural (Data, Cursor);
-            Settle : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+            Maximum       : constant Percentage := Percentage (Get_Float (Data, Cursor));
+            Window        : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+            Retakes       : constant Natural := Get_Natural (Data, Cursor);
+            Settle        : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
             Pause_Maximum : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
-            Rewarm : constant Nonnegative_Duration := Nonnegative_Duration (Get_Float (Data, Cursor));
+            Rewarm        : constant Nonnegative_Duration := Nonnegative_Duration (Get_Float (Data, Cursor));
          begin
             Result.Interference :=
               (Enabled                     => True,
@@ -652,21 +558,27 @@ package body Flyology_Bench.Workers is
       else
          declare
             Maximum : constant Percentage := Percentage (Get_Float (Data, Cursor));
-            Window : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+            Window  : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
             Retakes : constant Natural := Get_Natural (Data, Cursor);
          begin
             case Interference_Mode is
                when Observe =>
                   Result.Interference :=
-                    (Enabled => True, Response => Observe,
+                    (Enabled                     => True,
+                     Response                    => Observe,
                      Maximum_Foreign_CPU_Percent => Maximum,
-                     Window => Window, Maximum_Retakes => Retakes);
-               when Retake =>
+                     Window                      => Window,
+                     Maximum_Retakes             => Retakes);
+
+               when Retake  =>
                   Result.Interference :=
-                    (Enabled => True, Response => Retake,
+                    (Enabled                     => True,
+                     Response                    => Retake,
                      Maximum_Foreign_CPU_Percent => Maximum,
-                     Window => Window, Maximum_Retakes => Retakes);
-               when Pause =>
+                     Window                      => Window,
+                     Maximum_Retakes             => Retakes);
+
+               when Pause   =>
                   raise Program_Error;
             end case;
          end;
@@ -675,13 +587,12 @@ package body Flyology_Bench.Workers is
       Placement_Enabled := Get_Boolean (Data, Cursor);
       if Placement_Enabled then
          declare
-            CPU : constant Natural := Get_Natural (Data, Cursor);
+            CPU      : constant Natural := Get_Natural (Data, Cursor);
             Siblings : constant Boolean := Get_Boolean (Data, Cursor);
-            Strict : constant Boolean := Get_Boolean (Data, Cursor);
+            Strict   : constant Boolean := Get_Boolean (Data, Cursor);
          begin
             Result.Placement :=
-              (Enabled => True, CPU => CPU, Include_Siblings => Siblings,
-               Require_Strict => Strict);
+              (Enabled => True, CPU => CPU, Include_Siblings => Siblings, Require_Strict => Strict);
          end;
       else
          Result.Placement := (Enabled => False);
@@ -690,24 +601,25 @@ package body Flyology_Bench.Workers is
       Lock_Enabled := Get_Boolean (Data, Cursor);
       if Lock_Enabled then
          declare
-            Path : constant US.Unbounded_String := US.To_Unbounded_String
-              (Get_String (Data, Cursor, Maximum_Host_Lock_Path_Length));
-            Timeout : constant Nonnegative_Duration :=
-              Nonnegative_Duration (Get_Float (Data, Cursor));
-            Poll : constant Positive_Duration :=
-              Positive_Duration (Get_Float (Data, Cursor));
+            Path     : constant US.Unbounded_String :=
+              US.To_Unbounded_String (Get_String (Data, Cursor, Maximum_Host_Lock_Path_Length));
+            Timeout  : constant Nonnegative_Duration := Nonnegative_Duration (Get_Float (Data, Cursor));
+            Poll     : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
             Required : constant Boolean := Get_Boolean (Data, Cursor);
          begin
             Result.Host_Lock :=
-              (Enabled => True, Path => Path, Timeout => Timeout,
-               Poll_Interval => Poll, Require_Machine_Scope => Required);
+              (Enabled               => True,
+               Path                  => Path,
+               Timeout               => Timeout,
+               Poll_Interval         => Poll,
+               Require_Machine_Scope => Required);
          end;
       else
          Result.Host_Lock := (Enabled => False);
       end if;
       Result.Collect_Process_Telemetry := Get_Boolean (Data, Cursor);
-      Result.Progress_Name := US.To_Unbounded_String
-        (Get_String (Data, Cursor, Maximum_Progress_Name_Length));
+      Result.Progress_Name :=
+        US.To_Unbounded_String (Get_String (Data, Cursor, Maximum_Progress_Name_Length));
       if Cursor /= Data'Last + 1 then
          raise Protocol_Error with "trailing worker configuration data";
       end if;
@@ -721,17 +633,12 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "worker configuration value is out of range";
    end Decode_Configuration;
 
-   procedure Set_Entry
-     (Entries : in out Environment_Vectors.Vector;
-      Name    : String;
-      Value   : String) is
+   procedure Set_Entry (Entries : in out Environment_Vectors.Vector; Name : String; Value : String) is
    begin
       for Index in Entries.First_Index .. Entries.Last_Index loop
          if US.To_String (Entries (Index).Name) = Name then
             Entries.Replace_Element
-              (Index,
-               (Name  => US.To_Unbounded_String (Name),
-                Value => US.To_Unbounded_String (Value)));
+              (Index, (Name => US.To_Unbounded_String (Name), Value => US.To_Unbounded_String (Value)));
             return;
          end if;
       end loop;
@@ -739,14 +646,10 @@ package body Flyology_Bench.Workers is
          raise Configuration_Error with "worker environment has too many entries";
       end if;
       Entries.Append
-        (Environment_Entry'
-           (Name  => US.To_Unbounded_String (Name),
-            Value => US.To_Unbounded_String (Value)));
+        (Environment_Entry'(Name => US.To_Unbounded_String (Name), Value => US.To_Unbounded_String (Value)));
    end Set_Entry;
 
-   procedure Delete_Entry
-     (Entries : in out Environment_Vectors.Vector;
-      Name    : String) is
+   procedure Delete_Entry (Entries : in out Environment_Vectors.Vector; Name : String) is
    begin
       for Index in Entries.First_Index .. Entries.Last_Index loop
          if US.To_String (Entries (Index).Name) = Name then
@@ -763,24 +666,19 @@ package body Flyology_Bench.Workers is
       end if;
       for Left in Entries.First_Index .. Entries.Last_Index - 1 loop
          for Right in Left + 1 .. Entries.Last_Index loop
-            if US.To_String (Entries (Right).Name)
-              < US.To_String (Entries (Left).Name)
-            then
+            if US.To_String (Entries (Right).Name) < US.To_String (Entries (Left).Name) then
                Entries.Swap (Left, Right);
             end if;
          end loop;
       end loop;
    end Sort_Entries;
 
-   function Environment_Within_Byte_Limit
-     (Entries : Environment_Vectors.Vector) return Boolean
-   is
+   function Environment_Within_Byte_Limit (Entries : Environment_Vectors.Vector) return Boolean is
       Total : Natural := 1;
    begin
       for Variable of Entries loop
          declare
-            Size : constant Natural :=
-              US.Length (Variable.Name) + 1 + US.Length (Variable.Value) + 1;
+            Size : constant Natural := US.Length (Variable.Name) + 1 + US.Length (Variable.Value) + 1;
          begin
             if Size > Maximum_Environment_Bytes - Total then
                return False;
@@ -791,18 +689,13 @@ package body Flyology_Bench.Workers is
       return True;
    end Environment_Within_Byte_Limit;
 
-   function Is_Strict_Base_Name
-     (Name     : String;
-      Item     : Environment) return Boolean is
+   function Is_Strict_Base_Name (Name : String; Item : Environment) return Boolean is
    begin
-      if Name = "PATH" or else Name = "TMPDIR"
-        or else Name = "TMP" or else Name = "TEMP"
-      then
+      if Name = "PATH" or else Name = "TMPDIR" or else Name = "TMP" or else Name = "TEMP" then
          return True;
       elsif Item.Selected_Locale = Preserve_Locale
         and then (Name = "LANG"
-                  or else (Name'Length > 3
-                           and then Name (Name'First .. Name'First + 2) = "LC_"))
+                  or else (Name'Length > 3 and then Name (Name'First .. Name'First + 2) = "LC_"))
       then
          return True;
       else
@@ -810,22 +703,17 @@ package body Flyology_Bench.Workers is
       end if;
    end Is_Strict_Base_Name;
 
-   function Effective_Environment
-     (Item : Environment) return Environment_Vectors.Vector
-   is
+   function Effective_Environment (Item : Environment) return Environment_Vectors.Vector is
       Result : Environment_Vectors.Vector;
 
       procedure Consider (Name, Value : String) is
       begin
-         if Item.Selected_Mode = Inherit_Mode
-           or else Is_Strict_Base_Name (Name, Item)
-         then
+         if Item.Selected_Mode = Inherit_Mode or else Is_Strict_Base_Name (Name, Item) then
             if not Valid_Environment_Name (Name)
               or else Value'Length > Maximum_Environment_Value_Length
               or else Contains_NUL (Value)
             then
-               raise Configuration_Error with
-                 "inherited worker environment exceeds supported bounds";
+               raise Configuration_Error with "inherited worker environment exceeds supported bounds";
             end if;
             Set_Entry (Result, Name, Value);
          end if;
@@ -833,8 +721,7 @@ package body Flyology_Bench.Workers is
    begin
       Ada.Environment_Variables.Iterate (Consider'Access);
       for Variable of Item.Additions loop
-         Set_Entry
-           (Result, US.To_String (Variable.Name), US.To_String (Variable.Value));
+         Set_Entry (Result, US.To_String (Variable.Name), US.To_String (Variable.Value));
       end loop;
       for Name of Item.Removals loop
          Delete_Entry (Result, Name);
@@ -863,8 +750,7 @@ package body Flyology_Bench.Workers is
          Ada.Environment_Variables.Iterate (Include'Access);
       exception
          when Configuration_Error =>
-            raise Protocol_Error with
-              "worker inherited too many environment entries";
+            raise Protocol_Error with "worker inherited too many environment entries";
       end;
       Sort_Entries (Result);
       if not Environment_Within_Byte_Limit (Result) then
@@ -873,9 +759,7 @@ package body Flyology_Bench.Workers is
       return Result;
    end Current_Environment;
 
-   function Fingerprint
-     (Entries : Environment_Vectors.Vector) return U64
-   is
+   function Fingerprint (Entries : Environment_Vectors.Vector) return U64 is
       Data : Buffer;
    begin
       for Variable of Entries loop
@@ -887,9 +771,7 @@ package body Flyology_Bench.Workers is
       return Hash (US.To_String (Data));
    end Fingerprint;
 
-   function Public_Fingerprint
-     (Entries : Environment_Vectors.Vector) return U64
-   is
+   function Public_Fingerprint (Entries : Environment_Vectors.Vector) return U64 is
       Data : Buffer;
    begin
       for Variable of Entries loop
@@ -899,8 +781,7 @@ package body Flyology_Bench.Workers is
       return Hash (US.To_String (Data));
    end Public_Fingerprint;
 
-   procedure Put_Metric_Summary
-     (Data : in out Buffer; Value : Metric_Summary) is
+   procedure Put_Metric_Summary (Data : in out Buffer; Value : Metric_Summary) is
    begin
       Put_Boolean (Data, Value.Available);
       Put_Natural (Data, Value.Samples);
@@ -914,9 +795,7 @@ package body Flyology_Bench.Workers is
       Put_Float (Data, Value.Confidence_High);
    end Put_Metric_Summary;
 
-   function Get_Metric_Summary
-     (Data : String; Cursor : aliased in out Natural) return Metric_Summary
-   is
+   function Get_Metric_Summary (Data : String; Cursor : aliased in out Natural) return Metric_Summary is
       Result : Metric_Summary;
    begin
       Result.Available := Get_Boolean (Data, Cursor);
@@ -932,8 +811,7 @@ package body Flyology_Bench.Workers is
       return Result;
    end Get_Metric_Summary;
 
-   procedure Put_Metric_Comparison
-     (Data : in out Buffer; Value : Metric_Comparison_Result) is
+   procedure Put_Metric_Comparison (Data : in out Buffer; Value : Metric_Comparison_Result) is
    begin
       Put_Boolean (Data, Value.Available);
       Put_Natural (Data, Metric_Comparison_Method'Pos (Value.Method));
@@ -946,8 +824,7 @@ package body Flyology_Bench.Workers is
    end Put_Metric_Comparison;
 
    function Get_Metric_Comparison
-     (Data : String; Cursor : aliased in out Natural)
-      return Metric_Comparison_Result
+     (Data : String; Cursor : aliased in out Natural) return Metric_Comparison_Result
    is
       Result : Metric_Comparison_Result;
    begin
@@ -962,8 +839,7 @@ package body Flyology_Bench.Workers is
       return Result;
    end Get_Metric_Comparison;
 
-   procedure Put_Environment_Report
-     (Data : in out Buffer; Value : Environment_Report) is
+   procedure Put_Environment_Report (Data : in out Buffer; Value : Environment_Report) is
    begin
       Put_Boolean (Data, Value.Watched);
       Put_Natural (Data, Interference_Source'Pos (Value.Attribution));
@@ -982,8 +858,7 @@ package body Flyology_Bench.Workers is
       Put_Natural (Data, Host_Lock_Outcome'Pos (Value.Host_Lock));
    end Put_Environment_Report;
 
-   function Get_Environment_Report
-     (Data : String; Cursor : aliased in out Natural) return Environment_Report
+   function Get_Environment_Report (Data : String; Cursor : aliased in out Natural) return Environment_Report
    is
       Result : Environment_Report;
    begin
@@ -1005,8 +880,7 @@ package body Flyology_Bench.Workers is
       return Result;
    end Get_Environment_Report;
 
-   procedure Put_Measurement
-     (Data : in out Buffer; Value : Measurement) is
+   procedure Put_Measurement (Data : in out Buffer; Value : Measurement) is
       Metrics : constant Metric_Store_Access := Value.Metric_Data.Data;
    begin
       Put_Natural (Data, Value.Sample_Total);
@@ -1056,8 +930,7 @@ package body Flyology_Bench.Workers is
          for Axis in Metric_Axis loop
             Put_Boolean (Data, Metrics.Requested (Axis));
             Put_Boolean (Data, Metrics.Available (Axis));
-            Put_Natural
-              (Data, Metric_Availability'Pos (Metrics.Status (Axis)));
+            Put_Natural (Data, Metric_Availability'Pos (Metrics.Status (Axis)));
             Put_Metric_Summary (Data, Metrics.Summaries (Axis));
             for Index in Sample_Index range 1 .. Value.Sample_Total loop
                Put_Float (Data, Metrics.Values (Axis, Index));
@@ -1066,12 +939,9 @@ package body Flyology_Bench.Workers is
       end if;
    end Put_Measurement;
 
-   function Get_Measurement
-     (Data : String; Cursor : aliased in out Natural) return Measurement
-   is
-      Result : Measurement;
-      Count  : constant Sample_Count :=
-        Sample_Count (Get_Natural (Data, Cursor));
+   function Get_Measurement (Data : String; Cursor : aliased in out Natural) return Measurement is
+      Result      : Measurement;
+      Count       : constant Sample_Count := Sample_Count (Get_Natural (Data, Cursor));
       Has_Metrics : Boolean;
    begin
       Result.Sample_Total := Count;
@@ -1122,17 +992,12 @@ package body Flyology_Bench.Workers is
       if Has_Metrics then
          Result.Metric_Data.Data := new Metric_Store;
          for Axis in Metric_Axis loop
-            Result.Metric_Data.Data.Requested (Axis) :=
-              Get_Boolean (Data, Cursor);
-            Result.Metric_Data.Data.Available (Axis) :=
-              Get_Boolean (Data, Cursor);
-            Result.Metric_Data.Data.Status (Axis) := Metric_Availability'Val
-              (Get_Natural (Data, Cursor));
-            Result.Metric_Data.Data.Summaries (Axis) :=
-              Get_Metric_Summary (Data, Cursor);
+            Result.Metric_Data.Data.Requested (Axis) := Get_Boolean (Data, Cursor);
+            Result.Metric_Data.Data.Available (Axis) := Get_Boolean (Data, Cursor);
+            Result.Metric_Data.Data.Status (Axis) := Metric_Availability'Val (Get_Natural (Data, Cursor));
+            Result.Metric_Data.Data.Summaries (Axis) := Get_Metric_Summary (Data, Cursor);
             for Index in Sample_Index range 1 .. Count loop
-               Result.Metric_Data.Data.Values (Axis, Index) :=
-                 Get_Float (Data, Cursor);
+               Result.Metric_Data.Data.Values (Axis, Index) := Get_Float (Data, Cursor);
             end loop;
          end loop;
       end if;
@@ -1142,8 +1007,7 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "worker measurement value is out of range";
    end Get_Measurement;
 
-   procedure Put_Comparison
-     (Data : in out Buffer; Value : Comparison) is
+   procedure Put_Comparison (Data : in out Buffer; Value : Comparison) is
    begin
       Put_Measurement (Data, Value.Reference_Data);
       Put_Measurement (Data, Value.Contender_Data);
@@ -1171,16 +1035,12 @@ package body Flyology_Bench.Workers is
       end loop;
    end Put_Comparison;
 
-   function Get_Comparison
-     (Data : String; Cursor : aliased in out Natural) return Comparison
-   is
+   function Get_Comparison (Data : String; Cursor : aliased in out Natural) return Comparison is
       Result : Comparison;
    begin
       Result.Reference_Data := Get_Measurement (Data, Cursor);
       Result.Contender_Data := Get_Measurement (Data, Cursor);
-      if Result.Reference_Data.Sample_Total
-        /= Result.Contender_Data.Sample_Total
-      then
+      if Result.Reference_Data.Sample_Total /= Result.Contender_Data.Sample_Total then
          raise Protocol_Error with "worker comparison sample counts differ";
       end if;
       Result.Geometric_Speedup := Get_Float (Data, Cursor);
@@ -1197,15 +1057,13 @@ package body Flyology_Bench.Workers is
       Result.Lag_One := Get_Float (Data, Cursor);
       Result.Practical_Threshold := Get_Float (Data, Cursor);
       Result.Random_Seed_Value := To_Integer (Get_U64 (Data, Cursor));
-      Result.Verdict_Value := Comparison_Verdict'Val
-        (Get_Natural (Data, Cursor));
+      Result.Verdict_Value := Comparison_Verdict'Val (Get_Natural (Data, Cursor));
       for Index in Sample_Index range 1 .. Result.Reference_Data.Sample_Total loop
          Result.Speedup_Values (Index) := Get_Float (Data, Cursor);
          Result.Reference_First_Order (Index) := Get_Boolean (Data, Cursor);
       end loop;
       for Axis in Metric_Axis loop
-         Result.Metric_Comparisons (Axis) :=
-           Get_Metric_Comparison (Data, Cursor);
+         Result.Metric_Comparisons (Axis) := Get_Metric_Comparison (Data, Cursor);
       end loop;
       return Result;
    exception
@@ -1213,20 +1071,16 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "worker comparison value is out of range";
    end Get_Comparison;
 
-   procedure Validate_Measurement_Result
-     (Value           : Measurement;
-      Expected_Config : Configuration)
-   is
-      Count : constant Natural := Natural (Value.Sample_Total);
-      Report : Environment_Report renames Value.Environment_Data;
-      Classified : Natural := 0;
+   procedure Validate_Measurement_Result (Value : Measurement; Expected_Config : Configuration) is
+      Count               : constant Natural := Natural (Value.Sample_Total);
+      Report              : Environment_Report renames Value.Environment_Data;
+      Classified          : Natural := 0;
       Any_Metric_Expected : Boolean := False;
 
       procedure Add_Classified (Amount : Natural) is
       begin
          if Amount > Count - Classified then
-            raise Protocol_Error with
-              "worker measurement outlier counts exceed its samples";
+            raise Protocol_Error with "worker measurement outlier counts exceed its samples";
          end if;
          Classified := Classified + Amount;
       end Add_Classified;
@@ -1254,22 +1108,19 @@ package body Flyology_Bench.Workers is
          return True;
       end Foreign_Samples_Are_Zero;
 
-      function Summary_Is_Empty (Summary : Metric_Summary) return Boolean is
-        (not Summary.Available
-         and then Summary.Samples = 0
-         and then Summary.Minimum = 0.0
-         and then Summary.Maximum = 0.0
-         and then Summary.Mean = 0.0
-         and then Summary.Median = 0.0
-         and then Summary.P95 = 0.0
-         and then Summary.P99 = 0.0
-         and then Summary.Confidence_Low = 0.0
-         and then Summary.Confidence_High = 0.0);
+      function Summary_Is_Empty (Summary : Metric_Summary) return Boolean
+      is (not Summary.Available
+          and then Summary.Samples = 0
+          and then Summary.Minimum = 0.0
+          and then Summary.Maximum = 0.0
+          and then Summary.Mean = 0.0
+          and then Summary.Median = 0.0
+          and then Summary.P95 = 0.0
+          and then Summary.P99 = 0.0
+          and then Summary.Confidence_Low = 0.0
+          and then Summary.Confidence_High = 0.0);
 
-      function Metric_Samples_Are_Zero
-        (Store : Metric_Store;
-         Axis  : Metric_Axis) return Boolean
-      is
+      function Metric_Samples_Are_Zero (Store : Metric_Store; Axis : Metric_Axis) return Boolean is
       begin
          for Index in Sample_Index range 1 .. Value.Sample_Total loop
             if Store.Values (Axis, Index) /= 0.0 then
@@ -1292,8 +1143,7 @@ package body Flyology_Bench.Workers is
               or else Value.Telemetry_RSS_Change_Peak /= 0.0
               or else not Telemetry_Samples_Are_Zero
             then
-               raise Protocol_Error with
-                 "worker process telemetry differs from its configuration";
+               raise Protocol_Error with "worker process telemetry differs from its configuration";
             end if;
          elsif not Value.Telemetry_Available then
             if Value.Telemetry_CPU_Total /= 0.0
@@ -1304,27 +1154,21 @@ package body Flyology_Bench.Workers is
               or else Value.Telemetry_RSS_Change_Total /= 0.0
               or else Value.Telemetry_RSS_Change_Peak /= 0.0
             then
-               raise Protocol_Error with
-                 "unavailable worker process telemetry carries totals";
+               raise Protocol_Error with "unavailable worker process telemetry carries totals";
             end if;
          elsif Value.Telemetry_Available
-           and then
-             (Value.Telemetry_CPU_Total < 0.0
-              or else Value.Telemetry_Wall_Total <= 0.0
-              or else Value.Telemetry_RSS_Start < 0.0
-              or else Value.Telemetry_RSS_Final < 0.0
-              or else Value.Telemetry_RSS_Peak < Value.Telemetry_RSS_Final
-              or else Value.Telemetry_RSS_Change_Peak < 0.0)
+           and then (Value.Telemetry_CPU_Total < 0.0
+                     or else Value.Telemetry_Wall_Total <= 0.0
+                     or else Value.Telemetry_RSS_Start < 0.0
+                     or else Value.Telemetry_RSS_Final < 0.0
+                     or else Value.Telemetry_RSS_Peak < Value.Telemetry_RSS_Final
+                     or else Value.Telemetry_RSS_Change_Peak < 0.0)
          then
-            raise Protocol_Error with
-              "worker process telemetry is internally inconsistent";
+            raise Protocol_Error with "worker process telemetry is internally inconsistent";
          elsif Value.Telemetry_Available then
             for Index in Sample_Index range 1 .. Value.Sample_Total loop
-               if Value.Telemetry_CPU (Index) < 0.0
-                 or else Value.Telemetry_RSS (Index) < 0.0
-               then
-                  raise Protocol_Error with
-                    "worker process telemetry is internally inconsistent";
+               if Value.Telemetry_CPU (Index) < 0.0 or else Value.Telemetry_RSS (Index) < 0.0 then
+                  raise Protocol_Error with "worker process telemetry is internally inconsistent";
                end if;
             end loop;
          end if;
@@ -1332,41 +1176,27 @@ package body Flyology_Bench.Workers is
 
       procedure Validate_Environment_Metadata is
       begin
-         if Expected_Config.Placement.Enabled
-           /= (Report.Placement /= Placement_Not_Requested)
-           or else Expected_Config.Host_Lock.Enabled
-             /= (Report.Host_Lock /= Lock_Not_Requested)
+         if Expected_Config.Placement.Enabled /= (Report.Placement /= Placement_Not_Requested)
+           or else Expected_Config.Host_Lock.Enabled /= (Report.Host_Lock /= Lock_Not_Requested)
          then
-            raise Protocol_Error with
-              "worker environment control metadata differs from its "
-              & "configuration";
+            raise Protocol_Error
+              with "worker environment control metadata differs from its " & "configuration";
          elsif Report.Watched /= (Report.Windows > 0)
-           or else
-             (Report.Windows = 0
-              and then
-                (Report.Mean_Foreign_CPU_Percent /= 0.0
-                 or else Report.Peak_Foreign_CPU_Percent /= 0.0))
+           or else (Report.Windows = 0
+                    and then (Report.Mean_Foreign_CPU_Percent /= 0.0
+                              or else Report.Peak_Foreign_CPU_Percent /= 0.0))
          then
-            raise Protocol_Error with
-              "worker environment report is internally inconsistent";
+            raise Protocol_Error with "worker environment report is internally inconsistent";
          elsif Report.Attribution = Core_Scoped
-           and then
-             (Report.Placement /= Placement_Strict
-              or else Report.Watched_CPUs = 0
-              or else Report.Attribution_Diluted)
+           and then (Report.Placement /= Placement_Strict
+                     or else Report.Watched_CPUs = 0
+                     or else Report.Attribution_Diluted)
          then
-            raise Protocol_Error with
-              "worker environment attribution is internally inconsistent";
-         elsif Report.Attribution = Host_Wide
-           and then Report.Watched_CPUs /= 0
-         then
-            raise Protocol_Error with
-              "worker environment attribution is internally inconsistent";
-         elsif Report.Attribution_Diluted
-           and then Report.Attribution /= Host_Wide
-         then
-            raise Protocol_Error with
-              "worker environment attribution is internally inconsistent";
+            raise Protocol_Error with "worker environment attribution is internally inconsistent";
+         elsif Report.Attribution = Host_Wide and then Report.Watched_CPUs /= 0 then
+            raise Protocol_Error with "worker environment attribution is internally inconsistent";
+         elsif Report.Attribution_Diluted and then Report.Attribution /= Host_Wide then
+            raise Protocol_Error with "worker environment attribution is internally inconsistent";
          end if;
 
          if not Expected_Config.Interference.Enabled then
@@ -1383,51 +1213,38 @@ package body Flyology_Bench.Workers is
               or else Report.Attribution_Diluted
               or else not Foreign_Samples_Are_Zero
             then
-               raise Protocol_Error with
-                 "worker interference report differs from its configuration";
+               raise Protocol_Error with "worker interference report differs from its configuration";
             end if;
          elsif Expected_Config.Interference.Response = Observe
-           and then
-             (Report.Retaken_Samples /= 0 or else Report.Budget_Exhausted)
+           and then (Report.Retaken_Samples /= 0 or else Report.Budget_Exhausted)
          then
-            raise Protocol_Error with
-              "worker interference report differs from its configuration";
+            raise Protocol_Error with "worker interference report differs from its configuration";
          elsif Expected_Config.Interference.Response /= Pause
-           and then
-             (Report.Pauses /= 0 or else Report.Paused_Nanoseconds /= 0.0)
+           and then (Report.Pauses /= 0 or else Report.Paused_Nanoseconds /= 0.0)
          then
-            raise Protocol_Error with
-              "worker interference report differs from its configuration";
+            raise Protocol_Error with "worker interference report differs from its configuration";
          end if;
       end Validate_Environment_Metadata;
    begin
       if Value.Sample_Total > Expected_Config.Samples
-        or else
-          (Expected_Config.Maximum_Sampling_Time = 0.0
-           and then Value.Sample_Total /= Expected_Config.Samples)
+        or else (Expected_Config.Maximum_Sampling_Time = 0.0
+                 and then Value.Sample_Total /= Expected_Config.Samples)
       then
-         raise Protocol_Error with
-           "worker measurement sample count differs from its configuration";
+         raise Protocol_Error with "worker measurement sample count differs from its configuration";
       elsif Value.Iterations > Expected_Config.Maximum_Iterations then
-         raise Protocol_Error with
-           "worker measurement iteration count exceeds its configuration";
+         raise Protocol_Error with "worker measurement iteration count exceeds its configuration";
       elsif Value.Random_Seed_Value /= Expected_Config.Random_Seed then
          raise Protocol_Error with "worker measurement seed mismatch";
       elsif not Measurement_Statistics_Consistent (Value) then
-         raise Protocol_Error with
-           "worker measurement statistics disagree with its raw samples";
+         raise Protocol_Error with "worker measurement statistics disagree with its raw samples";
       elsif Report.Mean_Foreign_CPU_Percent < 0.0
-        or else Report.Peak_Foreign_CPU_Percent
-          < Report.Mean_Foreign_CPU_Percent
+        or else Report.Peak_Foreign_CPU_Percent < Report.Mean_Foreign_CPU_Percent
         or else Report.Paused_Nanoseconds < 0.0
         or else Report.Contaminated_Samples > Report.Observed_Samples
-        or else
-          (Expected_Config.Interference.Enabled
-           and then Report.Retaken_Samples
-             > Expected_Config.Interference.Maximum_Retakes)
+        or else (Expected_Config.Interference.Enabled
+                 and then Report.Retaken_Samples > Expected_Config.Interference.Maximum_Retakes)
       then
-         raise Protocol_Error with
-           "worker environment report is internally inconsistent";
+         raise Protocol_Error with "worker environment report is internally inconsistent";
       end if;
       Validate_Telemetry;
       Validate_Environment_Metadata;
@@ -1436,64 +1253,51 @@ package body Flyology_Bench.Workers is
       Add_Classified (Value.Outlier_Total.High_Mild);
       Add_Classified (Value.Outlier_Total.High_Severe);
       for Axis in Metric_Axis loop
-         Any_Metric_Expected :=
-           Any_Metric_Expected or Expected_Config.Metrics (Axis);
+         Any_Metric_Expected := Any_Metric_Expected or Expected_Config.Metrics (Axis);
       end loop;
       if Any_Metric_Expected /= (Value.Metric_Data.Data /= null) then
-         raise Protocol_Error with
-           "worker metric store presence differs from its configuration";
+         raise Protocol_Error with "worker metric store presence differs from its configuration";
       end if;
       if Value.Metric_Data.Data /= null then
          for Axis in Metric_Axis loop
             declare
-               Store : Metric_Store renames Value.Metric_Data.Data.all;
+               Store   : Metric_Store renames Value.Metric_Data.Data.all;
                Summary : Metric_Summary renames Store.Summaries (Axis);
             begin
                if Store.Requested (Axis) /= Expected_Config.Metrics (Axis) then
-                  raise Protocol_Error with
-                    "worker requested metric set differs from its configuration";
+                  raise Protocol_Error with "worker requested metric set differs from its configuration";
                elsif not Store.Requested (Axis) then
                   if Store.Available (Axis)
                     or else Store.Status (Axis) /= Metric_Not_Requested
                     or else not Summary_Is_Empty (Summary)
                     or else not Metric_Samples_Are_Zero (Store, Axis)
                   then
-                     raise Protocol_Error with
-                       "worker unrequested metric carries result data";
+                     raise Protocol_Error with "worker unrequested metric carries result data";
                   end if;
                elsif Store.Available (Axis) then
                   if Store.Status (Axis) /= Metric_Collected
                     or else not Summary.Available
                     or else Summary.Samples /= Count
                   then
-                     raise Protocol_Error with
-                       "worker available metric metadata is inconsistent";
+                     raise Protocol_Error with "worker available metric metadata is inconsistent";
                   end if;
-               elsif Store.Status (Axis) in
-                 Metric_Not_Requested | Metric_Collected
+               elsif Store.Status (Axis) in Metric_Not_Requested | Metric_Collected
                  or else not Summary_Is_Empty (Summary)
                then
-                  raise Protocol_Error with
-                    "worker unavailable metric metadata is inconsistent";
+                  raise Protocol_Error with "worker unavailable metric metadata is inconsistent";
                end if;
             end;
          end loop;
       end if;
    end Validate_Measurement_Result;
 
-   procedure Validate_Comparison_Result
-     (Value           : Comparison;
-      Expected_Config : Configuration)
-   is
-      Count : constant Natural := Natural (Value.Reference_Data.Sample_Total);
-      Outcomes : Natural := 0;
-      Orders : Natural := 0;
+   procedure Validate_Comparison_Result (Value : Comparison; Expected_Config : Configuration) is
+      Count                    : constant Natural := Natural (Value.Reference_Data.Sample_Total);
+      Outcomes                 : Natural := 0;
+      Orders                   : Natural := 0;
       Observed_Reference_First : Natural := 0;
 
-      procedure Add_Bounded
-        (Amount : Natural;
-         Total  : in out Natural;
-         Label  : String) is
+      procedure Add_Bounded (Amount : Natural; Total : in out Natural; Label : String) is
       begin
          if Amount > Count - Total then
             raise Protocol_Error with Label;
@@ -1501,40 +1305,25 @@ package body Flyology_Bench.Workers is
          Total := Total + Amount;
       end Add_Bounded;
    begin
-      Validate_Measurement_Result
-        (Value.Reference_Data, Expected_Config);
-      Validate_Measurement_Result
-        (Value.Contender_Data, Expected_Config);
+      Validate_Measurement_Result (Value.Reference_Data, Expected_Config);
+      Validate_Measurement_Result (Value.Contender_Data, Expected_Config);
       if Value.Random_Seed_Value /= Expected_Config.Random_Seed then
          raise Protocol_Error with "worker comparison seed mismatch";
-      elsif Value.Practical_Threshold
-        /= Expected_Config.Practical_Threshold_Percent
-      then
-         raise Protocol_Error with
-           "worker comparison threshold differs from its configuration";
+      elsif Value.Practical_Threshold /= Expected_Config.Practical_Threshold_Percent then
+         raise Protocol_Error with "worker comparison threshold differs from its configuration";
       end if;
       Add_Bounded
-        (Value.Contender_Win_Total, Outcomes,
-         "worker comparison outcome counts exceed its samples");
+        (Value.Contender_Win_Total, Outcomes, "worker comparison outcome counts exceed its samples");
       Add_Bounded
-        (Value.Reference_Win_Total, Outcomes,
-         "worker comparison outcome counts exceed its samples");
-      Add_Bounded
-        (Value.Tie_Total, Outcomes,
-         "worker comparison outcome counts exceed its samples");
+        (Value.Reference_Win_Total, Outcomes, "worker comparison outcome counts exceed its samples");
+      Add_Bounded (Value.Tie_Total, Outcomes, "worker comparison outcome counts exceed its samples");
       if Outcomes /= Count then
-         raise Protocol_Error with
-           "worker comparison outcome counts do not cover its samples";
+         raise Protocol_Error with "worker comparison outcome counts do not cover its samples";
       end if;
-      Add_Bounded
-        (Value.Reference_First, Orders,
-         "worker comparison order counts exceed its samples");
-      Add_Bounded
-        (Value.Contender_First, Orders,
-         "worker comparison order counts exceed its samples");
+      Add_Bounded (Value.Reference_First, Orders, "worker comparison order counts exceed its samples");
+      Add_Bounded (Value.Contender_First, Orders, "worker comparison order counts exceed its samples");
       if Orders /= Count then
-         raise Protocol_Error with
-           "worker comparison order counts do not cover its samples";
+         raise Protocol_Error with "worker comparison order counts do not cover its samples";
       end if;
       for Index in Sample_Index range 1 .. Value.Reference_Data.Sample_Total loop
          if Value.Reference_First_Order (Index) then
@@ -1542,11 +1331,9 @@ package body Flyology_Bench.Workers is
          end if;
       end loop;
       if Observed_Reference_First /= Value.Reference_First then
-         raise Protocol_Error with
-           "worker comparison order flags disagree with its counts";
+         raise Protocol_Error with "worker comparison order flags disagree with its counts";
       elsif not Comparison_Statistics_Consistent (Value) then
-         raise Protocol_Error with
-           "worker comparison statistics disagree with its paired samples";
+         raise Protocol_Error with "worker comparison statistics disagree with its paired samples";
       end if;
       for Axis in Metric_Axis loop
          declare
@@ -1555,11 +1342,8 @@ package body Flyology_Bench.Workers is
               and then Value.Reference_Data.Metric_Data.Data.Available (Axis)
               and then Value.Contender_Data.Metric_Data.Data.Available (Axis);
          begin
-            if Value.Metric_Comparisons (Axis).Available
-              /= Expected_Available
-            then
-               raise Protocol_Error with
-                 "worker metric comparison availability is inconsistent";
+            if Value.Metric_Comparisons (Axis).Available /= Expected_Available then
+               raise Protocol_Error with "worker metric comparison availability is inconsistent";
             end if;
          end;
       end loop;
@@ -1570,15 +1354,10 @@ package body Flyology_Bench.Workers is
       Wrote  : C.long;
    begin
       while Offset < Data'Length loop
-         Wrote := C_Write
-           (Result_FD,
-            Data (Data'First + Offset)'Address,
-            C.size_t (Data'Length - Offset));
+         Wrote := C_Write (Result_FD, Data (Data'First + Offset)'Address, C.size_t (Data'Length - Offset));
          if Wrote > 0 then
             Offset := Offset + Natural (Wrote);
-         elsif Wrote < 0
-           and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error
-         then
+         elsif Wrote < 0 and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error then
             null;
          else
             raise Protocol_Error with "cannot write worker result envelope";
@@ -1586,9 +1365,7 @@ package body Flyology_Bench.Workers is
       end loop;
    end Write_All;
 
-   procedure Put_Common
-     (Frame_Body : in out Buffer;
-      Request : Worker_Request) is
+   procedure Put_Common (Frame_Body : in out Buffer; Request : Worker_Request) is
    begin
       Put_String (Frame_Body, US.To_String (Request.Identity_Value));
       Put_Natural (Frame_Body, Result_Kind'Pos (Request.Kind_Value));
@@ -1619,13 +1396,11 @@ package body Flyology_Bench.Workers is
    function Prefix_Value (Argument, Prefix : String) return String is
    begin
       if Argument'Length < Prefix'Length
-        or else Argument
-          (Argument'First .. Argument'First + Prefix'Length - 1) /= Prefix
+        or else Argument (Argument'First .. Argument'First + Prefix'Length - 1) /= Prefix
       then
          raise Protocol_Error with "invalid internal worker argument";
       end if;
-      return Argument
-        (Argument'First + Prefix'Length .. Argument'Last);
+      return Argument (Argument'First + Prefix'Length .. Argument'Last);
    end Prefix_Value;
 
    function Parse_Positive (Value : String) return Positive is
@@ -1636,13 +1411,11 @@ package body Flyology_Bench.Workers is
       end if;
       for Element of Value loop
          if Element not in '0' .. '9'
-           or else Result > (Natural'Last -
-             (Character'Pos (Element) - Character'Pos ('0'))) / 10
+           or else Result > (Natural'Last - (Character'Pos (Element) - Character'Pos ('0'))) / 10
          then
             raise Protocol_Error with "invalid internal worker integer";
          end if;
-         Result := Result * 10
-           + Character'Pos (Element) - Character'Pos ('0');
+         Result := Result * 10 + Character'Pos (Element) - Character'Pos ('0');
       end loop;
       if Result = 0 then
          raise Protocol_Error with "internal worker integer must be positive";
@@ -1685,63 +1458,50 @@ package body Flyology_Bench.Workers is
       return Result;
    end Parse_Integer;
 
-   function Worker_Mode return Boolean is
-     (Ada.Command_Line.Argument_Count > 0
-      and then Ada.Command_Line.Argument (1) = Worker_Marker);
+   function Worker_Mode return Boolean
+   is (Ada.Command_Line.Argument_Count > 0 and then Ada.Command_Line.Argument (1) = Worker_Marker);
 
    function Current_Request return Worker_Request is
-      Result : Worker_Request;
+      Result  : Worker_Request;
       Version : Positive;
    begin
       if not Worker_Mode or else Ada.Command_Line.Argument_Count /= 9 then
          raise Protocol_Error with "invalid internal worker invocation";
       end if;
-      Version := Parse_Positive
-        (Prefix_Value (Ada.Command_Line.Argument (1),
-                       "--flyology-bench-worker="));
+      Version := Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (1), "--flyology-bench-worker="));
       if Version /= Protocol_Version then
          raise Protocol_Error with "unsupported worker protocol version";
       end if;
       declare
-         Config_Bytes : constant String := Hex_Decode
-           (Prefix_Value (Ada.Command_Line.Argument (6), "--config="),
-            Maximum_Configuration_Bytes);
-         Identity_Bytes : constant String := Hex_Decode
-           (Prefix_Value (Ada.Command_Line.Argument (2), "--identity="),
-            Maximum_Identity_Length);
+         Config_Bytes   : constant String :=
+           Hex_Decode
+             (Prefix_Value (Ada.Command_Line.Argument (6), "--config="), Maximum_Configuration_Bytes);
+         Identity_Bytes : constant String :=
+           Hex_Decode (Prefix_Value (Ada.Command_Line.Argument (2), "--identity="), Maximum_Identity_Length);
       begin
          if Identity_Bytes'Length = 0 or else Contains_NUL (Identity_Bytes) then
             raise Protocol_Error with "invalid worker identity";
          end if;
          Result.Identity_Value := US.To_Unbounded_String (Identity_Bytes);
-         Result.Kind_Value := Result_Kind'Val
-           (Parse_Positive
-              (Prefix_Value (Ada.Command_Line.Argument (3), "--kind=")) - 1);
-         Result.Repetition_Value := Repetition_Count
-           (Parse_Positive
-              (Prefix_Value
-                 (Ada.Command_Line.Argument (4), "--repetition=")));
-         Result.Seed_Value := Parse_Integer
-           (Prefix_Value (Ada.Command_Line.Argument (5), "--seed="));
-         Result.Config_Value := Decode_Configuration
-           (Config_Bytes, Default_Configuration);
+         Result.Kind_Value :=
+           Result_Kind'Val (Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (3), "--kind=")) - 1);
+         Result.Repetition_Value :=
+           Repetition_Count (Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (4), "--repetition=")));
+         Result.Seed_Value := Parse_Integer (Prefix_Value (Ada.Command_Line.Argument (5), "--seed="));
+         Result.Config_Value := Decode_Configuration (Config_Bytes, Default_Configuration);
          if Result.Config_Value.Random_Seed /= Result.Seed_Value then
-            raise Protocol_Error with
-              "worker configuration seed differs from its request seed";
+            raise Protocol_Error with "worker configuration seed differs from its request seed";
          end if;
          Result.Configuration_Hash := Hash (Config_Bytes);
-         Result.Policy_Value := Environment_Mode'Val
-           (Parse_Positive
-              (Prefix_Value
-                 (Ada.Command_Line.Argument (7), "--environment-policy=")) - 1);
-         Result.Locale_Value := Locale_Policy'Val
-           (Parse_Positive
-              (Prefix_Value
-                 (Ada.Command_Line.Argument (8), "--locale-policy=")) - 1);
-         Result.Timezone_Value := Timezone_Policy'Val
-           (Parse_Positive
-              (Prefix_Value
-                 (Ada.Command_Line.Argument (9), "--timezone-policy=")) - 1);
+         Result.Policy_Value :=
+           Environment_Mode'Val
+             (Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (7), "--environment-policy=")) - 1);
+         Result.Locale_Value :=
+           Locale_Policy'Val
+             (Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (8), "--locale-policy=")) - 1);
+         Result.Timezone_Value :=
+           Timezone_Policy'Val
+             (Parse_Positive (Prefix_Value (Ada.Command_Line.Argument (9), "--timezone-policy=")) - 1);
       end;
       declare
          Current : constant Environment_Vectors.Vector := Current_Environment;
@@ -1755,20 +1515,17 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "internal worker argument is out of range";
    end Current_Request;
 
-   function Requested_Identity (Request : Worker_Request) return String is
-     (US.To_String (Request.Identity_Value));
-   function Requested_Kind (Request : Worker_Request) return Result_Kind is
-     (Request.Kind_Value);
-   function Requested_Repetition (Request : Worker_Request) return Positive is
-     (Request.Repetition_Value);
-   function Requested_Seed
-     (Request : Worker_Request) return Long_Long_Integer is
-     (Request.Seed_Value);
+   function Requested_Identity (Request : Worker_Request) return String
+   is (US.To_String (Request.Identity_Value));
+   function Requested_Kind (Request : Worker_Request) return Result_Kind
+   is (Request.Kind_Value);
+   function Requested_Repetition (Request : Worker_Request) return Positive
+   is (Request.Repetition_Value);
+   function Requested_Seed (Request : Worker_Request) return Long_Long_Integer
+   is (Request.Seed_Value);
 
    function Requested_Configuration
-     (Request  : Worker_Request;
-      Template : Configuration := Default_Configuration)
-      return Configuration
+     (Request : Worker_Request; Template : Configuration := Default_Configuration) return Configuration
    is
       Result : Configuration := Request.Config_Value;
    begin
@@ -1785,14 +1542,11 @@ package body Flyology_Bench.Workers is
       Write_Frame (Ready_Frame, Frame_Body);
    end Announce_Ready;
 
-   type Envelope_Status is
-     (Envelope_Normal, Envelope_Exception, Envelope_Invalid);
+   type Envelope_Status is (Envelope_Normal, Envelope_Exception, Envelope_Invalid);
 
    procedure Return_Envelope
-     (Request : Worker_Request;
-      Status  : Envelope_Status;
-      Kind    : Result_Kind;
-      Payload : Buffer) is
+     (Request : Worker_Request; Status : Envelope_Status; Kind : Result_Kind; Payload : Buffer)
+   is
       Frame_Body : Buffer;
    begin
       Put_Common (Frame_Body, Request);
@@ -1804,22 +1558,17 @@ package body Flyology_Bench.Workers is
       Write_Frame (Result_Frame, Frame_Body);
    end Return_Envelope;
 
-   procedure Return_Result
-     (Request : Worker_Request;
-      Result  : Measurement) is
+   procedure Return_Result (Request : Worker_Request; Result : Measurement) is
       Payload : Buffer;
    begin
       if Request.Kind_Value /= Ordinary_Measurement then
          raise Protocol_Error with "worker returned the wrong result kind";
       end if;
       Put_Measurement (Payload, Result);
-      Return_Envelope
-        (Request, Envelope_Normal, Ordinary_Measurement, Payload);
+      Return_Envelope (Request, Envelope_Normal, Ordinary_Measurement, Payload);
    end Return_Result;
 
-   procedure Return_Result
-     (Request : Worker_Request;
-      Result  : Comparison) is
+   procedure Return_Result (Request : Worker_Request; Result : Comparison) is
       Payload : Buffer;
    begin
       if Request.Kind_Value /= Paired_Comparison then
@@ -1829,42 +1578,34 @@ package body Flyology_Bench.Workers is
       Return_Envelope (Request, Envelope_Normal, Paired_Comparison, Payload);
    end Return_Result;
 
-   procedure Return_Benchmark_Exception
-     (Request : Worker_Request;
-      Name    : String;
-      Message : String) is
+   procedure Return_Benchmark_Exception (Request : Worker_Request; Name : String; Message : String) is
       Payload : Buffer;
 
-      function Bounded (Value : String; Maximum : Positive) return String is
-        (if Value'Length <= Maximum then Value
-         else Value (Value'First .. Value'First + Maximum - 1));
+      function Bounded (Value : String; Maximum : Positive) return String
+      is (if Value'Length <= Maximum then Value else Value (Value'First .. Value'First + Maximum - 1));
    begin
       Put_String (Payload, Bounded (Name, Maximum_Exception_Name_Length));
       Put_String (Payload, Bounded (Message, Maximum_Result_Message_Length));
-      Return_Envelope
-        (Request, Envelope_Exception, Request.Kind_Value, Payload);
+      Return_Envelope (Request, Envelope_Exception, Request.Kind_Value, Payload);
    end Return_Benchmark_Exception;
 
-   procedure Return_Invalid_Configuration
-     (Request : Worker_Request;
-      Message : String) is
+   procedure Return_Invalid_Configuration (Request : Worker_Request; Message : String) is
       Payload : Buffer;
 
-      function Bounded (Value : String; Maximum : Positive) return String is
-        (if Value'Length <= Maximum then Value
-         else Value (Value'First .. Value'First + Maximum - 1));
+      function Bounded (Value : String; Maximum : Positive) return String
+      is (if Value'Length <= Maximum then Value else Value (Value'First .. Value'First + Maximum - 1));
    begin
       Put_String (Payload, Bounded (Message, Maximum_Result_Message_Length));
-      Return_Envelope
-        (Request, Envelope_Invalid, Request.Kind_Value, Payload);
+      Return_Envelope (Request, Envelope_Invalid, Request.Kind_Value, Payload);
    end Return_Invalid_Configuration;
 
    type Process_Guard is new Ada.Finalization.Limited_Controlled with record
-      Pid : aliased C.int := -1;
+      Pid         : aliased C.int := -1;
       Descriptors : Descriptor_Array := (others => -1);
    end record;
 
-   overriding procedure Finalize (Process : in out Process_Guard);
+   overriding
+   procedure Finalize (Process : in out Process_Guard);
 
    procedure Free_C_String (Item : in out CS.chars_ptr) is
    begin
@@ -1885,64 +1626,62 @@ package body Flyology_Bench.Workers is
    --  controlled process guard before a pending caller abort can take effect.
    protected type Spawn_Adopter is
       procedure Start
-        (Process             : in out Process_Guard;
-         Executable          : String;
-         Argument_Values     : String_Vectors.Vector;
-         Environment_Values  : Environment_Vectors.Vector;
-         Has_Directory       : Boolean;
-         Working_Directory   : String;
-         Started             : out Ada.Real_Time.Time;
-         Finished            : out Ada.Real_Time.Time;
-         Result              : out C.int);
+        (Process            : in out Process_Guard;
+         Executable         : String;
+         Argument_Values    : String_Vectors.Vector;
+         Environment_Values : Environment_Vectors.Vector;
+         Has_Directory      : Boolean;
+         Working_Directory  : String;
+         Started            : out Ada.Real_Time.Time;
+         Finished           : out Ada.Real_Time.Time;
+         Result             : out C.int);
    end Spawn_Adopter;
 
    protected body Spawn_Adopter is
       procedure Start
-        (Process             : in out Process_Guard;
-         Executable          : String;
-         Argument_Values     : String_Vectors.Vector;
-         Environment_Values  : Environment_Vectors.Vector;
-         Has_Directory       : Boolean;
-         Working_Directory   : String;
-         Started             : out Ada.Real_Time.Time;
-         Finished            : out Ada.Real_Time.Time;
-         Result              : out C.int)
+        (Process            : in out Process_Guard;
+         Executable         : String;
+         Argument_Values    : String_Vectors.Vector;
+         Environment_Values : Environment_Vectors.Vector;
+         Has_Directory      : Boolean;
+         Working_Directory  : String;
+         Started            : out Ada.Real_Time.Time;
+         Finished           : out Ada.Real_Time.Time;
+         Result             : out C.int)
       is
-         Argument_Count : constant Natural :=
-           Natural (Argument_Values.Length);
-         Environment_Count : constant Natural :=
-           Natural (Environment_Values.Length);
-         Arguments : Chars_Ptr_Array (0 .. Argument_Count) :=
-           (others => CS.Null_Ptr);
-         Variables : Chars_Ptr_Array (0 .. Environment_Count) :=
-           (others => CS.Null_Ptr);
-         Executable_C : CS.chars_ptr := CS.Null_Ptr;
-         Directory_C : CS.chars_ptr := CS.Null_Ptr;
+         Argument_Count    : constant Natural := Natural (Argument_Values.Length);
+         Environment_Count : constant Natural := Natural (Environment_Values.Length);
+         Arguments         : Chars_Ptr_Array (0 .. Argument_Count) := (others => CS.Null_Ptr);
+         Variables         : Chars_Ptr_Array (0 .. Environment_Count) := (others => CS.Null_Ptr);
+         Executable_C      : CS.chars_ptr := CS.Null_Ptr;
+         Directory_C       : CS.chars_ptr := CS.Null_Ptr;
       begin
          Process.Pid := -1;
          Process.Descriptors := (others => -1);
          Executable_C := CS.New_String (Executable);
          for Index in 1 .. Argument_Count loop
-            Arguments (Index - 1) := CS.New_String
-              (Argument_Values.Element (Positive (Index)));
+            Arguments (Index - 1) := CS.New_String (Argument_Values.Element (Positive (Index)));
          end loop;
          for Index in 1 .. Environment_Count loop
             declare
-               Variable : constant Environment_Entry :=
-                 Environment_Values.Element (Positive (Index));
+               Variable : constant Environment_Entry := Environment_Values.Element (Positive (Index));
             begin
-               Variables (Index - 1) := CS.New_String
-                 (US.To_String (Variable.Name) & "="
-                  & US.To_String (Variable.Value));
+               Variables (Index - 1) :=
+                 CS.New_String (US.To_String (Variable.Name) & "=" & US.To_String (Variable.Value));
             end;
          end loop;
          if Has_Directory then
             Directory_C := CS.New_String (Working_Directory);
          end if;
          Started := Ada.Real_Time.Clock;
-         Result := C_Spawn
-           (Process.Pid'Access, Process.Descriptors'Address, Executable_C,
-            Arguments'Address, Variables'Address, Directory_C);
+         Result :=
+           C_Spawn
+             (Process.Pid'Access,
+              Process.Descriptors'Address,
+              Executable_C,
+              Arguments'Address,
+              Variables'Address,
+              Directory_C);
          Finished := Ada.Real_Time.Clock;
          if Result /= 0 then
             Process.Pid := -1;
@@ -1971,10 +1710,7 @@ package body Flyology_Bench.Workers is
       end if;
    end Close_Descriptor;
 
-   procedure Reap
-     (Process    : in out Process_Guard;
-      Raw_Status : out C.int;
-      Succeeded  : access Boolean := null)
+   procedure Reap (Process : in out Process_Guard; Raw_Status : out C.int; Succeeded : access Boolean := null)
    is
       Result : C.int;
       Status : aliased C.int := 0;
@@ -1989,9 +1725,7 @@ package body Flyology_Bench.Workers is
       loop
          Result := C_Waitpid (Process.Pid, Status'Access, 0);
          exit when Result = Process.Pid;
-         if Result < 0
-           and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error
-         then
+         if Result < 0 and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error then
             null;
          else
             exit;
@@ -2008,7 +1742,8 @@ package body Flyology_Bench.Workers is
       Process.Pid := -1;
    end Reap;
 
-   overriding procedure Finalize (Process : in out Process_Guard) is
+   overriding
+   procedure Finalize (Process : in out Process_Guard) is
       Ignored : C.int;
       Raw     : aliased C.int;
    begin
@@ -2020,25 +1755,25 @@ package body Flyology_Bench.Workers is
          Close_Descriptor (Descriptor);
       end loop;
    exception
-      when others => null;
+      when others =>
+         null;
    end Finalize;
 
-   function Elapsed_Nanoseconds
-     (Started, Finished : Ada.Real_Time.Time) return Long_Float is
-     (Long_Float (Ada.Real_Time.To_Duration (Finished - Started))
-      * 1_000_000_000.0);
+   function Elapsed_Nanoseconds (Started, Finished : Ada.Real_Time.Time) return Long_Float
+   is (Long_Float (Ada.Real_Time.To_Duration (Finished - Started)) * 1_000_000_000.0);
 
    procedure Drain
-     (Descriptor : in out C.int;
-      Data       : in out Buffer;
-      Capacity   : Natural;
-      Omitted    : in out Natural;
-      EOF        : out Boolean;
-      Failed     : in out Boolean;
-      Error_Number : in out C.int) is
-      Chunk : aliased String (1 .. 8_192);
-      Count : C.long;
-      Keep  : Natural;
+     (Descriptor   : in out C.int;
+      Data         : in out Buffer;
+      Capacity     : Natural;
+      Omitted      : in out Natural;
+      EOF          : out Boolean;
+      Failed       : in out Boolean;
+      Error_Number : in out C.int)
+   is
+      Chunk     : aliased String (1 .. 8_192);
+      Count     : C.long;
+      Keep      : Natural;
       Remaining : Natural := Maximum_Drain_Bytes_Per_Pass;
    begin
       EOF := Descriptor < 0;
@@ -2046,13 +1781,10 @@ package body Flyology_Bench.Workers is
          return;
       end if;
       while Remaining > 0 loop
-         Count := C_Read
-           (Descriptor, Chunk'Address,
-            C.size_t (Natural'Min (Chunk'Length, Remaining)));
+         Count := C_Read (Descriptor, Chunk'Address, C.size_t (Natural'Min (Chunk'Length, Remaining)));
          if Count > 0 then
             Remaining := Remaining - Natural (Count);
-            Keep := Natural'Min
-              (Natural (Count), Capacity - Natural'Min (Capacity, US.Length (Data)));
+            Keep := Natural'Min (Natural (Count), Capacity - Natural'Min (Capacity, US.Length (Data)));
             if Keep > 0 then
                US.Append (Data, Chunk (1 .. Keep));
             end if;
@@ -2086,34 +1818,29 @@ package body Flyology_Bench.Workers is
    end Drain;
 
    procedure Get_Common
-     (Data              : String;
-      Cursor            : aliased in out Natural;
-      Expected_Identity : String;
-      Expected_Kind     : Result_Kind;
-      Expected_Rep      : Positive;
-      Expected_Seed     : Long_Long_Integer;
-      Expected_Env      : U64;
+     (Data                     : String;
+      Cursor                   : aliased in out Natural;
+      Expected_Identity        : String;
+      Expected_Kind            : Result_Kind;
+      Expected_Rep             : Positive;
+      Expected_Seed            : Long_Long_Integer;
+      Expected_Env             : U64;
       Expected_Env_Fingerprint : U64;
-      Expected_Config_Hash : U64;
-      Expected_Policy   : Environment_Mode;
-      Expected_Locale   : Locale_Policy;
-      Expected_Timezone : Timezone_Policy) is
-      Found_Identity : constant String :=
-        Get_String (Data, Cursor, Maximum_Identity_Length);
-      Found_Kind : constant Result_Kind := Result_Kind'Val
-        (Get_Natural (Data, Cursor));
-      Found_Rep : constant Positive := Positive (Get_Natural (Data, Cursor));
-      Found_Seed : constant Long_Long_Integer :=
-        To_Integer (Get_U64 (Data, Cursor));
-      Found_Env : constant U64 := Get_U64 (Data, Cursor);
+      Expected_Config_Hash     : U64;
+      Expected_Policy          : Environment_Mode;
+      Expected_Locale          : Locale_Policy;
+      Expected_Timezone        : Timezone_Policy)
+   is
+      Found_Identity        : constant String := Get_String (Data, Cursor, Maximum_Identity_Length);
+      Found_Kind            : constant Result_Kind := Result_Kind'Val (Get_Natural (Data, Cursor));
+      Found_Rep             : constant Positive := Positive (Get_Natural (Data, Cursor));
+      Found_Seed            : constant Long_Long_Integer := To_Integer (Get_U64 (Data, Cursor));
+      Found_Env             : constant U64 := Get_U64 (Data, Cursor);
       Found_Env_Fingerprint : constant U64 := Get_U64 (Data, Cursor);
-      Found_Config : constant U64 := Get_U64 (Data, Cursor);
-      Found_Policy : constant Environment_Mode := Environment_Mode'Val
-        (Get_Natural (Data, Cursor));
-      Found_Locale : constant Locale_Policy := Locale_Policy'Val
-        (Get_Natural (Data, Cursor));
-      Found_Timezone : constant Timezone_Policy := Timezone_Policy'Val
-        (Get_Natural (Data, Cursor));
+      Found_Config          : constant U64 := Get_U64 (Data, Cursor);
+      Found_Policy          : constant Environment_Mode := Environment_Mode'Val (Get_Natural (Data, Cursor));
+      Found_Locale          : constant Locale_Policy := Locale_Policy'Val (Get_Natural (Data, Cursor));
+      Found_Timezone        : constant Timezone_Policy := Timezone_Policy'Val (Get_Natural (Data, Cursor));
    begin
       if Found_Identity /= Expected_Identity
         or else Found_Kind /= Expected_Kind
@@ -2138,13 +1865,12 @@ package body Flyology_Bench.Workers is
       Cursor     : aliased in out Natural;
       Frame      : out U32;
       Body_First : out Natural;
-      Body_Last  : out Natural) is
+      Body_Last  : out Natural)
+   is
       Version : U32;
       Length  : Natural;
    begin
-      if Cursor > Data'Last
-        or else Data'Last - Cursor + 1 < Frame_Magic'Length + 12
-      then
+      if Cursor > Data'Last or else Data'Last - Cursor + 1 < Frame_Magic'Length + 12 then
          raise Protocol_Error with "truncated worker frame header";
       end if;
       if Data (Cursor .. Cursor + Frame_Magic'Length - 1) /= Frame_Magic then
@@ -2157,9 +1883,7 @@ package body Flyology_Bench.Workers is
       end if;
       Frame := Get_U32 (Data, Cursor);
       Length := Natural (Get_U32 (Data, Cursor));
-      if Length > Maximum_Protocol_Bytes
-        or else Length > Data'Last - Cursor + 1
-      then
+      if Length > Maximum_Protocol_Bytes or else Length > Data'Last - Cursor + 1 then
          raise Protocol_Error with "truncated or oversized worker frame";
       end if;
       Body_First := Cursor;
@@ -2168,20 +1892,21 @@ package body Flyology_Bench.Workers is
    end Get_Frame;
 
    procedure Validate_Ready
-     (Data              : String;
-      Expected_Identity : String;
-      Expected_Kind     : Result_Kind;
-      Expected_Rep      : Positive;
-      Expected_Seed     : Long_Long_Integer;
-      Expected_Env      : U64;
+     (Data                     : String;
+      Expected_Identity        : String;
+      Expected_Kind            : Result_Kind;
+      Expected_Rep             : Positive;
+      Expected_Seed            : Long_Long_Integer;
+      Expected_Env             : U64;
       Expected_Env_Fingerprint : U64;
-      Expected_Config_Hash : U64;
-      Expected_Policy   : Environment_Mode;
-      Expected_Locale   : Locale_Policy;
-      Expected_Timezone : Timezone_Policy;
-      Complete          : out Boolean) is
-      Cursor : aliased Natural := Data'First;
-      Frame : U32;
+      Expected_Config_Hash     : U64;
+      Expected_Policy          : Environment_Mode;
+      Expected_Locale          : Locale_Policy;
+      Expected_Timezone        : Timezone_Policy;
+      Complete                 : out Boolean)
+   is
+      Cursor      : aliased Natural := Data'First;
+      Frame       : U32;
       First, Last : Natural;
       Body_Cursor : aliased Natural;
    begin
@@ -2191,11 +1916,9 @@ package body Flyology_Bench.Workers is
       end if;
       declare
          Header_Cursor : aliased Natural := Data'First + Frame_Magic'Length + 8;
-         Length : U32;
+         Length        : U32;
       begin
-         if Data (Data'First .. Data'First + Frame_Magic'Length - 1)
-           /= Frame_Magic
-         then
+         if Data (Data'First .. Data'First + Frame_Magic'Length - 1) /= Frame_Magic then
             raise Protocol_Error with "invalid worker startup frame magic";
          end if;
          Length := Get_U32 (Data, Header_Cursor);
@@ -2212,41 +1935,48 @@ package body Flyology_Bench.Workers is
       end if;
       Body_Cursor := First;
       Get_Common
-        (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+        (Data,
+         Body_Cursor,
+         Expected_Identity,
+         Expected_Kind,
+         Expected_Rep,
+         Expected_Seed,
+         Expected_Env,
+         Expected_Env_Fingerprint,
+         Expected_Config_Hash,
+         Expected_Policy,
+         Expected_Locale,
          Expected_Timezone);
-      if Get_U64 (Data, Body_Cursor) /= Completion_Marker
-        or else Body_Cursor /= Last + 1
-      then
+      if Get_U64 (Data, Body_Cursor) /= Completion_Marker or else Body_Cursor /= Last + 1 then
          raise Protocol_Error with "invalid worker ready completion marker";
       end if;
       Complete := True;
    end Validate_Ready;
 
    procedure Decode_Result_Stream
-     (Data              : String;
-      Expected_Identity : String;
-      Expected_Kind     : Result_Kind;
-      Expected_Rep      : Positive;
-      Expected_Seed     : Long_Long_Integer;
-      Expected_Config   : Configuration;
-      Expected_Env      : U64;
+     (Data                     : String;
+      Expected_Identity        : String;
+      Expected_Kind            : Result_Kind;
+      Expected_Rep             : Positive;
+      Expected_Seed            : Long_Long_Integer;
+      Expected_Config          : Configuration;
+      Expected_Env             : U64;
       Expected_Env_Fingerprint : U64;
-      Expected_Config_Hash : U64;
-      Expected_Policy   : Environment_Mode;
-      Expected_Locale   : Locale_Policy;
-      Expected_Timezone : Timezone_Policy;
-      Target            : in out Worker_Result) is
-      Cursor : aliased Natural := Data'First;
-      Frame : U32;
-      First, Last : Natural;
-      Body_Cursor : aliased Natural;
-      Status : Envelope_Status;
-      Found_Kind : Result_Kind;
-      Payload_Length : Natural;
+      Expected_Config_Hash     : U64;
+      Expected_Policy          : Environment_Mode;
+      Expected_Locale          : Locale_Policy;
+      Expected_Timezone        : Timezone_Policy;
+      Target                   : in out Worker_Result)
+   is
+      Cursor                      : aliased Natural := Data'First;
+      Frame                       : U32;
+      First, Last                 : Natural;
+      Body_Cursor                 : aliased Natural;
+      Status                      : Envelope_Status;
+      Found_Kind                  : Result_Kind;
+      Payload_Length              : Natural;
       Payload_First, Payload_Last : Natural;
-      Payload_Cursor : aliased Natural;
+      Payload_Cursor              : aliased Natural;
    begin
       Get_Frame (Data, Cursor, Frame, First, Last);
       if Frame /= Ready_Frame then
@@ -2254,13 +1984,19 @@ package body Flyology_Bench.Workers is
       end if;
       Body_Cursor := First;
       Get_Common
-        (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+        (Data,
+         Body_Cursor,
+         Expected_Identity,
+         Expected_Kind,
+         Expected_Rep,
+         Expected_Seed,
+         Expected_Env,
+         Expected_Env_Fingerprint,
+         Expected_Config_Hash,
+         Expected_Policy,
+         Expected_Locale,
          Expected_Timezone);
-      if Get_U64 (Data, Body_Cursor) /= Completion_Marker
-        or else Body_Cursor /= Last + 1
-      then
+      if Get_U64 (Data, Body_Cursor) /= Completion_Marker or else Body_Cursor /= Last + 1 then
          raise Protocol_Error with "invalid worker ready frame";
       end if;
 
@@ -2270,9 +2006,17 @@ package body Flyology_Bench.Workers is
       end if;
       Body_Cursor := First;
       Get_Common
-        (Data, Body_Cursor, Expected_Identity, Expected_Kind, Expected_Rep,
-         Expected_Seed, Expected_Env, Expected_Env_Fingerprint,
-         Expected_Config_Hash, Expected_Policy, Expected_Locale,
+        (Data,
+         Body_Cursor,
+         Expected_Identity,
+         Expected_Kind,
+         Expected_Rep,
+         Expected_Seed,
+         Expected_Env,
+         Expected_Env_Fingerprint,
+         Expected_Config_Hash,
+         Expected_Policy,
+         Expected_Locale,
          Expected_Timezone);
       Status := Envelope_Status'Val (Get_Natural (Data, Body_Cursor));
       Found_Kind := Result_Kind'Val (Get_Natural (Data, Body_Cursor));
@@ -2280,9 +2024,7 @@ package body Flyology_Bench.Workers is
          raise Protocol_Error with "worker result kind mismatch";
       end if;
       Payload_Length := Get_Natural (Data, Body_Cursor);
-      if Payload_Length > Maximum_Protocol_Bytes
-        or else Payload_Length > Last - Body_Cursor
-      then
+      if Payload_Length > Maximum_Protocol_Bytes or else Payload_Length > Last - Body_Cursor then
          raise Protocol_Error with "invalid worker payload length";
       end if;
       Payload_First := Body_Cursor;
@@ -2297,35 +2039,30 @@ package body Flyology_Bench.Workers is
 
       Payload_Cursor := Payload_First;
       case Status is
-         when Envelope_Normal =>
+         when Envelope_Normal    =>
             if Expected_Kind = Ordinary_Measurement then
                Target.Measurement_Data := Get_Measurement (Data, Payload_Cursor);
-               Validate_Measurement_Result
-                 (Target.Measurement_Data, Expected_Config);
+               Validate_Measurement_Result (Target.Measurement_Data, Expected_Config);
             else
                Target.Comparison_Data := Get_Comparison (Data, Payload_Cursor);
-               Validate_Comparison_Result
-                 (Target.Comparison_Data, Expected_Config);
+               Validate_Comparison_Result (Target.Comparison_Data, Expected_Config);
             end if;
             Target.Outcome_Value := Normal_Result;
+
          when Envelope_Exception =>
             declare
-               Name : constant String :=
-                 Get_String
-                   (Data, Payload_Cursor, Maximum_Exception_Name_Length);
-               Message : constant String :=
-                 Get_String
-                   (Data, Payload_Cursor, Maximum_Result_Message_Length);
+               Name    : constant String := Get_String (Data, Payload_Cursor, Maximum_Exception_Name_Length);
+               Message : constant String := Get_String (Data, Payload_Cursor, Maximum_Result_Message_Length);
             begin
                Target.Outcome_Value := Benchmark_Exception;
-               Target.Reason_Value := US.To_Unbounded_String
-                 (Name & (if Message'Length = 0 then "" else ": " & Message));
+               Target.Reason_Value :=
+                 US.To_Unbounded_String (Name & (if Message'Length = 0 then "" else ": " & Message));
             end;
-         when Envelope_Invalid =>
+
+         when Envelope_Invalid   =>
             Target.Outcome_Value := Invalid_Worker_Configuration;
-            Target.Reason_Value := US.To_Unbounded_String
-              (Get_String
-                 (Data, Payload_Cursor, Maximum_Result_Message_Length));
+            Target.Reason_Value :=
+              US.To_Unbounded_String (Get_String (Data, Payload_Cursor, Maximum_Result_Message_Length));
       end case;
       if Payload_Length = 0 then
          if Status /= Envelope_Normal then
@@ -2336,55 +2073,54 @@ package body Flyology_Bench.Workers is
       end if;
    exception
       when Error : Constraint_Error =>
-         raise Protocol_Error with
-           ("worker result value is out of range: "
-            & Ada.Exceptions.Exception_Message (Error));
+         raise Protocol_Error
+           with ("worker result value is out of range: " & Ada.Exceptions.Exception_Message (Error));
    end Decode_Result_Stream;
 
    procedure Run_Repetition
-     (Executable_Path : String;
-      Working_Path    : String;
-      Has_Directory   : Boolean;
-      Identity_Value  : String;
-      Expected_Kind   : Result_Kind;
-      Benchmark_Config : Configuration;
-      Launch          : Launch_Configuration;
-      Environment_List : Environment_Vectors.Vector;
-      Environment_Hash : U64;
+     (Executable_Path              : String;
+      Working_Path                 : String;
+      Has_Directory                : Boolean;
+      Identity_Value               : String;
+      Expected_Kind                : Result_Kind;
+      Benchmark_Config             : Configuration;
+      Launch                       : Launch_Configuration;
+      Environment_List             : Environment_Vectors.Vector;
+      Environment_Hash             : U64;
       Environment_Fingerprint_Hash : U64;
-      Environment_Policy_Value : Environment_Mode;
-      Environment_Locale_Value : Locale_Policy;
-      Environment_Timezone_Value : Timezone_Policy;
-      Rep             : Positive;
-      Target          : out Worker_Result)
+      Environment_Policy_Value     : Environment_Mode;
+      Environment_Locale_Value     : Locale_Policy;
+      Environment_Timezone_Value   : Timezone_Policy;
+      Rep                          : Positive;
+      Target                       : out Worker_Result)
    is
-      Process : Process_Guard;
-      Adopter : Spawn_Adopter;
-      Raw_Status : aliased C.int := 0;
-      Config_Value : Configuration := Benchmark_Config;
-      Seed_Value : constant Long_Long_Integer :=
+      Process                                          : Process_Guard;
+      Adopter                                          : Spawn_Adopter;
+      Raw_Status                                       : aliased C.int := 0;
+      Config_Value                                     : Configuration := Benchmark_Config;
+      Seed_Value                                       : constant Long_Long_Integer :=
         Derive_Seed (Benchmark_Config.Random_Seed, Rep);
-      Config_Bytes : Buffer;
-      Config_Hash : U64;
-      Result_Data, Output_Data, Error_Data : Buffer;
-      Result_Omitted, Output_Omitted, Error_Omitted : Natural := 0;
-      Result_EOF, Output_EOF, Error_EOF : Boolean := False;
-      IO_Failed : Boolean := False;
-      IO_Error : C.int := 0;
-      Ready : Boolean := False;
-      Ready_Time : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
-      Spawn_Start, Spawn_End, Now : Ada.Real_Time.Time;
+      Config_Bytes                                     : Buffer;
+      Config_Hash                                      : U64;
+      Result_Data, Output_Data, Error_Data             : Buffer;
+      Result_Omitted, Output_Omitted, Error_Omitted    : Natural := 0;
+      Result_EOF, Output_EOF, Error_EOF                : Boolean := False;
+      IO_Failed                                        : Boolean := False;
+      IO_Error                                         : C.int := 0;
+      Ready                                            : Boolean := False;
+      Ready_Time                                       : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Spawn_Start, Spawn_End, Now                      : Ada.Real_Time.Time;
       Startup_Deadline, Total_Deadline, Grace_Deadline : Ada.Real_Time.Time;
-      Exit_Observed : Boolean := False;
-      Child_Ownership_Lost : Boolean := False;
-      Timed_Out : Boolean := False;
-      Startup_Expired : Boolean := False;
-      Term_Sent : Boolean := False;
-      Hard_Sent : Boolean := False;
-      Protocol_Failed : Boolean := False;
-      Protocol_Reason : US.Unbounded_String;
-      Spawn_Result : C.int;
-      Ignored : C.int;
+      Exit_Observed                                    : Boolean := False;
+      Child_Ownership_Lost                             : Boolean := False;
+      Timed_Out                                        : Boolean := False;
+      Startup_Expired                                  : Boolean := False;
+      Term_Sent                                        : Boolean := False;
+      Hard_Sent                                        : Boolean := False;
+      Protocol_Failed                                  : Boolean := False;
+      Protocol_Reason                                  : US.Unbounded_String;
+      Spawn_Result                                     : C.int;
+      Ignored                                          : C.int;
 
       procedure Record_IO_Failure (Error_Number : C.int) is
       begin
@@ -2404,8 +2140,7 @@ package body Flyology_Bench.Workers is
       Target.Locale_Value := Environment_Locale_Value;
       Target.Timezone_Value := Environment_Timezone_Value;
       Config_Value.Random_Seed := Seed_Value;
-      Config_Bytes := US.To_Unbounded_String
-        (Encode_Configuration (Config_Value));
+      Config_Bytes := US.To_Unbounded_String (Encode_Configuration (Config_Value));
       Config_Hash := Hash (US.To_String (Config_Bytes));
 
       declare
@@ -2413,47 +2148,47 @@ package body Flyology_Bench.Workers is
       begin
          Argument_Values.Append (Executable_Path);
          Argument_Values.Append (Worker_Marker);
+         Argument_Values.Append ("--identity=" & Hex_Encode (Identity_Value));
          Argument_Values.Append
-           ("--identity=" & Hex_Encode (Identity_Value));
+           ("--kind="
+            & Ada.Strings.Fixed.Trim
+                (Positive'Image (Result_Kind'Pos (Expected_Kind) + 1), Ada.Strings.Both));
          Argument_Values.Append
-           ("--kind=" & Ada.Strings.Fixed.Trim
-              (Positive'Image (Result_Kind'Pos (Expected_Kind) + 1),
-               Ada.Strings.Both));
+           ("--repetition=" & Ada.Strings.Fixed.Trim (Positive'Image (Rep), Ada.Strings.Both));
          Argument_Values.Append
-           ("--repetition=" & Ada.Strings.Fixed.Trim
-              (Positive'Image (Rep), Ada.Strings.Both));
+           ("--seed=" & Ada.Strings.Fixed.Trim (Long_Long_Integer'Image (Seed_Value), Ada.Strings.Both));
+         Argument_Values.Append ("--config=" & Hex_Encode (US.To_String (Config_Bytes)));
          Argument_Values.Append
-           ("--seed=" & Ada.Strings.Fixed.Trim
-              (Long_Long_Integer'Image (Seed_Value), Ada.Strings.Both));
+           ("--environment-policy="
+            & Ada.Strings.Fixed.Trim
+                (Positive'Image (Environment_Mode'Pos (Environment_Policy_Value) + 1), Ada.Strings.Both));
          Argument_Values.Append
-           ("--config=" & Hex_Encode (US.To_String (Config_Bytes)));
+           ("--locale-policy="
+            & Ada.Strings.Fixed.Trim
+                (Positive'Image (Locale_Policy'Pos (Environment_Locale_Value) + 1), Ada.Strings.Both));
          Argument_Values.Append
-           ("--environment-policy=" & Ada.Strings.Fixed.Trim
-              (Positive'Image
-                 (Environment_Mode'Pos (Environment_Policy_Value) + 1),
-               Ada.Strings.Both));
-         Argument_Values.Append
-           ("--locale-policy=" & Ada.Strings.Fixed.Trim
-              (Positive'Image
-                 (Locale_Policy'Pos (Environment_Locale_Value) + 1),
-               Ada.Strings.Both));
-         Argument_Values.Append
-           ("--timezone-policy=" & Ada.Strings.Fixed.Trim
-              (Positive'Image
-                 (Timezone_Policy'Pos (Environment_Timezone_Value) + 1),
-               Ada.Strings.Both));
+           ("--timezone-policy="
+            & Ada.Strings.Fixed.Trim
+                (Positive'Image (Timezone_Policy'Pos (Environment_Timezone_Value) + 1), Ada.Strings.Both));
          Adopter.Start
-           (Process, Executable_Path, Argument_Values, Environment_List,
-            Has_Directory, Working_Path, Spawn_Start, Spawn_End,
+           (Process,
+            Executable_Path,
+            Argument_Values,
+            Environment_List,
+            Has_Directory,
+            Working_Path,
+            Spawn_Start,
+            Spawn_End,
             Spawn_Result);
       end;
 
       Target.Spawn_Time := Elapsed_Nanoseconds (Spawn_Start, Spawn_End);
       if Spawn_Result /= 0 then
          Target.Outcome_Value := Spawn_Failure;
-         Target.Reason_Value := US.To_Unbounded_String
-           ("posix_spawn failed, error=" & Ada.Strings.Fixed.Trim
-              (C.int'Image (Spawn_Result), Ada.Strings.Both));
+         Target.Reason_Value :=
+           US.To_Unbounded_String
+             ("posix_spawn failed, error="
+              & Ada.Strings.Fixed.Trim (C.int'Image (Spawn_Result), Ada.Strings.Both));
          return;
       end if;
 
@@ -2461,41 +2196,60 @@ package body Flyology_Bench.Workers is
       for Descriptor of Process.Descriptors loop
          if C_Set_Nonblocking (Descriptor) /= 0 then
             Target.Outcome_Value := Parent_IO_Failure;
-            Target.Reason_Value := US.To_Unbounded_String
-              ("cannot make worker capture endpoint nonblocking, errno="
-               & Ada.Strings.Fixed.Trim
-                 (GNAT.OS_Lib.Errno'Image, Ada.Strings.Both));
+            Target.Reason_Value :=
+              US.To_Unbounded_String
+                ("cannot make worker capture endpoint nonblocking, errno="
+                 & Ada.Strings.Fixed.Trim (GNAT.OS_Lib.Errno'Image, Ada.Strings.Both));
             return;
          end if;
       end loop;
-      Startup_Deadline := Spawn_Start
-        + Ada.Real_Time.To_Time_Span (Duration (Launch.Startup_Timeout));
-      Total_Deadline := Spawn_Start
-        + Ada.Real_Time.To_Time_Span (Duration (Launch.Total_Timeout));
+      Startup_Deadline := Spawn_Start + Ada.Real_Time.To_Time_Span (Duration (Launch.Startup_Timeout));
+      Total_Deadline := Spawn_Start + Ada.Real_Time.To_Time_Span (Duration (Launch.Total_Timeout));
 
       loop
          Drain
-           (Process.Descriptors (0), Result_Data, Maximum_Protocol_Bytes,
-            Result_Omitted, Result_EOF, IO_Failed, IO_Error);
+           (Process.Descriptors (0),
+            Result_Data,
+            Maximum_Protocol_Bytes,
+            Result_Omitted,
+            Result_EOF,
+            IO_Failed,
+            IO_Error);
          Drain
-           (Process.Descriptors (1), Output_Data, Launch.Diagnostic_Capacity,
-            Output_Omitted, Output_EOF, IO_Failed, IO_Error);
+           (Process.Descriptors (1),
+            Output_Data,
+            Launch.Diagnostic_Capacity,
+            Output_Omitted,
+            Output_EOF,
+            IO_Failed,
+            IO_Error);
          Drain
-           (Process.Descriptors (2), Error_Data, Launch.Diagnostic_Capacity,
-            Error_Omitted, Error_EOF, IO_Failed, IO_Error);
+           (Process.Descriptors (2),
+            Error_Data,
+            Launch.Diagnostic_Capacity,
+            Error_Omitted,
+            Error_EOF,
+            IO_Failed,
+            IO_Error);
 
          if not Ready and then not Protocol_Failed then
             begin
                Validate_Ready
-                 (US.To_String (Result_Data), Identity_Value, Expected_Kind,
-                  Rep, Seed_Value, Environment_Hash,
-                  Environment_Fingerprint_Hash, Config_Hash,
-                  Environment_Policy_Value, Environment_Locale_Value,
-                  Environment_Timezone_Value, Ready);
+                 (US.To_String (Result_Data),
+                  Identity_Value,
+                  Expected_Kind,
+                  Rep,
+                  Seed_Value,
+                  Environment_Hash,
+                  Environment_Fingerprint_Hash,
+                  Config_Hash,
+                  Environment_Policy_Value,
+                  Environment_Locale_Value,
+                  Environment_Timezone_Value,
+                  Ready);
                if Ready then
                   Ready_Time := Ada.Real_Time.Clock;
-                  Target.Setup_Time :=
-                    Elapsed_Nanoseconds (Spawn_End, Ready_Time);
+                  Target.Setup_Time := Elapsed_Nanoseconds (Spawn_End, Ready_Time);
                   if Ready_Time >= Startup_Deadline then
                      Timed_Out := True;
                      Startup_Expired := True;
@@ -2504,8 +2258,7 @@ package body Flyology_Bench.Workers is
             exception
                when Error : Protocol_Error =>
                   Protocol_Failed := True;
-                  Protocol_Reason := US.To_Unbounded_String
-                    (Ada.Exceptions.Exception_Message (Error));
+                  Protocol_Reason := US.To_Unbounded_String (Ada.Exceptions.Exception_Message (Error));
             end;
          end if;
 
@@ -2541,31 +2294,23 @@ package body Flyology_Bench.Workers is
                   Term_Sent := True;
                   Grace_Deadline := Now;
                end if;
-            elsif Startup_Expired
-              or else (not Ready and then Now >= Startup_Deadline)
-            then
+            elsif Startup_Expired or else (not Ready and then Now >= Startup_Deadline) then
                Timed_Out := True;
                Startup_Expired := True;
                if not Exit_Observed then
                   Ignored := C_Kill (-Process.Pid, C_Signal_Terminate);
                   Term_Sent := True;
-                  Grace_Deadline := Now
-                    + Ada.Real_Time.To_Time_Span
-                      (Duration (Launch.Termination_Grace));
+                  Grace_Deadline := Now + Ada.Real_Time.To_Time_Span (Duration (Launch.Termination_Grace));
                end if;
             elsif Now >= Total_Deadline then
                Timed_Out := True;
                if not Exit_Observed then
                   Ignored := C_Kill (-Process.Pid, C_Signal_Terminate);
                   Term_Sent := True;
-                  Grace_Deadline := Now
-                    + Ada.Real_Time.To_Time_Span
-                      (Duration (Launch.Termination_Grace));
+                  Grace_Deadline := Now + Ada.Real_Time.To_Time_Span (Duration (Launch.Termination_Grace));
                end if;
             end if;
-         elsif not Exit_Observed and then Term_Sent
-           and then not Hard_Sent and then Now >= Grace_Deadline
-         then
+         elsif not Exit_Observed and then Term_Sent and then not Hard_Sent and then Now >= Grace_Deadline then
             Ignored := C_Kill (-Process.Pid, C_Signal_Kill);
             Hard_Sent := True;
          end if;
@@ -2601,16 +2346,30 @@ package body Flyology_Bench.Workers is
       begin
          loop
             Drain
-              (Process.Descriptors (0), Result_Data, Maximum_Protocol_Bytes,
-               Result_Omitted, Result_EOF, IO_Failed, IO_Error);
+              (Process.Descriptors (0),
+               Result_Data,
+               Maximum_Protocol_Bytes,
+               Result_Omitted,
+               Result_EOF,
+               IO_Failed,
+               IO_Error);
             Drain
-              (Process.Descriptors (1), Output_Data, Launch.Diagnostic_Capacity,
-               Output_Omitted, Output_EOF, IO_Failed, IO_Error);
+              (Process.Descriptors (1),
+               Output_Data,
+               Launch.Diagnostic_Capacity,
+               Output_Omitted,
+               Output_EOF,
+               IO_Failed,
+               IO_Error);
             Drain
-              (Process.Descriptors (2), Error_Data, Launch.Diagnostic_Capacity,
-               Error_Omitted, Error_EOF, IO_Failed, IO_Error);
-            exit when (Result_EOF and Output_EOF and Error_EOF)
-              or else Ada.Real_Time.Clock >= Drain_Deadline;
+              (Process.Descriptors (2),
+               Error_Data,
+               Launch.Diagnostic_Capacity,
+               Error_Omitted,
+               Error_EOF,
+               IO_Failed,
+               IO_Error);
+            exit when (Result_EOF and Output_EOF and Error_EOF) or else Ada.Real_Time.Clock >= Drain_Deadline;
             delay 0.001;
          end loop;
       end;
@@ -2626,60 +2385,63 @@ package body Flyology_Bench.Workers is
 
       if Child_Ownership_Lost then
          Target.Outcome_Value := Parent_IO_Failure;
-         Target.Reason_Value := US.To_Unbounded_String
-           ("worker child was consumed by an external reaper");
+         Target.Reason_Value := US.To_Unbounded_String ("worker child was consumed by an external reaper");
       elsif Timed_Out then
-         Target.Outcome_Value :=
-           (if Startup_Expired then Startup_Timeout else Execution_Timeout);
-         Target.Reason_Value := US.To_Unbounded_String
-           ((if Startup_Expired then "worker startup timed out"
-             else "worker execution timed out"));
+         Target.Outcome_Value := (if Startup_Expired then Startup_Timeout else Execution_Timeout);
+         Target.Reason_Value :=
+           US.To_Unbounded_String
+             ((if Startup_Expired then "worker startup timed out" else "worker execution timed out"));
       elsif IO_Failed then
          Target.Outcome_Value := Parent_IO_Failure;
-         Target.Reason_Value := US.To_Unbounded_String
-           ("parent worker I/O or process observation failed, errno="
-            & Ada.Strings.Fixed.Trim
-              (C.int'Image (IO_Error), Ada.Strings.Both));
+         Target.Reason_Value :=
+           US.To_Unbounded_String
+             ("parent worker I/O or process observation failed, errno="
+              & Ada.Strings.Fixed.Trim (C.int'Image (IO_Error), Ada.Strings.Both));
       elsif Protocol_Failed or else Result_Omitted > 0 then
          Target.Outcome_Value := Malformed_Protocol;
          Target.Reason_Value :=
-           (if Protocol_Failed then Protocol_Reason
+           (if Protocol_Failed
+            then Protocol_Reason
             else US.To_Unbounded_String ("worker result envelope is oversized"));
       elsif C_Status_Signaled (Raw_Status) /= 0 then
          Target.Outcome_Value := Crashed_By_Signal;
          Target.Signal_Value := Natural (C_Status_Signal (Raw_Status));
-         Target.Reason_Value := US.To_Unbounded_String
-           ("worker terminated by signal");
+         Target.Reason_Value := US.To_Unbounded_String ("worker terminated by signal");
       elsif C_Status_Exited (Raw_Status) = 0 then
          Target.Outcome_Value := Parent_IO_Failure;
-         Target.Reason_Value := US.To_Unbounded_String
-           ("worker returned an unrecognized wait status");
+         Target.Reason_Value := US.To_Unbounded_String ("worker returned an unrecognized wait status");
       elsif C_Status_Exit_Code (Raw_Status) /= 0 then
          Target.Outcome_Value := Nonzero_Exit;
          Target.Exit_Code_Value := Natural (C_Status_Exit_Code (Raw_Status));
-         Target.Reason_Value := US.To_Unbounded_String
-           ("worker exited with a nonzero status");
+         Target.Reason_Value := US.To_Unbounded_String ("worker exited with a nonzero status");
       else
          begin
             Decode_Result_Stream
-              (US.To_String (Result_Data), Identity_Value, Expected_Kind,
-               Rep, Seed_Value, Config_Value, Environment_Hash,
-               Environment_Fingerprint_Hash, Config_Hash,
-               Environment_Policy_Value, Environment_Locale_Value,
-               Environment_Timezone_Value, Target);
+              (US.To_String (Result_Data),
+               Identity_Value,
+               Expected_Kind,
+               Rep,
+               Seed_Value,
+               Config_Value,
+               Environment_Hash,
+               Environment_Fingerprint_Hash,
+               Config_Hash,
+               Environment_Policy_Value,
+               Environment_Locale_Value,
+               Environment_Timezone_Value,
+               Target);
          exception
             when Error : Protocol_Error =>
                Target.Outcome_Value := Malformed_Protocol;
-               Target.Reason_Value := US.To_Unbounded_String
-                 (Ada.Exceptions.Exception_Message (Error));
+               Target.Reason_Value := US.To_Unbounded_String (Ada.Exceptions.Exception_Message (Error));
          end;
       end if;
    exception
       when Error : others =>
          Target.Outcome_Value := Parent_IO_Failure;
-         Target.Reason_Value := US.To_Unbounded_String
-           (Ada.Exceptions.Exception_Name (Error) & ": "
-            & Ada.Exceptions.Exception_Message (Error));
+         Target.Reason_Value :=
+           US.To_Unbounded_String
+             (Ada.Exceptions.Exception_Name (Error) & ": " & Ada.Exceptions.Exception_Message (Error));
    end Run_Repetition;
 
    procedure Run
@@ -2691,64 +2453,51 @@ package body Flyology_Bench.Workers is
       Env        : Environment;
       Results    : out Worker_Result_Array)
    is
-      Full_Executable : US.Unbounded_String;
-      Full_Directory : US.Unbounded_String;
-      Has_Directory : constant Boolean := Launch.Directory = Use_Directory;
-      Entries : Environment_Vectors.Vector;
-      Env_Hash : U64;
+      Full_Executable      : US.Unbounded_String;
+      Full_Directory       : US.Unbounded_String;
+      Has_Directory        : constant Boolean := Launch.Directory = Use_Directory;
+      Entries              : Environment_Vectors.Vector;
+      Env_Hash             : U64;
       Env_Fingerprint_Hash : U64;
    begin
       if Results'Length /= Launch.Repetitions then
-         raise Configuration_Error with
-           "worker result array length differs from repetition count";
+         raise Configuration_Error with "worker result array length differs from repetition count";
       end if;
-      if Executable'Length = 0 or else Contains_NUL (Executable)
+      if Executable'Length = 0
+        or else Contains_NUL (Executable)
         or else Ada.Strings.Fixed.Index (Executable, "/") = 0
       then
-         raise Configuration_Error with
-           "worker executable must be a direct path";
+         raise Configuration_Error with "worker executable must be a direct path";
       end if;
-      if Identity'Length = 0
-        or else Identity'Length > Maximum_Identity_Length
-        or else Contains_NUL (Identity)
+      if Identity'Length = 0 or else Identity'Length > Maximum_Identity_Length or else Contains_NUL (Identity)
       then
          raise Configuration_Error with "invalid worker benchmark identity";
       end if;
-      if Config.Host_Lock.Enabled
-        and then US.Length (Config.Host_Lock.Path)
-          > Maximum_Host_Lock_Path_Length
+      if Config.Host_Lock.Enabled and then US.Length (Config.Host_Lock.Path) > Maximum_Host_Lock_Path_Length
       then
-         raise Configuration_Error with
-           "worker host-lock path exceeds the protocol limit";
+         raise Configuration_Error with "worker host-lock path exceeds the protocol limit";
       end if;
       if US.Length (Config.Progress_Name) > Maximum_Progress_Name_Length then
-         raise Configuration_Error with
-           "worker progress name exceeds the protocol limit";
+         raise Configuration_Error with "worker progress name exceeds the protocol limit";
       end if;
       begin
-         if Encode_Configuration (Config)'Length
-           > Maximum_Configuration_Bytes
-         then
-            raise Configuration_Error with
-              "worker configuration exceeds the protocol limit";
+         if Encode_Configuration (Config)'Length > Maximum_Configuration_Bytes then
+            raise Configuration_Error with "worker configuration exceeds the protocol limit";
          end if;
       exception
          when Protocol_Error | Constraint_Error =>
-            raise Configuration_Error with
-              "worker configuration cannot be encoded";
+            raise Configuration_Error with "worker configuration cannot be encoded";
       end;
       begin
-         Full_Executable := US.To_Unbounded_String
-           (Ada.Directories.Full_Name (Executable));
+         Full_Executable := US.To_Unbounded_String (Ada.Directories.Full_Name (Executable));
          if not Ada.Directories.Exists (US.To_String (Full_Executable))
-           or else Ada.Directories.Kind (US.To_String (Full_Executable))
-             /= Ada.Directories.Ordinary_File
+           or else Ada.Directories.Kind (US.To_String (Full_Executable)) /= Ada.Directories.Ordinary_File
          then
-            raise Configuration_Error with
-              "worker executable is not an ordinary file";
+            raise Configuration_Error with "worker executable is not an ordinary file";
          end if;
       exception
-         when Configuration_Error => raise;
+         when Configuration_Error =>
+            raise;
          when others =>
             raise Configuration_Error with "worker executable cannot be resolved";
       end;
@@ -2759,25 +2508,21 @@ package body Flyology_Bench.Workers is
             raise Configuration_Error with "invalid worker working directory";
          end if;
          begin
-            Full_Directory := US.To_Unbounded_String
-              (Ada.Directories.Full_Name
-                 (US.To_String (Launch.Working_Directory)));
+            Full_Directory :=
+              US.To_Unbounded_String (Ada.Directories.Full_Name (US.To_String (Launch.Working_Directory)));
             if not Ada.Directories.Exists (US.To_String (Full_Directory))
-              or else Ada.Directories.Kind (US.To_String (Full_Directory))
-                /= Ada.Directories.Directory
+              or else Ada.Directories.Kind (US.To_String (Full_Directory)) /= Ada.Directories.Directory
             then
-               raise Configuration_Error with
-                 "worker working directory is not a directory";
+               raise Configuration_Error with "worker working directory is not a directory";
             end if;
          exception
-            when Configuration_Error => raise;
+            when Configuration_Error =>
+               raise;
             when others =>
-               raise Configuration_Error with
-                 "worker working directory cannot be resolved";
+               raise Configuration_Error with "worker working directory cannot be resolved";
          end;
       elsif US.Length (Launch.Working_Directory) /= 0 then
-         raise Configuration_Error with
-           "inherited directory policy carries an explicit path";
+         raise Configuration_Error with "inherited directory policy carries an explicit path";
       end if;
 
       Entries := Effective_Environment (Env);
@@ -2785,62 +2530,68 @@ package body Flyology_Bench.Workers is
       Env_Fingerprint_Hash := Public_Fingerprint (Entries);
       for Offset in 0 .. Results'Length - 1 loop
          Run_Repetition
-           (US.To_String (Full_Executable), US.To_String (Full_Directory),
-            Has_Directory, Identity, Kind, Config, Launch, Entries, Env_Hash,
-            Env_Fingerprint_Hash, Env.Selected_Mode, Env.Selected_Locale,
-            Env.Selected_Timezone, Offset + 1,
+           (US.To_String (Full_Executable),
+            US.To_String (Full_Directory),
+            Has_Directory,
+            Identity,
+            Kind,
+            Config,
+            Launch,
+            Entries,
+            Env_Hash,
+            Env_Fingerprint_Hash,
+            Env.Selected_Mode,
+            Env.Selected_Locale,
+            Env.Selected_Timezone,
+            Offset + 1,
             Results (Results'First + Offset));
       end loop;
    end Run;
 
-   function Outcome (Result : Worker_Result) return Worker_Outcome is
-     (Result.Outcome_Value);
-   function Kind (Result : Worker_Result) return Result_Kind is
-     (Result.Kind_Value);
-   function Identity (Result : Worker_Result) return String is
-     (US.To_String (Result.Identity_Value));
-   function Repetition (Result : Worker_Result) return Positive is
-     (Result.Repetition_Value);
-   function Seed (Result : Worker_Result) return Long_Long_Integer is
-     (Result.Seed_Value);
-   function Process_Id (Result : Worker_Result) return Interfaces.C.int is
-     (Result.Pid_Value);
-   function Spawn_Nanoseconds (Result : Worker_Result) return Long_Float is
-     (Result.Spawn_Time);
-   function Setup_Nanoseconds (Result : Worker_Result) return Long_Float is
-     (Result.Setup_Time);
-   function Environment_Fingerprint (Result : Worker_Result) return String is
-     (Hex (Result.Environment_Fingerprint_Hash));
-   function Environment_Policy (Result : Worker_Result) return Environment_Mode is
-     (Result.Policy_Value);
-   function Environment_Locale_Policy
-     (Result : Worker_Result) return Locale_Policy is
-     (Result.Locale_Value);
-   function Environment_Timezone_Policy
-     (Result : Worker_Result) return Timezone_Policy is
-     (Result.Timezone_Value);
-   function Exit_Code (Result : Worker_Result) return Natural is
-     (Result.Exit_Code_Value);
-   function Terminating_Signal (Result : Worker_Result) return Natural is
-     (Result.Signal_Value);
-   function Forced_Termination (Result : Worker_Result) return Boolean is
-     (Result.Forced_Value);
-   function Reason (Result : Worker_Result) return String is
-     (US.To_String (Result.Reason_Value));
-   function Standard_Output (Result : Worker_Result) return String is
-     (US.To_String (Result.Output_Value));
-   function Standard_Error (Result : Worker_Result) return String is
-     (US.To_String (Result.Error_Value));
-   function Standard_Output_Omitted (Result : Worker_Result) return Natural is
-     (Result.Output_Omitted);
-   function Standard_Error_Omitted (Result : Worker_Result) return Natural is
-     (Result.Error_Omitted);
+   function Outcome (Result : Worker_Result) return Worker_Outcome
+   is (Result.Outcome_Value);
+   function Kind (Result : Worker_Result) return Result_Kind
+   is (Result.Kind_Value);
+   function Identity (Result : Worker_Result) return String
+   is (US.To_String (Result.Identity_Value));
+   function Repetition (Result : Worker_Result) return Positive
+   is (Result.Repetition_Value);
+   function Seed (Result : Worker_Result) return Long_Long_Integer
+   is (Result.Seed_Value);
+   function Process_Id (Result : Worker_Result) return Interfaces.C.int
+   is (Result.Pid_Value);
+   function Spawn_Nanoseconds (Result : Worker_Result) return Long_Float
+   is (Result.Spawn_Time);
+   function Setup_Nanoseconds (Result : Worker_Result) return Long_Float
+   is (Result.Setup_Time);
+   function Environment_Fingerprint (Result : Worker_Result) return String
+   is (Hex (Result.Environment_Fingerprint_Hash));
+   function Environment_Policy (Result : Worker_Result) return Environment_Mode
+   is (Result.Policy_Value);
+   function Environment_Locale_Policy (Result : Worker_Result) return Locale_Policy
+   is (Result.Locale_Value);
+   function Environment_Timezone_Policy (Result : Worker_Result) return Timezone_Policy
+   is (Result.Timezone_Value);
+   function Exit_Code (Result : Worker_Result) return Natural
+   is (Result.Exit_Code_Value);
+   function Terminating_Signal (Result : Worker_Result) return Natural
+   is (Result.Signal_Value);
+   function Forced_Termination (Result : Worker_Result) return Boolean
+   is (Result.Forced_Value);
+   function Reason (Result : Worker_Result) return String
+   is (US.To_String (Result.Reason_Value));
+   function Standard_Output (Result : Worker_Result) return String
+   is (US.To_String (Result.Output_Value));
+   function Standard_Error (Result : Worker_Result) return String
+   is (US.To_String (Result.Error_Value));
+   function Standard_Output_Omitted (Result : Worker_Result) return Natural
+   is (Result.Output_Omitted);
+   function Standard_Error_Omitted (Result : Worker_Result) return Natural
+   is (Result.Error_Omitted);
 
    function Measurement_Value (Result : Worker_Result) return Measurement is
    begin
-      if Result.Outcome_Value /= Normal_Result
-        or else Result.Kind_Value /= Ordinary_Measurement
-      then
+      if Result.Outcome_Value /= Normal_Result or else Result.Kind_Value /= Ordinary_Measurement then
          raise Program_Error with "worker result is not an ordinary measurement";
       end if;
       return Result.Measurement_Data;
@@ -2848,9 +2599,7 @@ package body Flyology_Bench.Workers is
 
    function Comparison_Value (Result : Worker_Result) return Comparison is
    begin
-      if Result.Outcome_Value /= Normal_Result
-        or else Result.Kind_Value /= Paired_Comparison
-      then
+      if Result.Outcome_Value /= Normal_Result or else Result.Kind_Value /= Paired_Comparison then
          raise Program_Error with "worker result is not a paired comparison";
       end if;
       return Result.Comparison_Data;

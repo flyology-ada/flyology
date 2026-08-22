@@ -23,9 +23,9 @@ use type Interfaces.Unsigned_64;
 --  silently reusable; an external recovery authority may poison and reclaim
 --  that slot only after establishing owner death and target-slot quiescence.
 --  @formal Element Immutable byte-backed element adapter stored by this slab
+
 generic
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
    --  Eight-byte magic stored in every slab header.
@@ -33,15 +33,15 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
    --  Schema identifier for the current fixed-width slab layout.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0002_534C_4142_0003# xor Element.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
+     16#0002_534C_4142_0003#
+     xor Element.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 4;
 
    --  Complete stable layout identity for envelope instances and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Maximum compare/exchange attempts made by one immediate claim
    --  campaign. Timed overloads may use shorter campaigns between yields.
@@ -86,10 +86,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Region_Error Region or extent is invalid
    --  @exception Constraint_Error Configuration cannot be represented
    procedure Initialize
-     (Item              : out View;
-      Region            : Region_View;
-      Location          : Region_Offset;
-      Capacity          : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Atomically initialize a known-virgin zeroed extent or attach to a ready
    --  compatible slab. Only the exact zero lifecycle sentinel is eligible for
@@ -105,11 +102,11 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @param Result Whether this caller initialized, attached, or observed an
    --     initialization in progress
    procedure Create_Or_Attach
-     (Item              : out View;
-      Region            : Region_View;
-      Location          : Region_Offset;
-      Capacity          : Positive;
-      Result            : out Open_Result);
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive;
+      Result   : out Open_Result);
 
    --  Attach to a quiescent existing slab and validate its complete layout,
    --  slot states, generations, and expected configuration. Valid transitional
@@ -121,11 +118,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @param Capacity Expected slot count
    --  @exception Layout_Error Stored data is incompatible or corrupt
    --  @exception Region_Error Region or extent is invalid
-   procedure Attach
-     (Item              : out View;
-      Region            : Region_View;
-      Location          : Region_Offset;
-      Capacity          : Positive);
+   procedure Attach (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Detach Item without changing backing bytes or reclaiming live slots.
    --  @param Item Local view to detach
@@ -155,10 +148,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @param Value New generation-stamped handle or Null_Handle
    --  @param Result Allocated, exhausted, or bounded-contention outcome
    procedure Try_Allocate
-     (Item      : in out View;
-      Data      : Element.Source;
-      Value     : out Handles.Handle;
-      Result    : out Allocation_Result);
+     (Item : in out View; Data : Element.Source; Value : out Handles.Handle; Result : out Allocation_Result);
 
    --  Retry bounded allocation contention through one timeout. A genuinely
    --  exhausted slab still returns Exhausted immediately after a full scan.
@@ -185,19 +175,14 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Poison_Error Value addresses a poisoned slot
    --     or its generation is exhausted and the slot was retired
    --  @exception Layout_Error Slot bookkeeping is corrupt
-   procedure Release
-     (Item  : in out View;
-      Value : Handles.Handle);
+   procedure Release (Item : in out View; Value : Handles.Handle);
 
    --  Reclaim Value after waiting through transient same-slot contention.
    --  @param Item Any concurrently attached slab view
    --  @param Value Live handle returned by this slab
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error Slot contention persists through the deadline
-   procedure Release
-     (Item    : in out View;
-      Value   : Handles.Handle;
-      Timeout : Wait_Timeout);
+   procedure Release (Item : in out View; Value : Handles.Handle; Timeout : Wait_Timeout);
 
    --  Observe exactly one immutable slot without copying its representation.
    --  @param Item Any concurrently attached slab view
@@ -206,10 +191,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Handle_Error Value is invalid or stale
    --  @exception Busy_Error The bounded claim budget is exhausted
    --  @exception Poison_Error Value addresses a poisoned slot
-   procedure Read
-      (Item  : View;
-      Value : Handles.Handle;
-      Data  : out Element.Observed);
+   procedure Read (Item : View; Value : Handles.Handle; Data : out Element.Observed);
 
    --  Read one slot after waiting through transient same-slot contention.
    --  @param Item Any concurrently attached slab view
@@ -217,11 +199,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @param Data Observation assigned only on success
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error Slot contention persists through the deadline
-   procedure Read
-      (Item    : View;
-      Value   : Handles.Handle;
-      Data    : out Element.Observed;
-      Timeout : Wait_Timeout);
+   procedure Read (Item : View; Value : Handles.Handle; Data : out Element.Observed; Timeout : Wait_Timeout);
 
    --  Replace exactly one immutable slot from Data. Independent creation
    --  completes before the slot claim, so a raising creator cannot mutate it.
@@ -231,10 +209,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Handle_Error Value is invalid or stale
    --  @exception Busy_Error The bounded claim budget is exhausted
    --  @exception Poison_Error Value addresses a poisoned slot
-   procedure Replace
-     (Item  : in out View;
-      Value : Handles.Handle;
-      Data  : Element.Source);
+   procedure Replace (Item : in out View; Value : Handles.Handle; Data : Element.Source);
 
    --  Replace one slot after waiting through transient same-slot contention.
    --  @param Item Any concurrently attached slab view
@@ -243,10 +218,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error Slot contention persists through the deadline
    procedure Replace
-     (Item    : in out View;
-      Value   : Handles.Handle;
-      Data    : Element.Source;
-      Timeout : Wait_Timeout);
+     (Item : in out View; Value : Handles.Handle; Data : Element.Source; Timeout : Wait_Timeout);
 
    --  Mark a transitional slot abandoned. The caller is the recovery
    --  authority and must first establish that its owner has terminated and
@@ -257,9 +229,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Handle_Error Slot is null or out of range
    --  @exception Program_Error Slot is live or free rather than abandoned
    --  @exception Busy_Error The bounded poison claim budget expires
-   procedure Poison_Abandoned
-     (Item : in out View;
-      Slot : Handles.Slot_Index);
+   procedure Poison_Abandoned (Item : in out View; Slot : Handles.Slot_Index);
 
    --  Validate immutable slab identity and geometry, then poison a
    --  transitional slot without requiring a retained pre-failure View or
@@ -274,10 +244,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Program_Error Slot is live or free rather than abandoned
    --  @exception Busy_Error The bounded poison claim budget expires
    procedure Poison_Abandoned_At
-     (Region            : Region_View;
-      Location          : Region_Offset;
-      Capacity          : Positive;
-      Slot              : Handles.Slot_Index);
+     (Region : Region_View; Location : Region_Offset; Capacity : Positive; Slot : Handles.Slot_Index);
 
    --  Explicitly recycle a poisoned slot after external recovery authority
    --  has established target-slot quiescence. The generation advances before
@@ -289,9 +256,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    --  @exception Handle_Error Slot is null or out of range
    --  @exception Program_Error Slot is not poisoned
    --  @exception Poison_Error The slot generation is exhausted
-   procedure Recover_Poisoned
-     (Item : in out View;
-      Slot : Handles.Slot_Index);
+   procedure Recover_Poisoned (Item : in out View; Slot : Handles.Slot_Index);
 
    --  Invalidate an empty slab and detach Item. Every view and handle must be
    --  quiescent; live slots make destruction fail rather than leak ownership.
@@ -303,12 +268,12 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
 
 private
    type View is limited record
-      Core              : Layouts.Local_View;
-      Capacity_Value    : Interfaces.Unsigned_32 := 0;
-      Element_Value     : Interfaces.Unsigned_32 := 0;
-      Alignment_Value   : Interfaces.Unsigned_32 := 0;
-      Payload_Offset    : Byte_Count := 0;
-      Stride            : Byte_Count := 0;
+      Core                      : Layouts.Local_View;
+      Capacity_Value            : Interfaces.Unsigned_32 := 0;
+      Element_Value             : Interfaces.Unsigned_32 := 0;
+      Alignment_Value           : Interfaces.Unsigned_32 := 0;
+      Payload_Offset            : Byte_Count := 0;
+      Stride                    : Byte_Count := 0;
       Allocation_Cursor_Address : System.Address := System.Null_Address;
    end record;
 end Flyology.Data_Structures.Slab_Pools;

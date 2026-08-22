@@ -15,43 +15,42 @@ package body Flyology_Bench.Sweeps.Reporters is
       return Value;
    end Trimmed;
 
-   function Number (Value : Long_Float) return String is
-     (Trimmed (Long_Float'Image (Value)));
+   function Number (Value : Long_Float) return String
+   is (Trimmed (Long_Float'Image (Value)));
 
-   function Number (Value : Exact_Value) return String is
-     (Trimmed (Exact_Value'Image (Value)));
+   function Number (Value : Exact_Value) return String
+   is (Trimmed (Exact_Value'Image (Value)));
 
-   function Token (Value : String) return String is
-     (Ada.Characters.Handling.To_Lower (Trimmed (Value)));
+   function Token (Value : String) return String
+   is (Ada.Characters.Handling.To_Lower (Trimmed (Value)));
 
-   function Status_Name (Value : Point_Status) return String is
-     (Token (Point_Status'Image (Value)));
+   function Status_Name (Value : Point_Status) return String
+   is (Token (Point_Status'Image (Value)));
 
-   function Availability_Name
-     (Value : Throughput_Availability) return String is
-     (Token (Throughput_Availability'Image (Value)));
+   function Availability_Name (Value : Throughput_Availability) return String
+   is (Token (Throughput_Availability'Image (Value)));
 
-   function Kind_Name (Value : Parameter_Kind) return String is
-     (case Value is
+   function Kind_Name (Value : Parameter_Kind) return String
+   is (case Value is
          when Size_Parameter  => "size",
          when Count_Parameter => "count");
 
-   function Work_Kind_Name (Value : Work_Unit_Kind) return String is
-     (case Value is
+   function Work_Kind_Name (Value : Work_Unit_Kind) return String
+   is (case Value is
          when Items        => "items",
          when Bytes        => "bytes",
          when Caller_Named => "caller_named");
 
-   function Scaling_Name (Value : Display_Scaling) return String is
-     (case Value is
+   function Scaling_Name (Value : Display_Scaling) return String
+   is (case Value is
          when Decimal_Scaling => "decimal",
          when Binary_Scaling  => "binary");
 
-   function Verdict_Name (Value : Comparison_Verdict) return String is
-     (Token (Comparison_Verdict'Image (Value)));
+   function Verdict_Name (Value : Comparison_Verdict) return String
+   is (Token (Comparison_Verdict'Image (Value)));
 
-   function Model_Name (Value : Scaling.Scaling_Model) return String is
-     (case Value is
+   function Model_Name (Value : Scaling.Scaling_Model) return String
+   is (case Value is
          when Scaling.Constant_Model    => "constant",
          when Scaling.Logarithmic_Model => "logarithmic",
          when Scaling.Linear_Model      => "linear",
@@ -59,19 +58,16 @@ package body Flyology_Bench.Sweeps.Reporters is
          when Scaling.Quadratic_Model   => "quadratic",
          when Scaling.Cubic_Model       => "cubic");
 
-   function Scaling_Status_Name (Value : Scaling.Scaling_Status) return String is
-     (Token (Scaling.Scaling_Status'Image (Value)));
+   function Scaling_Status_Name (Value : Scaling.Scaling_Status) return String
+   is (Token (Scaling.Scaling_Status'Image (Value)));
 
    function CSV (Value : String) return String is
       use Ada.Strings.Unbounded;
-      Escaped : Unbounded_String;
+      Escaped      : Unbounded_String;
       Needs_Quotes : Boolean := False;
    begin
       for Ch of Value loop
-         if Ch = ',' or else Ch = '"'
-           or else Ch = Character'Val (10)
-           or else Ch = Character'Val (13)
-         then
+         if Ch = ',' or else Ch = '"' or else Ch = Character'Val (10) or else Ch = Character'Val (13) then
             Needs_Quotes := True;
          end if;
          if Ch = '"' then
@@ -79,14 +75,13 @@ package body Flyology_Bench.Sweeps.Reporters is
          end if;
          Append (Escaped, Ch);
       end loop;
-      return
-        (if Needs_Quotes then '"' & To_String (Escaped) & '"'
-         else To_String (Escaped));
+      return (if Needs_Quotes then '"' & To_String (Escaped) & '"' else To_String (Escaped));
    end CSV;
 
-   function Hex (Value : Natural) return Character is
-     (if Value < 10 then Character'Val (Character'Pos ('0') + Value)
-      else Character'Val (Character'Pos ('a') + Value - 10));
+   function Hex (Value : Natural) return Character
+   is (if Value < 10
+       then Character'Val (Character'Pos ('0') + Value)
+       else Character'Val (Character'Pos ('a') + Value - 10));
 
    function JSON (Value : String) return String is
       use Ada.Strings.Unbounded;
@@ -94,14 +89,28 @@ package body Flyology_Bench.Sweeps.Reporters is
    begin
       for Ch of Value loop
          case Ch is
-            when '"' => Append (Escaped, "\""");
-            when '\' => Append (Escaped, "\\");
-            when Character'Val (8)  => Append (Escaped, "\b");
-            when Character'Val (9)  => Append (Escaped, "\t");
-            when Character'Val (10) => Append (Escaped, "\n");
-            when Character'Val (12) => Append (Escaped, "\f");
-            when Character'Val (13) => Append (Escaped, "\r");
-            when others =>
+            when '"'                =>
+               Append (Escaped, "\""");
+
+            when '\'                =>
+               Append (Escaped, "\\");
+
+            when Character'Val (8)  =>
+               Append (Escaped, "\b");
+
+            when Character'Val (9)  =>
+               Append (Escaped, "\t");
+
+            when Character'Val (10) =>
+               Append (Escaped, "\n");
+
+            when Character'Val (12) =>
+               Append (Escaped, "\f");
+
+            when Character'Val (13) =>
+               Append (Escaped, "\r");
+
+            when others             =>
                if Character'Pos (Ch) < 32 then
                   Append (Escaped, "\u00");
                   Append (Escaped, Hex (Character'Pos (Ch) / 16));
@@ -114,54 +123,44 @@ package body Flyology_Bench.Sweeps.Reporters is
       return To_String (Escaped);
    end JSON;
 
-   function Boolean_Name (Value : Boolean) return String is
-     (if Value then "true" else "false");
+   function Boolean_Name (Value : Boolean) return String
+   is (if Value then "true" else "false");
 
    function Maybe_Number
-     (Summary : Throughput_Summary;
-      Value   : Long_Float;
-      JSON_Mode : Boolean := False) return String is
-     (if Available (Summary) then Number (Value)
-      elsif JSON_Mode then "null" else "");
+     (Summary : Throughput_Summary; Value : Long_Float; JSON_Mode : Boolean := False) return String
+   is (if Available (Summary) then Number (Value) elsif JSON_Mode then "null" else "");
 
-   function Work_Base_Unit (Amount : Work_Amount) return String is
-     (case Unit_Kind (Amount) is
+   function Work_Base_Unit (Amount : Work_Amount) return String
+   is (case Unit_Kind (Amount) is
          when Items        => "items",
          when Bytes        => "B",
          when Caller_Named => Unit_Name (Amount));
 
-   function Scale_Prefix
-     (Power   : Natural;
-      Scaling : Display_Scaling) return String is
-     (case Scaling is
+   function Scale_Prefix (Power : Natural; Scaling : Display_Scaling) return String
+   is (case Scaling is
          when Decimal_Scaling =>
            (case Power is
-               when 0 => "",
-               when 1 => "k",
-               when 2 => "M",
-               when 3 => "G",
-               when 4 => "T",
-               when 5 => "P",
-               when others => "E"),
-         when Binary_Scaling =>
+              when 0      => "",
+              when 1      => "k",
+              when 2      => "M",
+              when 3      => "G",
+              when 4      => "T",
+              when 5      => "P",
+              when others => "E"),
+         when Binary_Scaling  =>
            (case Power is
-               when 0 => "",
-               when 1 => "Ki",
-               when 2 => "Mi",
-               when 3 => "Gi",
-               when 4 => "Ti",
-               when 5 => "Pi",
-               when others => "Ei"));
+              when 0      => "",
+              when 1      => "Ki",
+              when 2      => "Mi",
+              when 3      => "Gi",
+              when 4      => "Ti",
+              when 5      => "Pi",
+              when others => "Ei"));
 
-   function Human_Work_Rate
-     (Summary : Throughput_Summary;
-      Amount  : Work_Amount) return String
-   is
-      Base : constant Long_Float :=
-        (if Display_Scale (Amount) = Decimal_Scaling then 1_000.0
-         else 1_024.0);
+   function Human_Work_Rate (Summary : Throughput_Summary; Amount : Work_Amount) return String is
+      Base   : constant Long_Float := (if Display_Scale (Amount) = Decimal_Scaling then 1_000.0 else 1_024.0);
       Scaled : Long_Float := Work_Units_Per_Second (Summary);
-      Power : Natural := 0;
+      Power  : Natural := 0;
    begin
       if not Available (Summary) then
          return "unavailable";
@@ -170,43 +169,39 @@ package body Flyology_Bench.Sweeps.Reporters is
          Scaled := Scaled / Base;
          Power := Power + 1;
       end loop;
-      return Number (Scaled) & " "
-        & Scale_Prefix (Power, Display_Scale (Amount))
-        & Work_Base_Unit (Amount) & "/s";
+      return
+        Number (Scaled) & " " & Scale_Prefix (Power, Display_Scale (Amount)) & Work_Base_Unit (Amount) & "/s";
    end Human_Work_Rate;
 
-   function Human_Work_Amount (Amount : Work_Amount) return String is
-     (Number (Display_Value (Amount)) & " " & Display_Unit (Amount));
+   function Human_Work_Amount (Amount : Work_Amount) return String
+   is (Number (Display_Value (Amount)) & " " & Display_Unit (Amount));
 
    function Median_Or_Empty
-     (Summary : Throughput_Summary;
-      Item  : Measurement;
-      JSON_Mode : Boolean := False) return String is
-     (if Wall_Time_Available (Summary)
-      then Number (Median_Nanoseconds (Item))
-      elsif JSON_Mode then "null" else "");
+     (Summary : Throughput_Summary; Item : Measurement; JSON_Mode : Boolean := False) return String
+   is (if Wall_Time_Available (Summary)
+       then Number (Median_Nanoseconds (Item))
+       elsif JSON_Mode
+       then "null"
+       else "");
 
    function Low_Or_Empty
-     (Summary : Throughput_Summary;
-      Item  : Measurement;
-      JSON_Mode : Boolean := False) return String is
-     (if Wall_Time_Available (Summary)
-      then Number (Mean_Confidence_Low_Nanoseconds (Item))
-      elsif JSON_Mode then "null" else "");
+     (Summary : Throughput_Summary; Item : Measurement; JSON_Mode : Boolean := False) return String
+   is (if Wall_Time_Available (Summary)
+       then Number (Mean_Confidence_Low_Nanoseconds (Item))
+       elsif JSON_Mode
+       then "null"
+       else "");
 
    function High_Or_Empty
-     (Summary : Throughput_Summary;
-      Item  : Measurement;
-      JSON_Mode : Boolean := False) return String is
-     (if Wall_Time_Available (Summary)
-      then Number (Mean_Confidence_High_Nanoseconds (Item))
-      elsif JSON_Mode then "null" else "");
+     (Summary : Throughput_Summary; Item : Measurement; JSON_Mode : Boolean := False) return String
+   is (if Wall_Time_Available (Summary)
+       then Number (Mean_Confidence_High_Nanoseconds (Item))
+       elsif JSON_Mode
+       then "null"
+       else "");
 
    procedure Put_Console
-     (Case_Name : String;
-      Result    : Ordinary_Sweep_Result;
-      File      : File_Type := Standard_Output)
-   is
+     (Case_Name : String; Result : Ordinary_Sweep_Result; File : File_Type := Standard_Output) is
    begin
       Put_Line (File, "empirical sweep " & Case_Name);
       Put_Line
@@ -217,25 +212,37 @@ package body Flyology_Bench.Sweeps.Reporters is
       Put_Line (File, "throughput direction: higher is better");
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Ordinary_Point_Result := Element (Result, Index);
-            Point_Value : constant Parameter_Point := Parameter (Item);
-            Rate : constant Throughput_Summary := Throughput (Item);
+            Item              : constant Ordinary_Point_Result := Element (Result, Index);
+            Point_Value       : constant Parameter_Point := Parameter (Item);
+            Rate              : constant Throughput_Summary := Throughput (Item);
             Measurement_Value : constant Measurement := Data (Item);
          begin
             Put_Line
               (File,
-               Identity (Point_Value) & "  " & Label (Point_Value) & "  "
-               & Status_Name (Status (Item)) & "  "
-               & Median_Or_Empty (Rate, Measurement_Value) & "  ["
-               & Low_Or_Empty (Rate, Measurement_Value) & ", "
-               & High_Or_Empty (Rate, Measurement_Value) & "]  "
-               & Availability_Name (Availability (Rate)) & "  "
-               & Maybe_Number (Rate, Operations_Per_Second (Rate)) & " ["
-               & Maybe_Number (Rate, Operations_Confidence_Low (Rate)) & ", "
-               & Maybe_Number (Rate, Operations_Confidence_High (Rate)) & "]  "
+               Identity (Point_Value)
+               & "  "
+               & Label (Point_Value)
+               & "  "
+               & Status_Name (Status (Item))
+               & "  "
+               & Median_Or_Empty (Rate, Measurement_Value)
+               & "  ["
+               & Low_Or_Empty (Rate, Measurement_Value)
+               & ", "
+               & High_Or_Empty (Rate, Measurement_Value)
+               & "]  "
+               & Availability_Name (Availability (Rate))
+               & "  "
+               & Maybe_Number (Rate, Operations_Per_Second (Rate))
+               & " ["
+               & Maybe_Number (Rate, Operations_Confidence_Low (Rate))
+               & ", "
+               & Maybe_Number (Rate, Operations_Confidence_High (Rate))
+               & "]  "
                & (if Work_Available (Item)
                   then Human_Work_Rate (Rate, Work_Per_Operation (Item))
-                  else "unavailable") & "  "
+                  else "unavailable")
+               & "  "
                & (if Work_Available (Item)
                   then Human_Work_Amount (Work_Per_Operation (Item))
                   else "unavailable"));
@@ -248,12 +255,10 @@ package body Flyology_Bench.Sweeps.Reporters is
       Reference_Name : String;
       Contender_Name : String;
       Result         : Paired_Sweep_Result;
-      File           : File_Type := Standard_Output)
-   is
+      File           : File_Type := Standard_Output) is
    begin
       Put_Line
-        (File, "empirical paired sweep " & Case_Name & " ("
-         & Reference_Name & " vs " & Contender_Name & ")");
+        (File, "empirical paired sweep " & Case_Name & " (" & Reference_Name & " vs " & Contender_Name & ")");
       Put_Line
         (File,
          "parameter  status  reference median [mean CI]  contender median"
@@ -264,55 +269,60 @@ package body Flyology_Bench.Sweeps.Reporters is
       Put_Line (File, "throughput direction: higher is better");
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Paired_Point_Result := Element (Result, Index);
-            Pair : constant Comparison := Data (Item);
-            Reference : constant Measurement := Reference_Measurement (Pair);
-            Contender : constant Measurement := Contender_Measurement (Pair);
-            Reference_Rate : constant Throughput_Summary :=
-              Reference_Throughput (Item);
-            Contender_Rate : constant Throughput_Summary :=
-              Contender_Throughput (Item);
+            Item           : constant Paired_Point_Result := Element (Result, Index);
+            Pair           : constant Comparison := Data (Item);
+            Reference      : constant Measurement := Reference_Measurement (Pair);
+            Contender      : constant Measurement := Contender_Measurement (Pair);
+            Reference_Rate : constant Throughput_Summary := Reference_Throughput (Item);
+            Contender_Rate : constant Throughput_Summary := Contender_Throughput (Item);
          begin
             Put_Line
               (File,
-               Identity (Parameter (Item)) & "  " & Status_Name (Status (Item))
-               & "  " & Median_Or_Empty (Reference_Rate, Reference) & " ["
-               & Low_Or_Empty (Reference_Rate, Reference) & ", "
-               & High_Or_Empty (Reference_Rate, Reference) & "]  "
-               & Median_Or_Empty (Contender_Rate, Contender) & " ["
-               & Low_Or_Empty (Contender_Rate, Contender) & ", "
-               & High_Or_Empty (Contender_Rate, Contender) & "]  "
-               & Maybe_Number
-                   (Reference_Rate, Operations_Per_Second (Reference_Rate))
-               & " [" & Maybe_Number
-                   (Reference_Rate,
-                    Operations_Confidence_Low (Reference_Rate))
-               & ", " & Maybe_Number
-                   (Reference_Rate,
-                    Operations_Confidence_High (Reference_Rate)) & "]  "
-               & Maybe_Number
-                   (Contender_Rate, Operations_Per_Second (Contender_Rate))
-               & " [" & Maybe_Number
-                   (Contender_Rate,
-                    Operations_Confidence_Low (Contender_Rate))
-               & ", " & Maybe_Number
-                   (Contender_Rate,
-                    Operations_Confidence_High (Contender_Rate)) & "]  "
-               & Availability_Name (Availability (Reference_Rate)) & "  "
-               & Availability_Name (Availability (Contender_Rate)) & "  "
+               Identity (Parameter (Item))
+               & "  "
+               & Status_Name (Status (Item))
+               & "  "
+               & Median_Or_Empty (Reference_Rate, Reference)
+               & " ["
+               & Low_Or_Empty (Reference_Rate, Reference)
+               & ", "
+               & High_Or_Empty (Reference_Rate, Reference)
+               & "]  "
+               & Median_Or_Empty (Contender_Rate, Contender)
+               & " ["
+               & Low_Or_Empty (Contender_Rate, Contender)
+               & ", "
+               & High_Or_Empty (Contender_Rate, Contender)
+               & "]  "
+               & Maybe_Number (Reference_Rate, Operations_Per_Second (Reference_Rate))
+               & " ["
+               & Maybe_Number (Reference_Rate, Operations_Confidence_Low (Reference_Rate))
+               & ", "
+               & Maybe_Number (Reference_Rate, Operations_Confidence_High (Reference_Rate))
+               & "]  "
+               & Maybe_Number (Contender_Rate, Operations_Per_Second (Contender_Rate))
+               & " ["
+               & Maybe_Number (Contender_Rate, Operations_Confidence_Low (Contender_Rate))
+               & ", "
+               & Maybe_Number (Contender_Rate, Operations_Confidence_High (Contender_Rate))
+               & "]  "
+               & Availability_Name (Availability (Reference_Rate))
+               & "  "
+               & Availability_Name (Availability (Contender_Rate))
+               & "  "
                & (if Work_Available (Item)
-                  then Human_Work_Rate
-                    (Reference_Rate, Work_Per_Operation (Item))
-                  else "unavailable") & "  "
+                  then Human_Work_Rate (Reference_Rate, Work_Per_Operation (Item))
+                  else "unavailable")
+               & "  "
                & (if Work_Available (Item)
-                  then Human_Work_Rate
-                    (Contender_Rate, Work_Per_Operation (Item))
-                  else "unavailable") & "  "
+                  then Human_Work_Rate (Contender_Rate, Work_Per_Operation (Item))
+                  else "unavailable")
+               & "  "
                & (if Work_Available (Item)
                   then Human_Work_Amount (Work_Per_Operation (Item))
-                  else "unavailable") & "  "
-               & (if Collection_Available (Item)
-                  then Verdict_Name (Verdict (Pair)) else ""));
+                  else "unavailable")
+               & "  "
+               & (if Collection_Available (Item) then Verdict_Name (Verdict (Pair)) else ""));
          end;
       end loop;
    end Put_Comparison_Console;
@@ -330,54 +340,74 @@ package body Flyology_Bench.Sweeps.Reporters is
          & "work_units_per_second,work_ci_low,work_ci_high,direction");
    end Put_CSV_Header;
 
-   procedure Put_CSV
-     (Case_Name : String;
-      Result    : Ordinary_Sweep_Result;
-      File      : File_Type := Standard_Output)
+   procedure Put_CSV (Case_Name : String; Result : Ordinary_Sweep_Result; File : File_Type := Standard_Output)
    is
    begin
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Ordinary_Point_Result := Element (Result, Index);
-            Point_Value : constant Parameter_Point := Parameter (Item);
-            Has_Work : constant Boolean := Work_Available (Item);
-            Amount : constant Work_Amount :=
-              (if Has_Work then Work_Per_Operation (Item)
-               else Work (1, Items));
-            Rate : constant Throughput_Summary := Throughput (Item);
+            Item              : constant Ordinary_Point_Result := Element (Result, Index);
+            Point_Value       : constant Parameter_Point := Parameter (Item);
+            Has_Work          : constant Boolean := Work_Available (Item);
+            Amount            : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item) else Work (1, Items));
+            Rate              : constant Throughput_Summary := Throughput (Item);
             Measurement_Value : constant Measurement := Data (Item);
          begin
             Put_Line
               (File,
-               CSV (Case_Name) & ',' & CSV (Identity (Point_Value)) & ','
-               & Kind_Name (Kind (Point_Value)) & ','
-               & Number (Value (Point_Value)) & ',' & CSV (Label (Point_Value))
-               & ",ordinary_measurement," & Boolean_Name (Has_Work) & ','
+               CSV (Case_Name)
+               & ','
+               & CSV (Identity (Point_Value))
+               & ','
+               & Kind_Name (Kind (Point_Value))
+               & ','
+               & Number (Value (Point_Value))
+               & ','
+               & CSV (Label (Point_Value))
+               & ",ordinary_measurement,"
+               & Boolean_Name (Has_Work)
+               & ','
                & (if Has_Work then Work_Kind_Name (Unit_Kind (Amount)) else "")
-               & ',' & (if Has_Work then CSV (Unit_Name (Amount)) else "")
-               & ',' & (if Has_Work then Number (Raw_Value (Amount)) else "")
-               & ',' & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
+               & ','
+               & (if Has_Work then CSV (Unit_Name (Amount)) else "")
+               & ','
+               & (if Has_Work then Number (Raw_Value (Amount)) else "")
+               & ','
+               & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
                & ",per_operation_batch_mean,"
-               & Boolean_Name (Collection_Available (Item)) & ','
-               & Boolean_Name (Status (Item) = Point_Measured) & ','
-               & Status_Name (Status (Item)) & ',' & CSV (Failure_Message (Item))
-               & ',' & Median_Or_Empty (Rate, Measurement_Value)
-               & ',' & Low_Or_Empty (Rate, Measurement_Value)
-               & ',' & High_Or_Empty (Rate, Measurement_Value)
-               & ',' & Availability_Name (Availability (Rate))
-               & ',' & Maybe_Number (Rate, Operations_Per_Second (Rate))
-               & ',' & Maybe_Number (Rate, Operations_Confidence_Low (Rate))
-               & ',' & Maybe_Number (Rate, Operations_Confidence_High (Rate))
-               & ',' & Maybe_Number (Rate, Work_Units_Per_Second (Rate))
-               & ',' & Maybe_Number (Rate, Work_Confidence_Low (Rate))
-               & ',' & Maybe_Number (Rate, Work_Confidence_High (Rate))
+               & Boolean_Name (Collection_Available (Item))
+               & ','
+               & Boolean_Name (Status (Item) = Point_Measured)
+               & ','
+               & Status_Name (Status (Item))
+               & ','
+               & CSV (Failure_Message (Item))
+               & ','
+               & Median_Or_Empty (Rate, Measurement_Value)
+               & ','
+               & Low_Or_Empty (Rate, Measurement_Value)
+               & ','
+               & High_Or_Empty (Rate, Measurement_Value)
+               & ','
+               & Availability_Name (Availability (Rate))
+               & ','
+               & Maybe_Number (Rate, Operations_Per_Second (Rate))
+               & ','
+               & Maybe_Number (Rate, Operations_Confidence_Low (Rate))
+               & ','
+               & Maybe_Number (Rate, Operations_Confidence_High (Rate))
+               & ','
+               & Maybe_Number (Rate, Work_Units_Per_Second (Rate))
+               & ','
+               & Maybe_Number (Rate, Work_Confidence_Low (Rate))
+               & ','
+               & Maybe_Number (Rate, Work_Confidence_High (Rate))
                & ",higher_is_better");
          end;
       end loop;
    end Put_CSV;
 
-   procedure Put_Comparison_CSV_Header
-     (File : File_Type := Standard_Output) is
+   procedure Put_Comparison_CSV_Header (File : File_Type := Standard_Output) is
    begin
       Put_Line
         (File,
@@ -403,128 +433,148 @@ package body Flyology_Bench.Sweeps.Reporters is
       Reference_Name : String;
       Contender_Name : String;
       Result         : Paired_Sweep_Result;
-      File           : File_Type := Standard_Output)
-   is
+      File           : File_Type := Standard_Output) is
    begin
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Paired_Point_Result := Element (Result, Index);
-            Point_Value : constant Parameter_Point := Parameter (Item);
-            Has_Work : constant Boolean := Work_Available (Item);
-            Amount : constant Work_Amount :=
-              (if Has_Work then Work_Per_Operation (Item)
-               else Work (1, Items));
-            Pair : constant Comparison := Data (Item);
-            Reference : constant Measurement := Reference_Measurement (Pair);
-            Contender : constant Measurement := Contender_Measurement (Pair);
-            Reference_Rate : constant Throughput_Summary :=
-              Reference_Throughput (Item);
-            Contender_Rate : constant Throughput_Summary :=
-              Contender_Throughput (Item);
-            Measured : constant Boolean := Status (Item) = Point_Measured;
+            Item           : constant Paired_Point_Result := Element (Result, Index);
+            Point_Value    : constant Parameter_Point := Parameter (Item);
+            Has_Work       : constant Boolean := Work_Available (Item);
+            Amount         : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item) else Work (1, Items));
+            Pair           : constant Comparison := Data (Item);
+            Reference      : constant Measurement := Reference_Measurement (Pair);
+            Contender      : constant Measurement := Contender_Measurement (Pair);
+            Reference_Rate : constant Throughput_Summary := Reference_Throughput (Item);
+            Contender_Rate : constant Throughput_Summary := Contender_Throughput (Item);
+            Measured       : constant Boolean := Status (Item) = Point_Measured;
          begin
             Put_Line
               (File,
-               CSV (Case_Name) & ',' & CSV (Identity (Point_Value)) & ','
-               & Kind_Name (Kind (Point_Value)) & ','
-               & Number (Value (Point_Value)) & ',' & CSV (Label (Point_Value))
-               & ",paired_comparison," & CSV (Reference_Name) & ','
-               & CSV (Contender_Name) & ',' & Boolean_Name (Has_Work) & ','
+               CSV (Case_Name)
+               & ','
+               & CSV (Identity (Point_Value))
+               & ','
+               & Kind_Name (Kind (Point_Value))
+               & ','
+               & Number (Value (Point_Value))
+               & ','
+               & CSV (Label (Point_Value))
+               & ",paired_comparison,"
+               & CSV (Reference_Name)
+               & ','
+               & CSV (Contender_Name)
+               & ','
+               & Boolean_Name (Has_Work)
+               & ','
                & (if Has_Work then Work_Kind_Name (Unit_Kind (Amount)) else "")
-               & ',' & (if Has_Work then CSV (Unit_Name (Amount)) else "")
-               & ',' & (if Has_Work then Number (Raw_Value (Amount)) else "")
-               & ',' & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
+               & ','
+               & (if Has_Work then CSV (Unit_Name (Amount)) else "")
+               & ','
+               & (if Has_Work then Number (Raw_Value (Amount)) else "")
+               & ','
+               & (if Has_Work then Scaling_Name (Display_Scale (Amount)) else "")
                & ",per_operation_batch_mean,"
-               & Boolean_Name (Collection_Available (Item)) & ','
-               & Boolean_Name (Measured) & ','
-               & Status_Name (Status (Item)) & ',' & CSV (Failure_Message (Item))
-               & ',' & Median_Or_Empty (Reference_Rate, Reference)
-               & ',' & Low_Or_Empty (Reference_Rate, Reference)
-               & ',' & High_Or_Empty (Reference_Rate, Reference)
-               & ',' & Median_Or_Empty (Contender_Rate, Contender)
-               & ',' & Low_Or_Empty (Contender_Rate, Contender)
-               & ',' & High_Or_Empty (Contender_Rate, Contender)
-               & ',' & Availability_Name (Availability (Reference_Rate))
-               & ',' & Availability_Name (Availability (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Operations_Per_Second (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Operations_Per_Second (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Operations_Confidence_Low (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Operations_Confidence_High (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Operations_Confidence_Low (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Operations_Confidence_High (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Work_Units_Per_Second (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Work_Units_Per_Second (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Work_Confidence_Low (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Reference_Rate, Work_Confidence_High (Reference_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Work_Confidence_Low (Contender_Rate))
-               & ',' & Maybe_Number
-                 (Contender_Rate, Work_Confidence_High (Contender_Rate))
+               & Boolean_Name (Collection_Available (Item))
+               & ','
+               & Boolean_Name (Measured)
+               & ','
+               & Status_Name (Status (Item))
+               & ','
+               & CSV (Failure_Message (Item))
+               & ','
+               & Median_Or_Empty (Reference_Rate, Reference)
+               & ','
+               & Low_Or_Empty (Reference_Rate, Reference)
+               & ','
+               & High_Or_Empty (Reference_Rate, Reference)
+               & ','
+               & Median_Or_Empty (Contender_Rate, Contender)
+               & ','
+               & Low_Or_Empty (Contender_Rate, Contender)
+               & ','
+               & High_Or_Empty (Contender_Rate, Contender)
+               & ','
+               & Availability_Name (Availability (Reference_Rate))
+               & ','
+               & Availability_Name (Availability (Contender_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Operations_Per_Second (Reference_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Operations_Per_Second (Contender_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Operations_Confidence_Low (Reference_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Operations_Confidence_High (Reference_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Operations_Confidence_Low (Contender_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Operations_Confidence_High (Contender_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Work_Units_Per_Second (Reference_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Work_Units_Per_Second (Contender_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Work_Confidence_Low (Reference_Rate))
+               & ','
+               & Maybe_Number (Reference_Rate, Work_Confidence_High (Reference_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Work_Confidence_Low (Contender_Rate))
+               & ','
+               & Maybe_Number (Contender_Rate, Work_Confidence_High (Contender_Rate))
                & ",higher_is_better,"
-               & (if Collection_Available (Item)
-                  then Verdict_Name (Verdict (Pair)) else ""));
+               & (if Collection_Available (Item) then Verdict_Name (Verdict (Pair)) else ""));
          end;
       end loop;
    end Put_Comparison_CSV;
 
    procedure Put_NDJSON
-     (Case_Name : String;
-      Result    : Ordinary_Sweep_Result;
-      File      : File_Type := Standard_Output)
-   is
+     (Case_Name : String; Result : Ordinary_Sweep_Result; File : File_Type := Standard_Output) is
    begin
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Ordinary_Point_Result := Element (Result, Index);
-            Point_Value : constant Parameter_Point := Parameter (Item);
-            Has_Work : constant Boolean := Work_Available (Item);
-            Amount : constant Work_Amount :=
-              (if Has_Work then Work_Per_Operation (Item)
-               else Work (1, Items));
-            Rate : constant Throughput_Summary := Throughput (Item);
+            Item              : constant Ordinary_Point_Result := Element (Result, Index);
+            Point_Value       : constant Parameter_Point := Parameter (Item);
+            Has_Work          : constant Boolean := Work_Available (Item);
+            Amount            : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item) else Work (1, Items));
+            Rate              : constant Throughput_Summary := Throughput (Item);
             Measurement_Value : constant Measurement := Data (Item);
          begin
             Put_Line
               (File,
                "{""type"":""sweep_point"",""benchmark"":"""
-               & JSON (Case_Name) & """,""point"":"""
-               & JSON (Identity (Point_Value)) & """,""parameter_kind"":"""
-               & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
+               & JSON (Case_Name)
+               & """,""point"":"""
+               & JSON (Identity (Point_Value))
+               & """,""parameter_kind"":"""
+               & Kind_Name (Kind (Point_Value))
+               & """,""parameter_value"":"
                & Number (Value (Point_Value))
                & ",""parameter_value_exact"":"""
-               & Number (Value (Point_Value)) & """,""parameter_label"":"""
+               & Number (Value (Point_Value))
+               & """,""parameter_label"":"""
                & JSON (Label (Point_Value))
                & """,""result_kind"":""ordinary_measurement"",""work"":{""available"":"
-               & Boolean_Name (Has_Work) & ",""kind"":"
-               & (if Has_Work
-                  then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"'
-                  else "null") & ",""unit"":"
-               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
-                  else "null") & ",""raw_value"":"
+               & Boolean_Name (Has_Work)
+               & ",""kind"":"
+               & (if Has_Work then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"' else "null")
+               & ",""unit"":"
+               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"' else "null")
+               & ",""raw_value"":"
                & (if Has_Work then Number (Raw_Value (Amount)) else "null")
                & ",""raw_value_exact"":"
-               & (if Has_Work
-                  then '"' & Number (Raw_Value (Amount)) & '"'
-                  else "null")
+               & (if Has_Work then '"' & Number (Raw_Value (Amount)) & '"' else "null")
                & ",""display_scaling"":"
-               & (if Has_Work
-                  then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
-                  else "null")
+               & (if Has_Work then '"' & Scaling_Name (Display_Scale (Amount)) & '"' else "null")
                & "},""sample_semantics"":""per_operation_batch_mean"",""collection_available"":"
-               & Boolean_Name (Collection_Available (Item)) & ",""available"":"
+               & Boolean_Name (Collection_Available (Item))
+               & ",""available"":"
                & Boolean_Name (Status (Item) = Point_Measured)
-               & ",""status"":""" & Status_Name (Status (Item))
-               & """,""failure"":""" & JSON (Failure_Message (Item))
+               & ",""status"":"""
+               & Status_Name (Status (Item))
+               & """,""failure"":"""
+               & JSON (Failure_Message (Item))
                & """,""median_elapsed_ns"":"
                & Median_Or_Empty (Rate, Measurement_Value, True)
                & ",""mean_elapsed_ci_low_ns"":"
@@ -555,133 +605,136 @@ package body Flyology_Bench.Sweeps.Reporters is
       Reference_Name : String;
       Contender_Name : String;
       Result         : Paired_Sweep_Result;
-      File           : File_Type := Standard_Output)
-   is
+      File           : File_Type := Standard_Output) is
    begin
       for Index in 1 .. Length (Result) loop
          declare
-            Item : constant Paired_Point_Result := Element (Result, Index);
-            Point_Value : constant Parameter_Point := Parameter (Item);
-            Has_Work : constant Boolean := Work_Available (Item);
-            Amount : constant Work_Amount :=
-              (if Has_Work then Work_Per_Operation (Item)
-               else Work (1, Items));
-            Pair : constant Comparison := Data (Item);
-            Reference : constant Measurement := Reference_Measurement (Pair);
-            Contender : constant Measurement := Contender_Measurement (Pair);
-            Reference_Rate : constant Throughput_Summary :=
-              Reference_Throughput (Item);
-            Contender_Rate : constant Throughput_Summary :=
-              Contender_Throughput (Item);
-            Measured : constant Boolean := Status (Item) = Point_Measured;
+            Item           : constant Paired_Point_Result := Element (Result, Index);
+            Point_Value    : constant Parameter_Point := Parameter (Item);
+            Has_Work       : constant Boolean := Work_Available (Item);
+            Amount         : constant Work_Amount :=
+              (if Has_Work then Work_Per_Operation (Item) else Work (1, Items));
+            Pair           : constant Comparison := Data (Item);
+            Reference      : constant Measurement := Reference_Measurement (Pair);
+            Contender      : constant Measurement := Contender_Measurement (Pair);
+            Reference_Rate : constant Throughput_Summary := Reference_Throughput (Item);
+            Contender_Rate : constant Throughput_Summary := Contender_Throughput (Item);
+            Measured       : constant Boolean := Status (Item) = Point_Measured;
 
             function Side_JSON
-              (Name : String;
-               Measurement_Value : Measurement;
-               Rate : Throughput_Summary) return String is
-               ("{""name"":""" & JSON (Name) & """,""median_elapsed_ns"":"
-               & Median_Or_Empty (Rate, Measurement_Value, True)
-               & ",""mean_elapsed_ci_low_ns"":"
-               & Low_Or_Empty (Rate, Measurement_Value, True)
-               & ",""mean_elapsed_ci_high_ns"":"
-               & High_Or_Empty (Rate, Measurement_Value, True)
-               & ",""throughput_availability"":"""
-               & Availability_Name (Availability (Rate)) & """"
-               & ",""operations_per_second"":"
-               & Maybe_Number (Rate, Operations_Per_Second (Rate), True)
-               & ",""operations_ci_low"":"
-               & Maybe_Number (Rate, Operations_Confidence_Low (Rate), True)
-               & ",""operations_ci_high"":"
-               & Maybe_Number (Rate, Operations_Confidence_High (Rate), True)
-               & ",""work_units_per_second"":"
-               & Maybe_Number (Rate, Work_Units_Per_Second (Rate), True)
-               & ",""work_ci_low"":"
-               & Maybe_Number (Rate, Work_Confidence_Low (Rate), True)
-               & ",""work_ci_high"":"
-               & Maybe_Number (Rate, Work_Confidence_High (Rate), True)
-               & "}");
+              (Name : String; Measurement_Value : Measurement; Rate : Throughput_Summary) return String
+            is ("{""name"":"""
+                & JSON (Name)
+                & """,""median_elapsed_ns"":"
+                & Median_Or_Empty (Rate, Measurement_Value, True)
+                & ",""mean_elapsed_ci_low_ns"":"
+                & Low_Or_Empty (Rate, Measurement_Value, True)
+                & ",""mean_elapsed_ci_high_ns"":"
+                & High_Or_Empty (Rate, Measurement_Value, True)
+                & ",""throughput_availability"":"""
+                & Availability_Name (Availability (Rate))
+                & """"
+                & ",""operations_per_second"":"
+                & Maybe_Number (Rate, Operations_Per_Second (Rate), True)
+                & ",""operations_ci_low"":"
+                & Maybe_Number (Rate, Operations_Confidence_Low (Rate), True)
+                & ",""operations_ci_high"":"
+                & Maybe_Number (Rate, Operations_Confidence_High (Rate), True)
+                & ",""work_units_per_second"":"
+                & Maybe_Number (Rate, Work_Units_Per_Second (Rate), True)
+                & ",""work_ci_low"":"
+                & Maybe_Number (Rate, Work_Confidence_Low (Rate), True)
+                & ",""work_ci_high"":"
+                & Maybe_Number (Rate, Work_Confidence_High (Rate), True)
+                & "}");
          begin
             Put_Line
               (File,
                "{""type"":""sweep_point"",""benchmark"":"""
-               & JSON (Case_Name) & """,""point"":"""
-               & JSON (Identity (Point_Value)) & """,""parameter_kind"":"""
-               & Kind_Name (Kind (Point_Value)) & """,""parameter_value"":"
+               & JSON (Case_Name)
+               & """,""point"":"""
+               & JSON (Identity (Point_Value))
+               & """,""parameter_kind"":"""
+               & Kind_Name (Kind (Point_Value))
+               & """,""parameter_value"":"
                & Number (Value (Point_Value))
                & ",""parameter_value_exact"":"""
-               & Number (Value (Point_Value)) & """,""parameter_label"":"""
+               & Number (Value (Point_Value))
+               & """,""parameter_label"":"""
                & JSON (Label (Point_Value))
                & """,""result_kind"":""paired_comparison"",""work"":{""available"":"
-               & Boolean_Name (Has_Work) & ",""kind"":"
-               & (if Has_Work
-                  then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"'
-                  else "null") & ",""unit"":"
-               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"'
-                  else "null") & ",""raw_value"":"
+               & Boolean_Name (Has_Work)
+               & ",""kind"":"
+               & (if Has_Work then '"' & Work_Kind_Name (Unit_Kind (Amount)) & '"' else "null")
+               & ",""unit"":"
+               & (if Has_Work then '"' & JSON (Unit_Name (Amount)) & '"' else "null")
+               & ",""raw_value"":"
                & (if Has_Work then Number (Raw_Value (Amount)) else "null")
                & ",""raw_value_exact"":"
-               & (if Has_Work
-                  then '"' & Number (Raw_Value (Amount)) & '"'
-                  else "null")
+               & (if Has_Work then '"' & Number (Raw_Value (Amount)) & '"' else "null")
                & ",""display_scaling"":"
-               & (if Has_Work
-                  then '"' & Scaling_Name (Display_Scale (Amount)) & '"'
-                  else "null")
+               & (if Has_Work then '"' & Scaling_Name (Display_Scale (Amount)) & '"' else "null")
                & "},""sample_semantics"":""per_operation_batch_mean"",""collection_available"":"
                & Boolean_Name (Collection_Available (Item))
-               & ",""available"":" & Boolean_Name (Measured) & ",""status"":"""
-               & Status_Name (Status (Item)) & """,""failure"":"""
-               & JSON (Failure_Message (Item)) & """,""direction"":""higher_is_better"",""reference"":"
+               & ",""available"":"
+               & Boolean_Name (Measured)
+               & ",""status"":"""
+               & Status_Name (Status (Item))
+               & """,""failure"":"""
+               & JSON (Failure_Message (Item))
+               & """,""direction"":""higher_is_better"",""reference"":"
                & Side_JSON (Reference_Name, Reference, Reference_Rate)
                & ",""contender"":"
                & Side_JSON (Contender_Name, Contender, Contender_Rate)
                & ",""paired_verdict"":"
-               & (if Collection_Available (Item)
-                  then '"' & Verdict_Name (Verdict (Pair)) & '"'
-                  else "null") & "}");
+               & (if Collection_Available (Item) then '"' & Verdict_Name (Verdict (Pair)) & '"' else "null")
+               & "}");
          end;
       end loop;
    end Put_Comparison_NDJSON;
 
    procedure Put_Scaling_Console
-     (Case_Name : String;
-      Result    : Scaling.Empirical_Scaling_Analysis;
-      File      : File_Type := Standard_Output)
-   is
+     (Case_Name : String; Result : Scaling.Empirical_Scaling_Analysis; File : File_Type := Standard_Output) is
    begin
       Put_Line
-        (File, "empirical scaling " & Case_Name & ": "
-         & Scaling_Status_Name (Scaling.Status (Result)) & ", "
+        (File,
+         "empirical scaling "
+         & Case_Name
+         & ": "
+         & Scaling_Status_Name (Scaling.Status (Result))
+         & ", "
          & (if Scaling.Input_Kind_Available (Result)
             then Kind_Name (Scaling.Input_Kind (Result)) & " inputs "
             else "input kind unavailable, inputs ")
          & (if Scaling.Input_Range_Available (Result)
-            then Number (Scaling.Minimum_Input (Result)) & " .. "
-              & Number (Scaling.Maximum_Input (Result))
+            then Number (Scaling.Minimum_Input (Result)) & " .. " & Number (Scaling.Maximum_Input (Result))
             else "unavailable"));
       Put_Line
         (File, "model  selected  coefficient  exponent  r_squared  rms_log_residual  max_log_residual");
       for Model in Scaling.Scaling_Model loop
          declare
-            Item : constant Scaling.Model_Diagnostic :=
-              Scaling.Diagnostic (Result, Model);
+            Item : constant Scaling.Model_Diagnostic := Scaling.Diagnostic (Result, Model);
          begin
             Put_Line
-              (File, Model_Name (Model) & "  " & Boolean_Name (Item.Selected)
-               & "  " & (if Item.Available then Number (Item.Coefficient) else "")
-               & "  " & Number (Item.Nominal_Exponent)
-               & "  " & (if Item.Available then Number (Item.R_Squared) else "")
-               & "  " & (if Item.Available
-                            then Number (Item.RMS_Log_Residual) else "")
-               & "  " & (if Item.Available
-                            then Number (Item.Maximum_Absolute_Log_Residual)
-                            else ""));
+              (File,
+               Model_Name (Model)
+               & "  "
+               & Boolean_Name (Item.Selected)
+               & "  "
+               & (if Item.Available then Number (Item.Coefficient) else "")
+               & "  "
+               & Number (Item.Nominal_Exponent)
+               & "  "
+               & (if Item.Available then Number (Item.R_Squared) else "")
+               & "  "
+               & (if Item.Available then Number (Item.RMS_Log_Residual) else "")
+               & "  "
+               & (if Item.Available then Number (Item.Maximum_Absolute_Log_Residual) else ""));
          end;
       end loop;
    end Put_Scaling_Console;
 
-   procedure Put_Scaling_CSV_Header
-     (File : File_Type := Standard_Output) is
+   procedure Put_Scaling_CSV_Header (File : File_Type := Standard_Output) is
    begin
       Put_Line
         (File,
@@ -692,54 +745,63 @@ package body Flyology_Bench.Sweeps.Reporters is
    end Put_Scaling_CSV_Header;
 
    procedure Put_Scaling_CSV
-     (Case_Name : String;
-      Result    : Scaling.Empirical_Scaling_Analysis;
-      File      : File_Type := Standard_Output)
-   is
+     (Case_Name : String; Result : Scaling.Empirical_Scaling_Analysis; File : File_Type := Standard_Output) is
    begin
       for Model in Scaling.Scaling_Model loop
          declare
-            Item : constant Scaling.Model_Diagnostic :=
-              Scaling.Diagnostic (Result, Model);
+            Item : constant Scaling.Model_Diagnostic := Scaling.Diagnostic (Result, Model);
          begin
             Put_Line
-              (File, CSV (Case_Name) & ",empirical_scaling,"
-               & Scaling_Status_Name (Scaling.Status (Result)) & ','
-               & Trimmed (Natural'Image (Scaling.Points_Analyzed (Result)))
-               & ',' & (if Scaling.Input_Kind_Available (Result)
-                         then Kind_Name (Scaling.Input_Kind (Result)) else "")
-               & ',' & Boolean_Name (Scaling.Input_Range_Available (Result))
-               & ',' & (if Scaling.Input_Range_Available (Result)
-                         then Number (Scaling.Minimum_Input (Result)) else "")
-               & ',' & (if Scaling.Input_Range_Available (Result)
-                         then Number (Scaling.Maximum_Input (Result)) else "")
+              (File,
+               CSV (Case_Name)
+               & ",empirical_scaling,"
+               & Scaling_Status_Name (Scaling.Status (Result))
                & ','
-               & Model_Name (Model) & ',' & Boolean_Name (Item.Available) & ','
-               & Boolean_Name (Item.Selected) & ','
-               & (if Item.Available then Number (Item.Coefficient) else "") & ','
-               & Number (Item.Nominal_Exponent) & ','
-               & (if Item.Available then Number (Item.R_Squared) else "") & ','
+               & Trimmed (Natural'Image (Scaling.Points_Analyzed (Result)))
+               & ','
+               & (if Scaling.Input_Kind_Available (Result)
+                  then Kind_Name (Scaling.Input_Kind (Result))
+                  else "")
+               & ','
+               & Boolean_Name (Scaling.Input_Range_Available (Result))
+               & ','
+               & (if Scaling.Input_Range_Available (Result)
+                  then Number (Scaling.Minimum_Input (Result))
+                  else "")
+               & ','
+               & (if Scaling.Input_Range_Available (Result)
+                  then Number (Scaling.Maximum_Input (Result))
+                  else "")
+               & ','
+               & Model_Name (Model)
+               & ','
+               & Boolean_Name (Item.Available)
+               & ','
+               & Boolean_Name (Item.Selected)
+               & ','
+               & (if Item.Available then Number (Item.Coefficient) else "")
+               & ','
+               & Number (Item.Nominal_Exponent)
+               & ','
+               & (if Item.Available then Number (Item.R_Squared) else "")
+               & ','
                & (if Item.Available then Number (Item.RMS_Log_Residual) else "")
-               & ',' & (if Item.Available
-                         then Number (Item.Maximum_Absolute_Log_Residual)
-                         else ""));
+               & ','
+               & (if Item.Available then Number (Item.Maximum_Absolute_Log_Residual) else ""));
          end;
       end loop;
    end Put_Scaling_CSV;
 
    procedure Put_Scaling_NDJSON
-     (Case_Name : String;
-      Result    : Scaling.Empirical_Scaling_Analysis;
-      File      : File_Type := Standard_Output)
+     (Case_Name : String; Result : Scaling.Empirical_Scaling_Analysis; File : File_Type := Standard_Output)
    is
       use Ada.Strings.Unbounded;
       Models : Unbounded_String;
-      First : Boolean := True;
+      First  : Boolean := True;
    begin
       for Model in Scaling.Scaling_Model loop
          declare
-            Item : constant Scaling.Model_Diagnostic :=
-              Scaling.Diagnostic (Result, Model);
+            Item : constant Scaling.Model_Diagnostic := Scaling.Diagnostic (Result, Model);
          begin
             if not First then
                Append (Models, ",");
@@ -747,29 +809,33 @@ package body Flyology_Bench.Sweeps.Reporters is
             First := False;
             Append
               (Models,
-               "{""model"":""" & Model_Name (Model)
-               & """,""available"":" & Boolean_Name (Item.Available)
-               & ",""selected"":" & Boolean_Name (Item.Selected)
+               "{""model"":"""
+               & Model_Name (Model)
+               & """,""available"":"
+               & Boolean_Name (Item.Available)
+               & ",""selected"":"
+               & Boolean_Name (Item.Selected)
                & ",""coefficient"":"
                & (if Item.Available then Number (Item.Coefficient) else "null")
-               & ",""nominal_exponent"":" & Number (Item.Nominal_Exponent)
+               & ",""nominal_exponent"":"
+               & Number (Item.Nominal_Exponent)
                & ",""r_squared"":"
                & (if Item.Available then Number (Item.R_Squared) else "null")
                & ",""rms_log_residual"":"
-               & (if Item.Available
-                  then Number (Item.RMS_Log_Residual) else "null")
+               & (if Item.Available then Number (Item.RMS_Log_Residual) else "null")
                & ",""maximum_absolute_log_residual"":"
-               & (if Item.Available
-                  then Number (Item.Maximum_Absolute_Log_Residual) else "null")
+               & (if Item.Available then Number (Item.Maximum_Absolute_Log_Residual) else "null")
                & "}");
          end;
       end loop;
       Put_Line
         (File,
          "{""type"":""empirical_scaling"",""benchmark"":"""
-         & JSON (Case_Name) & """,""status"":"""
+         & JSON (Case_Name)
+         & """,""status"":"""
          & Scaling_Status_Name (Scaling.Status (Result))
-         & """,""available"":" & Boolean_Name (Scaling.Available (Result))
+         & """,""available"":"
+         & Boolean_Name (Scaling.Available (Result))
          & ",""points"":"
          & Trimmed (Natural'Image (Scaling.Points_Analyzed (Result)))
          & ",""parameter_kind"":"
@@ -780,14 +846,16 @@ package body Flyology_Bench.Sweeps.Reporters is
          & Boolean_Name (Scaling.Input_Range_Available (Result))
          & ",""minimum_input"":"
          & (if Scaling.Input_Range_Available (Result)
-            then Number (Scaling.Minimum_Input (Result)) else "null")
+            then Number (Scaling.Minimum_Input (Result))
+            else "null")
          & ",""minimum_input_exact"":"
          & (if Scaling.Input_Range_Available (Result)
             then '"' & Number (Scaling.Minimum_Input (Result)) & '"'
             else "null")
          & ",""maximum_input"":"
          & (if Scaling.Input_Range_Available (Result)
-            then Number (Scaling.Maximum_Input (Result)) else "null")
+            then Number (Scaling.Maximum_Input (Result))
+            else "null")
          & ",""maximum_input_exact"":"
          & (if Scaling.Input_Range_Available (Result)
             then '"' & Number (Scaling.Maximum_Input (Result)) & '"'
@@ -795,6 +863,9 @@ package body Flyology_Bench.Sweeps.Reporters is
          & ",""selected_model"":"
          & (if Scaling.Available (Result)
             then '"' & Model_Name (Scaling.Selected_Model (Result)) & '"'
-            else "null") & ",""models"":[" & To_String (Models) & "]}");
+            else "null")
+         & ",""models"":["
+         & To_String (Models)
+         & "]}");
    end Put_Scaling_NDJSON;
 end Flyology_Bench.Sweeps.Reporters;

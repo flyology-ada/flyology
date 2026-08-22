@@ -4,8 +4,7 @@ package body System.Flyology.ASan is
       Destination_Bottom : System.Address;
       Destination_Size   : Interfaces.C.size_t)
    is
-      pragma Unreferenced
-        (Source_Context, Destination_Bottom, Destination_Size);
+      pragma Unreferenced (Source_Context, Destination_Bottom, Destination_Size);
    begin
       null;
    end Start_Switch;
@@ -13,8 +12,7 @@ package body System.Flyology.ASan is
    procedure Finish_Switch
      (Source_Context : out System.Address;
       Source_Bottom  : out System.Address;
-      Source_Size    : out Interfaces.C.size_t)
-   is
+      Source_Size    : out Interfaces.C.size_t) is
    begin
       Source_Context := System.Null_Address;
       Source_Bottom := System.Null_Address;

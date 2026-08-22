@@ -12,29 +12,31 @@ with Interfaces.C;
 --  Every operation reports Not_Supported rather than succeeding quietly. A
 --  quiet success would tell a caller its memory had been placed somewhere
 --  particular, which on this host is not true of anywhere.
+
 package body Flyology_NUMA.Placement is
 
    use type Interfaces.C.int;
 
    function Page_Bytes return Interfaces.C.int
-     with Import, Convention => C, External_Name => "getpagesize";
+   with Import, Convention => C, External_Name => "getpagesize";
 
    --  The page size is still worth reporting: a caller aligning its own
    --  memory needs it whether or not the host can place that memory.
-   Detected_Page : constant Byte_Count :=
-     (if Page_Bytes > 0 then Byte_Count (Page_Bytes) else 4096);
+   Detected_Page : constant Byte_Count := (if Page_Bytes > 0 then Byte_Count (Page_Bytes) else 4096);
 
    -------------
    -- Support --
    -------------
 
-   function Support return Support_Level is (Unsupported_Host);
+   function Support return Support_Level
+   is (Unsupported_Host);
 
    ---------------
    -- Page_Size --
    ---------------
 
-   function Page_Size return Byte_Count is (Detected_Page);
+   function Page_Size return Byte_Count
+   is (Detected_Page);
 
    --------------
    -- Apply_To --
@@ -57,11 +59,7 @@ package body Flyology_NUMA.Placement is
    -- Apply_To_Thread --
    ---------------------
 
-   procedure Apply_To_Thread
-     (Policy : Policy_Kind;
-      Nodes  : Node_Set;
-      Result : out Placement_Outcome)
-   is
+   procedure Apply_To_Thread (Policy : Policy_Kind; Nodes : Node_Set; Result : out Placement_Outcome) is
       pragma Unreferenced (Policy, Nodes);
    begin
       Result := Not_Supported;

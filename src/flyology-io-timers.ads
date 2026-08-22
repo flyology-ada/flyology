@@ -8,6 +8,7 @@ private with Flyology.Timer_Set_Policy;
 --  Example:
 --
 --     Flyology.IO.Timers.Sleep_For (0.010);
+
 package Flyology.IO.Timers is
 
    --  Stable caller-selected identity for one slot in a Timer_Set.
@@ -51,8 +52,7 @@ package Flyology.IO.Timers is
    --  Terminal reason for a wall-clock wait.
    --  @enum Target_Reached The wall clock was observed at or beyond the target
    --  @enum Clock_Moved_Backward The wall clock lost more time than tolerated
-   type Wall_Clock_Wait_Outcome is
-     (Target_Reached, Clock_Moved_Backward);
+   type Wall_Clock_Wait_Outcome is (Target_Reached, Clock_Moved_Backward);
 
    --  Result of a wall-clock wait.
    --  @field Outcome Why the wait returned
@@ -79,60 +79,53 @@ package Flyology.IO.Timers is
 
    --  Scoped timer operation associated with one heterogeneous completion
    --  set. The set must outlive the operation.
-   type Timer_Operation is
-     new Flyology.Operations.Operation with private;
+   type Timer_Operation is new Flyology.Operations.Operation with private;
 
    --  Construct and start one relative timer operation in place.
    --  @param Set Completion set that owns the operation slot
    --  @param Interval Relative delay in seconds
    --  @return Started limited timer operation
    function Sleep_For
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Interval : Duration) return Timer_Operation;
+     (Set : not null access Flyology.Operations.Completion_Set'Class; Interval : Duration)
+      return Timer_Operation;
 
    --  Start or restart a relative timer in an established operation object.
    --  @param Interval Relative delay in seconds
    --  @param Operation Fresh, released, or consumed timer operation
-   procedure Sleep_For
-     (Interval  : Duration;
-      Operation : in out Timer_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Sleep_For (Interval : Duration; Operation : in out Timer_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Construct and start one absolute timer operation in place.
    --  @param Set Completion set that owns the operation slot
    --  @param Deadline Absolute Ada.Real_Time deadline
    --  @return Started limited timer operation
    function Sleep_Until
-     (Set      : not null access Flyology.Operations.Completion_Set'Class;
-      Deadline : Ada.Real_Time.Time) return Timer_Operation;
+     (Set : not null access Flyology.Operations.Completion_Set'Class; Deadline : Ada.Real_Time.Time)
+      return Timer_Operation;
 
    --  Start or restart an absolute timer in an established operation object.
    --  @param Deadline Absolute Ada.Real_Time deadline
    --  @param Operation Fresh, released, or consumed timer operation
-   procedure Sleep_Until
-     (Deadline  : Ada.Real_Time.Time;
-      Operation : in out Timer_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Sleep_Until (Deadline : Ada.Real_Time.Time; Operation : in out Timer_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Restart a previously consumed timer operation.
    --  @param Interval Relative delay in seconds
    --  @param Operation Previously consumed timer operation
-   procedure Rearm
-     (Interval  : Duration;
-      Operation : in out Timer_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Rearm (Interval : Duration; Operation : in out Timer_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal timer operation.
    --  @param Operation Terminal timer operation to consume
    --  @exception Device_Error The timer provider failed
    procedure Finish (Operation : in out Timer_Operation)
-     with Pre => Flyology.Operations.Is_Terminal (Operation);
+   with Pre => Flyology.Operations.Is_Terminal (Operation);
 
    --  Arm or reschedule one slot. A deadline at or before the next clock
    --  sample is returned by the next Wait_Next without an additional sleep.
@@ -140,10 +133,7 @@ package Flyology.IO.Timers is
    --  @param Timers Timer collection to update
    --  @param Id Caller-selected slot in 1 .. Timers.Capacity
    --  @param Deadline Absolute monotonic deadline
-   procedure Arm
-     (Timers   : in out Timer_Set;
-      Id       : Timer_Id;
-      Deadline : Ada.Real_Time.Time)
+   procedure Arm (Timers : in out Timer_Set; Id : Timer_Id; Deadline : Ada.Real_Time.Time)
    with Pre => Id <= Timers.Capacity;
 
    --  Replace the complete collection with the supplied deadline array.
@@ -152,27 +142,20 @@ package Flyology.IO.Timers is
    --  An empty array leaves the collection empty.
    --  @param Timers Timer collection to replace
    --  @param Deadlines New one-shot monotonic deadlines
-   procedure Replace
-     (Timers    : in out Timer_Set;
-      Deadlines : Deadline_Array)
-   with Pre =>
-     Deadlines'First = 1 and then Deadlines'Length <= Timers.Capacity;
+   procedure Replace (Timers : in out Timer_Set; Deadlines : Deadline_Array)
+   with Pre => Deadlines'First = 1 and then Deadlines'Length <= Timers.Capacity;
 
    --  Idempotently disarm one slot.
    --  @param Timers Timer collection to update
    --  @param Id Caller-selected slot in 1 .. Timers.Capacity
-   procedure Cancel
-     (Timers : in out Timer_Set;
-      Id     : Timer_Id)
+   procedure Cancel (Timers : in out Timer_Set; Id : Timer_Id)
    with Pre => Id <= Timers.Capacity;
 
    --  Report whether one slot is currently armed.
    --  @param Timers Timer collection to inspect
    --  @param Id Caller-selected slot in 1 .. Timers.Capacity
    --  @return True until cancellation, replacement, or activation delivery
-   function Is_Armed
-     (Timers : Timer_Set;
-      Id     : Timer_Id) return Boolean
+   function Is_Armed (Timers : Timer_Set; Id : Timer_Id) return Boolean
    with Pre => Id <= Timers.Capacity;
 
    --  Return the number of currently armed timers.
@@ -189,13 +172,10 @@ package Flyology.IO.Timers is
    --  only its pthread. The wait and clock pause during system sleep.
    --  @param Timers Nonempty timer collection to wait on and update
    --  @param Activated Complete set of ids due at the operation's clock sample
-   procedure Wait_Next
-     (Timers    : in out Timer_Set;
-      Activated : out Activation_Batch)
-   with Pre =>
-     Armed_Count (Timers) > 0
-     and then Activated.Capacity = Timers.Capacity,
-        Post => Activated.Count in 1 .. Activated.Capacity;
+   procedure Wait_Next (Timers : in out Timer_Set; Activated : out Activation_Batch)
+   with
+     Pre  => Armed_Count (Timers) > 0 and then Activated.Capacity = Timers.Capacity,
+     Post => Activated.Count in 1 .. Activated.Capacity;
 
    --  Wait for the next activation batch for at most Timeout active monotonic
    --  seconds. A zero timeout performs one clock sample without sleeping.
@@ -212,14 +192,12 @@ package Flyology.IO.Timers is
       Activated : out Activation_Batch;
       Timeout   : Duration;
       Outcome   : out Timer_Wait_Outcome)
-   with Pre =>
-     Armed_Count (Timers) > 0
-     and then Activated.Capacity = Timers.Capacity
-     and then Timeout >= 0.0,
-        Post =>
-          (if Outcome = Timers_Activated then
-              Activated.Count in 1 .. Activated.Capacity
-           else Activated.Count = 0);
+   with
+     Pre  => Armed_Count (Timers) > 0 and then Activated.Capacity = Timers.Capacity and then Timeout >= 0.0,
+     Post =>
+       (if Outcome = Timers_Activated
+        then Activated.Count in 1 .. Activated.Capacity
+        else Activated.Count = 0);
 
    --  Wait until the adjustable wall clock reaches Target. A forward clock
    --  change may complete the wait early. A backward change larger than
@@ -244,26 +222,23 @@ package Flyology.IO.Timers is
    --  @exception Device_Error Flyology.IO.Device_Error is raised when clock
    --     sampling, timer setup, or waiting fails
    function Wait_Until
-     (Target             : Ada.Calendar.Time;
-      Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
+     (Target : Ada.Calendar.Time; Backstep_Tolerance : Duration := Default_Backstep_Tolerance)
       return Wall_Clock_Wait_Result
    with Pre => Backstep_Tolerance >= 0.0;
 
 private
-   type Timer_Operation is
-     new Flyology.Operations.Operation with null record;
+   type Timer_Operation is new Flyology.Operations.Operation with null record;
 
    --  @exclude
    --  @param Item Timer operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Timer_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Timer_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Timer operation to cancel
-   overriding procedure Request_Cancellation
-     (Item : in out Timer_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Timer_Operation);
 
    type Timer_Set (Capacity : Positive) is limited record
       State : Flyology.Timer_Set_Policy.Timer_State (Capacity);

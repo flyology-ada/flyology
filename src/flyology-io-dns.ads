@@ -6,6 +6,7 @@ with Flyology.IO.Sockets;
 --  Example:
 --
 --     Addresses := Flyology.IO.DNS.Resolve ("example.net", Timeout => 2.0);
+
 package Flyology.IO.DNS is
 
    --  Address families returned by the resolver.
@@ -15,19 +16,17 @@ package Flyology.IO.DNS is
    type Family_Preference is (Any_Family, IPv4_Only, IPv6_Only);
 
    --  Nonempty or null array of resolved internet addresses.
-   type Address_Array is
-     array (Positive range <>) of Flyology.IO.Sockets.IP_Address;
+   type Address_Array is array (Positive range <>) of Flyology.IO.Sockets.IP_Address;
 
    --  Caller-supplied numeric DNS endpoints for Resolve_Using.
-   type Name_Server_Array is
-     array (Positive range <>) of Flyology.IO.Sockets.Endpoint;
+   type Name_Server_Array is array (Positive range <>) of Flyology.IO.Sockets.Endpoint;
 
    --  Raised for a valid negative DNS answer or family mismatch.
-   Name_Not_Found     : exception;
+   Name_Not_Found      : exception;
    --  Raised for invalid resolver input or unusable resolver configuration.
-   Resolution_Failed  : exception;
+   Resolution_Failed   : exception;
    --  Raised when no valid result can be obtained from malformed responses.
-   Malformed_Response : exception;
+   Malformed_Response  : exception;
    --  Raised when every name server answers with a failure response code.
    --  Unlike Timeout_Error this outcome leaves the caller's deadline unspent.
    Name_Server_Failure : exception;
@@ -60,13 +59,12 @@ package Flyology.IO.DNS is
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
    --     a socket operation fails
    function Resolve
-     (Name        : String;
-      Family      : Family_Preference := Any_Family;
-      Timeout     : Duration := 5.0;
-      Interrupts  : Interrupt_Set := No_Interrupts;
-      Configuration_Path : String := "/etc/resolv.conf")
-      return Address_Array
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+     (Name               : String;
+      Family             : Family_Preference := Any_Family;
+      Timeout            : Duration := 5.0;
+      Interrupts         : Interrupt_Set := No_Interrupts;
+      Configuration_Path : String := "/etc/resolv.conf") return Address_Array
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Resolve through explicit numeric DNS endpoints without search-domain
    --  expansion. Timeout is one deadline across family queries, Attempts, and
@@ -91,15 +89,14 @@ package Flyology.IO.DNS is
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
    --     a socket operation fails
    function Resolve_Using
-     (Name         : String;
-      Name_Servers : Name_Server_Array;
-      Family       : Family_Preference := Any_Family;
-      Timeout      : Duration := 5.0;
-      Attempts     : Positive := 2;
+     (Name           : String;
+      Name_Servers   : Name_Server_Array;
+      Family         : Family_Preference := Any_Family;
+      Timeout        : Duration := 5.0;
+      Attempts       : Positive := 2;
       Retry_Interval : Duration := 1.0;
-      Interrupts     : Interrupt_Set := No_Interrupts)
-      return Address_Array
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+      Interrupts     : Interrupt_Set := No_Interrupts) return Address_Array
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Atomically remove all process-local positive and negative cache entries.
    --  The cache owns no descriptors or background tasks and is safe to use
@@ -119,9 +116,9 @@ private
    --  @param For_IPv6 Parse an AAAA response when True, otherwise A
    --  @exception Malformed_Response Packet validation fails
    procedure Validate_Response_For_Testing
-     (Packet       : Ada.Streams.Stream_Element_Array;
-      Expected_ID  : Natural;
+     (Packet        : Ada.Streams.Stream_Element_Array;
+      Expected_ID   : Natural;
       Expected_Name : String;
-      For_IPv6     : Boolean := False);
+      For_IPv6      : Boolean := False);
 
 end Flyology.IO.DNS;

@@ -12,8 +12,7 @@ procedure Pool_Reduction_Smoke is
    Target_Size  : constant Groups.Loop_Pool_Size := 1;
 
    protected Control is
-      procedure Report_Initial
-        (Number : Positive; Group : Groups.Group_Id);
+      procedure Report_Initial (Number : Positive; Group : Groups.Group_Id);
       procedure Report_Explicit (Group : Groups.Group_Id);
       entry Wait_Initial;
       entry Hold_Group_One;
@@ -32,29 +31,26 @@ procedure Pool_Reduction_Smoke is
       entry Wait_Post_Cutover;
       function Passed return Boolean;
    private
-      Initial_Reports       : Natural := 0;
-      Initial_OK            : Boolean := True;
-      Explicit_Ready        : Boolean := False;
-      Explicit_OK           : Boolean := False;
-      Group_One_Released    : Boolean := False;
-      Group_Two_Released    : Boolean := False;
-      Explicit_Released     : Boolean := False;
-      Group_One_Drained     : Boolean := False;
-      Group_Two_Pinned      : Boolean := False;
-      Group_Two_Drained     : Boolean := False;
-      Post_Cutover_Done     : Boolean := False;
-      Post_Cutover_OK       : Boolean := False;
+      Initial_Reports    : Natural := 0;
+      Initial_OK         : Boolean := True;
+      Explicit_Ready     : Boolean := False;
+      Explicit_OK        : Boolean := False;
+      Group_One_Released : Boolean := False;
+      Group_Two_Released : Boolean := False;
+      Explicit_Released  : Boolean := False;
+      Group_One_Drained  : Boolean := False;
+      Group_Two_Pinned   : Boolean := False;
+      Group_Two_Drained  : Boolean := False;
+      Post_Cutover_Done  : Boolean := False;
+      Post_Cutover_OK    : Boolean := False;
    end Control;
 
    protected body Control is
-      procedure Report_Initial
-        (Number : Positive; Group : Groups.Group_Id)
-      is
+      procedure Report_Initial (Number : Positive; Group : Groups.Group_Id) is
       begin
          Initial_Reports := Initial_Reports + 1;
-         Initial_OK := Initial_OK
-           and then Number <= Integer (Initial_Size)
-           and then Group = Groups.Group_Id (Number - 1);
+         Initial_OK :=
+           Initial_OK and then Number <= Integer (Initial_Size) and then Group = Groups.Group_Id (Number - 1);
       end Report_Initial;
 
       procedure Report_Explicit (Group : Groups.Group_Id) is
@@ -65,10 +61,10 @@ procedure Pool_Reduction_Smoke is
 
       entry Wait_Initial
         when Initial_Reports = Integer (Initial_Size)
-          and Explicit_Ready
-          and Hold_Group_One'Count = 1
-          and Hold_Group_Two'Count = 1
-          and Hold_Explicit'Count = 1
+        and Explicit_Ready
+        and Hold_Group_One'Count = 1
+        and Hold_Group_Two'Count = 1
+        and Hold_Explicit'Count = 1
       is
       begin
          null;
@@ -145,13 +141,13 @@ procedure Pool_Reduction_Smoke is
          null;
       end Wait_Post_Cutover;
 
-      function Passed return Boolean is
-        (Initial_OK
-         and Explicit_OK
-         and Group_One_Drained
-         and Group_Two_Pinned
-         and Group_Two_Drained
-         and Post_Cutover_OK);
+      function Passed return Boolean
+      is (Initial_OK
+          and Explicit_OK
+          and Group_One_Drained
+          and Group_Two_Pinned
+          and Group_Two_Drained
+          and Post_Cutover_OK);
    end Control;
 
    task type Automatic_Worker (Number : Positive) is
@@ -180,7 +176,8 @@ procedure Pool_Reduction_Smoke is
       end if;
    end Automatic_Worker;
 
-   task Explicit_Worker with CPU => 2 is
+   task Explicit_Worker
+     with CPU => 2 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Explicit_Worker;
 
@@ -216,8 +213,7 @@ begin
       end loop;
       Control.Wait_Initial;
 
-      if Groups.Request_Pool_Reduction (Target_Size) /=
-        Groups.Reduction_Started
+      if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started
         or else Groups.Configured_Pool_Size /= Target_Size
       then
          raise Program_Error with "pool reduction did not start";
@@ -235,9 +231,7 @@ begin
          raise Program_Error with "initial reduction status is incorrect";
       end if;
 
-      if Groups.Request_Pool_Reduction (Target_Size) /=
-        Groups.Reduction_In_Progress
-      then
+      if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_In_Progress then
          raise Program_Error with "concurrent reduction was not rejected";
       end if;
 
@@ -250,8 +244,7 @@ begin
       end;
 
       declare
-         Post_Cutover : constant Post_Cutover_Access :=
-           new Post_Cutover_Worker;
+         Post_Cutover : constant Post_Cutover_Access := new Post_Cutover_Worker;
          pragma Unreferenced (Post_Cutover);
       begin
          Control.Wait_Post_Cutover;
@@ -287,8 +280,7 @@ begin
          raise Program_Error with "pool did not grow after drainage";
       end if;
 
-      if Groups.Request_Pool_Reduction (Target_Size) /=
-        Groups.Reduction_Started
+      if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started
         or else Groups.Pool_Reduction.Phase /= Groups.Drained
       then
          raise Program_Error with "explicit task blocked empty reduction";

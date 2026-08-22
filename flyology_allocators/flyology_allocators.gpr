@@ -19,7 +19,16 @@ project Flyology_Allocators is
    end Binder;
 
    package Compiler is
-      for Default_Switches ("Ada") use ("-gnat2022");
+      for Default_Switches ("Ada") use ("-gnat2022", "-gnatyM110");
    end Compiler;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
 
 end Flyology_Allocators;

@@ -6,6 +6,7 @@ with Ada.Strings.Unbounded;
 with Interfaces;
 
 --  Measures adaptive batches and paired comparisons of Ada operations.
+
 package Flyology_Bench is
    --  Configuration bounds are carried by the subtypes and record predicates
    --  below rather than by a validation pass. Predicates are assertions, and
@@ -17,8 +18,7 @@ package Flyology_Bench is
    type Iteration_Count is range 0 .. Long_Long_Integer'Last;
 
    --  Batch size for one timed sample, which is never empty.
-   subtype Positive_Iteration_Count is
-     Iteration_Count range 1 .. Iteration_Count'Last;
+   subtype Positive_Iteration_Count is Iteration_Count range 1 .. Iteration_Count'Last;
 
    --  Wall-time budget that may legitimately be zero, either because a stage
    --  is skipped or because a limit is disabled.
@@ -33,8 +33,7 @@ package Flyology_Bench is
 
    --  Percentage excluding the whole. 'Pred is a static attribute, so this
    --  stays an ordinary range constraint rather than a predicate.
-   subtype Threshold_Percentage is
-     Percentage range 0.0 .. Long_Float'Pred (100.0);
+   subtype Threshold_Percentage is Percentage range 0.0 .. Long_Float'Pred (100.0);
 
    --  Number of independently timed samples collected for one measurement.
    subtype Sample_Count is Positive range 10 .. 1_000;
@@ -69,8 +68,7 @@ package Flyology_Bench is
    --  @enum Analyzing Statistics and confidence intervals are being computed.
    --  @enum Finished The result is complete.
    type Progress_Phase is
-     (Starting, Waiting_For_CPU_Quiescence, Warming, Calibrating, Sampling,
-      Analyzing, Finished);
+     (Starting, Waiting_For_CPU_Quiescence, Warming, Calibrating, Sampling, Analyzing, Finished);
 
    --  Receives coarse benchmark progress. Total is zero when a phase has no
    --  meaningful bounded work count.
@@ -78,11 +76,8 @@ package Flyology_Bench is
    --  @param Phase Current benchmark stage.
    --  @param Completed Completed work units in the current stage.
    --  @param Total Total work units, or zero when the phase is unbounded.
-   type Progress_Handler is access procedure
-     (Name      : String;
-      Phase     : Progress_Phase;
-      Completed : Natural;
-      Total     : Natural);
+   type Progress_Handler is
+     access procedure (Name : String; Phase : Progress_Phase; Completed : Natural; Total : Natural);
 
    --  Statistical and practical interpretation of a paired comparison.
    --  @enum Inconclusive The confidence interval supports no practical verdict.
@@ -90,9 +85,7 @@ package Flyology_Bench is
    --  practical threshold.
    --  @enum Contender_Faster The contender is faster beyond the threshold.
    --  @enum Reference_Faster The reference is faster beyond the threshold.
-   type Comparison_Verdict is
-     (Inconclusive, Practically_Equivalent, Contender_Faster,
-      Reference_Faster);
+   type Comparison_Verdict is (Inconclusive, Practically_Equivalent, Contender_Faster, Reference_Faster);
 
    --  Controls how comparison batches divide their wall-time budget.
    --  Equal_Time independently calibrates each implementation toward the same
@@ -175,23 +168,21 @@ package Flyology_Bench is
    type Metric_Set is array (Metric_Axis) of Boolean;
 
    --  Wall-time results only, without additional native probes.
-   Time_Metrics : constant Metric_Set := [Wall_Time => True, others => False];
+   Time_Metrics               : constant Metric_Set := [Wall_Time => True, others => False];
    --  Portable Darwin/Linux process, thread, memory, fault, switch, and I/O
    --  counters in addition to wall time.
-   Process_Resource_Metrics : constant Metric_Set :=
+   Process_Resource_Metrics   : constant Metric_Set :=
      [Wall_Time .. Filesystem_Output_Operations => True, others => False];
    --  Linux perf counters covering the calling pthread and the native tasks
    --  it creates afterwards. Axes remain unavailable when the kernel, host
    --  PMU, or perf permissions reject an event; Metric_Status reports which.
-   Linux_Hardware_Metrics : constant Metric_Set :=
-     [CPU_Cycles .. Branch_Misses => True, others => False];
+   Linux_Hardware_Metrics     : constant Metric_Set := [CPU_Cycles .. Branch_Misses => True, others => False];
    --  Counters supplied through Scheduler_Probe.
    Flyology_Scheduler_Metrics : constant Metric_Set :=
      [Flyology_Dispatches .. Flyology_Migrations => True, others => False];
    --  Every built-in axis; Flyology scheduler counters remain opt-in because
    --  the standalone crate has no dependency on the Flyology runtime.
-   All_Builtin_Metrics : constant Metric_Set :=
-     Process_Resource_Metrics or Linux_Hardware_Metrics;
+   All_Builtin_Metrics        : constant Metric_Set := Process_Resource_Metrics or Linux_Hardware_Metrics;
 
    --  Collection state retained for each requested metric.
    --  @enum Metric_Not_Requested The configuration did not select the axis.
@@ -236,9 +227,14 @@ package Flyology_Bench is
    --  @enum Device_Or_Accelerator Synchronized external execution scope.
    --  @enum Simulated_Clock Deterministic or simulated clock scope.
    type Metric_Scope is
-     (Batch_Wall_Clock, Benchmark_Process, Current_Native_Thread,
-      Native_Task_Tree, Flyology_Runtime, Caller_Defined_Window,
-      Device_Or_Accelerator, Simulated_Clock);
+     (Batch_Wall_Clock,
+      Benchmark_Process,
+      Current_Native_Thread,
+      Native_Task_Tree,
+      Flyology_Runtime,
+      Caller_Defined_Window,
+      Device_Or_Accelerator,
+      Simulated_Clock);
 
    --  Quality of the boundary used to attribute a collected metric. This is
    --  deliberately separate from Metric_Availability: a process-wide value
@@ -267,18 +263,16 @@ package Flyology_Bench is
    --  @enum Lower_Is_Better Smaller resource consumption is favorable.
    --  @enum Higher_Is_Better Larger efficiency is favorable.
    --  @enum Diagnostic No general optimization direction is asserted.
-   type Metric_Direction is
-     (Lower_Is_Better, Higher_Is_Better, Diagnostic);
+   type Metric_Direction is (Lower_Is_Better, Higher_Is_Better, Diagnostic);
 
    --  Statistical form used to compare one metric.
    --  @enum Relative_Ratio Paired positive samples use ratios and percent.
    --  @enum Absolute_Difference Signed or zero-valued samples use differences.
-   type Metric_Comparison_Method is
-     (Relative_Ratio, Absolute_Difference);
+   type Metric_Comparison_Method is (Relative_Ratio, Absolute_Difference);
 
    --  Bounded caller-defined measurement axes. Registration is complete
    --  before a run starts; collection performs no allocation.
-   Max_Custom_Metrics : constant := 8;
+   Max_Custom_Metrics            : constant := 8;
    --  Maximum custom metric identity length.
    Max_Custom_Metric_Name_Length : constant := 48;
    --  Maximum custom metric unit length.
@@ -299,8 +293,7 @@ package Flyology_Bench is
    --  @enum Absolute_Sample Store the explicit ending sample value.
    --  @enum Completed_Elapsed Store a synchronized finite nonnegative elapsed
    --  value returned by measured work.
-   type Custom_Sample_Semantics is
-     (Cumulative_Delta, Absolute_Sample, Completed_Elapsed);
+   type Custom_Sample_Semantics is (Cumulative_Delta, Absolute_Sample, Completed_Elapsed);
 
    --  Whether a batch value is retained once or divided by its exact logical
    --  operation count. Units must describe the resulting value truthfully.
@@ -314,8 +307,7 @@ package Flyology_Bench is
    --  contender-minus-reference differences.
    --  @enum Relative_Positive Compare paired positive values as ratios.
    --  @enum Absolute Compare paired signed differences.
-   type Custom_Comparison_Semantics is
-     (Relative_Positive, Absolute);
+   type Custom_Comparison_Semantics is (Relative_Positive, Absolute);
 
    --  One caller-provided snapshot slot.
    --  @field Status Collection outcome; values are ignored unless collected.
@@ -327,8 +319,7 @@ package Flyology_Bench is
       Sample_Value  : Long_Float := 0.0;
    end record;
    --  Fixed provider snapshot covering every possible registered axis.
-   type Custom_Snapshot is
-     array (Custom_Metric_Index) of Custom_Value;
+   type Custom_Snapshot is array (Custom_Metric_Index) of Custom_Value;
 
    --  A single bounded snapshot callback covers every registered custom axis.
    --  It runs once immediately before and once immediately after each retained
@@ -359,32 +350,29 @@ package Flyology_Bench is
    --  @param Timing_Source Stable alternate timing source identity.
    --  @param Resolution Positive resolution in Unit for a primary timer.
    procedure Register_Custom_Metric
-     (Registry        : in out Custom_Metric_Registry;
-      Name            : String;
-      Unit            : String;
-      Scope           : Metric_Scope;
-      Attribution     : Metric_Attribution;
-      Direction       : Metric_Direction;
-      Semantics       : Custom_Sample_Semantics := Cumulative_Delta;
-      Normalization   : Custom_Normalization := Per_Operation;
-      Comparison      : Custom_Comparison_Semantics := Relative_Positive;
-      Primary_Timing  : Boolean := False;
-      Timing_Source   : String := "";
-      Resolution      : Long_Float := 0.0);
+     (Registry       : in out Custom_Metric_Registry;
+      Name           : String;
+      Unit           : String;
+      Scope          : Metric_Scope;
+      Attribution    : Metric_Attribution;
+      Direction      : Metric_Direction;
+      Semantics      : Custom_Sample_Semantics := Cumulative_Delta;
+      Normalization  : Custom_Normalization := Per_Operation;
+      Comparison     : Custom_Comparison_Semantics := Relative_Positive;
+      Primary_Timing : Boolean := False;
+      Timing_Source  : String := "";
+      Resolution     : Long_Float := 0.0);
 
    --  Install the one provider used by a registry. The provider address lives
    --  only for the synchronous call; completed results never retain it.
    --  @param Registry Registry used by a subsequent synchronous runner call.
    --  @param Probe Begin/end snapshot callback.
-   procedure Set_Custom_Probe
-     (Registry : in out Custom_Metric_Registry;
-      Probe    : Custom_Probe);
+   procedure Set_Custom_Probe (Registry : in out Custom_Metric_Registry; Probe : Custom_Probe);
 
    --  Return the number of registered axes.
    --  @param Registry Registry to inspect.
    --  @return Registered custom axis count.
-   function Custom_Metrics (Registry : Custom_Metric_Registry)
-     return Custom_Metric_Count;
+   function Custom_Metrics (Registry : Custom_Metric_Registry) return Custom_Metric_Count;
 
    --  Raised when bounded custom metric registration is full.
    Capacity_Error : exception;
@@ -426,8 +414,7 @@ package Flyology_Bench is
 
    --  Capture cumulative Flyology scheduler counters outside a timed region.
    --  @param Snapshot Caller-populated cumulative counter snapshot.
-   type Flyology_Scheduler_Probe is access procedure
-     (Snapshot : out Flyology_Scheduler_Snapshot);
+   type Flyology_Scheduler_Probe is access procedure (Snapshot : out Flyology_Scheduler_Snapshot);
 
    --  Distribution summary for one requested measurement axis.
    --  @field Available Whether at least one retained sample has this axis.
@@ -465,14 +452,14 @@ package Flyology_Bench is
    --  @field Confidence_High Upper endpoint in the same change units.
    --  @field Verdict Directional, equivalent, inconclusive, or diagnostic.
    type Metric_Comparison_Result is record
-      Available         : Boolean := False;
-      Method            : Metric_Comparison_Method := Absolute_Difference;
-      Reference_Median  : Long_Float := 0.0;
-      Contender_Median  : Long_Float := 0.0;
-      Change            : Long_Float := 0.0;
-      Confidence_Low    : Long_Float := 0.0;
-      Confidence_High   : Long_Float := 0.0;
-      Verdict           : Metric_Verdict := Metric_Inconclusive;
+      Available        : Boolean := False;
+      Method           : Metric_Comparison_Method := Absolute_Difference;
+      Reference_Median : Long_Float := 0.0;
+      Contender_Median : Long_Float := 0.0;
+      Change           : Long_Float := 0.0;
+      Confidence_Low   : Long_Float := 0.0;
+      Confidence_High  : Long_Float := 0.0;
+      Verdict          : Metric_Verdict := Metric_Inconclusive;
    end record;
 
    --  Controls the optional host CPU preflight gate. When enabled, the harness
@@ -500,20 +487,22 @@ package Flyology_Bench is
             Stable_Time                 : Positive_Duration := 1.0;
             Poll_Interval               : Positive_Duration := 0.100;
             Timeout                     : Positive_Duration := 15.0;
+
          when False =>
             null;
       end case;
    end record
-     with Dynamic_Predicate =>
+   with
+     Dynamic_Predicate =>
        (if CPU_Quiescence_Policy.Enabled
-        then CPU_Quiescence_Policy.Timeout
-               >= CPU_Quiescence_Policy.Stable_Time
-             and then CPU_Quiescence_Policy.Poll_Interval
-                        <= CPU_Quiescence_Policy.Timeout),
+        then
+          CPU_Quiescence_Policy.Timeout >= CPU_Quiescence_Policy.Stable_Time
+          and then CPU_Quiescence_Policy.Poll_Interval <= CPU_Quiescence_Policy.Timeout),
      Predicate_Failure =>
-       raise Constraint_Error with
-         "CPU quiescence timeout must cover the stable interval, and its "
-         & "poll interval must not exceed the timeout";
+       raise Constraint_Error
+         with
+           "CPU quiescence timeout must cover the stable interval, and its "
+           & "poll interval must not exceed the timeout";
 
    --  Raised when enabled CPU quiescence is not observed before its timeout.
    CPU_Quiescence_Timeout : exception;
@@ -569,8 +558,8 @@ package Flyology_Bench is
    --  samples would be the outliers the pause was meant to avoid.
    type Interference_Policy
      (Enabled  : Boolean := False;
-      Response : Interference_Response := Observe) is
-   record
+      Response : Interference_Response := Observe)
+   is record
       case Enabled is
          when True =>
             Maximum_Foreign_CPU_Percent : Percentage := 10.0;
@@ -579,23 +568,23 @@ package Flyology_Bench is
             case Response is
                when Observe | Retake =>
                   null;
+
                when Pause =>
                   Settle_Time        : Positive_Duration := 0.250;
                   Maximum_Pause_Time : Positive_Duration := 30.0;
                   Rewarm_Time        : Nonnegative_Duration := 0.050;
             end case;
+
          when False =>
             null;
       end case;
    end record
-     with Dynamic_Predicate =>
-       (if Interference_Policy.Enabled
-          and then Interference_Policy.Response = Pause
-        then Interference_Policy.Maximum_Pause_Time
-               >= Interference_Policy.Settle_Time),
+   with
+     Dynamic_Predicate =>
+       (if Interference_Policy.Enabled and then Interference_Policy.Response = Pause
+        then Interference_Policy.Maximum_Pause_Time >= Interference_Policy.Settle_Time),
      Predicate_Failure =>
-       raise Constraint_Error with
-         "interference pause budget must cover one settle interval";
+       raise Constraint_Error with "interference pause budget must cover one settle interval";
 
    --  Controls optional harness-applied placement of the benchmark thread.
    --  Placement is never neutral: it fixes frequency and thermal behavior and
@@ -617,6 +606,7 @@ package Flyology_Bench is
             CPU              : Natural := 0;
             Include_Siblings : Boolean := True;
             Require_Strict   : Boolean := False;
+
          when False =>
             null;
       end case;
@@ -645,6 +635,7 @@ package Flyology_Bench is
             Timeout               : Nonnegative_Duration := 30.0;
             Poll_Interval         : Positive_Duration := 0.250;
             Require_Machine_Scope : Boolean := False;
+
          when False =>
             null;
       end case;
@@ -660,8 +651,7 @@ package Flyology_Bench is
    --  so the executing CPU is unknown and observation stays host-wide.
    --  @enum Placement_Rejected The platform refused the request.
    type Placement_Outcome is
-     (Placement_Not_Requested, Placement_Strict, Placement_Advisory,
-      Placement_Rejected);
+     (Placement_Not_Requested, Placement_Strict, Placement_Advisory, Placement_Rejected);
 
    --  Outcome of the optional host CPU claim.
    --  @enum Lock_Not_Requested The policy was disabled.
@@ -673,8 +663,7 @@ package Flyology_Bench is
    --  @enum Lock_Busy A conflicting holder was still present at the timeout.
    --  @enum Lock_Path_Unusable The claim path could not be opened.
    type Host_Lock_Outcome is
-     (Lock_Not_Requested, Lock_Held, Lock_Namespace_Scoped, Lock_Busy,
-      Lock_Path_Unusable);
+     (Lock_Not_Requested, Lock_Held, Lock_Namespace_Scoped, Lock_Busy, Lock_Path_Unusable);
 
    --  What the harness observed about its host while collecting one
    --  measurement. Every field is a record of conditions, never a correction:
@@ -766,40 +755,39 @@ package Flyology_Bench is
    --  @field Progress_Name Human-readable identity passed to Progress. During
    --  Compare_Many sampling, the current case name follows this identity.
    type Configuration is record
-      Warmup_Time          : Nonnegative_Duration := 0.100;
-      Measurement_Time     : Positive_Duration := 0.500;
-      Maximum_Sampling_Time : Nonnegative_Duration := 0.0;
-      Samples              : Sample_Count := 50;
-      Minimum_Sample_Time  : Positive_Duration := 0.000_100;
-      Maximum_Iterations   : Positive_Iteration_Count :=
-        Positive_Iteration_Count'Last;
-      Comparison_Batching  : Comparison_Batch_Policy := Equal_Time;
-      Shootout_Scheduling  : Shootout_Schedule_Policy := Balanced_Rounds;
-      Subtract_Timer_Cost  : Boolean := False;
+      Warmup_Time                 : Nonnegative_Duration := 0.100;
+      Measurement_Time            : Positive_Duration := 0.500;
+      Maximum_Sampling_Time       : Nonnegative_Duration := 0.0;
+      Samples                     : Sample_Count := 50;
+      Minimum_Sample_Time         : Positive_Duration := 0.000_100;
+      Maximum_Iterations          : Positive_Iteration_Count := Positive_Iteration_Count'Last;
+      Comparison_Batching         : Comparison_Batch_Policy := Equal_Time;
+      Shootout_Scheduling         : Shootout_Schedule_Policy := Balanced_Rounds;
+      Subtract_Timer_Cost         : Boolean := False;
       Practical_Threshold_Percent : Threshold_Percentage := 1.0;
-      Confidence_Level_Percent : Confidence_Percentage := 95.0;
-      Bootstrap_Resamples  : Bootstrap_Resample_Count := 2_000;
-      Random_Seed          : Long_Long_Integer := 1;
-      Metrics              : Metric_Set := Time_Metrics;
-      Scheduler_Probe      : Flyology_Scheduler_Probe := null;
-      Custom_Metrics       : Custom_Metric_Registry;
-      CPU_Quiescence       : CPU_Quiescence_Policy := (others => <>);
-      Interference         : Interference_Policy := (others => <>);
-      Placement            : Placement_Policy := (others => <>);
-      Host_Lock            : Host_Lock_Policy := (others => <>);
-      Collect_Process_Telemetry : Boolean := False;
-      Progress             : Progress_Handler := null;
-      Progress_Name        : Ada.Strings.Unbounded.Unbounded_String :=
+      Confidence_Level_Percent    : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples         : Bootstrap_Resample_Count := 2_000;
+      Random_Seed                 : Long_Long_Integer := 1;
+      Metrics                     : Metric_Set := Time_Metrics;
+      Scheduler_Probe             : Flyology_Scheduler_Probe := null;
+      Custom_Metrics              : Custom_Metric_Registry;
+      CPU_Quiescence              : CPU_Quiescence_Policy := (others => <>);
+      Interference                : Interference_Policy := (others => <>);
+      Placement                   : Placement_Policy := (others => <>);
+      Host_Lock                   : Host_Lock_Policy := (others => <>);
+      Collect_Process_Telemetry   : Boolean := False;
+      Progress                    : Progress_Handler := null;
+      Progress_Name               : Ada.Strings.Unbounded.Unbounded_String :=
         Ada.Strings.Unbounded.Null_Unbounded_String;
    end record
-     --  A policy assembled field by field is never checked as a whole, so
-     --  the enclosing configuration re-asserts each policy's own rule. This
-     --  is the check a benchmark call makes on the way in.
-     with Dynamic_Predicate =>
+   --  A policy assembled field by field is never checked as a whole, so
+   --  the enclosing configuration re-asserts each policy's own rule. This
+   --  is the check a benchmark call makes on the way in.
+   with
+     Dynamic_Predicate =>
        Configuration.CPU_Quiescence in CPU_Quiescence_Policy
        and then Configuration.Interference in Interference_Policy,
-     Predicate_Failure =>
-       raise Constraint_Error with "incoherent benchmark configuration";
+     Predicate_Failure => raise Constraint_Error with "incoherent benchmark configuration";
 
    --  Default configuration for interactive microbenchmark runs.
    Default_Configuration : constant Configuration;
@@ -829,27 +817,23 @@ package Flyology_Bench is
    generic
       --  One logical operation with observable inputs or output.
       with procedure Operation;
-   --  Warm, calibrate, and measure one statically bound operation.
-   --  @param Config Measurement policy.
-   --  @param Result Collected raw samples and summary statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Measure
-     (Config : Configuration := Default_Configuration;
-      Result : out Measurement);
+      --  Warm, calibrate, and measure one statically bound operation.
+      --  @param Config Measurement policy.
+      --  @param Result Collected raw samples and summary statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Measure (Config : Configuration := Default_Configuration; Result : out Measurement);
 
    generic
       --  Executes the requested logical operation count.
       with procedure Batch (Iterations : Iteration_Count);
-   --  Warm, calibrate, and measure a caller-controlled batch. The caller must
-   --  perform exactly Iterations logical operations before returning.
-   --  @param Config Measurement policy.
-   --  @param Result Collected raw samples and summary statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Measure_Batched
-     (Config : Configuration := Default_Configuration;
-      Result : out Measurement);
+      --  Warm, calibrate, and measure a caller-controlled batch. The caller must
+      --  perform exactly Iterations logical operations before returning.
+      --  @param Config Measurement policy.
+      --  @param Result Collected raw samples and summary statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Measure_Batched (Config : Configuration := Default_Configuration; Result : out Measurement);
 
    generic
       --  Prepare one batch outside its timed region.
@@ -858,89 +842,75 @@ package Flyology_Bench is
       with procedure Operation;
       --  Consume or release batch state outside its timed region.
       with procedure Teardown;
-   --  Measure an operation with per-sample setup and teardown hooks. Teardown
-   --  also runs when the measured operation raises, before the exception is
-   --  propagated.
-   --  @param Config Measurement policy.
-   --  @param Result Collected raw samples and summary statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Measure_With_Hooks
-     (Config : Configuration := Default_Configuration;
-      Result : out Measurement);
+      --  Measure an operation with per-sample setup and teardown hooks. Teardown
+      --  also runs when the measured operation raises, before the exception is
+      --  propagated.
+      --  @param Config Measurement policy.
+      --  @param Result Collected raw samples and summary statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Measure_With_Hooks (Config : Configuration := Default_Configuration; Result : out Measurement);
 
    generic
       --  Observable result produced by a batch.
       type Element is private;
       --  Execute a batch and return a value that keeps its work observable.
-      with procedure Batch
-        (Iterations : Iteration_Count;
-         Value      : out Element);
-   --  Measure a result-producing batch and pass its result to an opaque barrier
-   --  after the ending timestamp. This avoids charging barrier cost to the
-   --  measured operation.
-   --  @param Config Measurement policy.
-   --  @param Result Collected raw samples and summary statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
+      with procedure Batch (Iterations : Iteration_Count; Value : out Element);
+      --  Measure a result-producing batch and pass its result to an opaque barrier
+      --  after the ending timestamp. This avoids charging barrier cost to the
+      --  measured operation.
+      --  @param Config Measurement policy.
+      --  @param Result Collected raw samples and summary statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
    procedure Measure_Result_Batched
-     (Config : Configuration := Default_Configuration;
-      Result : out Measurement);
+     (Config : Configuration := Default_Configuration; Result : out Measurement);
 
    generic
       --  Existing or baseline operation.
       with procedure Reference_Operation;
       --  Operation compared with the reference.
       with procedure Contender_Operation;
-   --  Measure two operations in adjacent, order-balanced sample pairs. Equal
-   --  timed slices are the default; Shared_Iterations can require one count.
-   --  @param Config Shared measurement policy.
-   --  @param Result Paired measurements and relative statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Compare
-     (Config : Configuration := Default_Configuration;
-      Result : out Comparison);
+      --  Measure two operations in adjacent, order-balanced sample pairs. Equal
+      --  timed slices are the default; Shared_Iterations can require one count.
+      --  @param Config Shared measurement policy.
+      --  @param Result Paired measurements and relative statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Compare (Config : Configuration := Default_Configuration; Result : out Comparison);
 
    generic
       --  Executes a reference batch.
       with procedure Reference_Batch (Iterations : Iteration_Count);
       --  Executes a contender batch.
       with procedure Contender_Batch (Iterations : Iteration_Count);
-   --  Measure two caller-controlled batches in adjacent, order-balanced sample
-   --  pairs. Each batch must perform exactly Iterations logical operations.
-   --  @param Config Shared measurement policy.
-   --  @param Result Paired measurements and relative statistics.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Compare_Batched
-     (Config : Configuration := Default_Configuration;
-      Result : out Comparison);
+      --  Measure two caller-controlled batches in adjacent, order-balanced sample
+      --  pairs. Each batch must perform exactly Iterations logical operations.
+      --  @param Config Shared measurement policy.
+      --  @param Result Paired measurements and relative statistics.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Compare_Batched (Config : Configuration := Default_Configuration; Result : out Comparison);
 
    generic
       --  Enumeration of implementations; the first value is the reference.
       type Case_Id is (<>);
       --  Execute Iterations operations for the selected implementation.
-      with procedure Batch
-        (Which      : Case_Id;
-         Iterations : Iteration_Count);
-   --  Compare two to sixteen implementations in shared rounds. Each case gets
-   --  a comparable timed slice by default and occupies every execution
-   --  position equally, or within one round when counts are indivisible.
-   --  Sampling progress identifies each implementation separately.
-   --  @param Config Shared measurement policy.
-   --  @param Result Multi-way measurements and comparisons against case one.
-   --  @exception Constraint_Error Config requests more than the bounded
-   --  bootstrap analysis work.
-   procedure Compare_Many
-     (Config : Configuration := Default_Configuration;
-      Result : out Multi_Comparison);
+      with procedure Batch (Which : Case_Id; Iterations : Iteration_Count);
+      --  Compare two to sixteen implementations in shared rounds. Each case gets
+      --  a comparable timed slice by default and occupies every execution
+      --  position equally, or within one round when counts are indivisible.
+      --  Sampling progress identifies each implementation separately.
+      --  @param Config Shared measurement policy.
+      --  @param Result Multi-way measurements and comparisons against case one.
+      --  @exception Constraint_Error Config requests more than the bounded
+      --  bootstrap analysis work.
+   procedure Compare_Many (Config : Configuration := Default_Configuration; Result : out Multi_Comparison);
 
    --  Return the calibrated logical operation count in each timed sample.
    --  @param Result Completed measurement.
    --  @return Logical operations in each raw sample.
-   function Iterations_Per_Sample
-     (Result : Measurement) return Iteration_Count;
+   function Iterations_Per_Sample (Result : Measurement) return Iteration_Count;
 
    --  Return the number of independently timed samples.
    --  @param Result Completed measurement.
@@ -960,32 +930,27 @@ package Flyology_Bench is
    --  Return the platform-reported clock resolution.
    --  @param Result Completed measurement.
    --  @return Nominal clock resolution in nanoseconds.
-   function Clock_Resolution_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Clock_Resolution_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the smallest positive clock step observed during characterization.
    --  @param Result Completed measurement.
    --  @return Observed clock step in nanoseconds, or zero if none was observed.
-   function Observed_Clock_Resolution_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Observed_Clock_Resolution_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the median adjacent-clock interval observed at startup.
    --  @param Result Completed measurement.
    --  @return Median clock-read interval in nanoseconds.
-   function Median_Timer_Cost_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Median_Timer_Cost_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the elapsed duration of one calibrated timed batch.
    --  @param Result Completed measurement.
    --  @return Median sample batch duration in nanoseconds.
-   function Median_Batch_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Median_Batch_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the clock-quantization floor amortized over one sample batch.
    --  @param Result Completed measurement.
    --  @return Nominal resolution divided by calibrated iterations.
-   function Quantization_Floor_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Quantization_Floor_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the fastest retained per-operation sample.
    --  @param Result Completed measurement.
@@ -1010,14 +975,12 @@ package Flyology_Bench is
    --  Return the sample standard deviation of per-operation time.
    --  @param Result Completed measurement.
    --  @return Sample standard deviation in nanoseconds.
-   function Standard_Deviation_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Standard_Deviation_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the median absolute deviation of per-operation time.
    --  @param Result Completed measurement.
    --  @return Median absolute deviation in nanoseconds.
-   function Median_Absolute_Deviation_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Median_Absolute_Deviation_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the 95th percentile of per-operation batch averages. This is not
    --  an individual-operation tail-latency percentile.
@@ -1034,38 +997,32 @@ package Flyology_Bench is
    --  Return the lower endpoint of the bootstrap mean interval.
    --  @param Result Completed measurement.
    --  @return Lower endpoint of the deterministic bootstrap mean interval.
-   function Mean_Confidence_Low_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Mean_Confidence_Low_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the upper endpoint of the bootstrap mean interval.
    --  @param Result Completed measurement.
    --  @return Upper endpoint of the deterministic bootstrap mean interval.
-   function Mean_Confidence_High_Nanoseconds
-     (Result : Measurement) return Long_Float;
+   function Mean_Confidence_High_Nanoseconds (Result : Measurement) return Long_Float;
 
    --  Return the confidence level used to analyze this measurement.
    --  @param Result Completed measurement.
    --  @return Central bootstrap interval coverage in percent.
-   function Confidence_Level_Percent
-     (Result : Measurement) return Confidence_Percentage;
+   function Confidence_Level_Percent (Result : Measurement) return Confidence_Percentage;
 
    --  Return the bootstrap resample count used to analyze this measurement.
    --  @param Result Completed measurement.
    --  @return Number of bootstrap distributions drawn per interval.
-   function Bootstrap_Resamples
-     (Result : Measurement) return Bootstrap_Resample_Count;
+   function Bootstrap_Resamples (Result : Measurement) return Bootstrap_Resample_Count;
 
    --  Return sample dispersion relative to the arithmetic mean.
    --  @param Result Completed measurement.
    --  @return Sample standard deviation as a percentage of the mean.
-   function Coefficient_Of_Variation_Percent
-     (Result : Measurement) return Long_Float;
+   function Coefficient_Of_Variation_Percent (Result : Measurement) return Long_Float;
 
    --  Return lag-one correlation of sequential sample means.
    --  @param Result Completed measurement.
    --  @return Lag-one sample correlation, or zero when undefined.
-   function Sample_Lag_One_Correlation
-     (Result : Measurement) return Long_Float;
+   function Sample_Lag_One_Correlation (Result : Measurement) return Long_Float;
 
    --  Return what the harness observed about its host during collection.
    --  Nothing in this report has been applied to any reported statistic: the
@@ -1081,9 +1038,7 @@ package Flyology_Bench is
    --  @param Index One-based index into its collected raw samples.
    --  @return Foreign share of total CPU capacity, in percent.
    --  @exception Constraint_Error If Index exceeds the collected sample count.
-   function Sample_Foreign_CPU_Percent
-     (Result : Measurement;
-      Index  : Sample_Index) return Long_Float;
+   function Sample_Foreign_CPU_Percent (Result : Measurement; Index : Sample_Index) return Long_Float;
 
    --  Return diagnostic Tukey-fence classifications without removing samples.
    --  @param Result Completed measurement.
@@ -1095,9 +1050,7 @@ package Flyology_Bench is
    --  @param Index One-based index into its collected raw samples.
    --  @return Per-operation duration in nanoseconds.
    --  @exception Constraint_Error If Index exceeds the collected sample count.
-   function Sample_Nanoseconds
-     (Result : Measurement;
-      Index  : Sample_Index) return Long_Float;
+   function Sample_Nanoseconds (Result : Measurement; Index : Sample_Index) return Long_Float;
 
    --  Return a stable human-readable metric name.
    --  @param Axis Selected measurement axis.
@@ -1124,25 +1077,19 @@ package Flyology_Bench is
    --  @param Result Completed measurement.
    --  @param Axis Requested measurement axis.
    --  @return True when every retained sample has a value.
-   function Metric_Available
-     (Result : Measurement;
-      Axis   : Metric_Axis) return Boolean;
+   function Metric_Available (Result : Measurement; Axis : Metric_Axis) return Boolean;
 
    --  Return why an axis is available, absent, or unusable.
    --  @param Result Completed measurement.
    --  @param Axis Measurement axis.
    --  @return Retained collection state with a specific failure class.
-   function Metric_Status
-     (Result : Measurement;
-      Axis   : Metric_Axis) return Metric_Availability;
+   function Metric_Status (Result : Measurement; Axis : Metric_Axis) return Metric_Availability;
 
    --  Test whether an axis was selected for one measurement.
    --  @param Result Completed measurement.
    --  @param Axis Measurement axis.
    --  @return True when the configuration requested the axis.
-   function Metric_Requested
-     (Result : Measurement;
-      Axis   : Metric_Axis) return Boolean;
+   function Metric_Requested (Result : Measurement; Axis : Metric_Axis) return Boolean;
 
    --  Return one retained metric sample.
    --  @param Result Completed measurement.
@@ -1151,54 +1098,43 @@ package Flyology_Bench is
    --  @return Value in Metric_Unit units.
    --  @exception Constraint_Error If the axis is unavailable or Index exceeds
    --  the retained sample count.
-   function Metric_Sample
-     (Result : Measurement;
-      Axis   : Metric_Axis;
-      Index  : Sample_Index) return Long_Float;
+   function Metric_Sample (Result : Measurement; Axis : Metric_Axis; Index : Sample_Index) return Long_Float;
 
    --  Return the distribution summary for one axis.
    --  @param Result Completed measurement.
    --  @param Axis Requested measurement axis.
    --  @return Available or unavailable summary.
-   function Metric_Statistics
-     (Result : Measurement;
-      Axis   : Metric_Axis) return Metric_Summary;
+   function Metric_Statistics (Result : Measurement; Axis : Metric_Axis) return Metric_Summary;
 
    --  Number of registered custom axes retained by a measurement.
    --  @param Result Completed measurement.
    --  @return Registered custom axis count.
-   function Custom_Metric_Total
-     (Result : Measurement) return Custom_Metric_Count;
+   function Custom_Metric_Total (Result : Measurement) return Custom_Metric_Count;
    --  Locate the declared primary alternate timer.
    --  @param Result Completed measurement.
    --  @return Its one-based custom axis, or zero when none was declared.
-   function Primary_Timing_Axis
-     (Result : Measurement) return Custom_Metric_Count;
+   function Primary_Timing_Axis (Result : Measurement) return Custom_Metric_Count;
    --  Return a custom axis's stable identity.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Stable custom metric name.
-   function Custom_Metric_Name
-     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   function Custom_Metric_Name (Result : Measurement; Axis : Custom_Metric_Index) return String;
    --  Return the unit after normalization.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Custom metric unit.
-   function Custom_Metric_Unit
-     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   function Custom_Metric_Unit (Result : Measurement; Axis : Custom_Metric_Index) return String;
    --  Return the declared scope.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Caller-declared scope.
-   function Custom_Metric_Scope
-     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Scope;
+   function Custom_Metric_Scope (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Scope;
    --  Return the declared attribution quality.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Caller-declared attribution.
    function Custom_Metric_Attribution
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Metric_Attribution;
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Attribution;
    --  Return the declared optimization direction.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
@@ -1210,72 +1146,59 @@ package Flyology_Bench is
    --  @param Axis Registered custom axis.
    --  @return Cumulative, absolute, or completed-elapsed semantics.
    function Custom_Metric_Semantics
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Custom_Sample_Semantics;
+     (Result : Measurement; Axis : Custom_Metric_Index) return Custom_Sample_Semantics;
    --  Return batch normalization semantics.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Per-batch or per-operation normalization.
    function Custom_Metric_Normalization
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Custom_Normalization;
+     (Result : Measurement; Axis : Custom_Metric_Index) return Custom_Normalization;
    --  Return the declared comparison form.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Relative-positive or signed absolute comparison.
    function Custom_Metric_Comparison
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Custom_Comparison_Semantics;
+     (Result : Measurement; Axis : Custom_Metric_Index) return Custom_Comparison_Semantics;
    --  Test whether an axis is the alternate reported timer.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return True for the one primary alternate timing axis.
-   function Custom_Metric_Is_Primary_Timing
-     (Result : Measurement; Axis : Custom_Metric_Index) return Boolean;
+   function Custom_Metric_Is_Primary_Timing (Result : Measurement; Axis : Custom_Metric_Index) return Boolean;
    --  Return alternate timer identity, or empty for an ordinary metric.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Stable timing source identity.
-   function Custom_Metric_Timing_Source
-     (Result : Measurement; Axis : Custom_Metric_Index) return String;
+   function Custom_Metric_Timing_Source (Result : Measurement; Axis : Custom_Metric_Index) return String;
    --  Return alternate source resolution in its output unit.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Positive primary-timer resolution, otherwise zero.
-   function Custom_Metric_Resolution
-     (Result : Measurement; Axis : Custom_Metric_Index) return Long_Float;
+   function Custom_Metric_Resolution (Result : Measurement; Axis : Custom_Metric_Index) return Long_Float;
    --  Return aggregate custom-axis availability.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Complete, partial, or failure status.
    function Custom_Metric_Status
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Metric_Availability;
+     (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Availability;
    --  Return one collected custom value.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @param Index Retained sample index.
    --  @return Value in Custom_Metric_Unit units.
    function Custom_Metric_Sample
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index;
-      Index  : Sample_Index) return Long_Float;
+     (Result : Measurement; Axis : Custom_Metric_Index; Index : Sample_Index) return Long_Float;
    --  Return one retained custom sample's status.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @param Index Retained sample index.
    --  @return Collected or specific unavailable status.
    function Custom_Metric_Sample_Status
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index;
-      Index  : Sample_Index) return Metric_Availability;
+     (Result : Measurement; Axis : Custom_Metric_Index; Index : Sample_Index) return Metric_Availability;
    --  Return the summary over collected custom values.
    --  @param Result Completed measurement.
    --  @param Axis Registered custom axis.
    --  @return Summary whose sample count excludes unavailable values.
-   function Custom_Metric_Statistics
-     (Result : Measurement;
-      Axis   : Custom_Metric_Index) return Metric_Summary;
+   function Custom_Metric_Statistics (Result : Measurement; Axis : Custom_Metric_Index) return Metric_Summary;
 
    --  Return the reference side of a paired comparison.
    --  @param Result Completed comparison.
@@ -1290,14 +1213,12 @@ package Flyology_Bench is
    --  Return the confidence level used to analyze this comparison.
    --  @param Result Completed comparison.
    --  @return Central bootstrap interval coverage in percent.
-   function Confidence_Level_Percent
-     (Result : Comparison) return Confidence_Percentage;
+   function Confidence_Level_Percent (Result : Comparison) return Confidence_Percentage;
 
    --  Return the bootstrap resample count used to analyze this comparison.
    --  @param Result Completed comparison.
    --  @return Number of bootstrap distributions drawn per interval.
-   function Bootstrap_Resamples
-     (Result : Comparison) return Bootstrap_Resample_Count;
+   function Bootstrap_Resamples (Result : Comparison) return Bootstrap_Resample_Count;
 
    --  Return the geometric mean paired speedup. A value greater than one means
    --  the contender is faster.
@@ -1314,33 +1235,28 @@ package Flyology_Bench is
    --  Return the lower endpoint of the paired bootstrap speedup interval.
    --  @param Result Completed comparison.
    --  @return Lower endpoint of the paired bootstrap speedup interval.
-   function Speedup_Confidence_Low
-     (Result : Comparison) return Long_Float;
+   function Speedup_Confidence_Low (Result : Comparison) return Long_Float;
 
    --  Return the upper endpoint of the paired bootstrap speedup interval.
    --  @param Result Completed comparison.
    --  @return Upper endpoint of the paired bootstrap speedup interval.
-   function Speedup_Confidence_High
-     (Result : Comparison) return Long_Float;
+   function Speedup_Confidence_High (Result : Comparison) return Long_Float;
 
    --  Return the contender's relative time change. A negative value means the
    --  contender took less time.
    --  @param Result Completed comparison.
    --  @return Contender time change relative to the reference, in percent.
-   function Relative_Time_Change_Percent
-     (Result : Comparison) return Long_Float;
+   function Relative_Time_Change_Percent (Result : Comparison) return Long_Float;
 
    --  Return the lower endpoint of the contender's relative time interval.
    --  @param Result Completed comparison.
    --  @return Lower endpoint of the relative-time-change interval.
-   function Relative_Time_Change_Confidence_Low
-     (Result : Comparison) return Long_Float;
+   function Relative_Time_Change_Confidence_Low (Result : Comparison) return Long_Float;
 
    --  Return the upper endpoint of the contender's relative time interval.
    --  @param Result Completed comparison.
    --  @return Upper endpoint of the relative-time-change interval.
-   function Relative_Time_Change_Confidence_High
-     (Result : Comparison) return Long_Float;
+   function Relative_Time_Change_Confidence_High (Result : Comparison) return Long_Float;
 
    --  Return the practical/statistical verdict for the comparison.
    --  @param Result Completed comparison.
@@ -1350,8 +1266,7 @@ package Flyology_Bench is
    --  Return the configured practical-effect threshold.
    --  @param Result Completed comparison.
    --  @return Symmetric relative-time threshold in percent.
-   function Practical_Threshold_Percent
-     (Result : Comparison) return Long_Float;
+   function Practical_Threshold_Percent (Result : Comparison) return Long_Float;
 
    --  Return the estimated first-versus-second execution order effect.
    --  @param Result Completed comparison.
@@ -1367,8 +1282,7 @@ package Flyology_Bench is
    --  contender took less time.
    --  @param Result Completed comparison.
    --  @return Arithmetic mean of contender-time minus reference-time pairs.
-   function Mean_Time_Difference_Nanoseconds
-     (Result : Comparison) return Long_Float;
+   function Mean_Time_Difference_Nanoseconds (Result : Comparison) return Long_Float;
 
    --  Return the number of sample pairs won by the contender.
    --  @param Result Completed comparison.
@@ -1391,17 +1305,14 @@ package Flyology_Bench is
    --  @param Result Completed comparison.
    --  @param Axis Requested measurement axis.
    --  @return Available or unavailable paired metric comparison.
-   function Compare_Metric
-     (Result : Comparison;
-      Axis   : Metric_Axis) return Metric_Comparison_Result;
+   function Compare_Metric (Result : Comparison; Axis : Metric_Axis) return Metric_Comparison_Result;
 
    --  Return one paired custom metric comparison.
    --  @param Result Completed direct or multi-way paired comparison.
    --  @param Axis Registered custom axis.
    --  @return Paired comparison, unavailable unless both sides are complete.
    function Compare_Custom_Metric
-     (Result : Comparison;
-      Axis   : Custom_Metric_Index) return Metric_Comparison_Result;
+     (Result : Comparison; Axis : Custom_Metric_Index) return Metric_Comparison_Result;
 
    --  Return how many timed pairs ran the reference first.
    --  @param Result Completed comparison.
@@ -1418,9 +1329,7 @@ package Flyology_Bench is
    --  @param Index One-based index into its paired raw samples.
    --  @return Reference-time/contender-time ratio for the pair.
    --  @exception Constraint_Error If Index exceeds the collected sample count.
-   function Sample_Speedup
-     (Result : Comparison;
-      Index  : Sample_Index) return Long_Float;
+   function Sample_Speedup (Result : Comparison; Index : Sample_Index) return Long_Float;
 
    --  Return the number of implementations in a multi-way comparison.
    --  @param Result Completed multi-way comparison.
@@ -1430,51 +1339,42 @@ package Flyology_Bench is
    --  Return the schedule used to collect a multi-way comparison.
    --  @param Result Completed multi-way comparison.
    --  @return Balanced or sequential shootout schedule.
-   function Shootout_Schedule
-     (Result : Multi_Comparison) return Shootout_Schedule_Policy;
+   function Shootout_Schedule (Result : Multi_Comparison) return Shootout_Schedule_Policy;
 
    --  Return the batch calibration policy used by a multi-way comparison.
    --  @param Result Completed multi-way comparison.
    --  @return Equal-time or shared-iteration batch policy.
-   function Shootout_Batching
-     (Result : Multi_Comparison) return Comparison_Batch_Policy;
+   function Shootout_Batching (Result : Multi_Comparison) return Comparison_Batch_Policy;
 
    --  Return one case's measurement. Index one is the reference.
    --  @param Result Completed multi-way comparison.
    --  @param Index Case index in enumeration order.
    --  @return Selected case measurement.
    --  @exception Constraint_Error If Index exceeds the measured case count.
-   function Case_Measurement
-     (Result : Multi_Comparison;
-      Index  : Comparison_Case_Index) return Measurement;
+   function Case_Measurement (Result : Multi_Comparison; Index : Comparison_Case_Index) return Measurement;
 
    --  Return one case's paired comparison against case one.
    --  @param Result Completed multi-way comparison.
    --  @param Index Contender index in enumeration order.
    --  @return Selected paired comparison against the reference.
    --  @exception Constraint_Error If Index is one or exceeds the case count.
-   function Versus_Reference
-     (Result : Multi_Comparison;
-      Index  : Comparison_Case_Index) return Comparison;
+   function Versus_Reference (Result : Multi_Comparison; Index : Comparison_Case_Index) return Comparison;
 
    generic
       --  Value type accepted by the barrier.
       type Element is private;
-   --  Make a value visible to an opaque compiler barrier. Place this outside a
-   --  timed nanosecond operation because the barrier is an out-of-line call.
-   --  @param Value Input or output value that the optimizer must retain.
+      --  Make a value visible to an opaque compiler barrier. Place this outside a
+      --  timed nanosecond operation because the barrier is an out-of-line call.
+      --  @param Value Input or output value that the optimizer must retain.
    procedure Do_Not_Optimize (Value : in out Element);
 
    --  Prevent memory operations from moving across this compiler barrier.
    procedure Clobber_Memory;
 
 private
-   type Custom_Name_Buffer is
-     array (Positive range 1 .. Max_Custom_Metric_Name_Length) of Character;
-   type Custom_Unit_Buffer is
-     array (Positive range 1 .. Max_Custom_Metric_Unit_Length) of Character;
-   type Timing_Source_Buffer is
-     array (Positive range 1 .. Max_Timing_Source_Name_Length) of Character;
+   type Custom_Name_Buffer is array (Positive range 1 .. Max_Custom_Metric_Name_Length) of Character;
+   type Custom_Unit_Buffer is array (Positive range 1 .. Max_Custom_Metric_Unit_Length) of Character;
+   type Timing_Source_Buffer is array (Positive range 1 .. Max_Timing_Source_Name_Length) of Character;
 
    type Custom_Metric_Descriptor is record
       Name_Length          : Natural range 0 .. Max_Custom_Metric_Name_Length := 0;
@@ -1492,8 +1392,7 @@ private
       Timing_Data          : Timing_Source_Buffer := [others => ' '];
       Resolution_Value     : Long_Float := 0.0;
    end record;
-   type Custom_Descriptor_Array is
-     array (Custom_Metric_Index) of Custom_Metric_Descriptor;
+   type Custom_Descriptor_Array is array (Custom_Metric_Index) of Custom_Metric_Descriptor;
 
    type Custom_Metric_Registry is record
       Count       : Custom_Metric_Count := 0;
@@ -1507,33 +1406,24 @@ private
    --  probe layer all store readings in these, so a measurement boundary
    --  never converts between two spellings of the same snapshot.
    Resource_Value_Count : constant := 11;
-   type Resource_Values is
-     array (Natural range 0 .. Resource_Value_Count - 1)
-       of Interfaces.Unsigned_64;
+   type Resource_Values is array (Natural range 0 .. Resource_Value_Count - 1) of Interfaces.Unsigned_64;
 
    Perf_Value_Count : constant := 5;
-   type Perf_Values is
-     array (Natural range 0 .. Perf_Value_Count - 1)
-       of Interfaces.Unsigned_64;
-   type Perf_Status_Values is
-     array (Natural range 0 .. Perf_Value_Count - 1) of Metric_Availability;
+   type Perf_Values is array (Natural range 0 .. Perf_Value_Count - 1) of Interfaces.Unsigned_64;
+   type Perf_Status_Values is array (Natural range 0 .. Perf_Value_Count - 1) of Metric_Availability;
 
    type Sample_Array is array (Sample_Index range <>) of Long_Float;
    type Boolean_Sample_Array is array (Sample_Index range <>) of Boolean;
-   type Metric_Sample_Matrix is
-     array (Metric_Axis, Sample_Index) of Long_Float;
+   type Metric_Sample_Matrix is array (Metric_Axis, Sample_Index) of Long_Float;
    type Metric_Summary_Array is array (Metric_Axis) of Metric_Summary;
-   type Metric_Comparison_Array is
-     array (Metric_Axis) of Metric_Comparison_Result;
-   type Metric_Availability_Array is
-     array (Metric_Axis) of Metric_Availability;
+   type Metric_Comparison_Array is array (Metric_Axis) of Metric_Comparison_Result;
+   type Metric_Availability_Array is array (Metric_Axis) of Metric_Availability;
 
    type Metric_Store is record
       References : Positive := 1;
       Requested  : Metric_Set := Time_Metrics;
       Available  : Metric_Set := [others => False];
-      Status     : Metric_Availability_Array :=
-        [others => Metric_Not_Requested];
+      Status     : Metric_Availability_Array := [others => Metric_Not_Requested];
       Values     : Metric_Sample_Matrix := [others => [others => 0.0]];
       Summaries  : Metric_Summary_Array := [others => (others => <>)];
    end record;
@@ -1543,25 +1433,22 @@ private
    end record;
    --  @exclude
    --  @param Object Internal shared store handle.
-   overriding procedure Adjust (Object : in out Metric_Store_Handle);
+   overriding
+   procedure Adjust (Object : in out Metric_Store_Handle);
    --  @exclude
    --  @param Object Internal shared store handle.
-   overriding procedure Finalize (Object : in out Metric_Store_Handle);
+   overriding
+   procedure Finalize (Object : in out Metric_Store_Handle);
 
-   type Custom_Sample_Matrix is
-     array (Custom_Metric_Index, Sample_Index) of Long_Float;
-   type Custom_Status_Matrix is
-     array (Custom_Metric_Index, Sample_Index) of Metric_Availability;
-   type Custom_Summary_Array is
-     array (Custom_Metric_Index) of Metric_Summary;
-   type Custom_Comparison_Array is
-     array (Custom_Metric_Index) of Metric_Comparison_Result;
+   type Custom_Sample_Matrix is array (Custom_Metric_Index, Sample_Index) of Long_Float;
+   type Custom_Status_Matrix is array (Custom_Metric_Index, Sample_Index) of Metric_Availability;
+   type Custom_Summary_Array is array (Custom_Metric_Index) of Metric_Summary;
+   type Custom_Comparison_Array is array (Custom_Metric_Index) of Metric_Comparison_Result;
    type Custom_Store is record
       References  : Positive := 1;
       Count       : Custom_Metric_Count := 0;
       Descriptors : Custom_Descriptor_Array := [others => (others => <>)];
-      Status      : Custom_Status_Matrix :=
-        [others => [others => Metric_Not_Requested]];
+      Status      : Custom_Status_Matrix := [others => [others => Metric_Not_Requested]];
       Values      : Custom_Sample_Matrix := [others => [others => 0.0]];
       Summaries   : Custom_Summary_Array := [others => (others => <>)];
    end record;
@@ -1571,108 +1458,98 @@ private
    end record;
    --  @exclude
    --  @param Object Internal shared custom store handle.
-   overriding procedure Adjust (Object : in out Custom_Store_Handle);
+   overriding
+   procedure Adjust (Object : in out Custom_Store_Handle);
    --  @exclude
    --  @param Object Internal shared custom store handle.
-   overriding procedure Finalize (Object : in out Custom_Store_Handle);
+   overriding
+   procedure Finalize (Object : in out Custom_Store_Handle);
 
    type Measurement is record
-      Sample_Total       : Sample_Count := Sample_Count'First;
-      Iterations         : Iteration_Count := 1;
-      Timer_Cost         : Long_Float := 0.0;
-      Median_Timer_Cost  : Long_Float := 0.0;
-      Clock_Resolution   : Long_Float := 0.0;
-      Observed_Resolution : Long_Float := 0.0;
-      Clock_Backend_Id   : Natural := 0;
-      Median_Batch       : Long_Float := 0.0;
-      Values             : Sample_Array (Sample_Index'Range) := [others => 0.0];
-      Minimum            : Long_Float := 0.0;
-      Maximum            : Long_Float := 0.0;
-      Mean               : Long_Float := 0.0;
-      Median             : Long_Float := 0.0;
-      Standard_Deviation : Long_Float := 0.0;
-      MAD                : Long_Float := 0.0;
-      P95                : Long_Float := 0.0;
-      P99                : Long_Float := 0.0;
-      Confidence_Low     : Long_Float := 0.0;
-      Confidence_High    : Long_Float := 0.0;
-      CV_Percent         : Long_Float := 0.0;
-      Outlier_Total      : Outlier_Counts;
-      Lag_One            : Long_Float := 0.0;
-      Confidence_Level_Value : Confidence_Percentage := 95.0;
-      Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
-      Random_Seed_Value  : Long_Long_Integer := 1;
-      Telemetry_Available : Boolean := False;
-      Telemetry_CPU       : Sample_Array (Sample_Index'Range) :=
-        [others => 0.0];
-      Telemetry_RSS       : Sample_Array (Sample_Index'Range) :=
-        [others => 0.0];
-      Telemetry_RSS_Delta : Sample_Array (Sample_Index'Range) :=
-        [others => 0.0];
-      Telemetry_CPU_Total : Long_Float := 0.0;
-      Telemetry_Wall_Total : Long_Float := 0.0;
-      Telemetry_RSS_Start : Long_Float := 0.0;
-      Telemetry_RSS_Final : Long_Float := 0.0;
-      Telemetry_RSS_Peak  : Long_Float := 0.0;
+      Sample_Total               : Sample_Count := Sample_Count'First;
+      Iterations                 : Iteration_Count := 1;
+      Timer_Cost                 : Long_Float := 0.0;
+      Median_Timer_Cost          : Long_Float := 0.0;
+      Clock_Resolution           : Long_Float := 0.0;
+      Observed_Resolution        : Long_Float := 0.0;
+      Clock_Backend_Id           : Natural := 0;
+      Median_Batch               : Long_Float := 0.0;
+      Values                     : Sample_Array (Sample_Index'Range) := [others => 0.0];
+      Minimum                    : Long_Float := 0.0;
+      Maximum                    : Long_Float := 0.0;
+      Mean                       : Long_Float := 0.0;
+      Median                     : Long_Float := 0.0;
+      Standard_Deviation         : Long_Float := 0.0;
+      MAD                        : Long_Float := 0.0;
+      P95                        : Long_Float := 0.0;
+      P99                        : Long_Float := 0.0;
+      Confidence_Low             : Long_Float := 0.0;
+      Confidence_High            : Long_Float := 0.0;
+      CV_Percent                 : Long_Float := 0.0;
+      Outlier_Total              : Outlier_Counts;
+      Lag_One                    : Long_Float := 0.0;
+      Confidence_Level_Value     : Confidence_Percentage := 95.0;
+      Bootstrap_Resample_Total   : Bootstrap_Resample_Count := 2_000;
+      Random_Seed_Value          : Long_Long_Integer := 1;
+      Telemetry_Available        : Boolean := False;
+      Telemetry_CPU              : Sample_Array (Sample_Index'Range) := [others => 0.0];
+      Telemetry_RSS              : Sample_Array (Sample_Index'Range) := [others => 0.0];
+      Telemetry_RSS_Delta        : Sample_Array (Sample_Index'Range) := [others => 0.0];
+      Telemetry_CPU_Total        : Long_Float := 0.0;
+      Telemetry_Wall_Total       : Long_Float := 0.0;
+      Telemetry_RSS_Start        : Long_Float := 0.0;
+      Telemetry_RSS_Final        : Long_Float := 0.0;
+      Telemetry_RSS_Peak         : Long_Float := 0.0;
       Telemetry_RSS_Change_Total : Long_Float := 0.0;
-      Telemetry_RSS_Change_Peak : Long_Float := 0.0;
-      Environment_Data    : Environment_Report;
-      Foreign_CPU         : Sample_Array (Sample_Index'Range) :=
-        (others => 0.0);
-      Metric_Data         : Metric_Store_Handle;
-      Custom_Data         : Custom_Store_Handle;
+      Telemetry_RSS_Change_Peak  : Long_Float := 0.0;
+      Environment_Data           : Environment_Report;
+      Foreign_CPU                : Sample_Array (Sample_Index'Range) := (others => 0.0);
+      Metric_Data                : Metric_Store_Handle;
+      Custom_Data                : Custom_Store_Handle;
    end record;
 
    type Comparison is record
-      Reference_Data       : Measurement;
-      Contender_Data       : Measurement;
-      Speedup_Values       : Sample_Array (Sample_Index'Range) :=
-        [others => 0.0];
-      Reference_First_Order : Boolean_Sample_Array (Sample_Index'Range) :=
-        [others => False];
-      Geometric_Speedup    : Long_Float := 1.0;
-      Median_Speedup_Value : Long_Float := 1.0;
-      Speedup_CI_Low       : Long_Float := 1.0;
-      Speedup_CI_High      : Long_Float := 1.0;
-      Mean_Time_Difference : Long_Float := 0.0;
-      Contender_Win_Total  : Natural := 0;
-      Reference_Win_Total  : Natural := 0;
-      Tie_Total            : Natural := 0;
-      Reference_First      : Natural := 0;
-      Contender_First      : Natural := 0;
-      Order_Effect         : Long_Float := 0.0;
-      Lag_One              : Long_Float := 0.0;
-      Practical_Threshold  : Long_Float := 1.0;
-      Random_Seed_Value    : Long_Long_Integer := 1;
-      Verdict_Value        : Comparison_Verdict := Inconclusive;
-      Metric_Comparisons   : Metric_Comparison_Array :=
-        [others => (others => <>)];
-      Custom_Comparisons   : Custom_Comparison_Array :=
-        [others => (others => <>)];
+      Reference_Data        : Measurement;
+      Contender_Data        : Measurement;
+      Speedup_Values        : Sample_Array (Sample_Index'Range) := [others => 0.0];
+      Reference_First_Order : Boolean_Sample_Array (Sample_Index'Range) := [others => False];
+      Geometric_Speedup     : Long_Float := 1.0;
+      Median_Speedup_Value  : Long_Float := 1.0;
+      Speedup_CI_Low        : Long_Float := 1.0;
+      Speedup_CI_High       : Long_Float := 1.0;
+      Mean_Time_Difference  : Long_Float := 0.0;
+      Contender_Win_Total   : Natural := 0;
+      Reference_Win_Total   : Natural := 0;
+      Tie_Total             : Natural := 0;
+      Reference_First       : Natural := 0;
+      Contender_First       : Natural := 0;
+      Order_Effect          : Long_Float := 0.0;
+      Lag_One               : Long_Float := 0.0;
+      Practical_Threshold   : Long_Float := 1.0;
+      Random_Seed_Value     : Long_Long_Integer := 1;
+      Verdict_Value         : Comparison_Verdict := Inconclusive;
+      Metric_Comparisons    : Metric_Comparison_Array := [others => (others => <>)];
+      Custom_Comparisons    : Custom_Comparison_Array := [others => (others => <>)];
    end record;
 
-   type Measurement_Case_Array is
-     array (Comparison_Case_Index'Range) of Measurement;
-   type Comparison_Case_Array is
-     array (Comparison_Case_Index'Range) of Comparison;
+   type Measurement_Case_Array is array (Comparison_Case_Index'Range) of Measurement;
+   type Comparison_Case_Array is array (Comparison_Case_Index'Range) of Comparison;
 
    type Multi_Comparison is record
-      Case_Total : Comparison_Case_Count := Comparison_Case_Count'First;
-      Schedule_Policy : Shootout_Schedule_Policy := Balanced_Rounds;
-      Batch_Policy : Comparison_Batch_Policy := Equal_Time;
-      Data       : Measurement_Case_Array;
+      Case_Total        : Comparison_Case_Count := Comparison_Case_Count'First;
+      Schedule_Policy   : Shootout_Schedule_Policy := Balanced_Rounds;
+      Batch_Policy      : Comparison_Batch_Policy := Equal_Time;
+      Data              : Measurement_Case_Array;
       Against_Reference : Comparison_Case_Array;
    end record;
 
    --  @exclude
    --  @param Value Internal measurement reconstructed from a worker envelope.
    --  @return True when raw samples reproduce every derived statistic.
-   function Measurement_Statistics_Consistent
-     (Value : Measurement) return Boolean;
+   function Measurement_Statistics_Consistent (Value : Measurement) return Boolean;
 
    --  @exclude
    --  @param Value Internal comparison reconstructed from a worker envelope.
    --  @return True when paired samples reproduce every derived statistic.
-   function Comparison_Statistics_Consistent
-     (Value : Comparison) return Boolean;
+   function Comparison_Statistics_Consistent (Value : Comparison) return Boolean;
 end Flyology_Bench;

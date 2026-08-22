@@ -12,10 +12,7 @@ procedure Pool_Growth_Smoke is
 
    Initial_Size : constant Groups.Loop_Pool_Size := 3;
    Grown_Size   : constant Groups.Loop_Pool_Size := 7;
-   type Group_Counts is
-     array
-       (Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1))
-       of Natural;
+   type Group_Counts is array (Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1)) of Natural;
 
    protected Results is
       procedure Resident_Started (Passed : Boolean);
@@ -100,7 +97,8 @@ procedure Pool_Growth_Smoke is
          end loop;
       end Wait_Automatic;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Results;
 
    task type Resident_Task is
@@ -152,9 +150,7 @@ begin
    if Groups.Configured_Pool_Size /= Initial_Size then
       raise Program_Error with "unexpected initial pool size";
    end if;
-   for Group in
-     Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1)
-   loop
+   for Group in Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1) loop
       if Observe.Snapshot (Group, Snapshot) then
          raise Program_Error with "pool-growth inspection started a loop";
       end if;
@@ -175,8 +171,7 @@ begin
       end;
 
       if Groups.Configured_Pool_Size /= Grown_Size
-        or else not Groups.In_Configured_Pool
-          (Groups.Group_Id (Grown_Size - 1))
+        or else not Groups.In_Configured_Pool (Groups.Group_Id (Grown_Size - 1))
         or else Groups.In_Configured_Pool (Groups.Group_Id (Grown_Size))
         or else Topology.Shard_For_Hash (6) /= 6
         or else Topology.Shard_For_Hash (7) /= 0
@@ -190,9 +185,7 @@ begin
          raise Program_Error with "pool growth was not monotonic and idempotent";
       end if;
 
-      for Group in
-        Groups.Group_Id range
-          Groups.Group_Id (Initial_Size) .. Groups.Group_Id (Grown_Size - 1)
+      for Group in Groups.Group_Id range Groups.Group_Id (Initial_Size) .. Groups.Group_Id (Grown_Size - 1)
       loop
          if Observe.Snapshot (Group, Snapshot) then
             raise Program_Error with "pool growth eagerly started a loop";
@@ -216,9 +209,7 @@ begin
       raise Program_Error with "pool-growth task semantics failed";
    end if;
 
-   for Group in
-     Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1)
-   loop
+   for Group in Groups.Group_Id range 0 .. Groups.Group_Id (Grown_Size - 1) loop
       if not Observe.Snapshot (Group, Snapshot) then
          raise Program_Error with "grown pool did not place automatic work";
       end if;

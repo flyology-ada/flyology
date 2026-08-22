@@ -72,7 +72,8 @@ project Flyology_Numa is
    for Library_Kind use Library_Type;
 
    package Compiler is
-      for Default_Switches ("Ada") use Flyology_Numa_Config.Ada_Compiler_Switches;
+      for Default_Switches ("Ada") use
+        Flyology_Numa_Config.Ada_Compiler_Switches & ("-gnatyM110");
    end Compiler;
 
    package Binder is
@@ -89,5 +90,14 @@ project Flyology_Numa is
       for Output_Dir ("html") use "docs/api";
       for Resources_Dir ("html") use "../docs/gnatdoc-numa/html";
    end Documentation;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
 
 end Flyology_Numa;

@@ -21,7 +21,8 @@ package body Semantic_Conformance_Cases is
          null;
       end Wait;
 
-      function Is_Set return Boolean is (Raised);
+      function Is_Set return Boolean
+      is (Raised);
    end Signal;
 
    function Run return Results is
@@ -68,8 +69,7 @@ package body Semantic_Conformance_Cases is
          begin
             null;
          end;
-         Outcome (Rendezvous_Exception) :=
-           Acceptor_Caught and Caller_Caught;
+         Outcome (Rendezvous_Exception) := Acceptor_Caught and Caller_Caught;
       end;
 
       --  A task whose declarative part raises has failed activation.  The
@@ -81,7 +81,8 @@ package body Semantic_Conformance_Cases is
          Activated : Boolean := False;
 
          type Probe is new Ada.Finalization.Controlled with null record;
-         overriding procedure Finalize (Object : in out Probe);
+         overriding
+         procedure Finalize (Object : in out Probe);
 
          procedure Finalize (Object : in out Probe) is
             pragma Unreferenced (Object);
@@ -115,8 +116,7 @@ package body Semantic_Conformance_Cases is
             when Tasking_Error =>
                null;
          end;
-         Outcome (Activation_Failure_Cleanup) :=
-           not Activated and not Body_Ran and Finalized.Is_Set;
+         Outcome (Activation_Failure_Cleanup) := not Activated and not Body_Ran and Finalized.Is_Set;
       end;
 
       --  WITH ABORT preserves the timed caller's ability to cancel after the
@@ -170,18 +170,17 @@ package body Semantic_Conformance_Cases is
             null;
          end;
          Server.Stop;
-         Outcome (Requeue_With_Abort) :=
-           Timed_Out and Requeued.Is_Set and not Ghost_Call;
+         Outcome (Requeue_With_Abort) := Timed_Out and Requeued.Is_Set and not Ghost_Call;
       end;
 
       --  Without WITH ABORT, accepting the original entry makes a timed call
       --  irrevocable.  The delay expires while the call is requeued, but the
       --  caller completes through the second rendezvous instead.
       declare
-         Ready       : Signal;
-         Requeued    : Signal;
-         Returned    : Boolean := False;
-         Timed_Out   : Boolean := False;
+         Ready     : Signal;
+         Requeued  : Signal;
+         Returned  : Boolean := False;
+         Timed_Out : Boolean := False;
 
          task Server is
             pragma Task_Info (Server_Model);
@@ -219,8 +218,7 @@ package body Semantic_Conformance_Cases is
          begin
             null;
          end;
-         Outcome (Requeue_Without_Abort) :=
-           Returned and not Timed_Out and Requeued.Is_Set;
+         Outcome (Requeue_Without_Abort) := Returned and not Timed_Out and Requeued.Is_Set;
       end;
 
       return Outcome;

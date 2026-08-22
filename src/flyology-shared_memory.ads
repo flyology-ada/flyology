@@ -11,6 +11,7 @@ with System;
 --  Create, open, close, unlink, map, unmap, and flush are synchronous metadata
 --  or virtual-memory operations. They may occupy a lightweight task's event-
 --  loop pthread; use a native-task boundary when that latency is unacceptable.
+
 package Flyology.Shared_Memory is
 
    use type Interfaces.C.int;
@@ -37,8 +38,7 @@ package Flyology.Shared_Memory is
    --  @enum File_Backed Regular file opened without following symlinks where
    --     the host supports that flag
    --  @enum Received_Capability Descriptor received through SCM_RIGHTS
-   type Backing_Kind is
-     (Anonymous_Capability, Named_POSIX, File_Backed, Received_Capability);
+   type Backing_Kind is (Anonymous_Capability, Named_POSIX, File_Backed, Received_Capability);
 
    --  Security properties verified on the live descriptor.
    --  @field Close_On_Exec FD_CLOEXEC is set
@@ -51,12 +51,12 @@ package Flyology.Shared_Memory is
    --     Linux memfd objects are capability-only but normally report this as
    --     False because their inode mode bits are not the access boundary
    type Security_Properties is record
-      Close_On_Exec            : Boolean := False;
-      Size_Immutable           : Boolean := False;
-      No_Execute_Seal          : Boolean := False;
+      Close_On_Exec             : Boolean := False;
+      Size_Immutable            : Boolean := False;
+      No_Execute_Seal           : Boolean := False;
       No_Execute_Seal_Supported : Boolean := False;
-      No_Symlink_Follow        : Boolean := False;
-      Owner_Only_Permissions   : Boolean := False;
+      No_Symlink_Follow         : Boolean := False;
+      Owner_Only_Permissions    : Boolean := False;
    end record;
 
    --  Result of opening a namespace object that another process may still be
@@ -65,8 +65,7 @@ package Flyology.Shared_Memory is
    --  @enum Opened_Existing An existing object passed exact-size validation
    --  @enum Initialization_In_Progress The object exists but still has zero
    --     length; retry only at an application-selected scheduling point
-   type Namespace_Open_Result is
-     (Created_New, Opened_Existing, Initialization_In_Progress);
+   type Namespace_Open_Result is (Created_New, Opened_Existing, Initialization_In_Progress);
 
    --  Limited owner of one backing descriptor. Close is independent of any
    --  mappings already created from the descriptor. Finalization attempts a
@@ -91,9 +90,7 @@ package Flyology.Shared_Memory is
    --  @exception Security_Error A required seal or descriptor property fails
    --  @exception Operating_System_Error Creation or exact sizing fails
    procedure Create_Anonymous
-     (Item                    : in out Backing_Object;
-      Length                  : Byte_Length;
-      Require_No_Execute_Seal : Boolean := False);
+     (Item : in out Backing_Object; Length : Byte_Length; Require_No_Execute_Seal : Boolean := False);
 
    --  Exclusively create and exactly size a named POSIX shared-memory object.
    --  The name must begin with one slash and contain no other slash. Close
@@ -168,10 +165,7 @@ package Flyology.Shared_Memory is
    --  @exception Constraint_Error Path or length is invalid
    --  @exception Validation_Error Object type or size does not match
    --  @exception Operating_System_Error Opening or validation fails
-   procedure Open_File
-     (Item            : in out Backing_Object;
-      Path            : String;
-      Expected_Length : Byte_Length);
+   procedure Open_File (Item : in out Backing_Object; Path : String; Expected_Length : Byte_Length);
 
    --  Remove Item's named POSIX object or file namespace entry. Where the host
    --  exposes stable object identity, reject a name that no longer identifies
@@ -246,9 +240,7 @@ package Flyology.Shared_Memory is
    --  @param Item Live mapping borrowed by Region
    --  @param Region Detached region view to attach
    --  @exception Validation_Error Item is not mapped
-   procedure Attach_Region
-     (Item   : Mapping;
-      Region : in out Flyology.Data_Structures.Regions.View);
+   procedure Attach_Region (Item : Mapping; Region : in out Flyology.Data_Structures.Regions.View);
 
    --  Unmap Item. The operation is idempotent and independent of the backing
    --  descriptor, but all borrowed views must already be detached.
@@ -270,30 +262,31 @@ private
    package C renames Interfaces.C;
    package Unbounded renames Ada.Strings.Unbounded;
 
-   type Backing_Object is limited new Ada.Finalization.Limited_Controlled with
-   record
-      Descriptor       : C.int := -1;
-      Length_Value     : Byte_Length := 0;
-      Kind_Value       : Backing_Kind := Anonymous_Capability;
-      Property_Value   : Security_Properties := (others => False);
-      Namespace_Value  : Unbounded.Unbounded_String;
+   type Backing_Object is limited new Ada.Finalization.Limited_Controlled with record
+      Descriptor         : C.int := -1;
+      Length_Value       : Byte_Length := 0;
+      Kind_Value         : Backing_Kind := Anonymous_Capability;
+      Property_Value     : Security_Properties := (others => False);
+      Namespace_Value    : Unbounded.Unbounded_String;
       Namespace_Is_POSIX : Boolean := False;
-      May_Initialize   : Boolean := False;
+      May_Initialize     : Boolean := False;
    end record;
 
    --  @exclude Controlled finalization hook
    --  @param Item Descriptor owner finalized without raising
-   overriding procedure Finalize (Item : in out Backing_Object);
+   overriding
+   procedure Finalize (Item : in out Backing_Object);
 
    type Mapping_State is new Ada.Finalization.Limited_Controlled with record
-      Base         : System.Address := System.Null_Address;
-      Length_Value : Byte_Length := 0;
+      Base           : System.Address := System.Null_Address;
+      Length_Value   : Byte_Length := 0;
       May_Initialize : Boolean := False;
    end record;
 
    --  @exclude Controlled finalization hook
    --  @param Item Mapping state finalized without raising
-   overriding procedure Finalize (Item : in out Mapping_State);
+   overriding
+   procedure Finalize (Item : in out Mapping_State);
 
    type Mapping is limited record
       State : Mapping_State;

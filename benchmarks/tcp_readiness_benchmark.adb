@@ -33,25 +33,31 @@ procedure TCP_Readiness_Benchmark is
       Result : Stream_Element_Array (1 .. Value'Length);
    begin
       for Index in Value'Range loop
-         Result
-           (Stream_Element_Offset (Index - Value'First + 1)) :=
-             Stream_Element (Character'Pos (Value (Index)));
+         Result (Stream_Element_Offset (Index - Value'First + 1)) :=
+           Stream_Element (Character'Pos (Value (Index)));
       end loop;
       return Result;
    end Bytes;
 
    Connections_To_Accept : constant Connection_Count := Parse_Connections;
-   Listener : Sockets.Socket_Type;
-   Address  : Sockets.Endpoint;
-   Manager  : aliased Connections.Server (Capacity => Connections_To_Accept);
-   Stop     : aliased Flyology.Cancellation.Token;
+   Listener              : Sockets.Socket_Type;
+   Address               : Sockets.Endpoint;
+   Manager               : aliased Connections.Server (Capacity => Connections_To_Accept);
+   Stop                  : aliased Flyology.Cancellation.Token;
 
    Response : constant Stream_Element_Array :=
      Bytes
-       ("HTTP/1.1 200 OK" & ASCII.CR & ASCII.LF
-        & "Content-Length: 0" & ASCII.CR & ASCII.LF
-        & "Connection: keep-alive" & ASCII.CR & ASCII.LF
-        & ASCII.CR & ASCII.LF);
+       ("HTTP/1.1 200 OK"
+        & ASCII.CR
+        & ASCII.LF
+        & "Content-Length: 0"
+        & ASCII.CR
+        & ASCII.LF
+        & "Connection: keep-alive"
+        & ASCII.CR
+        & ASCII.LF
+        & ASCII.CR
+        & ASCII.LF);
 
    type Group_Count_Array is array (Groups.Shared_Group_Id) of Natural;
 
@@ -101,10 +107,12 @@ procedure TCP_Readiness_Benchmark is
          null;
       end Await_Finished;
 
-      function Request_Count return Natural is (Requests);
-      function Failure_Count return Natural is (Failures);
-      function Group_Count
-        (Group : Groups.Shared_Group_Id) return Natural is (Counts (Group));
+      function Request_Count return Natural
+      is (Requests);
+      function Failure_Count return Natural
+      is (Failures);
+      function Group_Count (Group : Groups.Shared_Group_Id) return Natural
+      is (Counts (Group));
    end Progress;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -116,18 +124,18 @@ procedure TCP_Readiness_Benchmark is
 
 begin
    Sockets.Create_Socket (Listener, Sockets.IPv4, Sockets.Socket_Stream);
-   Sockets.Set_Socket_Option
-     (Listener, (Name => Sockets.Reuse_Address, Enabled => True));
-   Sockets.Bind_Socket
-     (Listener,
-      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+   Sockets.Set_Socket_Option (Listener, (Name => Sockets.Reuse_Address, Enabled => True));
+   Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
    Sockets.Listen_Socket (Listener, Connections_To_Accept);
    Address := Sockets.Get_Socket_Name (Listener);
 
    Put_Line
-     ("ready port=" & Sockets.Port'Image (Address.Port)
-      & " connections=" & Connection_Count'Image (Connections_To_Accept)
-      & " loops=" & Groups.Loop_Pool_Size'Image (Groups.Configured_Pool_Size));
+     ("ready port="
+      & Sockets.Port'Image (Address.Port)
+      & " connections="
+      & Connection_Count'Image (Connections_To_Accept)
+      & " loops="
+      & Groups.Loop_Pool_Size'Image (Groups.Configured_Pool_Size));
    Ada.Text_IO.Flush;
 
    declare
@@ -137,31 +145,33 @@ begin
       end Handler;
 
       task body Handler is
-         Item       : Connections.Connection (Manager'Access);
-         Peer       : Sockets.Endpoint;
-         Buffer     : Stream_Element_Array (1 .. 4_096);
-         Last       : Stream_Element_Offset;
-         Matched    : Natural range 0 .. 3 := 0;
-         Requests   : Natural := 0;
+         Item     : Connections.Connection (Manager'Access);
+         Peer     : Sockets.Endpoint;
+         Buffer   : Stream_Element_Array (1 .. 4_096);
+         Last     : Stream_Element_Offset;
+         Matched  : Natural range 0 .. 3 := 0;
+         Requests : Natural := 0;
 
          procedure Observe_Byte (Value : Stream_Element) is
          begin
             case Matched is
                when 0 =>
                   Matched := (if Value = 13 then 1 else 0);
+
                when 1 =>
                   if Value = 10 then
                      Matched := 2;
                   elsif Value /= 13 then
                      Matched := 0;
                   end if;
+
                when 2 =>
                   Matched := (if Value = 13 then 3 else 0);
+
                when 3 =>
                   if Value = 10 then
                      Matched := 0;
-                     Item.Send_All
-                       (Response, Timeout => 30.0, Token => Stop'Access);
+                     Item.Send_All (Response, Timeout => 30.0, Token => Stop'Access);
                      Requests := Requests + 1;
                   elsif Value = 13 then
                      Matched := 1;
@@ -171,13 +181,10 @@ begin
             end case;
          end Observe_Byte;
       begin
-         Connections.Accept_Connection
-           (Manager, Listener, Item, Peer,
-            Timeout => 30.0, Token => Stop'Access);
+         Connections.Accept_Connection (Manager, Listener, Item, Peer, Timeout => 30.0, Token => Stop'Access);
          Progress.Accepted (Groups.Current);
          loop
-            Item.Receive
-              (Buffer, Last, Timeout => 30.0, Token => Stop'Access);
+            Item.Receive (Buffer, Last, Timeout => 30.0, Token => Stop'Access);
             exit when Last < Buffer'First;
             for Index in Buffer'First .. Last loop
                Observe_Byte (Buffer (Index));
@@ -210,19 +217,25 @@ begin
       Manager.Request_Shutdown;
       Manager.Await_Drained;
       Put_Line
-        ("complete requests=" & Natural'Image (Progress.Request_Count)
-         & " failures=" & Natural'Image (Progress.Failure_Count)
-         & " elapsed_seconds=" & Duration'Image (Elapsed));
-      for Group in Groups.Shared_Group_Id range
-        0 .. Groups.Shared_Group_Id (Pool - 1)
-      loop
+        ("complete requests="
+         & Natural'Image (Progress.Request_Count)
+         & " failures="
+         & Natural'Image (Progress.Failure_Count)
+         & " elapsed_seconds="
+         & Duration'Image (Elapsed));
+      for Group in Groups.Shared_Group_Id range 0 .. Groups.Shared_Group_Id (Pool - 1) loop
          if Observe.Snapshot (Group, Snapshot) then
             Put_Line
-              ("group=" & Groups.Group_Id'Image (Group)
-               & " connections=" & Natural'Image (Progress.Group_Count (Group))
-               & " dispatches=" & Observe.Counter'Image (Snapshot.Dispatches)
-               & " poll_batches=" & Observe.Counter'Image (Snapshot.Poll_Batches)
-               & " poll_events=" & Observe.Counter'Image (Snapshot.Poll_Events));
+              ("group="
+               & Groups.Group_Id'Image (Group)
+               & " connections="
+               & Natural'Image (Progress.Group_Count (Group))
+               & " dispatches="
+               & Observe.Counter'Image (Snapshot.Dispatches)
+               & " poll_batches="
+               & Observe.Counter'Image (Snapshot.Poll_Batches)
+               & " poll_events="
+               & Observe.Counter'Image (Snapshot.Poll_Events));
          end if;
       end loop;
       if Progress.Failure_Count /= 0 then

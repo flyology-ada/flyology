@@ -1,7 +1,9 @@
 with Flyology.Execution_Groups;
 with Interfaces;
 
-package Flyology.Observability with Preelaborate is
+package Flyology.Observability
+  with Preelaborate
+is
 
    use type Interfaces.Unsigned_64;
 
@@ -34,26 +36,21 @@ package Flyology.Observability with Preelaborate is
    --  @enum Task_Running The task is executing on its event loop
    --  @enum Task_Migrating The task is transferring between groups
    --  @enum Task_Finished The task body finished and awaits reap
-   type Task_State is
-     (Task_Ready,
-      Task_Waiting,
-      Task_Running,
-      Task_Migrating,
-      Task_Finished)
-     with Convention => C;
+   type Task_State is (Task_Ready, Task_Waiting, Task_Running, Task_Migrating, Task_Finished)
+   with Convention => C;
 
    --  Bit set copied with a lightweight task snapshot.
    type Task_Flags is mod 2**32 with Size => 32, Convention => C;
    --  The task holds at least one thread pin.
-   Task_Pinned_Flag : constant Task_Flags := 2#000001#;
+   Task_Pinned_Flag            : constant Task_Flags := 2#000001#;
    --  The task is registered in the group deadline heap.
-   Task_Timer_Wait_Flag : constant Task_Flags := 2#000010#;
+   Task_Timer_Wait_Flag        : constant Task_Flags := 2#000010#;
    --  The task is waiting for descriptor readiness.
-   Task_Descriptor_Wait_Flag : constant Task_Flags := 2#000100#;
+   Task_Descriptor_Wait_Flag   : constant Task_Flags := 2#000100#;
    --  The task owns an in-flight or queued file request.
-   Task_File_Wait_Flag : constant Task_Flags := 2#001000#;
+   Task_File_Wait_Flag         : constant Task_Flags := 2#001000#;
    --  The task's file request is queued for kernel submission.
-   Task_File_Pending_Flag : constant Task_Flags := 2#010000#;
+   Task_File_Pending_Flag      : constant Task_Flags := 2#010000#;
    --  Reap was requested while the fiber was still running or migrating.
    Task_Destroy_Requested_Flag : constant Task_Flags := 2#100000#;
 
@@ -70,19 +67,17 @@ package Flyology.Observability with Preelaborate is
       Base_Priority      : Interfaces.Integer_32 := 0;
       Flags              : Task_Flags := 0;
       Stack_Usable_Bytes : Counter := 0;
-   end record with Convention => C;
+   end record
+   with Convention => C;
 
    --  Caller-owned output buffer for bounded lightweight task enumeration.
-   type Task_Snapshot_Array is array (Positive range <>) of Task_Snapshot
-     with Convention => C;
+   type Task_Snapshot_Array is array (Positive range <>) of Task_Snapshot with Convention => C;
 
    --  Test one flag in a copied task snapshot.
    --  @param Item Snapshot to inspect
    --  @param Flag Flag value to test
    --  @return True when Flag is set in Item
-   function Has_Flag
-     (Item : Task_Snapshot;
-      Flag : Task_Flags) return Boolean
+   function Has_Flag (Item : Task_Snapshot; Flag : Task_Flags) return Boolean
    is ((Item.Flags and Flag) /= 0);
 
    --  Lifecycle of one event-loop scheduler thread.
@@ -98,12 +93,7 @@ package Flyology.Observability with Preelaborate is
    --  @enum Context_Switch_Failure A fiber context transition failed
    --  @enum Fork_Child_Use Unsupported runtime use occurred after fork
    type Fatal_Context is
-     (No_Fatal,
-      Scheduler_Invariant,
-      Mutex_Failure,
-      Poller_Failure,
-      Context_Switch_Failure,
-      Fork_Child_Use);
+     (No_Fatal, Scheduler_Invariant, Mutex_Failure, Poller_Failure, Context_Switch_Failure, Fork_Child_Use);
 
    --  Consistent queue state plus cumulative counters for one permanent group.
    --  @field Group Execution group represented by the snapshot
@@ -212,9 +202,7 @@ package Flyology.Observability with Preelaborate is
    --  @param Result Snapshot written when the group exists
    --  @return True when Group has been created; False otherwise
    --  @exception Program_Error Runtime and library observability ABIs differ
-   function Snapshot
-     (Group  : Group_Id;
-      Result : out Group_Snapshot) return Boolean;
+   function Snapshot (Group : Group_Id; Result : out Group_Snapshot) return Boolean;
 
    --  Copy a bounded prefix of Group's lightweight task membership while
    --  holding the topology and selected group scheduler locks. No allocation
@@ -231,19 +219,15 @@ package Flyology.Observability with Preelaborate is
    --  @exception Constraint_Error Items is empty
    --  @exception Program_Error Runtime and library task snapshot ABIs differ
    function Snapshot_Tasks
-     (Group : Group_Id;
-      Items : in out Task_Snapshot_Array;
-      Count : out Natural;
-      Total : out Counter) return Boolean;
+     (Group : Group_Id; Items : in out Task_Snapshot_Array; Count : out Natural; Total : out Counter)
+      return Boolean;
 
    --  Test whether dispatch or polling counters changed between snapshots.
    --  This avoids adding a clock read to each scheduler dispatch.
    --  @param Earlier Older snapshot of a group
    --  @param Later Newer snapshot of the same group
    --  @return True when dispatches, poll batches, or poll events advanced
-   function Made_Progress
-     (Earlier : Group_Snapshot;
-      Later   : Group_Snapshot) return Boolean
+   function Made_Progress (Earlier : Group_Snapshot; Later : Group_Snapshot) return Boolean
    is (Later.Dispatches /= Earlier.Dispatches
        or else Later.Poll_Batches /= Earlier.Poll_Batches
        or else Later.Poll_Events /= Earlier.Poll_Events);

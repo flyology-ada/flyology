@@ -16,34 +16,35 @@ with Interfaces.C;
 --  ordinary or paired case, and writes one bounded binary result envelope to
 --  a dedicated descriptor.  Standard output and error are separate bounded
 --  diagnostics and are never parsed as protocol data.
+
 package Flyology_Bench.Workers is
 
    --  Current binary envelope schema.
-   Protocol_Version : constant := 3;
+   Protocol_Version                 : constant := 3;
    --  Largest encoded stable case identity.
-   Maximum_Identity_Length : constant := 512;
+   Maximum_Identity_Length          : constant := 512;
    --  Largest effective or edited environment entry count.
-   Maximum_Environment_Entries : constant := 256;
+   Maximum_Environment_Entries      : constant := 256;
    --  Largest environment variable name.
-   Maximum_Environment_Name_Length : constant := 255;
+   Maximum_Environment_Name_Length  : constant := 255;
    --  Largest environment variable value.
    Maximum_Environment_Value_Length : constant := 16_384;
    --  Largest complete environment including terminators.
-   Maximum_Environment_Bytes : constant := 65_536;
+   Maximum_Environment_Bytes        : constant := 65_536;
    --  Largest encoded benchmark configuration carried in internal argv.
-   Maximum_Configuration_Bytes : constant := 16_384;
+   Maximum_Configuration_Bytes      : constant := 16_384;
    --  Largest host-lock path carried to a worker.
-   Maximum_Host_Lock_Path_Length : constant := 4_096;
+   Maximum_Host_Lock_Path_Length    : constant := 4_096;
    --  Largest progress identity carried to a worker.
-   Maximum_Progress_Name_Length : constant := 512;
+   Maximum_Progress_Name_Length     : constant := 512;
    --  Largest exception identity carried in a result envelope.
-   Maximum_Exception_Name_Length : constant := 4_096;
+   Maximum_Exception_Name_Length    : constant := 4_096;
    --  Largest exception or configuration message carried in an envelope.
-   Maximum_Result_Message_Length : constant := 16_384;
+   Maximum_Result_Message_Length    : constant := 16_384;
    --  Largest retained diagnostic stream.
-   Maximum_Diagnostic_Bytes : constant := 1_048_576;
+   Maximum_Diagnostic_Bytes         : constant := 1_048_576;
    --  Largest repetition request accepted by one Run call.
-   Maximum_Worker_Repetitions : constant := 256;
+   Maximum_Worker_Repetitions       : constant := 256;
 
    --  Raised when parent launch policy or worker request data is invalid.
    Configuration_Error : exception;
@@ -117,10 +118,7 @@ package Flyology_Bench.Workers is
    --  @param Item Policy to update.
    --  @param Name Exact environment variable name.
    --  @param Value Exact environment variable value.
-   procedure Add
-     (Item : in out Environment;
-      Name : String;
-      Value : String);
+   procedure Add (Item : in out Environment; Name : String; Value : String);
 
    --  Remove one name after the selected base policy is constructed.
    --  Duplicate removals and a name also added are rejected.
@@ -148,8 +146,7 @@ package Flyology_Bench.Workers is
    type Directory_Mode is (Inherit_Directory, Use_Directory);
 
    --  Number of independent worker processes requested for one case.
-   subtype Repetition_Count is
-     Positive range 1 .. Maximum_Worker_Repetitions;
+   subtype Repetition_Count is Positive range 1 .. Maximum_Worker_Repetitions;
    --  Retained byte capacity for each diagnostic stream.
    subtype Diagnostic_Limit is Natural range 0 .. Maximum_Diagnostic_Bytes;
 
@@ -172,9 +169,7 @@ package Flyology_Bench.Workers is
       Directory           : Directory_Mode := Inherit_Directory;
       Working_Directory   : Ada.Strings.Unbounded.Unbounded_String;
    end record
-     with Dynamic_Predicate =>
-       Launch_Configuration.Total_Timeout
-         >= Launch_Configuration.Startup_Timeout;
+   with Dynamic_Predicate => Launch_Configuration.Total_Timeout >= Launch_Configuration.Startup_Timeout;
 
    --  Validated worker-side request recovered from the internal argv protocol.
    type Worker_Request is private;
@@ -189,9 +184,7 @@ package Flyology_Bench.Workers is
    --  @param Parent_Seed Suite-level deterministic seed.
    --  @param Repetition One-based independent process index.
    --  @return Stable nonzero worker seed.
-   function Derive_Seed
-     (Parent_Seed : Long_Long_Integer;
-      Repetition : Positive) return Long_Long_Integer;
+   function Derive_Seed (Parent_Seed : Long_Long_Integer; Repetition : Positive) return Long_Long_Integer;
 
    --  Spawn exactly Results'Length fresh processes.  Results'Length must equal
    --  Launch.Repetitions.  Executable is invoked directly and must contain a
@@ -264,13 +257,11 @@ package Flyology_Bench.Workers is
    --  Return the effective strict-mode locale policy.
    --  @param Result Worker process result.
    --  @return Clear or preserve locale policy supplied to the worker.
-   function Environment_Locale_Policy
-     (Result : Worker_Result) return Locale_Policy;
+   function Environment_Locale_Policy (Result : Worker_Result) return Locale_Policy;
    --  Return the effective strict-mode timezone policy.
    --  @param Result Worker process result.
    --  @return Clear or preserve timezone policy supplied to the worker.
-   function Environment_Timezone_Policy
-     (Result : Worker_Result) return Timezone_Policy;
+   function Environment_Timezone_Policy (Result : Worker_Result) return Timezone_Policy;
    --  Return a nonzero ordinary exit code, or zero when not applicable.
    --  @param Result Worker process result.
    --  @return Portable exit code.
@@ -337,8 +328,7 @@ package Flyology_Bench.Workers is
    --  Return the worker's derived seed.
    --  @param Request Validated worker request.
    --  @return Deterministic per-process seed.
-   function Requested_Seed
-     (Request : Worker_Request) return Long_Long_Integer;
+   function Requested_Seed (Request : Worker_Request) return Long_Long_Integer;
 
    --  Rebuild the serializable measurement policy in the worker.  Process-
    --  local callback values come from Template; no access value crosses exec.
@@ -346,9 +336,7 @@ package Flyology_Bench.Workers is
    --  @param Template Worker-local callback sources.
    --  @return Reconstructed measurement configuration.
    function Requested_Configuration
-     (Request  : Worker_Request;
-      Template : Configuration := Default_Configuration)
-      return Configuration;
+     (Request : Worker_Request; Template : Configuration := Default_Configuration) return Configuration;
 
    --  Write the startup marker after CLI/configuration validation and before
    --  host setup, warmup, calibration, or timed work.
@@ -359,42 +347,33 @@ package Flyology_Bench.Workers is
    --  most once and terminates protocol ownership for this worker.
    --  @param Request Validated worker request.
    --  @param Result Completed ordinary measurement.
-   procedure Return_Result
-     (Request : Worker_Request;
-      Result  : Measurement);
+   procedure Return_Result (Request : Worker_Request; Result : Measurement);
    --  Write one complete paired result envelope.
    --  @param Request Validated worker request.
    --  @param Result Completed paired comparison.
-   procedure Return_Result
-     (Request : Worker_Request;
-      Result  : Comparison);
+   procedure Return_Result (Request : Worker_Request; Result : Comparison);
 
    --  Return explicit non-success envelopes without mixing diagnostics into
    --  the result stream.
    --  @param Request Validated worker request.
    --  @param Name Exception identity.
    --  @param Message Bounded exception message.
-   procedure Return_Benchmark_Exception
-     (Request : Worker_Request;
-      Name    : String;
-      Message : String);
+   procedure Return_Benchmark_Exception (Request : Worker_Request; Name : String; Message : String);
    --  Return an explicit invalid-configuration envelope.
    --  @param Request Validated worker request.
    --  @param Message Configuration diagnostic.
-   procedure Return_Invalid_Configuration
-     (Request : Worker_Request;
-      Message : String);
+   procedure Return_Invalid_Configuration (Request : Worker_Request; Message : String);
 
 private
-   package String_Vectors is new Ada.Containers.Indefinite_Vectors
-     (Index_Type => Positive, Element_Type => String);
+   package String_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => String);
 
    type Environment_Entry is record
       Name  : Ada.Strings.Unbounded.Unbounded_String;
       Value : Ada.Strings.Unbounded.Unbounded_String;
    end record;
-   package Environment_Vectors is new Ada.Containers.Indefinite_Vectors
-     (Index_Type => Positive, Element_Type => Environment_Entry);
+   package Environment_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => Environment_Entry);
 
    type Environment is record
       Selected_Mode     : Environment_Mode := Strict_Mode;
@@ -405,42 +384,42 @@ private
    end record;
 
    type Worker_Request is record
-      Identity_Value    : Ada.Strings.Unbounded.Unbounded_String;
-      Kind_Value        : Result_Kind := Ordinary_Measurement;
-      Repetition_Value  : Positive := 1;
-      Seed_Value        : Long_Long_Integer := 1;
-      Config_Value      : Configuration := Default_Configuration;
-      Environment_Hash  : Interfaces.Unsigned_64 := 0;
+      Identity_Value               : Ada.Strings.Unbounded.Unbounded_String;
+      Kind_Value                   : Result_Kind := Ordinary_Measurement;
+      Repetition_Value             : Positive := 1;
+      Seed_Value                   : Long_Long_Integer := 1;
+      Config_Value                 : Configuration := Default_Configuration;
+      Environment_Hash             : Interfaces.Unsigned_64 := 0;
       Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
-      Configuration_Hash : Interfaces.Unsigned_64 := 0;
-      Policy_Value      : Environment_Mode := Strict_Mode;
-      Locale_Value      : Locale_Policy := Clear_Locale;
-      Timezone_Value    : Timezone_Policy := Clear_Timezone;
+      Configuration_Hash           : Interfaces.Unsigned_64 := 0;
+      Policy_Value                 : Environment_Mode := Strict_Mode;
+      Locale_Value                 : Locale_Policy := Clear_Locale;
+      Timezone_Value               : Timezone_Policy := Clear_Timezone;
    end record;
 
    type Worker_Result is record
-      Outcome_Value     : Worker_Outcome := Spawn_Failure;
-      Kind_Value        : Result_Kind := Ordinary_Measurement;
-      Identity_Value    : Ada.Strings.Unbounded.Unbounded_String;
-      Repetition_Value  : Positive := 1;
-      Seed_Value        : Long_Long_Integer := 1;
-      Pid_Value         : Interfaces.C.int := Interfaces.C.int (-1);
-      Spawn_Time        : Long_Float := 0.0;
-      Setup_Time        : Long_Float := 0.0;
+      Outcome_Value                : Worker_Outcome := Spawn_Failure;
+      Kind_Value                   : Result_Kind := Ordinary_Measurement;
+      Identity_Value               : Ada.Strings.Unbounded.Unbounded_String;
+      Repetition_Value             : Positive := 1;
+      Seed_Value                   : Long_Long_Integer := 1;
+      Pid_Value                    : Interfaces.C.int := Interfaces.C.int (-1);
+      Spawn_Time                   : Long_Float := 0.0;
+      Setup_Time                   : Long_Float := 0.0;
       Environment_Fingerprint_Hash : Interfaces.Unsigned_64 := 0;
-      Policy_Value      : Environment_Mode := Strict_Mode;
-      Locale_Value      : Locale_Policy := Clear_Locale;
-      Timezone_Value    : Timezone_Policy := Clear_Timezone;
-      Exit_Code_Value   : Natural := 0;
-      Signal_Value      : Natural := 0;
-      Forced_Value      : Boolean := False;
-      Reason_Value      : Ada.Strings.Unbounded.Unbounded_String;
-      Output_Value      : Ada.Strings.Unbounded.Unbounded_String;
-      Error_Value       : Ada.Strings.Unbounded.Unbounded_String;
-      Output_Omitted    : Natural := 0;
-      Error_Omitted     : Natural := 0;
-      Measurement_Data  : Measurement;
-      Comparison_Data   : Comparison;
+      Policy_Value                 : Environment_Mode := Strict_Mode;
+      Locale_Value                 : Locale_Policy := Clear_Locale;
+      Timezone_Value               : Timezone_Policy := Clear_Timezone;
+      Exit_Code_Value              : Natural := 0;
+      Signal_Value                 : Natural := 0;
+      Forced_Value                 : Boolean := False;
+      Reason_Value                 : Ada.Strings.Unbounded.Unbounded_String;
+      Output_Value                 : Ada.Strings.Unbounded.Unbounded_String;
+      Error_Value                  : Ada.Strings.Unbounded.Unbounded_String;
+      Output_Omitted               : Natural := 0;
+      Error_Omitted                : Natural := 0;
+      Measurement_Data             : Measurement;
+      Comparison_Data              : Comparison;
    end record;
 
 end Flyology_Bench.Workers;

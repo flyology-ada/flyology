@@ -6,6 +6,7 @@ with Flyology.Wall_Clock_Native;
 --  Internal controlled owner of one platform wall-clock readiness source.
 --  Linux uses timerfd; Darwin uses a relative kqueue timer, clock-set
 --  notification, and bounded wall-clock re-evaluation.
+
 private package Flyology.Wall_Clock_Waits is
    use type Interfaces.C.int;
 
@@ -18,10 +19,7 @@ private package Flyology.Wall_Clock_Waits is
    --  Arm the wall-clock target or one bounded probe, whichever is earlier.
    --  True means a clock change raced the arm and the caller must classify a
    --  fresh sample without blocking.
-   function Arm
-     (Item          : in out Source;
-      Target        : Ada.Calendar.Time;
-      Maximum_Slice : Duration) return Boolean
+   function Arm (Item : in out Source; Target : Ada.Calendar.Time; Maximum_Slice : Duration) return Boolean
    with Pre => Maximum_Slice > 0.0;
    --  Drain one readiness event without taking descriptor ownership.
    procedure Consume (Item : in out Source);
@@ -36,5 +34,6 @@ private
    end record;
 
    --  Release every owned descriptor without propagating close errors.
-   overriding procedure Finalize (Item : in out Source);
+   overriding
+   procedure Finalize (Item : in out Source);
 end Flyology.Wall_Clock_Waits;

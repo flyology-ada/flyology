@@ -1,9 +1,9 @@
 with System.Task_Info;
 
 generic
-   Label         : String;
+   Label : String;
    Subject_Model : System.Task_Info.Task_Info_Type;
-   Peer_Model    : System.Task_Info.Task_Info_Type;
+   Peer_Model : System.Task_Info.Task_Info_Type;
 package Semantic_Termination_Cases is
 
    type Check_Id is

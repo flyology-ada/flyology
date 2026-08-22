@@ -9,15 +9,10 @@ package body Flyology.Bytes is
       return Natural (Data.Value.Length);
    end Length;
 
-   function Element
-     (Data  : Unbounded_Bytes;
-      Index : Positive) return Ada.Streams.Stream_Element is
-     (Data.Value.Element (Index));
+   function Element (Data : Unbounded_Bytes; Index : Positive) return Ada.Streams.Stream_Element
+   is (Data.Value.Element (Index));
 
-   procedure Append
-     (Data  : in out Unbounded_Bytes;
-      Value : Ada.Streams.Stream_Element_Array)
-   is
+   procedure Append (Data : in out Unbounded_Bytes; Value : Ada.Streams.Stream_Element_Array) is
       New_Length : constant Ada.Containers.Count_Type :=
         Data.Value.Length + Ada.Containers.Count_Type (Value'Length);
    begin
@@ -27,37 +22,27 @@ package body Flyology.Bytes is
       end loop;
    end Append;
 
-   procedure Append
-     (Data  : in out Unbounded_Bytes;
-      Value : Ada.Streams.Stream_Element) is
+   procedure Append (Data : in out Unbounded_Bytes; Value : Ada.Streams.Stream_Element) is
    begin
       Data.Value.Append (Value);
    end Append;
 
-   procedure Reserve_Capacity
-     (Data     : in out Unbounded_Bytes;
-      Capacity : Natural) is
+   procedure Reserve_Capacity (Data : in out Unbounded_Bytes; Capacity : Natural) is
    begin
       Data.Value.Reserve_Capacity (Ada.Containers.Count_Type (Capacity));
    end Reserve_Capacity;
 
-   procedure Append_Byte_String
-     (Data  : in out Unbounded_Bytes;
-      Value : String)
-   is
+   procedure Append_Byte_String (Data : in out Unbounded_Bytes; Value : String) is
       New_Length : constant Ada.Containers.Count_Type :=
         Data.Value.Length + Ada.Containers.Count_Type (Value'Length);
    begin
       Data.Value.Reserve_Capacity (New_Length);
       for Index in Value'Range loop
-         Data.Value.Append
-           (Ada.Streams.Stream_Element (Character'Pos (Value (Index))));
+         Data.Value.Append (Ada.Streams.Stream_Element (Character'Pos (Value (Index))));
       end loop;
    end Append_Byte_String;
 
-   function To_Unbounded_Bytes
-     (Data : Ada.Streams.Stream_Element_Array) return Unbounded_Bytes
-   is
+   function To_Unbounded_Bytes (Data : Ada.Streams.Stream_Element_Array) return Unbounded_Bytes is
       Result : Unbounded_Bytes;
    begin
       Append (Result, Data);
@@ -71,15 +56,11 @@ package body Flyology.Bytes is
       return Result;
    end From_Byte_String;
 
-   function To_Array
-     (Data : Unbounded_Bytes) return Ada.Streams.Stream_Element_Array
-   is
-      Result : Ada.Streams.Stream_Element_Array
-        (1 .. Ada.Streams.Stream_Element_Offset (Length (Data)));
+   function To_Array (Data : Unbounded_Bytes) return Ada.Streams.Stream_Element_Array is
+      Result : Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Length (Data)));
    begin
       for Index in 1 .. Length (Data) loop
-         Result (Ada.Streams.Stream_Element_Offset (Index)) :=
-           Data.Value.Element (Index);
+         Result (Ada.Streams.Stream_Element_Offset (Index)) := Data.Value.Element (Index);
       end loop;
       return Result;
    end To_Array;
@@ -99,9 +80,7 @@ package body Flyology.Bytes is
       Storage.Move (Target => Data.Value, Source => Replacement);
    end Clear;
 
-   procedure Move
-     (Target : in out Unbounded_Bytes;
-      Source : in out Unbounded_Bytes) is
+   procedure Move (Target : in out Unbounded_Bytes; Source : in out Unbounded_Bytes) is
    begin
       Storage.Move (Target => Target.Value, Source => Source.Value);
    end Move;

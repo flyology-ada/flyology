@@ -3,7 +3,10 @@
 --  Example:
 --
 --     State := Flyology.Process_Lifecycle.State;
-package Flyology.Process_Lifecycle with Preelaborate is
+
+package Flyology.Process_Lifecycle
+  with Preelaborate
+is
 
    --  Process-wide Flyology scheduler lifecycle.
    --  @enum Dormant Initialized but no event-loop group was created
@@ -12,13 +15,7 @@ package Flyology.Process_Lifecycle with Preelaborate is
    --  @enum Stopped Runtime shutdown completed
    --  @enum Cleanup_Deferred Unsafe cleanup was deferred to process exit
    --  @enum Fork_Child Process identity changed after runtime initialization
-   type Event_Runtime_State is
-     (Dormant,
-      Running,
-      Finalizing,
-      Stopped,
-      Cleanup_Deferred,
-      Fork_Child);
+   type Event_Runtime_State is (Dormant, Running, Finalizing, Stopped, Cleanup_Deferred, Fork_Child);
 
    --  Read the process lifecycle without taking a runtime lock. Native-only
    --  programs remain Dormant until GNARL finalization changes them to

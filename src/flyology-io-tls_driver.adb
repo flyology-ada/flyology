@@ -8,16 +8,13 @@ package body Flyology.IO.TLS_Driver is
    use type TLS.Step_Status;
 
    function Invalid_Progress_Bound
-     (First : Ada.Streams.Stream_Element_Offset;
-      Last  : Ada.Streams.Stream_Element_Offset)
+     (First : Ada.Streams.Stream_Element_Offset; Last : Ada.Streams.Stream_Element_Offset)
       return Ada.Streams.Stream_Element_Offset
    is
-      Choice : constant Policy.Sentinel_Choice :=
-        Policy.Invalid_Progress_Sentinel (First, Last);
+      Choice : constant Policy.Sentinel_Choice := Policy.Invalid_Progress_Sentinel (First, Last);
    begin
       if not Choice.Available then
-         raise TLS.TLS_Error with
-           "TLS buffer range leaves no invalid progress sentinel";
+         raise TLS.TLS_Error with "TLS buffer range leaves no invalid progress sentinel";
       end if;
       return Choice.Value;
    end Invalid_Progress_Bound;
@@ -27,17 +24,17 @@ package body Flyology.IO.TLS_Driver is
       raise TLS.TLS_Error with TLS.Error_Message (Item);
    end Raise_Provider_Error;
 
-   procedure Handshake_Once
-     (Item   : in out TLS.Session'Class;
-      Status : out TLS.Step_Status) is
+   procedure Handshake_Once (Item : in out TLS.Session'Class; Status : out TLS.Step_Status) is
    begin
       Status := TLS.Handshake_Step (Item);
       case Status is
          when TLS.Peer_Closed =>
             raise TLS.TLS_Error with "TLS peer closed during handshake";
-         when TLS.Failed =>
+
+         when TLS.Failed      =>
             Raise_Provider_Error (Item);
-         when others =>
+
+         when others          =>
             null;
       end case;
    end Handshake_Once;
@@ -48,8 +45,7 @@ package body Flyology.IO.TLS_Driver is
       Last   : out Ada.Streams.Stream_Element_Offset;
       Status : out TLS.Step_Status)
    is
-      Before_Last : constant Ada.Streams.Stream_Element_Offset :=
-        Data'First - 1;
+      Before_Last : constant Ada.Streams.Stream_Element_Offset := Data'First - 1;
    begin
       Last := Before_Last;
       if Data'Length = 0 then
@@ -58,19 +54,17 @@ package body Flyology.IO.TLS_Driver is
       end if;
       Status := TLS.Receive_Step (Item, Data, Last);
       case Status is
-         when TLS.Complete =>
-            if not Policy.Complete_Progress_Valid
-              (Data'First, Data'Last, Last)
-            then
-               raise TLS.TLS_Error with
-                 "TLS provider returned an invalid receive bound";
+         when TLS.Complete                                     =>
+            if not Policy.Complete_Progress_Valid (Data'First, Data'Last, Last) then
+               raise TLS.TLS_Error with "TLS provider returned an invalid receive bound";
             end if;
+
          when TLS.Want_Read | TLS.Want_Write | TLS.Peer_Closed =>
             if not Policy.Progress_Preserved (Before_Last, Last) then
-               raise TLS.TLS_Error with
-                 "TLS provider changed receive output without progress";
+               raise TLS.TLS_Error with "TLS provider changed receive output without progress";
             end if;
-         when TLS.Failed =>
+
+         when TLS.Failed                                       =>
             Raise_Provider_Error (Item);
       end case;
    end Receive_Once;
@@ -81,8 +75,7 @@ package body Flyology.IO.TLS_Driver is
       Last   : out Ada.Streams.Stream_Element_Offset;
       Status : out TLS.Step_Status)
    is
-      Before_Last : constant Ada.Streams.Stream_Element_Offset :=
-        Data'First - 1;
+      Before_Last : constant Ada.Streams.Stream_Element_Offset := Data'First - 1;
    begin
       Last := Before_Last;
       if Data'Length = 0 then
@@ -91,35 +84,32 @@ package body Flyology.IO.TLS_Driver is
       end if;
       Status := TLS.Send_Step (Item, Data, Last);
       case Status is
-         when TLS.Complete =>
-            if not Policy.Complete_Progress_Valid
-              (Data'First, Data'Last, Last)
-            then
-               raise TLS.TLS_Error with
-                 "TLS provider returned an invalid send bound";
+         when TLS.Complete                                     =>
+            if not Policy.Complete_Progress_Valid (Data'First, Data'Last, Last) then
+               raise TLS.TLS_Error with "TLS provider returned an invalid send bound";
             end if;
+
          when TLS.Want_Read | TLS.Want_Write | TLS.Peer_Closed =>
             if not Policy.Progress_Preserved (Before_Last, Last) then
-               raise TLS.TLS_Error with
-                 "TLS provider changed send output without progress";
+               raise TLS.TLS_Error with "TLS provider changed send output without progress";
             end if;
-         when TLS.Failed =>
+
+         when TLS.Failed                                       =>
             Raise_Provider_Error (Item);
       end case;
    end Send_Once;
 
-   procedure Shutdown_Once
-     (Item   : in out TLS.Session'Class;
-      Status : out TLS.Step_Status) is
+   procedure Shutdown_Once (Item : in out TLS.Session'Class; Status : out TLS.Step_Status) is
    begin
       Status := TLS.Shutdown_Step (Item);
       case Status is
          when TLS.Peer_Closed =>
-            raise TLS.TLS_Error with
-              "TLS peer closed before shutdown completed";
-         when TLS.Failed =>
+            raise TLS.TLS_Error with "TLS peer closed before shutdown completed";
+
+         when TLS.Failed      =>
             Raise_Provider_Error (Item);
-         when others =>
+
+         when others          =>
             null;
       end case;
    end Shutdown_Once;
@@ -135,13 +125,16 @@ package body Flyology.IO.TLS_Driver is
          Check.all;
          Status := TLS.Handshake_Step (Item);
          case Status is
-            when TLS.Complete =>
+            when TLS.Complete                   =>
                return;
+
             when TLS.Want_Read | TLS.Want_Write =>
                Await_Ready.all (Status);
-            when TLS.Peer_Closed =>
+
+            when TLS.Peer_Closed                =>
                raise TLS.TLS_Error with "TLS peer closed during handshake";
-            when TLS.Failed =>
+
+            when TLS.Failed                     =>
                Raise_Provider_Error (Item);
          end case;
       end loop;
@@ -166,27 +159,25 @@ package body Flyology.IO.TLS_Driver is
          Before_Last := Last;
          Status := TLS.Receive_Step (Item, Data, Last);
          case Status is
-            when TLS.Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (Data'First, Data'Last, Last)
-               then
-                  raise TLS.TLS_Error with
-                    "TLS provider returned an invalid receive bound";
+            when TLS.Complete                   =>
+               if not Policy.Complete_Progress_Valid (Data'First, Data'Last, Last) then
+                  raise TLS.TLS_Error with "TLS provider returned an invalid receive bound";
                end if;
                return;
-            when TLS.Peer_Closed =>
+
+            when TLS.Peer_Closed                =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed receive output on peer close";
+                  raise TLS.TLS_Error with "TLS provider changed receive output on peer close";
                end if;
                return;
+
             when TLS.Want_Read | TLS.Want_Write =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed receive output while waiting";
+                  raise TLS.TLS_Error with "TLS provider changed receive output while waiting";
                end if;
                Await_Ready.all (Status);
-            when TLS.Failed =>
+
+            when TLS.Failed                     =>
                Raise_Provider_Error (Item);
          end case;
       end loop;
@@ -210,32 +201,28 @@ package body Flyology.IO.TLS_Driver is
          Check.all;
          Before_Last := Invalid_Progress_Bound (First, Data'Last);
          Last := Before_Last;
-         Status := TLS.Receive_Step
-           (Item, Data (First .. Data'Last), Last);
+         Status := TLS.Receive_Step (Item, Data (First .. Data'Last), Last);
          case Status is
-            when TLS.Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (First, Data'Last, Last)
-               then
-                  raise TLS.TLS_Error with
-                    "TLS provider made no receive progress";
+            when TLS.Complete                   =>
+               if not Policy.Complete_Progress_Valid (First, Data'Last, Last) then
+                  raise TLS.TLS_Error with "TLS provider made no receive progress";
                end if;
                exit when Last = Data'Last;
                First := Policy.Next_Offset (Last);
+
             when TLS.Want_Read | TLS.Want_Write =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed receive output while waiting";
+                  raise TLS.TLS_Error with "TLS provider changed receive output while waiting";
                end if;
                Await_Ready.all (Status);
-            when TLS.Peer_Closed =>
+
+            when TLS.Peer_Closed                =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed receive output on peer close";
+                  raise TLS.TLS_Error with "TLS provider changed receive output on peer close";
                end if;
-               raise TLS.TLS_Error with
-                 "TLS peer closed before receive completed";
-            when TLS.Failed =>
+               raise TLS.TLS_Error with "TLS peer closed before receive completed";
+
+            when TLS.Failed                     =>
                Raise_Provider_Error (Item);
          end case;
       end loop;
@@ -259,32 +246,28 @@ package body Flyology.IO.TLS_Driver is
          Check.all;
          Before_Last := Invalid_Progress_Bound (First, Data'Last);
          Last := Before_Last;
-         Status := TLS.Send_Step
-           (Item, Data (First .. Data'Last), Last);
+         Status := TLS.Send_Step (Item, Data (First .. Data'Last), Last);
          case Status is
-            when TLS.Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (First, Data'Last, Last)
-               then
-                  raise TLS.TLS_Error with
-                    "TLS provider made no send progress";
+            when TLS.Complete                   =>
+               if not Policy.Complete_Progress_Valid (First, Data'Last, Last) then
+                  raise TLS.TLS_Error with "TLS provider made no send progress";
                end if;
                exit when Last = Data'Last;
                First := Policy.Next_Offset (Last);
+
             when TLS.Want_Read | TLS.Want_Write =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed send output while waiting";
+                  raise TLS.TLS_Error with "TLS provider changed send output while waiting";
                end if;
                Await_Ready.all (Status);
-            when TLS.Peer_Closed =>
+
+            when TLS.Peer_Closed                =>
                if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS.TLS_Error with
-                    "TLS provider changed send output on peer close";
+                  raise TLS.TLS_Error with "TLS provider changed send output on peer close";
                end if;
-               raise TLS.TLS_Error with
-                 "TLS peer closed before send completed";
-            when TLS.Failed =>
+               raise TLS.TLS_Error with "TLS peer closed before send completed";
+
+            when TLS.Failed                     =>
                Raise_Provider_Error (Item);
          end case;
       end loop;
@@ -301,14 +284,16 @@ package body Flyology.IO.TLS_Driver is
          Check.all;
          Status := TLS.Shutdown_Step (Item);
          case Status is
-            when TLS.Complete =>
+            when TLS.Complete                   =>
                return;
+
             when TLS.Want_Read | TLS.Want_Write =>
                Await_Ready.all (Status);
-            when TLS.Peer_Closed =>
-               raise TLS.TLS_Error with
-                 "TLS peer closed before shutdown completed";
-            when TLS.Failed =>
+
+            when TLS.Peer_Closed                =>
+               raise TLS.TLS_Error with "TLS peer closed before shutdown completed";
+
+            when TLS.Failed                     =>
                Raise_Provider_Error (Item);
          end case;
       end loop;

@@ -6,10 +6,7 @@ generic
 package Semantic_Conformance_Cases is
 
    type Check_Id is
-     (Rendezvous_Exception,
-      Activation_Failure_Cleanup,
-      Requeue_With_Abort,
-      Requeue_Without_Abort);
+     (Rendezvous_Exception, Activation_Failure_Cleanup, Requeue_With_Abort, Requeue_Without_Abort);
 
    type Results is array (Check_Id) of Boolean;
 

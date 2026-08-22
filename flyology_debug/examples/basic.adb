@@ -12,11 +12,9 @@ procedure Basic is
    end record;
    type Gauge is (Active_Requests, Queue_Depth);
 
-   package Debug is new Flyology_Debug.Tracers
-     (Message_Type => Message, Capacity => 256);
+   package Debug is new Flyology_Debug.Tracers (Message_Type => Message, Capacity => 256);
 
-   package Metrics is new Flyology_Debug.Gauges
-     (Gauge_Kind => Gauge, Gauge_Value_Type => Natural);
+   package Metrics is new Flyology_Debug.Gauges (Gauge_Kind => Gauge, Gauge_Value_Type => Natural);
 
    Trace_Result : Debug.Batch;
    Gauge_Result : Metrics.Snapshot;

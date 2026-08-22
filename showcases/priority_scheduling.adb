@@ -14,7 +14,8 @@ procedure Priority_Scheduling is
    Low_B_Gate   : STC.Suspension_Object;
    High_Gate    : STC.Suspension_Object;
    Blocker_Gate : STC.Suspension_Object;
-   Stop_Blocker : Boolean := False with Atomic;
+   Stop_Blocker : Boolean := False
+   with Atomic;
 
    protected Results is
       procedure Blocker_Running;
@@ -50,25 +51,30 @@ procedure Priority_Scheduling is
          null;
       end Await_All;
 
-      function Trace return String is (Order);
+      function Trace return String
+      is (Order);
    end Results;
 
-   task Low_A with CPU => 1 is
+   task Low_A
+     with CPU => 1 is
       pragma Priority (5);
       pragma Task_Info (Flyology.Lightweight_Task);
    end Low_A;
 
-   task Low_B with CPU => 1 is
+   task Low_B
+     with CPU => 1 is
       pragma Priority (5);
       pragma Task_Info (Flyology.Lightweight_Task);
    end Low_B;
 
-   task High with CPU => 1 is
+   task High
+     with CPU => 1 is
       pragma Priority (20);
       pragma Task_Info (Flyology.Lightweight_Task);
    end High;
 
-   task Blocker with CPU => 1 is
+   task Blocker
+     with CPU => 1 is
       pragma Priority (25);
       pragma Task_Info (Flyology.Lightweight_Task);
    end Blocker;
@@ -103,8 +109,7 @@ procedure Priority_Scheduling is
    Snapshot : Observation.Group_Snapshot;
 begin
    loop
-      exit when Observation.Snapshot (1, Snapshot)
-        and then Snapshot.Waiting = 4;
+      exit when Observation.Snapshot (1, Snapshot) and then Snapshot.Waiting = 4;
       delay 0.001;
    end loop;
 
@@ -115,19 +120,15 @@ begin
    STC.Set_True (High_Gate);
 
    loop
-      exit when Observation.Snapshot (1, Snapshot)
-        and then Snapshot.Ready = 3;
+      exit when Observation.Snapshot (1, Snapshot) and then Snapshot.Ready = 3;
       delay 0.001;
    end loop;
    Stop_Blocker := True;
    Results.Await_All;
 
-   Ada.Text_IO.Put_Line
-     ("lightweight group 1 dispatch trace: " & Results.Trace);
-   Ada.Text_IO.Put_Line
-     ("expected: H first (priority 20), then A/B FIFO (priority 5)");
-   Ada.Text_IO.Put_Line
-     ("one group is cooperative; priorities select only at safe points");
+   Ada.Text_IO.Put_Line ("lightweight group 1 dispatch trace: " & Results.Trace);
+   Ada.Text_IO.Put_Line ("expected: H first (priority 20), then A/B FIFO (priority 5)");
+   Ada.Text_IO.Put_Line ("one group is cooperative; priorities select only at safe points");
 
    if Results.Trace /= "HAB" then
       raise Program_Error with "unexpected priority dispatch trace";

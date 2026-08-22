@@ -4,6 +4,7 @@ with System.Storage_Elements;
 with System.Storage_Pools.Subpools;
 
 --  Provides explicitly task-owned allocation regions with bulk release.
+
 package Flyology.Memory_Regions is
 
    --  Raised when a pool or region is used by a task other than its owner,
@@ -14,9 +15,7 @@ package Flyology.Memory_Regions is
    --  with the pool must use a named Region_Handle in every allocator. An
    --  allocator without a region raises Program_Error. The pool is not
    --  synchronized and must not outlive its owning task.
-   type Task_Pool is limited new
-     System.Storage_Pools.Subpools.Root_Storage_Pool_With_Subpools
-       with private;
+   type Task_Pool is limited new System.Storage_Pools.Subpools.Root_Storage_Pool_With_Subpools with private;
 
    --  Standard Ada subpool handle accepted by a named allocator.
    subtype Region_Handle is System.Storage_Pools.Subpools.Subpool_Handle;
@@ -43,8 +42,7 @@ package Flyology.Memory_Regions is
    --  @exception Ownership_Error The calling task does not own Pool
    --  @exception Constraint_Error Chunk_Storage is zero
    function Create_Region
-     (Pool          : in out Task_Pool;
-      Chunk_Storage : System.Storage_Elements.Storage_Count := 65_536)
+     (Pool : in out Task_Pool; Chunk_Storage : System.Storage_Elements.Storage_Count := 65_536)
       return not null Region_Handle;
 
    --  Finalize every controlled object in Region and release all of its
@@ -78,27 +76,25 @@ private
    end record;
 
    type Region_Data is limited new Subpools.Root_Subpool with record
-      First       : Chunk_Access := null;
-      Chunk_Size  : Storage.Storage_Count := 0;
-      Consumed    : Storage.Storage_Count := 0;
-      Reserved    : Storage.Storage_Count := 0;
+      First      : Chunk_Access := null;
+      Chunk_Size : Storage.Storage_Count := 0;
+      Consumed   : Storage.Storage_Count := 0;
+      Reserved   : Storage.Storage_Count := 0;
    end record;
    type Region_Access is access all Region_Data;
 
-   type Task_Pool is limited new
-     Subpools.Root_Storage_Pool_With_Subpools with record
-      Owner       : Ada.Task_Identification.Task_Id :=
-        Ada.Task_Identification.Current_Task;
-      Live_Count  : Natural := 0;
-      Consumed    : Storage.Storage_Count := 0;
-      Reserved    : Storage.Storage_Count := 0;
+   type Task_Pool is limited new Subpools.Root_Storage_Pool_With_Subpools with record
+      Owner      : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Current_Task;
+      Live_Count : Natural := 0;
+      Consumed   : Storage.Storage_Count := 0;
+      Reserved   : Storage.Storage_Count := 0;
    end record;
 
    --  @exclude
    --  @param Pool Task-owned storage pool
    --  @return Newly created default-sized region
-   overriding function Create_Subpool
-     (Pool : in out Task_Pool) return not null Region_Handle;
+   overriding
+   function Create_Subpool (Pool : in out Task_Pool) return not null Region_Handle;
 
    --  @exclude
    --  @param Pool Owning storage pool
@@ -106,7 +102,8 @@ private
    --  @param Size_In_Storage_Elements Requested size
    --  @param Alignment Requested alignment
    --  @param Subpool Region receiving the allocation
-   overriding procedure Allocate_From_Subpool
+   overriding
+   procedure Allocate_From_Subpool
      (Pool                     : in out Task_Pool;
       Storage_Address          : out System.Address;
       Size_In_Storage_Elements : Storage.Storage_Count;
@@ -116,8 +113,7 @@ private
    --  @exclude
    --  @param Pool Owning storage pool
    --  @param Subpool Finalized region being reclaimed
-   overriding procedure Deallocate_Subpool
-     (Pool    : in out Task_Pool;
-      Subpool : in out Region_Handle);
+   overriding
+   procedure Deallocate_Subpool (Pool : in out Task_Pool; Subpool : in out Region_Handle);
 
 end Flyology.Memory_Regions;

@@ -8,10 +8,8 @@ package body Context_ABI_Support is
 
    use type Ada.Streams.Stream_Element;
 
-   function Machine_Probe
-     (Action : Action_Code) return Interfaces.C.unsigned;
-   pragma Import
-     (C, Machine_Probe, "flyology_test_context_probe");
+   function Machine_Probe (Action : Action_Code) return Interfaces.C.unsigned;
+   pragma Import (C, Machine_Probe, "flyology_test_context_probe");
 
    Reader_Socket : access Flyology.IO.Sockets.Socket_Type := null;
    protected Descriptor_Gate is
@@ -34,9 +32,7 @@ package body Context_ABI_Support is
 
    end Descriptor_Gate;
 
-   procedure Configure
-     (Reader : aliased in out Flyology.IO.Sockets.Socket_Type)
-   is
+   procedure Configure (Reader : aliased in out Flyology.IO.Sockets.Socket_Type) is
    begin
       Reader_Socket := Reader'Unchecked_Access;
    end Configure;
@@ -46,19 +42,22 @@ package body Context_ABI_Support is
       Descriptor_Gate.Wait_For_Request;
    end Wait_For_Descriptor_Request;
 
-   function Probe (Action : Action_Code) return Interfaces.C.unsigned is
-     (Machine_Probe (Action));
+   function Probe (Action : Action_Code) return Interfaces.C.unsigned
+   is (Machine_Probe (Action));
 
    function Callback (Action : Action_Code) return Interfaces.C.unsigned is
       Item : Ada.Streams.Stream_Element_Array (1 .. 1);
    begin
       case Action is
-         when No_Switch =>
+         when No_Switch            =>
             null;
-         when Cooperative_Yield =>
+
+         when Cooperative_Yield    =>
             delay 0.0;
-         when Timer_Suspension =>
+
+         when Timer_Suspension     =>
             Flyology.IO.Timers.Sleep_For (0.005);
+
          when Descriptor_Readiness =>
             Descriptor_Gate.Request;
             if Reader_Socket = null then
@@ -68,7 +67,8 @@ package body Context_ABI_Support is
             if Item (1) /= 16#5A# then
                return 1;
             end if;
-         when Cross_Group_Move =>
+
+         when Cross_Group_Move     =>
             Groups.Migrate (1);
             delay 0.0;
             Groups.Migrate (Groups.Default_Group);

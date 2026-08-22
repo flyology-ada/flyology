@@ -16,20 +16,14 @@ package body Flyology_Cachelines.Macos is
       Old_Len   : System.Address;
       New_Value : System.Address;
       New_Len   : Interfaces.C.size_t) return Interfaces.C.int
-     with Import,
-          Convention    => C,
-          External_Name => "sysctlbyname";
+   with Import, Convention => C, External_Name => "sysctlbyname";
 
    function Query (Name : String) return Cache_Query_Result is
-      C_Name : aliased constant Interfaces.C.char_array :=
-        Interfaces.C.To_C (Name);
+      C_Name : aliased constant Interfaces.C.char_array := Interfaces.C.To_C (Name);
 
       --  Read exactly Width bytes of the value into Target.  A reply of a
       --  different length is rejected instead of interpreted.
-      function Read
-        (Target : System.Address;
-         Width  : Interfaces.C.size_t) return Boolean
-      is
+      function Read (Target : System.Address; Width : Interfaces.C.size_t) return Boolean is
          Length : aliased Interfaces.C.size_t := Width;
       begin
          return
@@ -38,7 +32,8 @@ package body Flyology_Cachelines.Macos is
               Old_Value => Target,
               Old_Len   => Length'Address,
               New_Value => System.Null_Address,
-              New_Len   => 0) = 0
+              New_Len   => 0)
+           = 0
            and then Length = Width;
       end Read;
 
@@ -53,7 +48,8 @@ package body Flyology_Cachelines.Macos is
             Old_Value => System.Null_Address,
             Old_Len   => Width'Address,
             New_Value => System.Null_Address,
-            New_Len   => 0) /= 0
+            New_Len   => 0)
+        /= 0
       then
          return Unavailable;
       end if;

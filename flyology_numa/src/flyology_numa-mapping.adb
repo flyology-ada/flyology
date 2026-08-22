@@ -15,9 +15,9 @@ package body Flyology_NUMA.Mapping is
 
    --  Readable, writable, and private to this process.  Both hosts this
    --  package maps memory on agree on these values.
-   Readable  : constant Interfaces.C.int := 1;
-   Writable  : constant Interfaces.C.int := 2;
-   Unshared  : constant Interfaces.C.int := 2;
+   Readable : constant Interfaces.C.int := 1;
+   Writable : constant Interfaces.C.int := 2;
+   Unshared : constant Interfaces.C.int := 2;
 
    function Map
      (Address : System.Address;
@@ -26,15 +26,12 @@ package body Flyology_NUMA.Mapping is
       Flags   : Interfaces.C.int;
       File    : Interfaces.C.int;
       Offset  : Interfaces.C.long) return System.Address
-     with Import, Convention => C, External_Name => "mmap";
+   with Import, Convention => C, External_Name => "mmap";
 
-   function Unmap
-     (Address : System.Address;
-      Length  : Interfaces.C.size_t) return Interfaces.C.int
-     with Import, Convention => C, External_Name => "munmap";
+   function Unmap (Address : System.Address; Length : Interfaces.C.size_t) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "munmap";
 
-   function To_Address is
-     new Ada.Unchecked_Conversion (Interfaces.C.long, System.Address);
+   function To_Address is new Ada.Unchecked_Conversion (Interfaces.C.long, System.Address);
 
    --  The host reports refusal by returning this rather than by failing.
    Refused : constant System.Address := To_Address (-1);
@@ -70,12 +67,13 @@ package body Flyology_NUMA.Mapping is
       end if;
 
       Result :=
-        Map (Address => System.Null_Address,
-             Length  => Interfaces.C.size_t (Rounded),
-             Reach   => Readable + Writable,
-             Flags   => Unshared + Map_Flags.Anonymous,
-             File    => -1,
-             Offset  => 0);
+        Map
+          (Address => System.Null_Address,
+           Length  => Interfaces.C.size_t (Rounded),
+           Reach   => Readable + Writable,
+           Flags   => Unshared + Map_Flags.Anonymous,
+           File    => -1,
+           Offset  => 0);
 
       if Result = Refused then
          return System.Null_Address;

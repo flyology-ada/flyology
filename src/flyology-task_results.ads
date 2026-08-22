@@ -4,18 +4,19 @@ with Flyology.Operations;
 with Interfaces.C;
 with System;
 
-package Flyology.Task_Results with Preelaborate is
+package Flyology.Task_Results
+  with Preelaborate
+is
 
    --  Provides fixed task-owned records of Ada task termination. The
    --  facility observes task exit only; it does not catch, resume, restart,
    --  or otherwise supervise a terminated task.
 
    --  Raised by Finish after a scoped task-result wait is cancelled.
-   Operation_Cancelled : exception renames
-     Flyology.Operations.Operation_Cancelled;
+   Operation_Cancelled : exception renames Flyology.Operations.Operation_Cancelled;
 
    --  Maximum retained exception-name bytes.
-   Exception_Name_Capacity : constant := 96;
+   Exception_Name_Capacity    : constant := 96;
    --  Maximum retained exception-message bytes.
    Exception_Message_Capacity : constant := 128;
 
@@ -23,10 +24,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @enum Normal_Completion The task body and its master completed normally
    --  @enum Unhandled_Exception An exception escaped the task body
    --  @enum Abnormal_Completion GNARL classified task exit as abnormal
-   type Exit_Cause is
-     (Normal_Completion,
-      Unhandled_Exception,
-      Abnormal_Completion);
+   type Exit_Cause is (Normal_Completion, Unhandled_Exception, Abnormal_Completion);
 
    --  Fixed exception identity copied into a terminal result.
    --  @field Length Number of meaningful characters in Data
@@ -51,14 +49,14 @@ package Flyology.Task_Results with Preelaborate is
    --  Return the meaningful exception-name characters.
    --  @param Item Bounded exception name
    --  @return Copied exception name without unused fixed storage
-   function Text (Item : Bounded_Exception_Name) return String is
-     (Item.Data (1 .. Item.Length));
+   function Text (Item : Bounded_Exception_Name) return String
+   is (Item.Data (1 .. Item.Length));
 
    --  Return the meaningful exception-message characters.
    --  @param Item Bounded exception message
    --  @return Copied exception message without unused fixed storage
-   function Text (Item : Bounded_Exception_Message) return String is
-     (Item.Data (1 .. Item.Length));
+   function Text (Item : Bounded_Exception_Message) return String
+   is (Item.Data (1 .. Item.Length));
 
    --  One immutable terminal observation. Exception fields are empty unless
    --  Cause is Unhandled_Exception.
@@ -81,12 +79,11 @@ package Flyology.Task_Results with Preelaborate is
    --  a result that was not available.
    --  @field Status Whether a terminal result was copied
    --  @field Result Terminal result when Status is Terminal
-   type Task_Observation
-     (Status : Observation_Status := Not_Terminal)
-   is record
+   type Task_Observation (Status : Observation_Status := Not_Terminal) is record
       case Status is
          when Not_Terminal =>
             null;
+
          when Terminal =>
             Result : Task_Result;
       end case;
@@ -103,8 +100,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @return Terminal with a copied result, or Not_Terminal
    --  @exception Program_Error T is null, lacks Flyology-owned result
    --  storage, or the runtime and library result ABIs differ
-   function Observe
-     (T : Ada.Task_Identification.Task_Id) return Task_Observation;
+   function Observe (T : Ada.Task_Identification.Task_Id) return Task_Observation;
 
    --  Wait up to Timeout for T's terminal result and return a copied
    --  observation. A negative timeout waits indefinitely, zero only checks,
@@ -124,9 +120,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @return Terminal with a copied result, or Not_Terminal on timeout
    --  @exception Program_Error T is null, lacks Flyology-owned result
    --  storage, or the runtime wait failed
-   function Wait
-     (T       : Ada.Task_Identification.Task_Id;
-      Timeout : Duration := -1.0) return Task_Observation;
+   function Wait (T : Ada.Task_Identification.Task_Id; Timeout : Duration := -1.0) return Task_Observation;
 
    --  Limited exact-task observation handle. Attach retains only the fixed
    --  task-result sidecar; it neither retains the Ada task object nor follows
@@ -145,9 +139,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @param T Exact Ada task identity to observe
    --  @exception Program_Error Item is already attached, T is null, or T has
    --     no Flyology-owned task-result storage
-   procedure Attach
-     (Item : in out Monitor;
-      T    : Ada.Task_Identification.Task_Id);
+   procedure Attach (Item : in out Monitor; T : Ada.Task_Identification.Task_Id);
 
    --  Report whether Item currently retains task-result storage.
    --  @param Item Monitor to inspect
@@ -178,9 +170,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @param Timeout Maximum relative wait; negative means indefinitely
    --  @return Terminal with a copied result, or Not_Terminal on timeout
    --  @exception Program_Error Item is detached or the runtime wait failed
-   function Wait
-     (Item    : Monitor;
-      Timeout : Duration := -1.0) return Task_Observation;
+   function Wait (Item : Monitor; Timeout : Duration := -1.0) return Task_Observation;
 
    --  First-class wait for one retained task result. The operation owns a
    --  sidecar reference after initiation, so the target task object and a
@@ -212,24 +202,19 @@ package Flyology.Task_Results with Preelaborate is
    --  @param Timeout Maximum relative wait; negative means indefinitely
    --  @param Operation Fresh or consumed task-result operation
    procedure Wait
-     (T         : Ada.Task_Identification.Task_Id;
-      Timeout   : Duration := -1.0;
-      Operation : in out Wait_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+     (T : Ada.Task_Identification.Task_Id; Timeout : Duration := -1.0; Operation : in out Wait_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start or restart a retained-monitor wait in an established operation.
    --  @param Item Attached source monitor
    --  @param Timeout Maximum relative wait; negative means indefinitely
    --  @param Operation Fresh or consumed task-result operation
-   procedure Wait
-     (Item      : Monitor'Class;
-      Timeout   : Duration := -1.0;
-      Operation : in out Wait_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Wait (Item : Monitor'Class; Timeout : Duration := -1.0; Operation : in out Wait_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume one terminal task-result operation. Timeout succeeds with a
    --  Not_Terminal observation; cancellation raises after consuming.
@@ -237,9 +222,7 @@ package Flyology.Task_Results with Preelaborate is
    --  @param Observation Copied terminal result or Not_Terminal on timeout
    --  @exception Program_Error Runtime observation or subscription failed
    --  @exception Operation_Cancelled Operation was cancelled
-   procedure Finish
-     (Operation   : in out Wait_Operation;
-      Observation : out Task_Observation);
+   procedure Finish (Operation : in out Wait_Operation; Observation : out Task_Observation);
 
 private
    type Monitor is limited new Ada.Finalization.Limited_Controlled with record
@@ -248,17 +231,18 @@ private
 
    --  @exclude
    --  @param Item Monitor whose retained sidecar reference is released
-   overriding procedure Finalize (Item : in out Monitor);
+   overriding
+   procedure Finalize (Item : in out Monitor);
 
    type Subscription_Node is record
       Version           : Interfaces.C.unsigned := 1;
       Next              : System.Address := System.Null_Address;
       Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       Attached          : Interfaces.C.int := 0;
-   end record with Convention => C;
+   end record
+   with Convention => C;
 
-   type Wait_Failure is
-     (No_Failure, Attach_Failure, Subscription_Failure, Observation_Failure);
+   type Wait_Failure is (No_Failure, Attach_Failure, Subscription_Failure, Observation_Failure);
 
    type Wait_Operation is new Flyology.Operations.Operation with record
       Target       : Monitor;
@@ -271,13 +255,12 @@ private
    --  @exclude
    --  @param Item Task-result operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Wait_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Wait_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Task-result operation to cancel
-   overriding procedure Request_Cancellation
-     (Item : in out Wait_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Wait_Operation);
 
 end Flyology.Task_Results;

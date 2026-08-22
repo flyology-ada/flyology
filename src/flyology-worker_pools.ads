@@ -14,6 +14,7 @@ with System.Multiprocessors;
 --  @formal Process Per-job callback invoked by a worker task
 --  @formal Worker_Model Fixed lightweight or native worker designation
 --  @formal Worker_CPU CPU aspect applied to every worker task
+
 generic
    --  Definite value transferred by copy to one worker.
    type Job_Type is private;
@@ -33,10 +34,11 @@ generic
    --  @param Context Shared instance supplied to Run
    --  @param Job One value removed from the bounded FIFO
    --  @param Stopping Shared one-shot shutdown source
-   with procedure Process
-     (Context  : in out Worker_Context;
-      Job      : Job_Type;
-      Stopping : not null access Flyology.Cancellation.Token);
+   with
+     procedure Process
+       (Context  : in out Worker_Context;
+        Job      : Job_Type;
+        Stopping : not null access Flyology.Cancellation.Token);
 
    --  Fixed task designation for every worker in this generic instance.
    Worker_Model : Flyology.Execution_Model := Flyology.Project_Default;
@@ -45,10 +47,10 @@ generic
    --  execution group and the default Not_A_Specific_CPU distributes workers
    --  over the configured pool; for native tasks it retains Ada affinity
    --  semantics.
-   Worker_CPU : System.Multiprocessors.CPU_Range :=
-     System.Multiprocessors.Not_A_Specific_CPU;
+   Worker_CPU : System.Multiprocessors.CPU_Range := System.Multiprocessors.Not_A_Specific_CPU;
 
-package Flyology.Worker_Pools is
+package Flyology.Worker_Pools
+is
 
    --  Raised by Run after all workers join when at least one callback or
    --  worker-lifecycle failure was recorded.
@@ -87,19 +89,18 @@ package Flyology.Worker_Pools is
    --  @field Worker_Count Tasks created by Run
    --  @field Queue_Capacity Maximum buffered jobs
    type Pool
-     (Worker_Count   : Positive;  --  Tasks created by Run
+     (Worker_Count   : Positive;
+      --  Tasks created by Run
       Queue_Capacity : Positive)  --  Maximum buffered jobs
-   is limited private;
+   is
+     limited private;
 
    --  Submit one job, waiting for bounded queue capacity. Accepted is False
    --  after shutdown; no exception is used for this expected terminal state.
    --  @param Item Pool whose queue receives Job
    --  @param Job Value copied into the queue
    --  @param Accepted Whether the job was accepted
-   procedure Submit
-     (Item     : in out Pool;
-      Job      : Job_Type;
-      Accepted : out Boolean);
+   procedure Submit (Item : in out Pool; Job : Job_Type; Accepted : out Boolean);
 
    --  Submit one job within a relative deadline. Negative Timeout waits
    --  indefinitely and zero is an immediate attempt.
@@ -107,11 +108,7 @@ package Flyology.Worker_Pools is
    --  @param Job Value copied into the queue
    --  @param Timeout Deadline interval in seconds
    --  @param Result Acceptance, closure, or timeout outcome
-   procedure Submit
-     (Item    : in out Pool;
-      Job     : Job_Type;
-      Timeout : Duration;
-      Result  : out Submit_Result);
+   procedure Submit (Item : in out Pool; Job : Job_Type; Timeout : Duration; Result : out Submit_Result);
 
    --  Idempotently close admission and request the shared stopping token.
    --  Workers continue removing all jobs accepted before closure, then join.
@@ -130,9 +127,7 @@ package Flyology.Worker_Pools is
    --  @exception Program_Error Run was already called
    --  @exception Pool_Failed One or more callback or worker failures occurred
    --  @exception Tasking_Error Worker activation fails
-   procedure Run
-     (Item    : aliased in out Pool;
-      Context : aliased in out Worker_Context);
+   procedure Run (Item : aliased in out Pool; Context : aliased in out Worker_Context);
 
    --  Sample current lifecycle, work, and queue state.
    --  @param Item Pool to inspect
@@ -146,9 +141,7 @@ package Flyology.Worker_Pools is
    function First_Failure_Information (Item : Pool) return String;
 
 private
-   package Job_Channels is new Flyology.Channels.Bounded
-     (Element_Type => Job_Type,
-      Empty_Value  => Empty_Job);
+   package Job_Channels is new Flyology.Channels.Bounded (Element_Type => Job_Type, Empty_Value => Empty_Job);
 
    protected type Lifecycle is
       procedure Begin_Run (Expected_Workers : Positive);

@@ -20,8 +20,7 @@ procedure Sanitizer_Fiber_Smoke is
    Interrupt_Reader, Interrupt_Writer : Flyology.IO.Sockets.Socket_Type;
 
    function Touch_Stack
-     (Seed  : Interfaces.C.unsigned;
-      Depth : Interfaces.C.unsigned) return Interfaces.C.unsigned;
+     (Seed : Interfaces.C.unsigned; Depth : Interfaces.C.unsigned) return Interfaces.C.unsigned;
    pragma Import (C, Touch_Stack, "flyology_sanitizer_touch_stack");
 
    protected Results is
@@ -45,7 +44,8 @@ procedure Sanitizer_Fiber_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Results;
 
    task type Worker (Index : Positive) with CPU => 1 is
@@ -81,13 +81,12 @@ procedure Sanitizer_Fiber_Smoke is
    task body Interruptible_Waiter is
       Outcome : Flyology.IO.Wait_Outcome;
    begin
-      Outcome := Flyology.IO.Wait_Interruptibly
-        (Flyology.IO.Sockets.Native_Descriptor (Primary_Reader),
-         Flyology.IO.For_Read,
-         Timeout => 5.0,
-         Interrupts =>
-           (1 => Flyology.IO.Sockets.Native_Descriptor
-              (Interrupt_Reader)));
+      Outcome :=
+        Flyology.IO.Wait_Interruptibly
+          (Flyology.IO.Sockets.Native_Descriptor (Primary_Reader),
+           Flyology.IO.For_Read,
+           Timeout    => 5.0,
+           Interrupts => (1 => Flyology.IO.Sockets.Native_Descriptor (Interrupt_Reader)));
       Results.Finished (Outcome = Flyology.IO.Interrupted);
    exception
       when others =>
@@ -98,17 +97,14 @@ procedure Sanitizer_Fiber_Smoke is
    type Waiter_Access is access Interruptible_Waiter;
    Workers : array (1 .. Worker_Count) of Worker_Access;
 begin
-   Flyology.IO.Sockets.Create_Socket_Pair
-     (Primary_Reader, Primary_Writer);
-   Flyology.IO.Sockets.Create_Socket_Pair
-     (Interrupt_Reader, Interrupt_Writer);
+   Flyology.IO.Sockets.Create_Socket_Pair (Primary_Reader, Primary_Writer);
+   Flyology.IO.Sockets.Create_Socket_Pair (Interrupt_Reader, Interrupt_Writer);
    for Index in Workers'Range loop
       Workers (Index) := new Worker (Index);
    end loop;
    declare
       Waiter : constant Waiter_Access := new Interruptible_Waiter;
-      Data   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-        [1 => 42];
+      Data   : constant Ada.Streams.Stream_Element_Array (1 .. 1) := [1 => 42];
       Last   : Ada.Streams.Stream_Element_Offset;
       pragma Unreferenced (Waiter);
    begin

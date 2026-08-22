@@ -38,28 +38,25 @@ package body Flyology.IO.Connections.Drivers is
          raise;
    end Release;
 
-   overriding procedure Finalize (IO : in out Capability) is
+   overriding
+   procedure Finalize (IO : in out Capability) is
    begin
       Release (IO);
    end Finalize;
 
-   function Is_Acquired (IO : Capability) return Boolean is
-     (IO.Guard.State = Acquired);
+   function Is_Acquired (IO : Capability) return Boolean
+   is (IO.Guard.State = Acquired);
 
-   function Is_Engaged (IO : Capability) return Boolean is
-     (IO.Item /= null and then IO.Guard.State /= Unregistered);
+   function Is_Engaged (IO : Capability) return Boolean
+   is (IO.Item /= null and then IO.Guard.State /= Unregistered);
 
-   procedure Poll_Acquisition
-     (IO     : in out Capability;
-      Result : out Acquisition_Result)
-   is
-      Lease : Lease_Result;
+   procedure Poll_Acquisition (IO : in out Capability; Result : out Acquisition_Result) is
+      Lease      : Lease_Result;
       Interrupts : Interrupt_Set (1 .. 2);
-      Count : Natural;
+      Count      : Natural;
    begin
       if IO.Item = null or else IO.Guard.State /= Registered then
-         raise Program_Error with
-           "connection capability is not awaiting acquisition";
+         raise Program_Error with "connection capability is not awaiting acquisition";
       end if;
       Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Count);
       IO.Item.Controller.Try_Acquire
@@ -72,17 +69,17 @@ package body Flyology.IO.Connections.Drivers is
          IO.Owner,
          IO.Transport);
       case Lease is
-         when Lease_Busy =>
+         when Lease_Busy      =>
             Result := Need_Acquire_Readiness;
+
          when Lease_Cancelled =>
             Reset (IO);
-            raise Operation_Cancelled with
-              "connection closed during capability acquisition";
-         when Lease_Acquired =>
+            raise Operation_Cancelled with "connection closed during capability acquisition";
+
+         when Lease_Acquired  =>
             if IO.Transport not in Plain_Transport | TLS_Transport then
                Release (IO);
-               raise Program_Error with
-                 "connection capability transport is invalid";
+               raise Program_Error with "connection capability transport is invalid";
             end if;
             begin
                Sockets.Prepare (IO.Guard.Socket);
@@ -106,8 +103,7 @@ package body Flyology.IO.Connections.Drivers is
          raise Program_Error with "connection capability is already active";
       end if;
       IO.Item := Item.all'Unchecked_Access;
-      IO.Token :=
-        (if Token = null then null else Token.all'Unchecked_Access);
+      IO.Token := (if Token = null then null else Token.all'Unchecked_Access);
       IO.Guard.Item := IO.Item;
       IO.Started := Ada.Real_Time.Clock;
       IO.Deadline := Timeout;
@@ -132,74 +128,55 @@ package body Flyology.IO.Connections.Drivers is
       end;
    end Start;
 
-   procedure Arm_Acquisition
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class)
+   procedure Arm_Acquisition (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class)
    is
-      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupts      : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
-      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
-      Count : Natural := 2;
+      Sources         : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count           : Natural := 2;
    begin
       if IO.Item = null or else IO.Guard.State /= Registered then
-         raise Program_Error with
-           "connection capability is not awaiting acquisition";
+         raise Program_Error with "connection capability is not awaiting acquisition";
       end if;
-      Sources (1) :=
-        (Descriptor => IO.Lease_Source, For_Write => False);
-      Sources (2) :=
-        (Descriptor => IO.Initial_Close_Source, For_Write => False);
-      Interrupt_Sources
-        (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+      Sources (1) := (Descriptor => IO.Lease_Source, For_Write => False);
+      Sources (2) := (Descriptor => IO.Initial_Close_Source, For_Write => False);
+      Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
       for Index in 1 .. Interrupt_Count loop
          Count := Count + 1;
-         Sources (Count) :=
-           (Descriptor => Interrupts (Index), For_Write => False);
+         Sources (Count) := (Descriptor => Interrupts (Index), For_Write => False);
       end loop;
-      Flyology.Operations.Drivers.Arm_Readiness
-        (Operation, Sources (1 .. Count));
+      Flyology.Operations.Drivers.Arm_Readiness (Operation, Sources (1 .. Count));
    end Arm_Acquisition;
 
    procedure Arm_Transport
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class;
-      Required  : Step_Result)
+     (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class; Required : Step_Result)
    is
-      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupts      : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
-      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
-      Count : Natural := 2;
+      Sources         : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count           : Natural := 2;
    begin
       if IO.Item = null or else IO.Guard.State /= Acquired then
          raise Program_Error with "connection capability is not acquired";
       elsif Required not in Need_Read | Need_Write then
-         raise Program_Error with
-           "transport arming requires Need_Read or Need_Write";
+         raise Program_Error with "transport arming requires Need_Read or Need_Write";
       end if;
-      Sources (1) :=
-        (Descriptor => IO.FD, For_Write => Required = Need_Write);
-      Sources (2) :=
-        (Descriptor => IO.Close_Source, For_Write => False);
-      Interrupt_Sources
-        (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+      Sources (1) := (Descriptor => IO.FD, For_Write => Required = Need_Write);
+      Sources (2) := (Descriptor => IO.Close_Source, For_Write => False);
+      Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
       for Index in 1 .. Interrupt_Count loop
          Count := Count + 1;
-         Sources (Count) :=
-           (Descriptor => Interrupts (Index), For_Write => False);
+         Sources (Count) := (Descriptor => Interrupts (Index), For_Write => False);
       end loop;
-      Flyology.Operations.Drivers.Arm_Readiness
-        (Operation, Sources (1 .. Count));
+      Flyology.Operations.Drivers.Arm_Readiness (Operation, Sources (1 .. Count));
    end Arm_Transport;
 
-   procedure Arm_Deadline
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class) is
+   procedure Arm_Deadline (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class) is
    begin
       if not Is_Engaged (IO) then
          raise Program_Error with "connection capability is not engaged";
       elsif IO.Deadline >= 0.0 then
-         Flyology.Operations.Drivers.Arm_Deadline
-           (Operation, Remaining (IO.Started, IO.Deadline));
+         Flyology.Operations.Drivers.Arm_Deadline (Operation, Remaining (IO.Started, IO.Deadline));
       end if;
    end Arm_Deadline;
 
@@ -216,9 +193,7 @@ package body Flyology.IO.Connections.Drivers is
          Signalled := True;
       end Signal;
 
-      procedure Wait_Source
-        (FD : out Descriptor; Already_Pending : out Boolean)
-      is
+      procedure Wait_Source (FD : out Descriptor; Already_Pending : out Boolean) is
       begin
          Already_Pending := Pending;
          if Pending then
@@ -252,23 +227,19 @@ package body Flyology.IO.Connections.Drivers is
       if Item.Item = null or else Item.Guard.State /= Acquired then
          raise Program_Error with "connection capability is not acquired";
       end if;
-      Check_TLS_Operation
-        (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
-      if Item.Deadline >= 0.0
-        and then Remaining (Item.Started, Item.Deadline) = 0.0
-      then
+      Check_TLS_Operation (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
+      if Item.Deadline >= 0.0 and then Remaining (Item.Started, Item.Deadline) = 0.0 then
          raise Timeout_Error with "connection driver timed out";
       end if;
    end Check;
 
-   function Mapped (Status : TLS.Step_Status) return Step_Result is
-     (case Status is
+   function Mapped (Status : TLS.Step_Status) return Step_Result
+   is (case Status is
          when TLS.Complete    => Made_Progress,
          when TLS.Want_Read   => Need_Read,
          when TLS.Want_Write  => Need_Write,
          when TLS.Peer_Closed => Peer_Closed,
-         when TLS.Failed      => raise Program_Error with
-           "TLS driver returned an unhandled failure");
+         when TLS.Failed      => raise Program_Error with "TLS driver returned an unhandled failure");
 
    procedure Receive
      (Item   : in out Capability;
@@ -281,26 +252,21 @@ package body Flyology.IO.Connections.Drivers is
       Last := Data'First - 1;
       Check (Item);
       case Item.Transport is
-         when TLS_Transport =>
+         when TLS_Transport                =>
             if Item.Item.TLS_Session = null then
-               raise Program_Error with
-                 "TLS transport has no provider session";
+               raise Program_Error with "TLS transport has no provider session";
             end if;
-            TLS_Driver.Receive_Once
-              (Item.Item.TLS_Session.all, Data, Last, Status);
+            TLS_Driver.Receive_Once (Item.Item.TLS_Session.all, Data, Last, Status);
             Result := Mapped (Status);
-         when Plain_Transport =>
+
+         when Plain_Transport              =>
             begin
                Sockets.Receive_Socket (Item.Guard.Socket, Data, Last);
-               Result :=
-                 (if Data'Length = 0 or else Last >= Data'First
-                  then Made_Progress
-                  else Peer_Closed);
+               Result := (if Data'Length = 0 or else Last >= Data'First then Made_Progress else Peer_Closed);
             exception
                when Occurrence : Sockets.Socket_Error =>
-                  if Sockets.Resolve_Exception (Occurrence) in
-                    Sockets.Resource_Temporarily_Unavailable |
-                    Sockets.Interrupted_System_Call
+                  if Sockets.Resolve_Exception (Occurrence)
+                     in Sockets.Resource_Temporarily_Unavailable | Sockets.Interrupted_System_Call
                   then
                      Last := Data'First - 1;
                      Result := Need_Read;
@@ -308,6 +274,7 @@ package body Flyology.IO.Connections.Drivers is
                      Ada.Exceptions.Reraise_Occurrence (Occurrence);
                   end if;
             end;
+
          when No_Transport | TLS_Upgrading =>
             raise Program_Error with "connection driver transport is invalid";
       end case;
@@ -324,27 +291,23 @@ package body Flyology.IO.Connections.Drivers is
       Last := Data'First - 1;
       Check (Item);
       case Item.Transport is
-         when TLS_Transport =>
+         when TLS_Transport                =>
             if Item.Item.TLS_Session = null then
-               raise Program_Error with
-                 "TLS transport has no provider session";
+               raise Program_Error with "TLS transport has no provider session";
             end if;
-            TLS_Driver.Send_Once
-              (Item.Item.TLS_Session.all, Data, Last, Status);
+            TLS_Driver.Send_Once (Item.Item.TLS_Session.all, Data, Last, Status);
             Result := Mapped (Status);
-         when Plain_Transport =>
+
+         when Plain_Transport              =>
             begin
                Sockets.Send_Socket (Item.Guard.Socket, Data, Last);
-               Result :=
-                 (if Data'Length = 0 or else Last >= Data'First
-                  then Made_Progress
-                  else Peer_Closed);
+               Result := (if Data'Length = 0 or else Last >= Data'First then Made_Progress else Peer_Closed);
             exception
                when Occurrence : Sockets.Socket_Error =>
-                  if Sockets.Resolve_Exception (Occurrence) in
-                    Sockets.Resource_Temporarily_Unavailable |
-                    Sockets.Interrupted_System_Call |
-                    Sockets.No_Buffer_Space_Available
+                  if Sockets.Resolve_Exception (Occurrence)
+                     in Sockets.Resource_Temporarily_Unavailable
+                      | Sockets.Interrupted_System_Call
+                      | Sockets.No_Buffer_Space_Available
                   then
                      Last := Data'First - 1;
                      Result := Need_Write;
@@ -352,6 +315,7 @@ package body Flyology.IO.Connections.Drivers is
                      Ada.Exceptions.Reraise_Occurrence (Occurrence);
                   end if;
             end;
+
          when No_Transport | TLS_Upgrading =>
             raise Program_Error with "connection driver transport is invalid";
       end case;
@@ -364,16 +328,16 @@ package body Flyology.IO.Connections.Drivers is
       Timeout  : Duration := Infinite;
       Result   : out Wait_Result)
    is
-      Requests          : Wait_Request_Array (1 .. 7);
-      Count             : Natural := 0;
-      Outbound_FD       : Descriptor;
-      Outbound_Pending  : Boolean;
-      Outbound_Index    : Natural := 0;
-      Interrupts        : Interrupt_Set (1 .. 2);
-      Interrupt_Count   : Natural;
-      Global_Remaining  : Duration;
-      Wait_For          : Duration;
-      Ready_Index       : Natural;
+      Requests         : Wait_Request_Array (1 .. 7);
+      Count            : Natural := 0;
+      Outbound_FD      : Descriptor;
+      Outbound_Pending : Boolean;
+      Outbound_Index   : Natural := 0;
+      Interrupts       : Interrupt_Set (1 .. 2);
+      Interrupt_Count  : Natural;
+      Global_Remaining : Duration;
+      Wait_For         : Duration;
+      Ready_Index      : Natural;
 
       procedure Append (FD : Descriptor; Condition : Wait_Kind) is
       begin
@@ -382,8 +346,7 @@ package body Flyology.IO.Connections.Drivers is
       end Append;
    begin
       Check (Item);
-      Outbound.Controller.Wait_Source
-        (Outbound_FD, Outbound_Pending);
+      Outbound.Controller.Wait_Source (Outbound_FD, Outbound_Pending);
       if Outbound_Pending then
          Outbound.Controller.Consume;
          Result := Outbound_Ready;
@@ -399,24 +362,22 @@ package body Flyology.IO.Connections.Drivers is
          Append (Item.FD, For_Write);
       end if;
       Append (Item.Close_Source, For_Read);
-      Interrupt_Sources
-        (Item.Owner, Item.Token, Interrupts, Interrupt_Count);
-      for Index in Interrupts'First .. Interrupts'First + Interrupt_Count - 1
-      loop
+      Interrupt_Sources (Item.Owner, Item.Token, Interrupts, Interrupt_Count);
+      for Index in Interrupts'First .. Interrupts'First + Interrupt_Count - 1 loop
          Append (Interrupts (Index), For_Read);
       end loop;
 
       Global_Remaining := Remaining (Item.Started, Item.Deadline);
       Wait_For :=
-        (if Timeout < 0.0 then Global_Remaining
-         elsif Item.Deadline < 0.0 then Timeout
+        (if Timeout < 0.0
+         then Global_Remaining
+         elsif Item.Deadline < 0.0
+         then Timeout
          else Duration'Min (Timeout, Global_Remaining));
       Ready_Index := Wait_Any (Requests (1 .. Count), Wait_For);
 
       if Ready_Index = 0 then
-         if Item.Deadline >= 0.0
-           and then Remaining (Item.Started, Item.Deadline) = 0.0
-         then
+         if Item.Deadline >= 0.0 and then Remaining (Item.Started, Item.Deadline) = 0.0 then
             raise Timeout_Error with "connection driver timed out";
          end if;
          Result := Wait_Timed_Out;
@@ -427,10 +388,7 @@ package body Flyology.IO.Connections.Drivers is
       if Ready_Index = Outbound_Index then
          Outbound.Controller.Consume;
          Result := Outbound_Ready;
-      elsif Ready_Index <=
-        Outbound_Index
-        + Boolean'Pos (Interest.Readable)
-        + Boolean'Pos (Interest.Writable)
+      elsif Ready_Index <= Outbound_Index + Boolean'Pos (Interest.Readable) + Boolean'Pos (Interest.Writable)
       then
          Result := Transport_Ready;
       else
@@ -446,33 +404,27 @@ package body Flyology.IO.Connections.Drivers is
       Timeout : Duration := Infinite;
       Token   : access Cancellation_Token := null)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      IO      : Capability;
-      Acquisition : Acquisition_Result;
-      Requests : Wait_Request_Array (1 .. 4);
-      Count : Natural;
-      Interrupts : Interrupt_Set (1 .. 2);
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      IO              : Capability;
+      Acquisition     : Acquisition_Result;
+      Requests        : Wait_Request_Array (1 .. 4);
+      Count           : Natural;
+      Interrupts      : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
-      Ready : Natural;
+      Ready           : Natural;
    begin
-      Start
-        (IO, Item'Unchecked_Access, Acquisition,
-         Timeout => Timeout, Token => Token);
+      Start (IO, Item'Unchecked_Access, Acquisition, Timeout => Timeout, Token => Token);
       IO.Started := Started;
       while Acquisition = Need_Acquire_Readiness loop
          Count := 2;
          Requests (1) := (FD => IO.Lease_Source, Condition => For_Read);
-         Requests (2) :=
-           (FD => IO.Initial_Close_Source, Condition => For_Read);
-         Interrupt_Sources
-           (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+         Requests (2) := (FD => IO.Initial_Close_Source, Condition => For_Read);
+         Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
          for Index in 1 .. Interrupt_Count loop
             Count := Count + 1;
-            Requests (Count) :=
-              (FD => Interrupts (Index), Condition => For_Read);
+            Requests (Count) := (FD => Interrupts (Index), Condition => For_Read);
          end loop;
-         Ready := Wait_Any
-           (Requests (1 .. Count), Remaining (Started, Timeout));
+         Ready := Wait_Any (Requests (1 .. Count), Remaining (Started, Timeout));
          if Ready = 0 then
             raise Timeout_Error with "connection driver timed out";
          end if;

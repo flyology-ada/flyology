@@ -13,16 +13,11 @@ package body Flyology.Wall_Clock_Waits is
    procedure Open (Item : in out Source) is
    begin
       if not Native.Open (Item.Native) then
-         raise Flyology.IO.Device_Error with
-           "cannot create wall-clock wait source";
+         raise Flyology.IO.Device_Error with "cannot create wall-clock wait source";
       end if;
    end Open;
 
-   function Arm
-     (Item          : in out Source;
-      Target        : Ada.Calendar.Time;
-      Maximum_Slice : Duration) return Boolean
-   is
+   function Arm (Item : in out Source; Target : Ada.Calendar.Time; Maximum_Slice : Duration) return Boolean is
       Year        : Ada.Calendar.Year_Number;
       Month       : Ada.Calendar.Month_Number;
       Day         : Ada.Calendar.Day_Number;
@@ -53,16 +48,13 @@ package body Flyology.Wall_Clock_Waits is
               Integer (Hour),
               Integer (Minute),
               Integer (Second),
-              Policy.Nanosecond_Part
-                (Flyology.Time_Math.To_Nanoseconds
-                   (Duration (Sub_Second))),
+              Policy.Nanosecond_Part (Flyology.Time_Math.To_Nanoseconds (Duration (Sub_Second))),
               Leap_Second);
-         Result : constant Native.Arm_Outcome :=
+         Result        : constant Native.Arm_Outcome :=
            Native.Arm
              (Item.Native,
               Native_Target,
-              Interfaces.Integer_64
-                (Flyology.Time_Math.To_Nanoseconds (Maximum_Slice)));
+              Interfaces.Integer_64 (Flyology.Time_Math.To_Nanoseconds (Maximum_Slice)));
       begin
          if Result = Native.Arm_Failed then
             raise Flyology.IO.Device_Error with "cannot arm wall-clock wait";
@@ -79,14 +71,14 @@ package body Flyology.Wall_Clock_Waits is
       end if;
    end Consume;
 
-   function Descriptor (Item : Source) return C.int is
-     (Item.Native.Wait_FD);
+   function Descriptor (Item : Source) return C.int
+   is (Item.Native.Wait_FD);
 
-   function Cancels_On_Clock_Set (Item : Source) return Boolean is
-     (Item.Native.Wait_FD >= 0
-      and then Item.Native.Change_FD = Item.Native.Wait_FD);
+   function Cancels_On_Clock_Set (Item : Source) return Boolean
+   is (Item.Native.Wait_FD >= 0 and then Item.Native.Change_FD = Item.Native.Wait_FD);
 
-   overriding procedure Finalize (Item : in out Source) is
+   overriding
+   procedure Finalize (Item : in out Source) is
    begin
       Native.Close (Item.Native);
    end Finalize;

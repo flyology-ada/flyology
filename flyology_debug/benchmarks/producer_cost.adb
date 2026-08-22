@@ -11,12 +11,12 @@ procedure Producer_Cost is
 
    subtype Message is Interfaces.Unsigned_64;
 
-   Iterations             : constant Positive := 1_000_000;
-   Concurrent_Producers   : constant Positive := 4;
-   Iterations_Per_Producer : constant Positive :=
-     Iterations / Concurrent_Producers;
+   Iterations              : constant Positive := 1_000_000;
+   Concurrent_Producers    : constant Positive := 4;
+   Iterations_Per_Producer : constant Positive := Iterations / Concurrent_Producers;
 
-   function Cheap_Clock return Flyology_Debug.Timestamp is (0);
+   function Cheap_Clock return Flyology_Debug.Timestamp
+   is (0);
 
    function Select_First (Producer_Count : Positive) return Positive is
       pragma Unreferenced (Producer_Count);
@@ -24,37 +24,42 @@ procedure Producer_Cost is
       return 1;
    end Select_First;
 
-   package Cheap is new Flyology_Debug.Tracers
-     (Message_Type => Message,
-      Capacity     => 1_024,
-      Overflow     => Flyology_Debug.Overwrite_Oldest,
-      Now          => Cheap_Clock);
+   package Cheap is new
+     Flyology_Debug.Tracers
+       (Message_Type => Message,
+        Capacity     => 1_024,
+        Overflow     => Flyology_Debug.Overwrite_Oldest,
+        Now          => Cheap_Clock);
 
-   package Native is new Flyology_Debug.Tracers
-     (Message_Type => Message,
-      Capacity     => 1_024,
-      Overflow     => Flyology_Debug.Overwrite_Oldest);
+   package Native is new
+     Flyology_Debug.Tracers
+       (Message_Type => Message,
+        Capacity     => 1_024,
+        Overflow     => Flyology_Debug.Overwrite_Oldest);
 
-   package Disabled is new Flyology_Debug.Tracers
-     (Message_Type => Message,
-      Capacity     => 1_024,
-      Overflow     => Flyology_Debug.Overwrite_Oldest,
-      Now          => Cheap_Clock);
+   package Disabled is new
+     Flyology_Debug.Tracers
+       (Message_Type => Message,
+        Capacity     => 1_024,
+        Overflow     => Flyology_Debug.Overwrite_Oldest,
+        Now          => Cheap_Clock);
 
-   package Sharded is new Flyology_Debug.Tracers
-     (Message_Type   => Message,
-      Capacity       => 1_024,
-      Overflow       => Flyology_Debug.Overwrite_Oldest,
-      Now            => Cheap_Clock,
-      Producer_Count => Concurrent_Producers);
+   package Sharded is new
+     Flyology_Debug.Tracers
+       (Message_Type   => Message,
+        Capacity       => 1_024,
+        Overflow       => Flyology_Debug.Overwrite_Oldest,
+        Now            => Cheap_Clock,
+        Producer_Count => Concurrent_Producers);
 
-   package Automatic is new Flyology_Debug.Tracers
-     (Message_Type    => Message,
-      Capacity        => 1_024,
-      Overflow        => Flyology_Debug.Overwrite_Oldest,
-      Now             => Cheap_Clock,
-      Producer_Count  => Concurrent_Producers,
-      Select_Producer => Select_First);
+   package Automatic is new
+     Flyology_Debug.Tracers
+       (Message_Type    => Message,
+        Capacity        => 1_024,
+        Overflow        => Flyology_Debug.Overwrite_Oldest,
+        Now             => Cheap_Clock,
+        Producer_Count  => Concurrent_Producers,
+        Select_Producer => Select_First);
 
    procedure Report
      (Label      : String;
@@ -62,12 +67,10 @@ procedure Producer_Cost is
       Stopped_At : Flyology_Debug.Timestamp;
       Operations : Positive)
    is
-      Elapsed : constant Long_Float :=
-        Long_Float (Stopped_At - Started_At);
+      Elapsed       : constant Long_Float := Long_Float (Stopped_At - Started_At);
       Per_Operation : constant Long_Float := Elapsed / Long_Float (Operations);
    begin
-      Ada.Text_IO.Put_Line
-        (Label & ":" & Long_Float'Image (Per_Operation) & " ns/trace");
+      Ada.Text_IO.Put_Line (Label & ":" & Long_Float'Image (Per_Operation) & " ns/trace");
    end Report;
 
    generic
@@ -87,18 +90,14 @@ procedure Producer_Cost is
       Report (Label, Started_At, Stopped_At, Iterations);
    end Run_Serial;
 
-   procedure Run_Cheap is new Run_Serial
-     (Label => "injected clock, one producer", Emit => Cheap.Trace);
+   procedure Run_Cheap is new Run_Serial (Label => "injected clock, one producer", Emit => Cheap.Trace);
 
-   procedure Run_Native is new Run_Serial
-     (Label => "native clock, one producer", Emit => Native.Trace);
+   procedure Run_Native is new Run_Serial (Label => "native clock, one producer", Emit => Native.Trace);
 
-   procedure Run_Automatic is new Run_Serial
-     (Label => "injected clock, constant automatic selector",
-      Emit  => Automatic.Trace);
+   procedure Run_Automatic is new
+     Run_Serial (Label => "injected clock, constant automatic selector", Emit => Automatic.Trace);
 
-   procedure Run_Disabled is new Run_Serial
-     (Label => "disabled, direct Trace", Emit => Disabled.Trace);
+   procedure Run_Disabled is new Run_Serial (Label => "disabled, direct Trace", Emit => Disabled.Trace);
 
    procedure Emit_Shared (Producer : Positive; Value : Message) is
       pragma Unreferenced (Producer);
@@ -124,8 +123,8 @@ procedure Producer_Cost is
          procedure Finish;
          entry Await_Finish;
       private
-         Started  : Boolean := False;
-         Finished : Natural := 0;
+         Started       : Boolean := False;
+         Finished      : Natural := 0;
          Next_Producer : Natural := 0;
       end Gate;
 
@@ -178,20 +177,14 @@ procedure Producer_Cost is
       Gate.Start;
       Gate.Await_Finish;
       Stopped_At := Flyology_Debug.Clock;
-      Report
-        (Label,
-         Started_At,
-         Stopped_At,
-         Iterations_Per_Producer * Concurrent_Producers);
+      Report (Label, Started_At, Stopped_At, Iterations_Per_Producer * Concurrent_Producers);
    end Run_Concurrent;
 
-   procedure Run_Shared_Concurrent is new Run_Concurrent
-     (Label => "injected clock, four producers, one shard",
-      Emit  => Emit_Shared);
+   procedure Run_Shared_Concurrent is new
+     Run_Concurrent (Label => "injected clock, four producers, one shard", Emit => Emit_Shared);
 
-   procedure Run_Sharded_Concurrent is new Run_Concurrent
-     (Label => "injected clock, four producers, four shards",
-      Emit  => Emit_Sharded);
+   procedure Run_Sharded_Concurrent is new
+     Run_Concurrent (Label => "injected clock, four producers, four shards", Emit => Emit_Sharded);
 begin
    Disabled.Disable;
    Run_Disabled;

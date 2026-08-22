@@ -18,7 +18,8 @@ package body Flyology_Cachelines is
    --  Ready is atomic and is set after Detected is written, so a task that
    --  observes it set also observes the completed record.
    Detected : Platform.Host_Facts;
-   Ready    : Boolean := False with Atomic;
+   Ready    : Boolean := False
+   with Atomic;
 
    function Facts return Platform.Host_Facts is
    begin
@@ -31,8 +32,8 @@ package body Flyology_Cachelines is
    end Facts;
 
    --  A zero field is a value the host did not supply.
-   function Reported (Value : Natural) return Cache_Query_Result is
-     (if Value = 0 then Unavailable else (Available => True, Value => Value));
+   function Reported (Value : Natural) return Cache_Query_Result
+   is (if Value = 0 then Unavailable else (Available => True, Value => Value));
 
    --  Facts for a class the host actually described.  Asking about a class
    --  beyond the reported count is a question the host did not answer, not an
@@ -40,57 +41,43 @@ package body Flyology_Cachelines is
    function Facts_For (Class : Core_Class) return Platform.Class_Facts is
       Host : constant Platform.Host_Facts := Facts;
    begin
-      return
-        (if Natural (Class) <= Host.Count
-         then Host.Classes (Class)
-         else (others => 0));
+      return (if Natural (Class) <= Host.Count then Host.Classes (Class) else (others => 0));
    end Facts_For;
 
-   function Hardware_Cache_Line_Size return Cache_Query_Result is
-     (Reported (Facts.Line_Size));
+   function Hardware_Cache_Line_Size return Cache_Query_Result
+   is (Reported (Facts.Line_Size));
 
-   function Core_Class_Count return Cache_Query_Result is
-     (Reported (Facts.Count));
+   function Core_Class_Count return Cache_Query_Result
+   is (Reported (Facts.Count));
 
-   function Core_Class_Ordering return Class_Ordering is
-     (Facts.Ordering);
+   function Core_Class_Ordering return Class_Ordering
+   is (Facts.Ordering);
 
-   function Core_Class_Cores
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
-     (Reported (Facts_For (Class).Cores));
+   function Core_Class_Cores (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
+   is (Reported (Facts_For (Class).Cores));
 
-   function Core_Class_CPUs
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
-     (Reported (Facts_For (Class).CPUs));
+   function Core_Class_CPUs (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
+   is (Reported (Facts_For (Class).CPUs));
 
-   function L1_Data_Cache_Size
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
-     (Reported (Facts_For (Class).Total_Size));
+   function L1_Data_Cache_Size (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
+   is (Reported (Facts_For (Class).Total_Size));
 
-   function L2_Cache_Size
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
-     (Reported (Facts_For (Class).L2_Size));
+   function L2_Cache_Size (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
+   is (Reported (Facts_For (Class).L2_Size));
 
-   function L2_Sharing_Cores
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
-     (Reported (Facts_For (Class).L2_Sharing_Cores));
+   function L2_Sharing_Cores (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
+   is (Reported (Facts_For (Class).L2_Sharing_Cores));
 
-   function L1_Data_Cache_Slots
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result
-   is
+   function L1_Data_Cache_Slots (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result is
       Size : constant Cache_Query_Result := L1_Data_Cache_Size (Class);
    begin
       return
         (if Size.Available
-         then
-           (Available => True,
-            Value     => Size.Value / Destructive_Interference_Size)
+         then (Available => True, Value => Size.Value / Destructive_Interference_Size)
          else Unavailable);
    end L1_Data_Cache_Slots;
 
-   function Value_Or
-     (Result   : Cache_Query_Result;
-      Fallback : Natural) return Natural is
-     (if Result.Available then Result.Value else Fallback);
+   function Value_Or (Result : Cache_Query_Result; Fallback : Natural) return Natural
+   is (if Result.Available then Result.Value else Fallback);
 
 end Flyology_Cachelines;

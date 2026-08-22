@@ -16,8 +16,7 @@ procedure Event_Loop_Pool is
    package Groups renames Flyology.Execution_Groups;
    package Observe renames Flyology.Observability;
 
-   type Socket_Array is
-     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+   type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    type Socket_Array_Access is access Socket_Array;
    type Group_Count_Array is array (Groups.Shared_Group_Id) of Natural;
 
@@ -70,10 +69,10 @@ procedure Event_Loop_Pool is
             Next_Target := Next_Target + Workers;
          end Await_Round;
 
-         function Failures return Natural is (Failure_Count);
+         function Failures return Natural
+         is (Failure_Count);
 
-         function Group_Count
-           (Group : Groups.Shared_Group_Id) return Natural
+         function Group_Count (Group : Groups.Shared_Group_Id) return Natural
          is (Counts (Group));
       end Progress;
 
@@ -88,8 +87,7 @@ procedure Event_Loop_Pool is
          Progress.Ready (Groups.Current);
          for Round in 1 .. Rounds loop
             begin
-               Flyology.IO.Sockets.Receive_Exactly
-                 (Servers (Index), Incoming, Timeout => 30.0);
+               Flyology.IO.Sockets.Receive_Exactly (Servers (Index), Incoming, Timeout => 30.0);
                Progress.Complete (Incoming = Byte);
             exception
                when others =>
@@ -103,8 +101,7 @@ procedure Event_Loop_Pool is
       end Connection;
 
       type Connection_Access is access Connection;
-      type Connection_Array is
-        array (Positive range <>) of Connection_Access;
+      type Connection_Array is array (Positive range <>) of Connection_Access;
       Connections : Connection_Array (1 .. Workers);
       pragma Unreferenced (Connections);
 
@@ -114,8 +111,7 @@ procedure Event_Loop_Pool is
       Pool     : constant Groups.Loop_Pool_Size := Groups.Configured_Pool_Size;
    begin
       for Index in 1 .. Workers loop
-         Flyology.IO.Sockets.Create_Socket_Pair
-           (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
       end loop;
       for Index in 1 .. Workers loop
          Connections (Index) := new Connection (Index);
@@ -125,37 +121,40 @@ procedure Event_Loop_Pool is
       Started := Clock;
       for Round in 1 .. Rounds loop
          for Index in 1 .. Workers loop
-            Flyology.IO.Sockets.Send_All
-              (Peers (Index), Byte, Timeout => 30.0);
+            Flyology.IO.Sockets.Send_All (Peers (Index), Byte, Timeout => 30.0);
          end loop;
          Progress.Await_Round;
       end loop;
       Elapsed := To_Duration (Clock - Started);
 
       if Progress.Failures /= 0 then
-         raise Program_Error with
-           Natural'Image (Progress.Failures) & " socket operations failed";
+         raise Program_Error with Natural'Image (Progress.Failures) & " socket operations failed";
       end if;
 
       Put_Line
-        ("configured_loops=" & Groups.Loop_Pool_Size'Image (Pool)
+        ("configured_loops="
+         & Groups.Loop_Pool_Size'Image (Pool)
          & " policy=round_robin"
-         & " workers=" & Workers'Image
-         & " rounds=" & Rounds'Image
-         & " receive_operations=" & Natural'Image (Workers * Rounds));
-      Put_Line
-        ("elapsed_seconds="
-         & Showcase_Support.Fixed_Image (Long_Float (Elapsed), 6));
-      for Group in Groups.Shared_Group_Id range
-        0 .. Groups.Shared_Group_Id (Pool - 1)
-      loop
+         & " workers="
+         & Workers'Image
+         & " rounds="
+         & Rounds'Image
+         & " receive_operations="
+         & Natural'Image (Workers * Rounds));
+      Put_Line ("elapsed_seconds=" & Showcase_Support.Fixed_Image (Long_Float (Elapsed), 6));
+      for Group in Groups.Shared_Group_Id range 0 .. Groups.Shared_Group_Id (Pool - 1) loop
          if Observe.Snapshot (Group, Snapshot) then
             Put_Line
-              ("  group=" & Groups.Group_Id'Image (Group)
-               & " workers=" & Natural'Image (Progress.Group_Count (Group))
-               & " dispatches=" & Observe.Counter'Image (Snapshot.Dispatches)
-               & " poll_batches=" & Observe.Counter'Image (Snapshot.Poll_Batches)
-               & " poll_events=" & Observe.Counter'Image (Snapshot.Poll_Events));
+              ("  group="
+               & Groups.Group_Id'Image (Group)
+               & " workers="
+               & Natural'Image (Progress.Group_Count (Group))
+               & " dispatches="
+               & Observe.Counter'Image (Snapshot.Dispatches)
+               & " poll_batches="
+               & Observe.Counter'Image (Snapshot.Poll_Batches)
+               & " poll_events="
+               & Observe.Counter'Image (Snapshot.Poll_Events));
          end if;
       end loop;
 
@@ -176,9 +175,7 @@ begin
       return;
    end if;
 
-   Run
-     (Positive'Value (Ada.Command_Line.Argument (1)),
-      Positive'Value (Ada.Command_Line.Argument (2)));
+   Run (Positive'Value (Ada.Command_Line.Argument (1)), Positive'Value (Ada.Command_Line.Argument (2)));
 exception
    when Constraint_Error =>
       Usage;

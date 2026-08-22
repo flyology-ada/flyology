@@ -1,7 +1,10 @@
 with Interfaces.C;
 
 --  Internal platform binding for one positional sendfile attempt.
-private package Flyology.Sendfile_Bridge with Preelaborate is
+
+private package Flyology.Sendfile_Bridge
+  with Preelaborate
+is
 
    function Send_File
      (Socket : Interfaces.C.int;

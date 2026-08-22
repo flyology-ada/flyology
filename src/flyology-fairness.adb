@@ -1,10 +1,7 @@
 package body Flyology.Fairness is
    use type Ada.Real_Time.Time;
 
-   procedure Configure
-     (Budget  : in out Yield_Budget;
-      Quantum : Ada.Real_Time.Time_Span := Default_Quantum)
-   is
+   procedure Configure (Budget : in out Yield_Budget; Quantum : Ada.Real_Time.Time_Span := Default_Quantum) is
    begin
       Budget.Quantum := Quantum;
       Budget.Next_Yield := Ada.Real_Time.Clock + Quantum;

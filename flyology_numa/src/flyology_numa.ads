@@ -25,6 +25,7 @@ with System.Multiprocessors;
 --  life of the process. Nodes that appear or disappear afterwards are not
 --  observed. Discovery reads host description files and raises nothing: a
 --  host that answers nothing is reported as one node.
+
 package Flyology_NUMA is
 
    --  Highest memory-node number this package represents.
@@ -49,7 +50,7 @@ package Flyology_NUMA is
    type Distance is range 0 .. 255;
 
    --  A quantity of bytes.
-   type Byte_Count is range 0 .. 2 ** 62 - 1;
+   type Byte_Count is range 0 .. 2**62 - 1;
 
    ---------------------------------------------------------------------
    --  Query results
@@ -63,6 +64,7 @@ package Flyology_NUMA is
       case Available is
          when True =>
             Node : Node_Id;
+
          when False =>
             null;
       end case;
@@ -79,6 +81,7 @@ package Flyology_NUMA is
       case Available is
          when True =>
             Bytes : Byte_Count;
+
          when False =>
             null;
       end case;
@@ -95,6 +98,7 @@ package Flyology_NUMA is
       case Available is
          when True =>
             Value : Distance;
+
          when False =>
             null;
       end case;
@@ -111,6 +115,7 @@ package Flyology_NUMA is
       case Available is
          when True =>
             Value : Natural;
+
          when False =>
             null;
       end case;
@@ -123,25 +128,19 @@ package Flyology_NUMA is
    --  @param Result The query result to inspect.
    --  @param Fallback The quantity to return when Result is unanswered.
    --  @return Result.Bytes when available, otherwise Fallback.
-   function Value_Or
-     (Result   : Byte_Query;
-      Fallback : Byte_Count) return Byte_Count;
+   function Value_Or (Result : Byte_Query; Fallback : Byte_Count) return Byte_Count;
 
    --  Explicitly choose a fallback for an unanswered distance query.
    --  @param Result The query result to inspect.
    --  @param Fallback The distance to return when Result is unanswered.
    --  @return Result.Value when available, otherwise Fallback.
-   function Value_Or
-     (Result   : Distance_Query;
-      Fallback : Distance) return Distance;
+   function Value_Or (Result : Distance_Query; Fallback : Distance) return Distance;
 
    --  Explicitly choose a fallback for an unanswered numeric query.
    --  @param Result The query result to inspect.
    --  @param Fallback The value to return when Result is unanswered.
    --  @return Result.Value when available, otherwise Fallback.
-   function Value_Or
-     (Result   : Value_Query;
-      Fallback : Natural) return Natural;
+   function Value_Or (Result : Value_Query; Fallback : Natural) return Natural;
 
    ---------------------------------------------------------------------
    --  Sets
@@ -157,20 +156,14 @@ package Flyology_NUMA is
    --
    --  Iterating a node set visits its members in increasing node order.
    type Node_Set is private
-     with Iterable => (First       => First,
-                       Next        => Next,
-                       Has_Element => Has_Element,
-                       Element     => Element);
+   with Iterable => (First => First, Next => Next, Has_Element => Has_Element, Element => Element);
 
    --  A set of logical processors.
    --
    --  Iterating a processor set visits its members in increasing processor
    --  order.
    type Processor_Set is private
-     with Iterable => (First       => First,
-                       Next        => Next,
-                       Has_Element => Has_Element,
-                       Element     => Element);
+   with Iterable => (First => First, Next => Next, Has_Element => Has_Element, Element => Element);
 
    --  Report whether Node belongs to Set.
    --  @param Set The set to inspect.
@@ -182,8 +175,7 @@ package Flyology_NUMA is
    --  @param Set The set to inspect.
    --  @param Processor The processor to look for.
    --  @return True when Processor belongs to Set.
-   function Contains
-     (Set : Processor_Set; Processor : Processor_Id) return Boolean;
+   function Contains (Set : Processor_Set; Processor : Processor_Id) return Boolean;
 
    --  Return the number of nodes in Set.
    --  @param Set The set to inspect.
@@ -213,8 +205,7 @@ package Flyology_NUMA is
    --  @param Position The position to test.
    --  @return True while the iteration has a member.
    --  @exclude
-   function Has_Element
-     (Set : Node_Set; Position : Node_Cursor) return Boolean;
+   function Has_Element (Set : Node_Set; Position : Node_Cursor) return Boolean;
 
    --  Return the node at Position.
    --
@@ -238,25 +229,21 @@ package Flyology_NUMA is
    --  @param Position The current position.
    --  @return The position of the next member.
    --  @exclude
-   function Next
-     (Set : Processor_Set; Position : Processor_Cursor)
-      return Processor_Cursor;
+   function Next (Set : Processor_Set; Position : Processor_Cursor) return Processor_Cursor;
 
    --  Report whether a processor set iteration has a member at Position.
    --  @param Set The set being iterated.
    --  @param Position The position to test.
    --  @return True while the iteration has a member.
    --  @exclude
-   function Has_Element
-     (Set : Processor_Set; Position : Processor_Cursor) return Boolean;
+   function Has_Element (Set : Processor_Set; Position : Processor_Cursor) return Boolean;
 
    --  Return the processor at Position.
    --  @param Set The set being iterated.
    --  @param Position The position to read.
    --  @return The member processor.
    --  @exclude
-   function Element
-     (Set : Processor_Set; Position : Processor_Cursor) return Processor_Id;
+   function Element (Set : Processor_Set; Position : Processor_Cursor) return Processor_Id;
 
    ---------------------------------------------------------------------
    --  Discovery outcome
@@ -283,9 +270,9 @@ package Flyology_NUMA is
    --  @field Consecutive_Processors True when the host numbers its
    --     processors consecutively from zero. To_CPU answers only then.
    type Support_Report is record
-      Source                : Discovery_Source;
-      Restricted            : Boolean;
-      Complete              : Boolean;
+      Source                 : Discovery_Source;
+      Restricted             : Boolean;
+      Complete               : Boolean;
       Consecutive_Processors : Boolean;
    end record;
 
@@ -385,14 +372,13 @@ package Flyology_NUMA is
    --  task can tell the difference instead of pinning to the wrong place.
    --  @param Processor The host processor number to convert.
    --  @return The Ada processor number, or Not_A_Specific_CPU.
-   function To_CPU
-     (Processor : Processor_Id) return System.Multiprocessors.CPU_Range;
+   function To_CPU (Processor : Processor_Id) return System.Multiprocessors.CPU_Range;
 
 private
 
    Bits_Per_Word : constant := 64;
 
-   type Word is mod 2 ** Bits_Per_Word;
+   type Word is mod 2**Bits_Per_Word;
 
    Node_Word_Count      : constant := (Max_Node / Bits_Per_Word) + 1;
    Processor_Word_Count : constant := (Max_Processor / Bits_Per_Word) + 1;
@@ -418,29 +404,28 @@ private
    --  Everything discovery established about one node.
    type Node_Facts is record
       Processors : Processor_Set := Empty_Processors;
-      Memory     : Byte_Query    := No_Bytes;
-      Packaging  : Value_Query   := No_Value;
-      Distances  : Distance_Row  := No_Distances;
+      Memory     : Byte_Query := No_Bytes;
+      Packaging  : Value_Query := No_Value;
+      Distances  : Distance_Row := No_Distances;
    end record;
 
    type Node_Facts_Array is array (Node_Id) of Node_Facts;
 
    type Processor_Nodes is array (Processor_Id) of Node_Query;
 
-   No_Processor_Nodes : constant Processor_Nodes :=
-     (others => (Available => False));
+   No_Processor_Nodes : constant Processor_Nodes := (others => (Available => False));
 
    --  Everything discovery established about the host.
    type Machine_Facts is record
       Source                 : Discovery_Source := Single_Domain;
-      Restricted             : Boolean          := False;
-      Complete               : Boolean          := True;
-      Consecutive_Processors : Boolean          := True;
-      Online                 : Node_Set         := Empty_Nodes;
-      Allowed                : Node_Set         := Empty_Nodes;
-      With_Memory            : Node_Set         := Empty_Nodes;
+      Restricted             : Boolean := False;
+      Complete               : Boolean := True;
+      Consecutive_Processors : Boolean := True;
+      Online                 : Node_Set := Empty_Nodes;
+      Allowed                : Node_Set := Empty_Nodes;
+      With_Memory            : Node_Set := Empty_Nodes;
       Nodes                  : Node_Facts_Array;
-      Owner                  : Processor_Nodes  := No_Processor_Nodes;
+      Owner                  : Processor_Nodes := No_Processor_Nodes;
    end record;
 
 end Flyology_NUMA;

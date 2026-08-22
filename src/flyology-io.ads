@@ -8,7 +8,10 @@ with Flyology.Operations;
 --     if Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0) then
 --        null;
 --     end if;
-package Flyology.IO with Preelaborate is
+
+package Flyology.IO
+  with Preelaborate
+is
 
    --  Conventional negative timeout denoting no time limit. All negative
    --  Duration values have the same meaning in this API.
@@ -28,8 +31,7 @@ package Flyology.IO with Preelaborate is
    --  the call.
    type Interrupt_Set is array (Positive range <>) of Descriptor;
    --  Empty interrupt set used when no wake source is present.
-   No_Interrupts : constant Interrupt_Set (1 .. 0) :=
-     (others => Invalid_Descriptor);
+   No_Interrupts      : constant Interrupt_Set (1 .. 0) := (others => Invalid_Descriptor);
    --  Readiness condition requested from the poller.
    --  @enum For_Read The descriptor can be read without blocking
    --  @enum For_Write The descriptor can be written without blocking
@@ -60,8 +62,7 @@ package Flyology.IO with Preelaborate is
    --  @field Indexes Ready indexes from the caller's request array
    type Wait_Batch (Capacity : Natural) is record
       Count   : Natural := 0;
-      Indexes : Wait_Index_Array (1 .. Capacity) :=
-        (others => Positive'First);
+      Indexes : Wait_Index_Array (1 .. Capacity) := (others => Positive'First);
    end record;
 
    --  Maximum number of descriptors in one allocation-free Wait_Any call.
@@ -83,10 +84,7 @@ package Flyology.IO with Preelaborate is
    --  @param Timeout Deadline interval in seconds
    --  @return True when ready; False on timeout
    --  @exception Device_Error FD is invalid or the poller fails
-   function Wait
-     (FD        : Descriptor;
-      Condition : Wait_Kind;
-      Timeout   : Duration := Infinite) return Boolean;
+   function Wait (FD : Descriptor; Condition : Wait_Kind; Timeout : Duration := Infinite) return Boolean;
 
    --  Wait until one request is ready. Negative Timeout means no limit and
    --  zero is an immediate poll. One deadline spans EINTR retries. Duplicate
@@ -97,10 +95,8 @@ package Flyology.IO with Preelaborate is
    --  @param Timeout Deadline interval in seconds
    --  @return Exact Requests index ready, or 0 on timeout or empty input
    --  @exception Device_Error A descriptor is invalid or polling fails
-   function Wait_Any
-     (Requests : Wait_Request_Array;
-      Timeout  : Duration := Infinite) return Natural
-     with Pre => Requests'Length <= Max_Wait_Requests;
+   function Wait_Any (Requests : Wait_Request_Array; Timeout : Duration := Infinite) return Natural
+   with Pre => Requests'Length <= Max_Wait_Requests;
 
    --  Wait until at least one request is ready, then report the requests
    --  observed ready by the terminal zero-time probe. A readiness event that
@@ -112,12 +108,8 @@ package Flyology.IO with Preelaborate is
    --  @param Timeout Deadline interval in seconds
    --  @exception Device_Error A descriptor is invalid or polling fails
    procedure Wait_Some
-     (Requests  : Wait_Request_Array;
-      Completed : out Wait_Batch;
-      Timeout   : Duration := Infinite)
-     with Pre =>
-       Requests'Length <= Max_Wait_Requests
-       and then Completed.Capacity = Requests'Length;
+     (Requests : Wait_Request_Array; Completed : out Wait_Batch; Timeout : Duration := Infinite)
+   with Pre => Requests'Length <= Max_Wait_Requests and then Completed.Capacity = Requests'Length;
 
    --  Wait for FD or any readable interrupt source. Interrupt
    --  descriptors are neither read nor closed. Timeout and lane behavior
@@ -130,17 +122,16 @@ package Flyology.IO with Preelaborate is
    --  @return Ready, Timed_Out, or Interrupted
    --  @exception Device_Error FD is invalid or the poller fails
    function Wait_Interruptibly
-     (FD          : Descriptor;
-      Condition   : Wait_Kind;
-      Timeout     : Duration := Infinite;
-      Interrupts  : Interrupt_Set := No_Interrupts) return Wait_Outcome
-     with Pre => Interrupts'Length < Max_Wait_Requests;
+     (FD         : Descriptor;
+      Condition  : Wait_Kind;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Wait_Outcome
+   with Pre => Interrupts'Length < Max_Wait_Requests;
 
    --  Scoped readiness operation associated with one completion set. Calling
    --  the operation-producing Wait overload below records the request without
    --  waiting. The completion set must outlive the operation.
-   type Readiness_Operation is
-     new Flyology.Operations.Operation with private;
+   type Readiness_Operation is new Flyology.Operations.Operation with private;
 
    --  Construct and start one readiness operation in place.
    --  @param Set Completion set that owns the operation slot
@@ -148,56 +139,47 @@ package Flyology.IO with Preelaborate is
    --  @param Condition Requested readiness condition
    --  @return Started limited readiness operation
    function Wait
-     (Set       : not null access Flyology.Operations.Completion_Set'Class;
-      FD        : Descriptor;
-      Condition : Wait_Kind) return Readiness_Operation;
+     (Set : not null access Flyology.Operations.Completion_Set'Class; FD : Descriptor; Condition : Wait_Kind)
+      return Readiness_Operation;
 
    --  Start or restart readiness in an established operation object. This is
    --  the composition form of the familiar Wait name.
    --  @param FD Valid descriptor to observe
    --  @param Condition Requested readiness condition
    --  @param Operation Fresh, released, or consumed readiness operation
-   procedure Wait
-     (FD        : Descriptor;
-      Condition : Wait_Kind;
-      Operation : in out Readiness_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Wait (FD : Descriptor; Condition : Wait_Kind; Operation : in out Readiness_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Restart a previously consumed readiness operation.
    --  @param FD Valid descriptor to observe
    --  @param Condition Requested readiness condition
    --  @param Operation Previously consumed operation state
-   procedure Rearm
-     (FD        : Descriptor;
-      Condition : Wait_Kind;
-      Operation : in out Readiness_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   procedure Rearm (FD : Descriptor; Condition : Wait_Kind; Operation : in out Readiness_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal readiness operation. Cancellation raises the common
    --  scoped-operation cancellation exception.
    --  @param Operation Terminal readiness operation to consume
    --  @exception Device_Error The readiness provider failed
    procedure Finish (Operation : in out Readiness_Operation)
-     with Pre => Flyology.Operations.Is_Terminal (Operation);
+   with Pre => Flyology.Operations.Is_Terminal (Operation);
 
 private
-   type Readiness_Operation is
-     new Flyology.Operations.Operation with null record;
+   type Readiness_Operation is new Flyology.Operations.Operation with null record;
 
    --  @exclude
    --  @param Item Readiness operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Readiness_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Readiness_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Readiness operation to cancel
-   overriding procedure Request_Cancellation
-     (Item : in out Readiness_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Readiness_Operation);
 
 end Flyology.IO;

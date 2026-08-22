@@ -8,6 +8,7 @@ with Flyology.IO.Sockets;
 --  and the task-aware call must therefore finish that handshake instead of
 --  reporting a hard failure, while a genuinely refused connection still
 --  fails.
+
 procedure Connect_Transient_Smoke is
    package Sockets renames Flyology.IO.Sockets;
 
@@ -15,26 +16,15 @@ procedure Connect_Transient_Smoke is
 
    Probe : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 97);
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint);
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint);
 
    procedure Close_Endpoint_Owner (Socket : in out Sockets.Socket_Type);
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint)
-   is
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option
-        (Listener,
-         Sockets.Socket_Level,
-         (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 16);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
@@ -63,8 +53,7 @@ procedure Connect_Transient_Smoke is
       Fault_Control.Arm (Fault_Control.Connect_Interrupted);
       Sockets.Create_Socket (Client);
       Sockets.Connect_Socket (Client, Address);
-      pragma Assert
-        (Fault_Control.Calls (Fault_Control.Connect_Interrupted) = 1);
+      pragma Assert (Fault_Control.Calls (Fault_Control.Connect_Interrupted) = 1);
 
       Sockets.Accept_Connection (Listener, Served, Peer, Timeout => 5.0);
       Sockets.Send_All (Client, Probe, Timeout => 5.0);
@@ -114,8 +103,10 @@ procedure Connect_Transient_Smoke is
       Address    : Sockets.Endpoint;
       Peer       : Sockets.Endpoint;
       Echoed     : Ada.Streams.Stream_Element_Array (1 .. 1);
-      Client_OK  : Boolean := False with Atomic;
-      Refused_OK : Boolean := False with Atomic;
+      Client_OK  : Boolean := False
+      with Atomic;
+      Refused_OK : Boolean := False
+      with Atomic;
    begin
       Open_Listener (Listener, Address);
       Fault_Control.Reset;
@@ -145,8 +136,7 @@ procedure Connect_Transient_Smoke is
          Sockets.Send_All (Served, Echoed, Timeout => 5.0);
       end;
       pragma Assert (Client_OK);
-      pragma Assert
-        (Fault_Control.Calls (Fault_Control.Connect_Interrupted) = 1);
+      pragma Assert (Fault_Control.Calls (Fault_Control.Connect_Interrupted) = 1);
       Close_Endpoint_Owner (Served);
       Close_Endpoint_Owner (Listener);
       Fault_Control.Reset;
@@ -182,12 +172,10 @@ procedure Connect_Transient_Smoke is
    end Run_Task_Aware;
 
    procedure Run_Native is new Run_Task_Aware (Flyology.Native_Task);
-   procedure Run_Lightweight is new Run_Task_Aware
-     (Flyology.Lightweight_Task);
+   procedure Run_Lightweight is new Run_Task_Aware (Flyology.Lightweight_Task);
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "connect transient test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "connect transient test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
    Run_Blocking_Interrupt;
    Run_Blocking_Refused;

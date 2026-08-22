@@ -9,6 +9,7 @@ with Ada.Strings.Unbounded;
 --  propagating the corresponding exception. Cleanup failures are suppressed
 --  in favor of that original exception. Cleanup is not part of the
 --  command-progress deadline and can delay exception delivery.
+
 package Flyology.Subprocesses.Capture is
 
    --  Complete bounded command result.
@@ -38,8 +39,7 @@ package Flyology.Subprocesses.Capture is
       Maximum_Output : Natural := 64 * 1_024;
       Maximum_Error  : Natural := 64 * 1_024;
       Timeout        : Duration := 30.0;
-      Token          : access Flyology.Cancellation.Token := null)
-      return Result;
+      Token          : access Flyology.Cancellation.Token := null) return Result;
 
    --  Return the root process status.
    --  @param Item Completed capture result
@@ -68,11 +68,11 @@ package Flyology.Subprocesses.Capture is
 
 private
    type Result is record
-      Child_Status    : Exit_Status;
-      Output_State    : Ada.Strings.Unbounded.Unbounded_String;
-      Error_State     : Ada.Strings.Unbounded.Unbounded_String;
-      Output_Was_Cut  : Boolean := False;
-      Error_Was_Cut   : Boolean := False;
+      Child_Status   : Exit_Status;
+      Output_State   : Ada.Strings.Unbounded.Unbounded_String;
+      Error_State    : Ada.Strings.Unbounded.Unbounded_String;
+      Output_Was_Cut : Boolean := False;
+      Error_Was_Cut  : Boolean := False;
    end record;
 
 end Flyology.Subprocesses.Capture;

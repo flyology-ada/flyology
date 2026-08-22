@@ -2,21 +2,12 @@ package body Flyology.Structured_Server_Test_Hooks is
 #if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
    use type Interfaces.C.int;
 
-   function Test_Barrier_Arrive
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_arrive";
-   function Test_Barrier_Released
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_structured_server_barrier_released";
+   function Test_Barrier_Arrive (Point : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_arrive";
+   function Test_Barrier_Released (Point : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_barrier_released";
    function Test_Activation_Failure return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_structured_server_activation_failure";
+   with Import, Convention => C, External_Name => "flyology_test_structured_server_activation_failure";
 
    procedure Barrier (Point : Interfaces.C.int) is
    begin
@@ -31,8 +22,7 @@ package body Flyology.Structured_Server_Test_Hooks is
    begin
       Barrier (5);
       if Test_Activation_Failure /= 0 then
-         raise Program_Error with
-           "injected structured server worker activation failure";
+         raise Program_Error with "injected structured server worker activation failure";
       end if;
       return True;
    end Check_Activation;
@@ -43,6 +33,7 @@ package body Flyology.Structured_Server_Test_Hooks is
       null;
    end Barrier;
 
-   function Check_Activation return Boolean is (True);
+   function Check_Activation return Boolean
+   is (True);
 #end if;
 end Flyology.Structured_Server_Test_Hooks;

@@ -1,7 +1,7 @@
 with System.Task_Info;
 
 generic
-   Model      : System.Task_Info.Task_Info_Type;
+   Model : System.Task_Info.Task_Info_Type;
    Peer_Model : System.Task_Info.Task_Info_Type;
 package Semantic_Scenarios is
 

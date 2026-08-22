@@ -13,5 +13,5 @@ package System.Flyology.ASan is
    procedure Finish_Switch
      (Source_Context : out System.Address;
       Source_Bottom  : out System.Address;
-      Source_Size   : out Interfaces.C.size_t);
+      Source_Size    : out Interfaces.C.size_t);
 end System.Flyology.ASan;

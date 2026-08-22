@@ -23,8 +23,7 @@ package body Flyology.IO.Connections is
    use type TLS.Role;
    use type TLS.Step_Status;
 
-   procedure Free is new Ada.Unchecked_Deallocation
-     (TLS.Session'Class, TLS.Session_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (TLS.Session'Class, TLS.Session_Access);
 
    --  GNAT implements this as SO_NOSIGPIPE on Darwin and a no-op where send
    --  flags provide the equivalent process-safety behavior.
@@ -34,16 +33,17 @@ package body Flyology.IO.Connections is
    --  The gate and descriptor controller update Armed in their protected
    --  ownership transitions. Socket holds an accepted descriptor until the
    --  same adoption transition moves it into the Connection.
-   type Admission_Guard (Owner : not null Server_Access) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Admission_Guard (Owner : not null Server_Access) is new Ada.Finalization.Limited_Controlled
+   with record
       Armed  : aliased Boolean := False;
       Socket : Sockets.Socket_Type;
    end record;
 
-   overriding procedure Finalize (Guard : in out Admission_Guard);
+   overriding
+   procedure Finalize (Guard : in out Admission_Guard);
 
-   type Upgrade_Cleanup_Guard (Item : not null access Connection) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Upgrade_Cleanup_Guard (Item : not null access Connection) is new Ada.Finalization.Limited_Controlled
+   with record
       Armed : aliased Boolean := False;
    end record;
 
@@ -65,16 +65,19 @@ package body Flyology.IO.Connections is
       Outcome : not null access Close_Outcome)
    is new Ada.Finalization.Limited_Controlled with null record;
 
-   overriding procedure Initialize (Guard : in out Close_Guard);
-   overriding procedure Finalize (Guard : in out Close_Guard);
+   overriding
+   procedure Initialize (Guard : in out Close_Guard);
+   overriding
+   procedure Finalize (Guard : in out Close_Guard);
 
-   type Session_Setup_Guard is
-     new Ada.Finalization.Limited_Controlled with record
+   type Session_Setup_Guard is new Ada.Finalization.Limited_Controlled with record
       Value : TLS.Session_Access := null;
    end record;
 
-   overriding procedure Finalize (Guard : in out Upgrade_Cleanup_Guard);
-   overriding procedure Finalize (Guard : in out Session_Setup_Guard);
+   overriding
+   procedure Finalize (Guard : in out Upgrade_Cleanup_Guard);
+   overriding
+   procedure Finalize (Guard : in out Session_Setup_Guard);
 
    procedure Disarm (Guard : in out Upgrade_Cleanup_Guard) is
    begin
@@ -82,26 +85,14 @@ package body Flyology.IO.Connections is
    end Disarm;
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
-   function Test_Barrier_Arrive
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_arrive";
-   function Test_Barrier_Released
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_released";
-   function Test_Barrier_Arrive_Once
-     (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_arrive_once";
-   function Test_Receive_Limit
-     (Requested : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_receive_limit";
+   function Test_Barrier_Arrive (Point : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arrive";
+   function Test_Barrier_Released (Point : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_released";
+   function Test_Barrier_Arrive_Once (Point : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arrive_once";
+   function Test_Receive_Limit (Requested : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_connection_receive_limit";
 
    procedure Test_Barrier (Point : Interfaces.C.int) is
    begin
@@ -127,8 +118,7 @@ package body Flyology.IO.Connections is
         (FD            : Descriptor;
          Socket        : in out Sockets.Socket_Type;
          Owner         : Server_Access;
-         Cleanup_Armed : not null access Boolean)
-      is
+         Cleanup_Armed : not null access Boolean) is
       begin
          if FD < 0
            or else not Sockets.Is_Open (Socket)
@@ -139,8 +129,7 @@ package body Flyology.IO.Connections is
            or else Closing
            or else not Cleanup_Armed.all
          then
-            raise Program_Error with
-              "descriptor controller already owns a resource";
+            raise Program_Error with "descriptor controller already owns a resource";
          end if;
          Wake_Sources.Ensure (Lease_Wake);
          Wake_Sources.Ensure (Close_Wake);
@@ -161,25 +150,19 @@ package body Flyology.IO.Connections is
          FD           : out Descriptor;
          Lease_Source : out Descriptor;
          Close_Source : out Descriptor;
-         Owner        : out Server_Access)
-      is
+         Owner        : out Server_Access) is
       begin
          if State.all /= Unregistered then
             raise Program_Error with "connection operation already registered";
          end if;
          if Current_Transport = TLS_Upgrading then
-            raise Operation_Cancelled with
-              "connection transport is being upgraded";
-         elsif Current_FD < 0
-           or else Closing
-           or else Current_Owner = null
-         then
+            raise Operation_Cancelled with "connection transport is being upgraded";
+         elsif Current_FD < 0 or else Closing or else Current_Owner = null then
             raise Program_Error with "connection is not open";
          elsif Started_Operations = Natural'Last then
             raise Program_Error with "too many connection operations";
          end if;
-         Started_Operations :=
-           Policy.Started_After_Register (Started_Operations);
+         Started_Operations := Policy.Started_After_Register (Started_Operations);
          Generation.all := Current_Generation;
          FD := Current_FD;
          Lease_Source := Wake_Sources.Descriptor (Lease_Wake);
@@ -193,41 +176,39 @@ package body Flyology.IO.Connections is
 
       procedure Try_Acquire
         (Expected_Generation : Descriptor_Generation;
-         State        : not null access Operation_State;
-         Result       : out Lease_Result;
-         FD           : out Descriptor;
-         Close_Source : out Descriptor;
-         Socket       : in out Sockets.Socket_Type;
-         Owner        : out Server_Access;
-         Transport    : out Transport_Kind)
-      is
+         State               : not null access Operation_State;
+         Result              : out Lease_Result;
+         FD                  : out Descriptor;
+         Close_Source        : out Descriptor;
+         Socket              : in out Sockets.Socket_Type;
+         Owner               : out Server_Access;
+         Transport           : out Transport_Kind) is
       begin
          if State.all /= Registered then
             raise Program_Error with "connection operation is not registered";
          end if;
          case Policy.Classify_Acquire
-           (Generation_Matches => Expected_Generation = Current_Generation,
-            Resources_Open     =>
-              Current_FD >= 0
-              and then Current_Owner /= null,
-            Closing            => Closing,
-            Active             => Active)
+                (Generation_Matches => Expected_Generation = Current_Generation,
+                 Resources_Open     => Current_FD >= 0 and then Current_Owner /= null,
+                 Closing            => Closing,
+                 Active             => Active)
          is
-            when Policy.Cancel_Lease =>
+            when Policy.Cancel_Lease   =>
                if Started_Operations = 0 then
                   raise Program_Error with "missing connection operation";
                end if;
-               Started_Operations :=
-                 Policy.Started_After_Release (Started_Operations);
+               Started_Operations := Policy.Started_After_Release (Started_Operations);
                State.all := Unregistered;
                Result := Lease_Cancelled;
                Transport := No_Transport;
                return;
+
             when Policy.Wait_For_Lease =>
                Result := Lease_Busy;
                Transport := No_Transport;
                return;
-            when Policy.Acquire_Lease =>
+
+            when Policy.Acquire_Lease  =>
                null;
          end case;
          if Lease_Signalled then
@@ -247,22 +228,17 @@ package body Flyology.IO.Connections is
       end Try_Acquire;
 
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation;
-         State      : not null access Operation_State)
-      is
+        (Generation : Descriptor_Generation; State : not null access Operation_State) is
       begin
          pragma Unreferenced (Generation);
          if State.all /= Registered or else Started_Operations = 0 then
             raise Program_Error with "stale connection operation withdrawal";
          end if;
-         Started_Operations :=
-           Policy.Started_After_Release (Started_Operations);
+         Started_Operations := Policy.Started_After_Release (Started_Operations);
          --  Publish discharge of the caller's obligation in the same
          --  protected action and before the fallible wake notification.
          State.all := Unregistered;
-         if Policy.Should_Wake_Next
-           (Active, Closing, Started_Operations, Lease_Signalled)
-         then
+         if Policy.Should_Wake_Next (Active, Closing, Started_Operations, Lease_Signalled) then
             Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
          end if;
@@ -273,25 +249,18 @@ package body Flyology.IO.Connections is
          if not Active or else Generation /= Current_Generation then
             raise Program_Error with "stale descriptor operation";
          elsif Closing then
-            raise Operation_Cancelled with
-              "connection closed during its operation";
+            raise Operation_Cancelled with "connection closed during its operation";
          end if;
       end Check_Operation;
 
       procedure Begin_TLS_Upgrade
-        (Generation    : in out Descriptor_Generation;
-         Cleanup_Armed : not null access Boolean)
-      is
+        (Generation : in out Descriptor_Generation; Cleanup_Armed : not null access Boolean) is
       begin
-         if not Active
-           or else Generation /= Current_Generation
-           or else Current_Transport /= Plain_Transport
+         if not Active or else Generation /= Current_Generation or else Current_Transport /= Plain_Transport
          then
-            raise Program_Error with
-              "connection TLS upgrade requires an active plaintext transport";
+            raise Program_Error with "connection TLS upgrade requires an active plaintext transport";
          elsif Closing then
-            raise Operation_Cancelled with
-              "connection closed before its TLS upgrade transition";
+            raise Operation_Cancelled with "connection closed before its TLS upgrade transition";
          end if;
          Current_Transport := TLS_Upgrading;
          Current_Generation := Current_Generation + 1;
@@ -301,18 +270,13 @@ package body Flyology.IO.Connections is
          Cleanup_Armed.all := True;
       end Begin_TLS_Upgrade;
 
-      procedure Finish_TLS_Upgrade
-        (Generation : Descriptor_Generation)
-      is
+      procedure Finish_TLS_Upgrade (Generation : Descriptor_Generation) is
       begin
-         if not Active
-           or else Generation /= Current_Generation
-           or else Current_Transport /= TLS_Upgrading
+         if not Active or else Generation /= Current_Generation or else Current_Transport /= TLS_Upgrading
          then
             raise Program_Error with "invalid TLS upgrade completion";
          elsif Closing then
-            raise Operation_Cancelled with
-              "connection closed during its TLS upgrade";
+            raise Operation_Cancelled with "connection closed during its TLS upgrade";
          end if;
          Current_Transport := TLS_Transport;
       end Finish_TLS_Upgrade;
@@ -320,8 +284,7 @@ package body Flyology.IO.Connections is
       procedure Release
         (Generation : Descriptor_Generation;
          Socket     : in out Sockets.Socket_Type;
-         State      : not null access Operation_State)
-      is
+         State      : not null access Operation_State) is
       begin
          if State.all /= Acquired
            or else not Active
@@ -335,24 +298,18 @@ package body Flyology.IO.Connections is
          end if;
          Sockets.Move (Socket, Current_Socket);
          Active := False;
-         Started_Operations :=
-           Policy.Started_After_Release (Started_Operations);
+         Started_Operations := Policy.Started_After_Release (Started_Operations);
          --  As with abandonment, make the guard non-owning before a wake can
          --  fail. Validation failures leave it owning so finalization retries.
          State.all := Unregistered;
-         if Policy.Should_Wake_Next
-           (Active, Closing, Started_Operations, Lease_Signalled)
-         then
+         if Policy.Should_Wake_Next (Active, Closing, Started_Operations, Lease_Signalled) then
             Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
          end if;
       end Release;
 
       procedure Begin_Close
-        (FD         : out Descriptor;
-         Generation : out Descriptor_Generation;
-         Leader     : out Boolean)
-      is
+        (FD : out Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean) is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
@@ -369,9 +326,7 @@ package body Flyology.IO.Connections is
          end if;
       end Begin_Close;
 
-      entry Await_Drained
-        (Socket : in out Sockets.Socket_Type;
-         Owner  : out Server_Access)
+      entry Await_Drained (Socket : in out Sockets.Socket_Type; Owner : out Server_Access)
         when not Active and then Started_Operations = 0
       is
       begin
@@ -395,12 +350,11 @@ package body Flyology.IO.Connections is
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
          if not Policy.Finish_Close_Allowed
-           (Closing,
-            Active,
-            Started_Operations,
-            Generation = Current_Generation,
-            not Sockets.Is_Open (Current_Socket)
-              and then Current_Owner = null)
+                  (Closing,
+                   Active,
+                   Started_Operations,
+                   Generation = Current_Generation,
+                   not Sockets.Is_Open (Current_Socket) and then Current_Owner = null)
          then
             raise Program_Error with "stale descriptor close completion";
          end if;
@@ -412,15 +366,17 @@ package body Flyology.IO.Connections is
          Closing := False;
       end Finish_Close;
 
-      function Is_Open_State return Boolean is
-        (Policy.Is_Open (Current_FD >= 0, Closing));
+      function Is_Open_State return Boolean
+      is (Policy.Is_Open (Current_FD >= 0, Closing));
 
-      function Waiting_Count return Natural is
-        (Policy.Waiting_Operations (Started_Operations, Active));
+      function Waiting_Count return Natural
+      is (Policy.Waiting_Operations (Started_Operations, Active));
 
-      function Lease_Active return Boolean is (Active);
+      function Lease_Active return Boolean
+      is (Active);
 
-      function Close_Pending return Boolean is (Closing);
+      function Close_Pending return Boolean
+      is (Closing);
 
    end Descriptor_Controller;
 
@@ -429,16 +385,17 @@ package body Flyology.IO.Connections is
       case Guard.State is
          when Unregistered =>
             null;
-         when Registered =>
-            Guard.Item.Controller.Abandon_Operation
-              (Guard.Generation, Guard.State'Access);
-         when Acquired =>
-            Guard.Item.Controller.Release
-              (Guard.Generation, Guard.Socket, Guard.State'Access);
+
+         when Registered   =>
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access);
+
+         when Acquired     =>
+            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
       end case;
    end Release_Operation;
 
-   overriding procedure Finalize (Guard : in out Operation_Guard) is
+   overriding
+   procedure Finalize (Guard : in out Operation_Guard) is
    begin
       Release_Operation (Guard);
    end Finalize;
@@ -448,12 +405,12 @@ package body Flyology.IO.Connections is
       case Guard.State is
          when Unregistered =>
             null;
-         when Registered =>
-            Guard.Item.Controller.Abandon_Operation
-              (Guard.Generation, Guard.State'Access);
-         when Acquired =>
-            Guard.Item.Controller.Release
-              (Guard.Generation, Guard.Socket, Guard.State'Access);
+
+         when Registered   =>
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access);
+
+         when Acquired     =>
+            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
       end case;
       if Guard.State = Unregistered then
          Guard.Item := null;
@@ -469,9 +426,7 @@ package body Flyology.IO.Connections is
    end Release_Operation;
 
    procedure Release_Admission_Ownership
-     (Owner  : Server_Access;
-      Armed  : aliased in out Boolean;
-      Socket : in out Sockets.Socket_Type)
+     (Owner : Server_Access; Armed : aliased in out Boolean; Socket : in out Sockets.Socket_Type)
    is
       Failure : Ada.Exceptions.Exception_Occurrence;
       Failed  : Boolean := False;
@@ -479,8 +434,7 @@ package body Flyology.IO.Connections is
       if Armed then
          begin
             if Owner = null then
-               raise Program_Error with
-                 "admission cleanup has no owning manager";
+               raise Program_Error with "admission cleanup has no owning manager";
             end if;
             Owner.Release (Armed'Access);
          exception
@@ -508,22 +462,23 @@ package body Flyology.IO.Connections is
       end if;
    end Release_Admission_Ownership;
 
-   overriding procedure Finalize (Guard : in out Admission_Guard) is
+   overriding
+   procedure Finalize (Guard : in out Admission_Guard) is
    begin
-      Release_Admission_Ownership
-        (Guard.Owner, Guard.Armed, Guard.Socket);
+      Release_Admission_Ownership (Guard.Owner, Guard.Armed, Guard.Socket);
    end Finalize;
 
-   overriding procedure Finalize (Item : in out Pending_Connect_Owner) is
+   overriding
+   procedure Finalize (Item : in out Pending_Connect_Owner) is
    begin
-      Release_Admission_Ownership
-        (Item.Manager, Item.Armed, Item.Socket);
+      Release_Admission_Ownership (Item.Manager, Item.Armed, Item.Socket);
       if not Item.Armed and then not Sockets.Is_Open (Item.Socket) then
          Item.Manager := null;
       end if;
    end Finalize;
 
-   overriding procedure Finalize (Guard : in out Upgrade_Cleanup_Guard) is
+   overriding
+   procedure Finalize (Guard : in out Upgrade_Cleanup_Guard) is
    begin
       if Guard.Armed then
          begin
@@ -537,21 +492,18 @@ package body Flyology.IO.Connections is
       end if;
    end Finalize;
 
-   overriding procedure Initialize (Guard : in out Close_Guard) is
+   overriding
+   procedure Initialize (Guard : in out Close_Guard) is
    begin
-      Guard.Item.Controller.Begin_Close
-        (Guard.Outcome.FD,
-         Guard.Outcome.Generation,
-         Guard.Outcome.Leader);
+      Guard.Item.Controller.Begin_Close (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader);
    end Initialize;
 
-   overriding procedure Finalize (Guard : in out Close_Guard) is
+   overriding
+   procedure Finalize (Guard : in out Close_Guard) is
       Socket : Sockets.Socket_Type;
       Owner  : Server_Access;
 
-      procedure Record_Failure
-        (Occurrence : Ada.Exceptions.Exception_Occurrence)
-      is
+      procedure Record_Failure (Occurrence : Ada.Exceptions.Exception_Occurrence) is
       begin
          if not Guard.Outcome.Failed then
             Ada.Exceptions.Save_Occurrence (Guard.Outcome.Failure, Occurrence);
@@ -603,7 +555,8 @@ package body Flyology.IO.Connections is
       end if;
    end Finalize;
 
-   overriding procedure Finalize (Guard : in out Session_Setup_Guard) is
+   overriding
+   procedure Finalize (Guard : in out Session_Setup_Guard) is
    begin
       if Guard.Value /= null then
          begin
@@ -614,17 +567,12 @@ package body Flyology.IO.Connections is
          end;
       end if;
    end Finalize;
-   function Remaining
-     (Started : Ada.Real_Time.Time;
-      Timeout : Duration) return Duration
-   is
+   function Remaining (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration is
    begin
       if Timeout < 0.0 then
          return Infinite;
       end if;
-      return Time_Math.Remaining
-        (Timeout,
-         Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
+      return Time_Math.Remaining (Timeout, Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
    end Remaining;
 
    procedure Interrupt_Sources
@@ -649,31 +597,26 @@ package body Flyology.IO.Connections is
    end Interrupt_Sources;
 
    procedure Acquire_Operation
-     (Item          : not null Connection_Access;
-      Started       : Ada.Real_Time.Time;
-      Timeout       : Duration;
-      Token         : access Cancellation_Token;
-      FD            : out Descriptor;
-      Guard         : in out Operation_Guard;
-      Close_Source  : out Descriptor;
-      Owner         : out Server_Access;
-      Transport     : out Transport_Kind)
+     (Item         : not null Connection_Access;
+      Started      : Ada.Real_Time.Time;
+      Timeout      : Duration;
+      Token        : access Cancellation_Token;
+      FD           : out Descriptor;
+      Guard        : in out Operation_Guard;
+      Close_Source : out Descriptor;
+      Owner        : out Server_Access;
+      Transport    : out Transport_Kind)
    is
-      Lease_Source : Descriptor;
+      Lease_Source         : Descriptor;
       Initial_Close_Source : Descriptor;
-      Initial_Owner : Server_Access;
-      Interrupts : Interrupt_Set (1 .. 3);
-      Interrupt_Count : Natural;
-      Outcome : Wait_Outcome := Timed_Out;
-      Result : Lease_Result := Lease_Busy;
+      Initial_Owner        : Server_Access;
+      Interrupts           : Interrupt_Set (1 .. 3);
+      Interrupt_Count      : Natural;
+      Outcome              : Wait_Outcome := Timed_Out;
+      Result               : Lease_Result := Lease_Busy;
    begin
       Item.Controller.Start_Operation
-        (Guard.Generation'Access,
-         Guard.State'Access,
-         FD,
-         Lease_Source,
-         Initial_Close_Source,
-         Initial_Owner);
+        (Guard.Generation'Access, Guard.State'Access, FD, Lease_Source, Initial_Close_Source, Initial_Owner);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (0);
       --  Unlike the general barrier above, only the first registration parks.
@@ -682,27 +625,20 @@ package body Flyology.IO.Connections is
 #end if;
       loop
          Interrupts (1) := Initial_Close_Source;
-         Interrupt_Sources
-           (Initial_Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+         Interrupt_Sources (Initial_Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
          Item.Controller.Try_Acquire
-           (Guard.Generation,
-            Guard.State'Access,
-            Result,
-            FD,
-            Close_Source,
-            Guard.Socket,
-            Owner,
-            Transport);
+           (Guard.Generation, Guard.State'Access, Result, FD, Close_Source, Guard.Socket, Owner, Transport);
          case Result is
-            when Lease_Acquired =>
+            when Lease_Acquired  =>
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
                Test_Barrier (1);
 #end if;
                return;
+
             when Lease_Cancelled =>
-               raise Operation_Cancelled with
-                 "connection closed while waiting for its operation lease";
-            when Lease_Busy =>
+               raise Operation_Cancelled with "connection closed while waiting for its operation lease";
+
+            when Lease_Busy      =>
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
                Test_Barrier (4);
 #else
@@ -713,20 +649,18 @@ package body Flyology.IO.Connections is
          --  Try_Acquire observes Active under the controller lock before this
          --  wait is armed. Release makes Lease_Source readable under the same
          --  lock, so readiness persists across the registration window.
-         Outcome := Wait_Interruptibly
-           (Lease_Source,
-            For_Read,
-            Remaining (Started, Timeout),
-            Interrupts (1 .. Interrupt_Count + 1));
+         Outcome :=
+           Wait_Interruptibly
+             (Lease_Source, For_Read, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count + 1));
          if Outcome /= Ready then
             case Outcome is
-               when Timed_Out =>
-                  raise Timeout_Error with
-                    "connection operation lease timed out";
+               when Timed_Out   =>
+                  raise Timeout_Error with "connection operation lease timed out";
+
                when Interrupted =>
-                  raise Operation_Cancelled with
-                    "connection operation lease was cancelled";
-               when Ready =>
+                  raise Operation_Cancelled with "connection operation lease was cancelled";
+
+               when Ready       =>
                   null;
             end case;
          end if;
@@ -737,13 +671,10 @@ package body Flyology.IO.Connections is
      (Item       : in out Connection;
       Generation : Descriptor_Generation;
       Owner      : not null Server_Access;
-      Token      : access Cancellation_Token)
-   is
+      Token      : access Cancellation_Token) is
    begin
       Item.Controller.Check_Operation (Generation);
-      if Owner.Shutdown_Requested
-        or else (Token /= null and then Token.Requested)
-      then
+      if Owner.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
    end Check_TLS_Operation;
@@ -762,27 +693,26 @@ package body Flyology.IO.Connections is
       Outcome         : Wait_Outcome;
    begin
       Interrupts (1) := Close_Source;
-      Interrupt_Sources
-        (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
-      Outcome := Wait_Interruptibly
-        (FD,
-         (if Status = TLS.Want_Read then For_Read else For_Write),
-         Remaining (Started, Timeout),
-         Interrupts (1 .. Interrupt_Count + 1));
+      Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+      Outcome :=
+        Wait_Interruptibly
+          (FD,
+           (if Status = TLS.Want_Read then For_Read else For_Write),
+           Remaining (Started, Timeout),
+           Interrupts (1 .. Interrupt_Count + 1));
       case Outcome is
-         when Ready =>
+         when Ready       =>
             null;
-         when Timed_Out =>
+
+         when Timed_Out   =>
             raise Timeout_Error with "TLS connection operation timed out";
+
          when Interrupted =>
             raise Operation_Cancelled;
       end case;
    end Await_TLS_Ready;
 
-   procedure Reserve
-     (Manager : aliased in out Server;
-      Guard   : in out Admission_Guard)
-   is
+   procedure Reserve (Manager : aliased in out Server; Guard : in out Admission_Guard) is
       Accepted : Boolean;
    begin
       Manager.Acquire (Accepted, Guard.Armed'Access);
@@ -812,18 +742,20 @@ package body Flyology.IO.Connections is
       loop
          Manager.Try_Acquire (Result, Guard.Armed'Access);
          case Result is
-            when Flyology.Capacity.Permit_Acquired =>
+            when Flyology.Capacity.Permit_Acquired   =>
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
                Test_Barrier (8);
 #end if;
                return;
-            when Flyology.Capacity.Gate_Closed =>
+
+            when Flyology.Capacity.Gate_Closed       =>
                raise Admission_Closed;
-            when Flyology.Capacity.Gate_Full =>
+
+            when Flyology.Capacity.Gate_Full         =>
                null;
+
             when Flyology.Capacity.Acquire_Timed_Out =>
-               raise Program_Error with
-                 "nonblocking admission returned a timed result";
+               raise Program_Error with "nonblocking admission returned a timed result";
          end case;
 
          --  Try_Acquire and Acquire_Wait_Source observe the gate under the
@@ -835,29 +767,25 @@ package body Flyology.IO.Connections is
             Test_Barrier (9);
 #end if;
             if Token = null then
-               Outcome := Wait_Interruptibly
-                 (Acquire_FD, For_Read, Remaining (Started, Timeout));
+               Outcome := Wait_Interruptibly (Acquire_FD, For_Read, Remaining (Started, Timeout));
             else
                Token.Wait_Source (Token_FD, Cancelled);
                if Cancelled then
-                  raise Operation_Cancelled with
-                    "connection admission was cancelled";
+                  raise Operation_Cancelled with "connection admission was cancelled";
                end if;
                Interrupts (1) := Token_FD;
-               Outcome := Wait_Interruptibly
-                 (Acquire_FD, For_Read, Remaining (Started, Timeout),
-                  Interrupts);
+               Outcome := Wait_Interruptibly (Acquire_FD, For_Read, Remaining (Started, Timeout), Interrupts);
             end if;
 
             case Outcome is
-               when Ready =>
+               when Ready       =>
                   null;
-               when Timed_Out =>
-                  raise Timeout_Error with
-                    "connection admission timed out";
+
+               when Timed_Out   =>
+                  raise Timeout_Error with "connection admission timed out";
+
                when Interrupted =>
-                  raise Operation_Cancelled with
-                    "connection admission was cancelled";
+                  raise Operation_Cancelled with "connection admission was cancelled";
             end case;
          end if;
       end loop;
@@ -867,23 +795,15 @@ package body Flyology.IO.Connections is
    --  discriminant, which the compiler has already checked outlives it.
    --  Admitting it through any other Server would reinstate an unchecked
    --  borrow, so reject that before any permit is reserved.
-   procedure Check_Binding
-     (Item    : Connection'Class;
-      Manager : Server_Access) is
+   procedure Check_Binding (Item : Connection'Class; Manager : Server_Access) is
    begin
-      if not Policy.Binding_Accepted
-        (Bound   => Item.Manager /= null,
-         Matches => Item.Manager = Manager)
-      then
-         raise Program_Error with
-           "connection is bound to a different admission controller";
+      if not Policy.Binding_Accepted (Bound => Item.Manager /= null, Matches => Item.Manager = Manager) then
+         raise Program_Error with "connection is bound to a different admission controller";
       end if;
    end Check_Binding;
 
    procedure Take
-     (Manager : aliased in out Server;
-      Socket  : in out Sockets.Socket_Type;
-      Item    : in out Connection)
+     (Manager : aliased in out Server; Socket : in out Sockets.Socket_Type; Item : in out Connection)
    is
       Guard : Admission_Guard (Manager'Unchecked_Access);
    begin
@@ -896,10 +816,7 @@ package body Flyology.IO.Connections is
 
       Reserve (Manager, Guard);
       Item.Controller.Adopt
-        (Flyology.IO.Sockets.Native_Descriptor (Socket),
-         Socket,
-         Guard.Owner,
-         Guard.Armed'Access);
+        (Flyology.IO.Sockets.Native_Descriptor (Socket), Socket, Guard.Owner, Guard.Armed'Access);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (12);
 #end if;
@@ -923,14 +840,11 @@ package body Flyology.IO.Connections is
       end if;
       Reserve_Interruptibly (Manager, Started, Timeout, Token, Guard);
 
-      Sockets.Create_Socket
-        (Guard.Socket, Family => Server.Family, Mode => Sockets.Socket_Stream);
-      Interrupt_Sources
-        (Guard.Owner, Token, Interrupts, Interrupt_Count);
+      Sockets.Create_Socket (Guard.Socket, Family => Server.Family, Mode => Sockets.Socket_Stream);
+      Interrupt_Sources (Guard.Owner, Token, Interrupts, Interrupt_Count);
       begin
          Sockets.Connect
-           (Guard.Socket, Server, Remaining (Started, Timeout),
-            Interrupts (1 .. Interrupt_Count));
+           (Guard.Socket, Server, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count));
       exception
          when Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
@@ -938,41 +852,31 @@ package body Flyology.IO.Connections is
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (18);
 #end if;
-      if Manager.Shutdown_Requested
-        or else (Token /= null and then Token.Requested)
-      then
+      if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
       Item.Controller.Adopt
-        (Sockets.Native_Descriptor (Guard.Socket),
-         Guard.Socket,
-         Guard.Owner,
-         Guard.Armed'Access);
+        (Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
    end Connect;
 
    procedure Complete_Managed_Connect
      (Item    : in out Connect_Operation;
       Result  : Flyology.Operations.Terminal_Outcome;
-      Failure : Connect_Failure := No_Connect_Failure)
-   is
+      Failure : Connect_Failure := No_Connect_Failure) is
    begin
       if Result /= Flyology.Operations.Succeeded then
          begin
             Release_Admission_Ownership
-              (Item.State.Resources.Manager,
-               Item.State.Resources.Armed,
-               Item.State.Resources.Socket);
+              (Item.State.Resources.Manager, Item.State.Resources.Armed, Item.State.Resources.Socket);
             Item.State.Resources.Manager := null;
          exception
             when others =>
-               if not Item.State.Resources.Armed
-                 and then not Sockets.Is_Open (Item.State.Resources.Socket)
+               if not Item.State.Resources.Armed and then not Sockets.Is_Open (Item.State.Resources.Socket)
                then
                   Item.State.Resources.Manager := null;
                end if;
                Item.State.Failure := Connect_Cleanup_Failure;
-               Flyology.Operations.Drivers.Complete
-                 (Item, Flyology.Operations.Failed);
+               Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
                return;
          end;
       end if;
@@ -983,21 +887,16 @@ package body Flyology.IO.Connections is
       Flyology.Operations.Drivers.Complete (Item, Result);
    end Complete_Managed_Connect;
 
-   procedure Arm_Admission_Sources
-     (Item       : in out Connect_Operation;
-      Acquire_FD : Descriptor)
-   is
+   procedure Arm_Admission_Sources (Item : in out Connect_Operation; Acquire_FD : Descriptor) is
       Token_FD  : Descriptor := Invalid_Descriptor;
       Cancelled : Boolean := False;
    begin
       if Item.State.Token = null then
-         Flyology.Operations.Drivers.Arm_Readiness
-           (Item, Acquire_FD, For_Write => False);
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Acquire_FD, For_Write => False);
       else
          Item.State.Token.Wait_Source (Token_FD, Cancelled);
          if Cancelled then
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Cancelled);
+            Complete_Managed_Connect (Item, Flyology.Operations.Cancelled);
             return;
          end if;
          Flyology.Operations.Drivers.Arm_Readiness
@@ -1007,13 +906,10 @@ package body Flyology.IO.Connections is
       end if;
    exception
       when others =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
    end Arm_Admission_Sources;
 
-   procedure Start_Managed_Connect_Child
-     (Item : in out Connect_Operation)
-   is
+   procedure Start_Managed_Connect_Child (Item : in out Connect_Operation) is
       Interrupts : Interrupt_Set (1 .. 2);
       Count      : Natural;
 
@@ -1036,12 +932,9 @@ package body Flyology.IO.Connections is
          Item.State.Child_Live := False;
       end Cancel_Unlinked_Child;
    begin
-      Interrupt_Sources
-        (Item.State.Resources.Manager, Item.State.Token, Interrupts, Count);
+      Interrupt_Sources (Item.State.Resources.Manager, Item.State.Token, Interrupts, Count);
       Sockets.Create_Socket
-        (Item.State.Resources.Socket,
-         Family => Item.State.Destination.Family,
-         Mode   => Sockets.Socket_Stream);
+        (Item.State.Resources.Socket, Family => Item.State.Destination.Family, Mode => Sockets.Socket_Stream);
       Item.State.Phase := Waiting_For_Connect;
 
       --  Starting the child and publishing its continuation relation form one
@@ -1069,45 +962,36 @@ package body Flyology.IO.Connections is
       System.Soft_Links.Abort_Undefer.all;
    exception
       when Operation_Cancelled =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Cancelled);
+         Complete_Managed_Connect (Item, Flyology.Operations.Cancelled);
       when Flyology.Operations.Capacity_Error =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_Capacity_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_Capacity_Failure);
       when Sockets.Socket_Error =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
       when others =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
    end Start_Managed_Connect_Child;
 
-   procedure Try_Managed_Admission
-     (Item : in out Connect_Operation)
-   is
+   procedure Try_Managed_Admission (Item : in out Connect_Operation) is
       Result      : Flyology.Capacity.Acquire_Result;
       Acquire_FD  : Descriptor;
       Can_Acquire : Boolean;
    begin
-      Item.State.Resources.Manager.Try_Acquire
-        (Result, Item.State.Resources.Armed'Access);
+      Item.State.Resources.Manager.Try_Acquire (Result, Item.State.Resources.Armed'Access);
       case Result is
-         when Flyology.Capacity.Permit_Acquired =>
+         when Flyology.Capacity.Permit_Acquired   =>
             if Item.State.Resources.Manager.Shutdown_Requested
-              or else
-                (Item.State.Token /= null and then Item.State.Token.Requested)
+              or else (Item.State.Token /= null and then Item.State.Token.Requested)
             then
-               Complete_Managed_Connect
-                 (Item, Flyology.Operations.Cancelled);
+               Complete_Managed_Connect (Item, Flyology.Operations.Cancelled);
             else
                Start_Managed_Connect_Child (Item);
             end if;
-         when Flyology.Capacity.Gate_Closed =>
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Failed, Admission_Failure);
-         when Flyology.Capacity.Gate_Full =>
-            Item.State.Resources.Manager.Acquire_Wait_Source
-              (Acquire_FD, Can_Acquire);
+
+         when Flyology.Capacity.Gate_Closed       =>
+            Complete_Managed_Connect (Item, Flyology.Operations.Failed, Admission_Failure);
+
+         when Flyology.Capacity.Gate_Full         =>
+            Item.State.Resources.Manager.Acquire_Wait_Source (Acquire_FD, Can_Acquire);
             if Can_Acquire then
                Flyology.Operations.Drivers.Reschedule (Item);
             else
@@ -1116,22 +1000,19 @@ package body Flyology.IO.Connections is
 #end if;
                Arm_Admission_Sources (Item, Acquire_FD);
             end if;
+
          when Flyology.Capacity.Acquire_Timed_Out =>
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+            Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
       end case;
    exception
       when others =>
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
    end Try_Managed_Admission;
 
-   procedure Finish_Managed_Connect_Child
-     (Item : in out Connect_Operation)
-   is
-      Succeeded   : Boolean := False;
-      Interrupted : Boolean := False;
-      Timed_Out   : Boolean := False;
+   procedure Finish_Managed_Connect_Child (Item : in out Connect_Operation) is
+      Succeeded     : Boolean := False;
+      Interrupted   : Boolean := False;
+      Timed_Out     : Boolean := False;
       Socket_Failed : Boolean := False;
    begin
       --  Consuming the typed child detaches the parent's dependency; releasing
@@ -1172,43 +1053,30 @@ package body Flyology.IO.Connections is
       if Item.State.Cancelling then
          Complete_Managed_Connect
            (Item,
-            (if Item.State.Timed_Out
-             then Flyology.Operations.Failed
-             else Flyology.Operations.Cancelled),
-            (if Item.State.Timed_Out
-             then Connect_Timeout_Failure
-             else No_Connect_Failure));
+            (if Item.State.Timed_Out then Flyology.Operations.Failed else Flyology.Operations.Cancelled),
+            (if Item.State.Timed_Out then Connect_Timeout_Failure else No_Connect_Failure));
       elsif Interrupted
         or else Item.State.Resources.Manager.Shutdown_Requested
-        or else
-          (Item.State.Token /= null and then Item.State.Token.Requested)
+        or else (Item.State.Token /= null and then Item.State.Token.Requested)
       then
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Cancelled);
+         Complete_Managed_Connect (Item, Flyology.Operations.Cancelled);
       elsif Timed_Out then
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
       elsif Socket_Failed then
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
       elsif Succeeded then
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Succeeded);
+         Complete_Managed_Connect (Item, Flyology.Operations.Succeeded);
       else
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
       end if;
    exception
       when others =>
          Item.State.Child_Live := False;
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
    end Finish_Managed_Connect_Child;
 
-   overriding procedure Drive
-     (Item  : in out Connect_Operation;
-      Event : Flyology.Operations.Driver_Event)
-   is
+   overriding
+   procedure Drive (Item : in out Connect_Operation; Event : Flyology.Operations.Driver_Event) is
    begin
       if Event = Flyology.Operations.Deadline_Reached then
          Item.State.Cancelling := True;
@@ -1216,23 +1084,19 @@ package body Flyology.IO.Connections is
          if Item.State.Child_Live then
             Flyology.Operations.Cancel (Item.State.Child);
          else
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
+            Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
          end if;
-      elsif Event = Flyology.Operations.Dependency_Changed
-        and then Item.State.Child_Live
-      then
+      elsif Event = Flyology.Operations.Dependency_Changed and then Item.State.Child_Live then
          Finish_Managed_Connect_Child (Item);
       elsif Item.State.Phase = Waiting_For_Admission
-        and then Event in
-          Flyology.Operations.Start_Operation |
-          Flyology.Operations.Source_Ready |
-          Flyology.Operations.Continue_Operation
+        and then Event
+                 in Flyology.Operations.Start_Operation
+                  | Flyology.Operations.Source_Ready
+                  | Flyology.Operations.Continue_Operation
       then
          Try_Managed_Admission (Item);
       else
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
       end if;
    exception
       when others =>
@@ -1240,27 +1104,23 @@ package body Flyology.IO.Connections is
             Item.State.Cancelling := True;
             Flyology.Operations.Cancel (Item.State.Child);
          else
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+            Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
          end if;
    end Drive;
 
-   overriding procedure Request_Cancellation
-     (Item : in out Connect_Operation)
-   is
+   overriding
+   procedure Request_Cancellation (Item : in out Connect_Operation) is
    begin
       Item.State.Cancelling := True;
       if Item.State.Child_Live then
          Flyology.Operations.Cancel (Item.State.Child);
       else
-         Complete_Managed_Connect
-           (Item, Flyology.Operations.Cancelled);
+         Complete_Managed_Connect (Item, Flyology.Operations.Cancelled);
       end if;
    exception
       when others =>
          if not Item.State.Child_Live then
-            Complete_Managed_Connect
-              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+            Complete_Managed_Connect (Item, Flyology.Operations.Failed, Connect_State_Failure);
          end if;
    end Request_Cancellation;
 
@@ -1269,19 +1129,16 @@ package body Flyology.IO.Connections is
       Manager   : not null access Server;
       Server    : Sockets.Endpoint;
       Timeout   : Duration;
-      Token     : access Cancellation_Token)
-   is
+      Token     : access Cancellation_Token) is
    begin
       if Operation.State.Resources.Armed
         or else Sockets.Is_Open (Operation.State.Resources.Socket)
         or else Operation.State.Child_Live
       then
-         raise Flyology.Operations.Operation_Error with
-           "managed connect operation still owns resources";
+         raise Flyology.Operations.Operation_Error with "managed connect operation still owns resources";
       end if;
       Operation.State.Resources.Manager := Manager.all'Unchecked_Access;
-      Operation.State.Token :=
-        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.State.Token := (if Token = null then null else Token.all'Unchecked_Access);
       Operation.State.Destination := Server;
       Operation.State.Started := Ada.Real_Time.Clock;
       Operation.State.Timeout := Timeout;
@@ -1295,8 +1152,7 @@ package body Flyology.IO.Connections is
          Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
       end if;
       Flyology.Operations.Drive
-        (Flyology.Operations.Operation'Class (Operation),
-         Flyology.Operations.Start_Operation);
+        (Flyology.Operations.Operation'Class (Operation), Flyology.Operations.Start_Operation);
    exception
       when others =>
          if Flyology.Operations.Is_Active (Operation) then
@@ -1313,12 +1169,10 @@ package body Flyology.IO.Connections is
       Manager : not null access Server;
       Server  : Sockets.Endpoint;
       Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null) return Connect_Operation
-   is
+      Token   : access Cancellation_Token := null) return Connect_Operation is
    begin
       return Result : Connect_Operation (Set) do
-         Start_Scoped_Managed_Connect
-           (Result, Manager, Server, Timeout, Token);
+         Start_Scoped_Managed_Connect (Result, Manager, Server, Timeout, Token);
       end return;
    end Connect;
 
@@ -1327,19 +1181,13 @@ package body Flyology.IO.Connections is
       Server    : Sockets.Endpoint;
       Timeout   : Duration := Infinite;
       Token     : access Cancellation_Token := null;
-      Operation : in out Connect_Operation)
-   is
+      Operation : in out Connect_Operation) is
    begin
-      Start_Scoped_Managed_Connect
-        (Operation, Manager, Server, Timeout, Token);
+      Start_Scoped_Managed_Connect (Operation, Manager, Server, Timeout, Token);
    end Connect;
 
-   procedure Finish
-     (Operation : in out Connect_Operation;
-      Item      : in out Connection'Class)
-   is
-      Result : constant Flyology.Operations.Terminal_Outcome :=
-        Flyology.Operations.Outcome (Operation);
+   procedure Finish (Operation : in out Connect_Operation; Item : in out Connection'Class) is
+      Result  : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Operation);
       Failure : constant Connect_Failure := Operation.State.Failure;
    begin
       if Result = Flyology.Operations.Succeeded then
@@ -1362,18 +1210,22 @@ package body Flyology.IO.Connections is
          raise Operation_Cancelled;
       end if;
       case Failure is
-         when Admission_Failure =>
+         when Admission_Failure                          =>
             raise Admission_Closed;
-         when Connect_Timeout_Failure =>
+
+         when Connect_Timeout_Failure                    =>
             raise Timeout_Error with "managed connection attempt timed out";
-         when Connect_Socket_Failure =>
-            raise Sockets.Socket_Error with
-              "managed connection socket attempt failed";
-         when Connect_Capacity_Failure =>
-            raise Flyology.Operations.Capacity_Error with
-              "managed connection requires a child operation slot";
-         when Connect_Cleanup_Failure =>
+
+         when Connect_Socket_Failure                     =>
+            raise Sockets.Socket_Error with "managed connection socket attempt failed";
+
+         when Connect_Capacity_Failure                   =>
+            raise Flyology.Operations.Capacity_Error
+              with "managed connection requires a child operation slot";
+
+         when Connect_Cleanup_Failure                    =>
             raise Program_Error with "managed connection cleanup failed";
+
          when Connect_State_Failure | No_Connect_Failure =>
             raise Program_Error with "managed connection operation failed";
       end case;
@@ -1384,8 +1236,7 @@ package body Flyology.IO.Connections is
       Backend     : in out TLS.Provider'Class;
       Side        : TLS.Role;
       Server_Name : String;
-      Factory     : not null access function
-        (FD : Descriptor) return TLS.Session_Access;
+      Factory     : not null access function (FD : Descriptor) return TLS.Session_Access;
       Timeout     : Duration;
       Token       : access Cancellation_Token)
    is
@@ -1411,14 +1262,12 @@ package body Flyology.IO.Connections is
 
       procedure Check is
       begin
-         Check_TLS_Operation
-           (Item, Guard.Generation, Owner, Token);
+         Check_TLS_Operation (Item, Guard.Generation, Owner, Token);
       end Check;
 
       procedure Await (Status : TLS.Step_Status) is
       begin
-         Await_TLS_Ready
-           (FD, Status, Started, Timeout, Close_Source, Owner, Token);
+         Await_TLS_Ready (FD, Status, Started, Timeout, Close_Source, Owner, Token);
       end Await;
    begin
       if Side = TLS.Client and then Server_Name'Length = 0 then
@@ -1428,21 +1277,17 @@ package body Flyology.IO.Connections is
       end if;
 
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token,
-         FD, Guard, Close_Source, Owner, Transport);
+        (Item'Unchecked_Access, Started, Timeout, Token, FD, Guard, Close_Source, Owner, Transport);
       if Transport /= Plain_Transport then
-         raise Program_Error with
-           "connection TLS upgrade requires a plaintext transport";
+         raise Program_Error with "connection TLS upgrade requires a plaintext transport";
       end if;
 
-      Item.Controller.Begin_TLS_Upgrade
-        (Guard.Generation, Cleanup.Armed'Access);
+      Item.Controller.Begin_TLS_Upgrade (Guard.Generation, Cleanup.Armed'Access);
 
       Available := TLS.Is_Available (Backend);
       Check_Setup_Deadline;
       if not Available then
-         raise TLS.TLS_Error with
-           TLS.Name (Backend) & " provider is unavailable";
+         raise TLS.TLS_Error with TLS.Name (Backend) & " provider is unavailable";
       end if;
       Sockets.Prepare (Guard.Socket);
       Check_Setup_Deadline;
@@ -1452,8 +1297,7 @@ package body Flyology.IO.Connections is
       Session_Hold.Value := Factory (FD);
       Check_Setup_Deadline;
       if Session_Hold.Value = null then
-         raise TLS.TLS_Error with
-           TLS.Name (Backend) & " returned no TLS session";
+         raise TLS.TLS_Error with TLS.Name (Backend) & " returned no TLS session";
       end if;
       Item.TLS_Session := Session_Hold.Value;
       Session_Hold.Value := null;
@@ -1462,16 +1306,14 @@ package body Flyology.IO.Connections is
       Test_Barrier (7);
 #end if;
 
-      TLS_Driver.Handshake
-        (Item.TLS_Session.all, Check'Access, Await'Access);
+      TLS_Driver.Handshake (Item.TLS_Session.all, Check'Access, Await'Access);
       Item.Controller.Finish_TLS_Upgrade (Guard.Generation);
       Disarm (Cleanup);
    end Upgrade_TLS;
 
    function Query_TLS_Session
-     (Item  : in out Connection;
-      Query : not null access function
-        (Value : TLS.Session'Class) return String) return String
+     (Item : in out Connection; Query : not null access function (Value : TLS.Session'Class) return String)
+      return String
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Guard        : Operation_Guard (Item'Unchecked_Access);
@@ -1481,21 +1323,15 @@ package body Flyology.IO.Connections is
       Transport    : Transport_Kind;
    begin
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Infinite, null,
-         FD, Guard, Close_Source, Owner, Transport);
-      pragma Assert
-        (FD >= 0 and then Close_Source >= 0 and then Owner /= null);
+        (Item'Unchecked_Access, Started, Infinite, null, FD, Guard, Close_Source, Owner, Transport);
+      pragma Assert (FD >= 0 and then Close_Source >= 0 and then Owner /= null);
       if Transport /= TLS_Transport or else Item.TLS_Session = null then
          raise Program_Error with "connection transport does not use TLS";
       end if;
       return Query (Item.TLS_Session.all);
    end Query_TLS_Session;
 
-   procedure Shutdown_TLS
-     (Item    : in out Connection;
-      Timeout : Duration;
-      Token   : access Cancellation_Token)
-   is
+   procedure Shutdown_TLS (Item : in out Connection; Timeout : Duration; Token : access Cancellation_Token) is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Guard        : Operation_Guard (Item'Unchecked_Access);
       FD           : Descriptor;
@@ -1505,26 +1341,22 @@ package body Flyology.IO.Connections is
 
       procedure Check is
       begin
-         Check_TLS_Operation
-           (Item, Guard.Generation, Owner, Token);
+         Check_TLS_Operation (Item, Guard.Generation, Owner, Token);
       end Check;
 
       procedure Await (Status : TLS.Step_Status) is
       begin
-         Await_TLS_Ready
-           (FD, Status, Started, Timeout, Close_Source, Owner, Token);
+         Await_TLS_Ready (FD, Status, Started, Timeout, Close_Source, Owner, Token);
       end Await;
    begin
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token,
-         FD, Guard, Close_Source, Owner, Transport);
+        (Item'Unchecked_Access, Started, Timeout, Token, FD, Guard, Close_Source, Owner, Transport);
       if Transport /= TLS_Transport or else Item.TLS_Session = null then
          raise Program_Error with "connection transport does not use TLS";
       elsif Item.TLS_Shutdown_Complete then
          return;
       end if;
-      TLS_Driver.Shutdown
-        (Item.TLS_Session.all, Check'Access, Await'Access);
+      TLS_Driver.Shutdown (Item.TLS_Session.all, Check'Access, Await'Access);
       Item.TLS_Shutdown_Complete := True;
    end Shutdown_TLS;
 
@@ -1537,9 +1369,9 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Guard   : Admission_Guard (Manager'Unchecked_Access);
-      Interrupts : Interrupt_Set (1 .. 2);
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Guard           : Admission_Guard (Manager'Unchecked_Access);
+      Interrupts      : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
       pragma Unreferenced (Cancellation_Quantum);
    begin
@@ -1549,13 +1381,11 @@ package body Flyology.IO.Connections is
       end if;
       Reserve_Interruptibly (Manager, Started, Timeout, Token, Guard);
 
-      Interrupt_Sources
-        (Guard.Owner, Token, Interrupts, Interrupt_Count);
+      Interrupt_Sources (Guard.Owner, Token, Interrupts, Interrupt_Count);
 
       begin
          Flyology.IO.Sockets.Accept_Connection
-           (Listener, Guard.Socket, Address, Remaining (Started, Timeout),
-            Interrupts (1 .. Interrupt_Count));
+           (Listener, Guard.Socket, Address, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count));
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
@@ -1563,16 +1393,11 @@ package body Flyology.IO.Connections is
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (14);
 #end if;
-      if Manager.Shutdown_Requested
-        or else (Token /= null and then Token.Requested)
-      then
+      if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
       Item.Controller.Adopt
-        (Flyology.IO.Sockets.Native_Descriptor (Guard.Socket),
-         Guard.Socket,
-         Guard.Owner,
-         Guard.Armed'Access);
+        (Flyology.IO.Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (11);
 #end if;
@@ -1598,55 +1423,53 @@ package body Flyology.IO.Connections is
       end;
 
       case Policy.Classify_Close
-        (Leader          => Outcome.Leader,
-         Descriptor_Open => Outcome.FD >= 0,
-         Cleanup_Failed  => Outcome.Failed,
-         Provider_Failed => Outcome.Provider_Error)
+             (Leader          => Outcome.Leader,
+              Descriptor_Open => Outcome.FD >= 0,
+              Cleanup_Failed  => Outcome.Failed,
+              Provider_Failed => Outcome.Provider_Error)
       is
-         when Policy.Close_Finished =>
+         when Policy.Close_Finished        =>
             null;
-         when Policy.Await_Leader =>
+
+         when Policy.Await_Leader          =>
             Item.Controller.Await_Closed;
+
          when Policy.Raise_Cleanup_Failure =>
             Ada.Exceptions.Reraise_Occurrence (Outcome.Failure);
-         when Policy.Raise_Provider_Error =>
-            raise TLS.TLS_Error with
-              "TLS provider session finalization failed";
+
+         when Policy.Raise_Provider_Error  =>
+            raise TLS.TLS_Error with "TLS provider session finalization failed";
       end case;
    end Close;
 
-   function Is_Open (Item : Connection) return Boolean is
-     (Item.Controller.Is_Open_State);
+   function Is_Open (Item : Connection) return Boolean
+   is (Item.Controller.Is_Open_State);
 
    procedure Arm_Connection_Sources
-     (Item         : in out Connection_Operation'Class;
-      Primary      : Descriptor;
+     (Item          : in out Connection_Operation'Class;
+      Primary       : Descriptor;
       Primary_Write : Boolean;
-      Lifecycle    : Descriptor)
+      Lifecycle     : Descriptor)
    is
-      Interrupts : Interrupt_Set (1 .. 2);
+      Interrupts      : Interrupt_Set (1 .. 2);
       Interrupt_Count : Natural;
-      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
-      Count : Natural := 2;
+      Sources         : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 4);
+      Count           : Natural := 2;
    begin
-      Interrupt_Sources
-        (Item.Owner, Item.Token, Interrupts, Interrupt_Count);
+      Interrupt_Sources (Item.Owner, Item.Token, Interrupts, Interrupt_Count);
       Sources (1) := (Descriptor => Primary, For_Write => Primary_Write);
       Sources (2) := (Descriptor => Lifecycle, For_Write => False);
       for Index in 1 .. Interrupt_Count loop
          Count := Count + 1;
-         Sources (Count) :=
-           (Descriptor => Interrupts (Index), For_Write => False);
+         Sources (Count) := (Descriptor => Interrupts (Index), For_Write => False);
       end loop;
-      Flyology.Operations.Drivers.Arm_Readiness
-        (Item, Sources (1 .. Count));
+      Flyology.Operations.Drivers.Arm_Readiness (Item, Sources (1 .. Count));
    end Arm_Connection_Sources;
 
    procedure Complete_Connection_Operation
-     (Item   : in out Connection_Operation'Class;
-      Result : Flyology.Operations.Terminal_Outcome)
+     (Item : in out Connection_Operation'Class; Result : Flyology.Operations.Terminal_Outcome)
    is
-      Published : Flyology.Operations.Terminal_Outcome := Result;
+      Published           : Flyology.Operations.Terminal_Outcome := Result;
       Close_After_Release : constant Boolean :=
         Item.Kind = Upgrade_TLS_Transport
         and then Item.Upgrade_Started
@@ -1677,53 +1500,49 @@ package body Flyology.IO.Connections is
       Flyology.Operations.Drivers.Complete (Item, Published);
    end Complete_Connection_Operation;
 
-   procedure Fail_Connection_Operation
-     (Item   : in out Connection_Operation'Class;
-      Reason : Scoped_IO_Failure) is
+   procedure Fail_Connection_Operation (Item : in out Connection_Operation'Class; Reason : Scoped_IO_Failure)
+   is
    begin
       Item.Failure := Reason;
       Complete_Connection_Operation (Item, Flyology.Operations.Failed);
    end Fail_Connection_Operation;
 
    procedure Drive_Transport (Item : in out Connection_Operation'Class) is
-      Sending : constant Boolean := Item.Kind = Send_Complete;
-      Data_First : constant Ada.Streams.Stream_Element_Offset :=
-        (if Item.Kind = Upgrade_TLS_Transport then 1
-         elsif Sending then Item.Send_Data.all'First
+      Sending       : constant Boolean := Item.Kind = Send_Complete;
+      Data_First    : constant Ada.Streams.Stream_Element_Offset :=
+        (if Item.Kind = Upgrade_TLS_Transport
+         then 1
+         elsif Sending
+         then Item.Send_Data.all'First
          else Item.Data.all'First);
-      Data_Last : constant Ada.Streams.Stream_Element_Offset :=
-        (if Item.Kind = Upgrade_TLS_Transport then 0
-         elsif Sending then Item.Send_Data.all'Last
+      Data_Last     : constant Ada.Streams.Stream_Element_Offset :=
+        (if Item.Kind = Upgrade_TLS_Transport
+         then 0
+         elsif Sending
+         then Item.Send_Data.all'Last
          else Item.Data.all'Last);
-      First : constant Ada.Streams.Stream_Element_Offset :=
+      First         : constant Ada.Streams.Stream_Element_Offset :=
         (if Item.Kind = Receive_One then Data_First else Item.Cursor);
-      Last : Ada.Streams.Stream_Element_Offset := First - 1;
-      Status : TLS.Step_Status := TLS.Complete;
+      Last          : Ada.Streams.Stream_Element_Offset := First - 1;
+      Status        : TLS.Step_Status := TLS.Complete;
       Retry_Attempt : Natural := 0;
 
       procedure Arm_Transport (For_Write : Boolean) is
       begin
-         Arm_Connection_Sources
-           (Item, Item.FD, For_Write, Item.Close_Source);
+         Arm_Connection_Sources (Item, Item.FD, For_Write, Item.Close_Source);
       end Arm_Transport;
 
       procedure Complete_Progress is
       begin
          Item.Last := Last;
          if Item.Kind = Receive_One then
-            Complete_Connection_Operation
-              (Item, Flyology.Operations.Succeeded);
+            Complete_Connection_Operation (Item, Flyology.Operations.Succeeded);
          elsif Last < First then
-            Fail_Connection_Operation
-              (Item,
-               (if Sending
-                then No_Progress_Failure
-                else Peer_Closed_Failure));
+            Fail_Connection_Operation (Item, (if Sending then No_Progress_Failure else Peer_Closed_Failure));
          else
             Item.Cursor := Last + 1;
             if Item.Cursor > Data_Last then
-               Complete_Connection_Operation
-                 (Item, Flyology.Operations.Succeeded);
+               Complete_Connection_Operation (Item, Flyology.Operations.Succeeded);
             elsif Item.Transport = TLS_Transport then
                Flyology.Operations.Drivers.Reschedule (Item);
             else
@@ -1732,8 +1551,7 @@ package body Flyology.IO.Connections is
          end if;
       end Complete_Progress;
    begin
-      Check_TLS_Operation
-        (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
+      Check_TLS_Operation (Item.Item.all, Item.Guard.Generation, Item.Owner, Item.Token);
       if Item.Kind = Upgrade_TLS_Transport then
          if not Item.Upgrade_Started then
             if Item.Transport /= Plain_Transport
@@ -1743,8 +1561,7 @@ package body Flyology.IO.Connections is
                Fail_Connection_Operation (Item, State_Failure);
                return;
             end if;
-            Item.Item.Controller.Begin_TLS_Upgrade
-              (Item.Guard.Generation, Item.Upgrade_Started'Access);
+            Item.Item.Controller.Begin_TLS_Upgrade (Item.Guard.Generation, Item.Upgrade_Started'Access);
             Item.Item.TLS_Session := Item.Pending_TLS_Session;
             Item.Pending_TLS_Session := null;
             Item.Item.TLS_Shutdown_Complete := False;
@@ -1753,17 +1570,18 @@ package body Flyology.IO.Connections is
 
          Status := TLS.Handshake_Step (Item.Item.TLS_Session.all);
          case Status is
-            when TLS.Complete =>
-               Item.Item.Controller.Finish_TLS_Upgrade
-                 (Item.Guard.Generation);
+            when TLS.Complete                 =>
+               Item.Item.Controller.Finish_TLS_Upgrade (Item.Guard.Generation);
                Item.Transport := TLS_Transport;
                Item.Upgrade_Started := False;
-               Complete_Connection_Operation
-                 (Item, Flyology.Operations.Succeeded);
-            when TLS.Want_Read =>
+               Complete_Connection_Operation (Item, Flyology.Operations.Succeeded);
+
+            when TLS.Want_Read                =>
                Arm_Transport (False);
-            when TLS.Want_Write =>
+
+            when TLS.Want_Write               =>
                Arm_Transport (True);
+
             when TLS.Peer_Closed | TLS.Failed =>
                Fail_Connection_Operation (Item, TLS_Failure);
          end case;
@@ -1771,62 +1589,52 @@ package body Flyology.IO.Connections is
       end if;
       if First > Data_Last then
          Item.Last := Data_First - 1;
-         Complete_Connection_Operation
-           (Item, Flyology.Operations.Succeeded);
+         Complete_Connection_Operation (Item, Flyology.Operations.Succeeded);
          return;
       end if;
 
       case Item.Transport is
-         when TLS_Transport =>
+         when TLS_Transport                =>
             if Item.Item.TLS_Session = null then
                Fail_Connection_Operation (Item, State_Failure);
                return;
             elsif Sending then
                TLS_Driver.Send_Once
-                 (Item.Item.TLS_Session.all,
-                  Item.Send_Data.all (First .. Data_Last),
-                  Last,
-                  Status);
+                 (Item.Item.TLS_Session.all, Item.Send_Data.all (First .. Data_Last), Last, Status);
             else
                TLS_Driver.Receive_Once
-                 (Item.Item.TLS_Session.all,
-                  Item.Data.all (First .. Data_Last),
-                  Last,
-                  Status);
+                 (Item.Item.TLS_Session.all, Item.Data.all (First .. Data_Last), Last, Status);
             end if;
             case Status is
-               when TLS.Complete =>
+               when TLS.Complete    =>
                   Complete_Progress;
-               when TLS.Want_Read =>
+
+               when TLS.Want_Read   =>
                   Arm_Transport (False);
-               when TLS.Want_Write =>
+
+               when TLS.Want_Write  =>
                   Arm_Transport (True);
+
                when TLS.Peer_Closed =>
                   Item.Last := First - 1;
                   if Item.Kind = Receive_One then
-                     Complete_Connection_Operation
-                       (Item, Flyology.Operations.Succeeded);
+                     Complete_Connection_Operation (Item, Flyology.Operations.Succeeded);
                   else
-                     Fail_Connection_Operation
-                       (Item, TLS_Failure);
+                     Fail_Connection_Operation (Item, TLS_Failure);
                   end if;
-               when TLS.Failed =>
+
+               when TLS.Failed      =>
                   --  TLS_Driver raises before returning this status.
                   Fail_Connection_Operation (Item, TLS_Failure);
             end case;
-         when Plain_Transport =>
+
+         when Plain_Transport              =>
             loop
                begin
                   if Sending then
-                     Sockets.Send_Socket
-                       (Item.Guard.Socket,
-                        Item.Send_Data.all (First .. Data_Last),
-                        Last);
+                     Sockets.Send_Socket (Item.Guard.Socket, Item.Send_Data.all (First .. Data_Last), Last);
                   else
-                     Sockets.Receive_Socket
-                       (Item.Guard.Socket,
-                        Item.Data.all (First .. Data_Last),
-                        Last);
+                     Sockets.Receive_Socket (Item.Guard.Socket, Item.Data.all (First .. Data_Last), Last);
                   end if;
                   exit;
                exception
@@ -1835,36 +1643,36 @@ package body Flyology.IO.Connections is
                         when Sockets.Resource_Temporarily_Unavailable =>
                            Arm_Transport (Sending);
                            return;
-                        when Sockets.No_Buffer_Space_Available =>
+
+                        when Sockets.No_Buffer_Space_Available        =>
                            if Sending then
                               Arm_Transport (True);
                            else
-                              Fail_Connection_Operation
-                                (Item, Socket_Failure);
+                              Fail_Connection_Operation (Item, Socket_Failure);
                            end if;
                            return;
-                        when Sockets.Interrupted_System_Call =>
+
+                        when Sockets.Interrupted_System_Call          =>
                            Retry_Attempt := Retry_Attempt + 1;
-                           if not Flyology.Socket_Policy.Retry_IO_Immediately
-                             (Retry_Attempt)
-                           then
+                           if not Flyology.Socket_Policy.Retry_IO_Immediately (Retry_Attempt) then
                               Arm_Transport (Sending);
                               return;
                            end if;
-                        when others =>
+
+                        when others                                   =>
                            Fail_Connection_Operation (Item, Socket_Failure);
                            return;
                      end case;
                end;
             end loop;
             Complete_Progress;
+
          when No_Transport | TLS_Upgrading =>
             Fail_Connection_Operation (Item, State_Failure);
       end case;
    exception
       when Operation_Cancelled =>
-         Complete_Connection_Operation
-           (Item, Flyology.Operations.Cancelled);
+         Complete_Connection_Operation (Item, Flyology.Operations.Cancelled);
       when TLS.TLS_Error =>
          Fail_Connection_Operation (Item, TLS_Failure);
       when Sockets.Socket_Error =>
@@ -1873,9 +1681,7 @@ package body Flyology.IO.Connections is
          Fail_Connection_Operation (Item, State_Failure);
    end Drive_Transport;
 
-   procedure Try_Scoped_Acquire
-     (Item : in out Connection_Operation'Class)
-   is
+   procedure Try_Scoped_Acquire (Item : in out Connection_Operation'Class) is
       Result : Lease_Result;
    begin
       --  Observe persistent lifecycle state before attempting the lease. The
@@ -1883,7 +1689,7 @@ package body Flyology.IO.Connections is
       --  recheck protocols, so no transition can be lost in between.
       declare
          Interrupts : Interrupt_Set (1 .. 2);
-         Count : Natural;
+         Count      : Natural;
       begin
          Interrupt_Sources (Item.Owner, Item.Token, Interrupts, Count);
       end;
@@ -1897,33 +1703,27 @@ package body Flyology.IO.Connections is
          Item.Owner,
          Item.Transport);
       case Result is
-         when Lease_Busy =>
-            Arm_Connection_Sources
-              (Item,
-               Item.Lease_Source,
-               False,
-               Item.Initial_Close_Source);
+         when Lease_Busy      =>
+            Arm_Connection_Sources (Item, Item.Lease_Source, False, Item.Initial_Close_Source);
+
          when Lease_Cancelled =>
-            Complete_Connection_Operation
-              (Item, Flyology.Operations.Cancelled);
-         when Lease_Acquired =>
+            Complete_Connection_Operation (Item, Flyology.Operations.Cancelled);
+
+         when Lease_Acquired  =>
             Sockets.Prepare (Item.Guard.Socket);
             Drive_Transport (Item);
       end case;
    exception
       when Operation_Cancelled =>
-         Complete_Connection_Operation
-           (Item, Flyology.Operations.Cancelled);
+         Complete_Connection_Operation (Item, Flyology.Operations.Cancelled);
       when Sockets.Socket_Error =>
          Fail_Connection_Operation (Item, Socket_Failure);
       when others =>
          Fail_Connection_Operation (Item, State_Failure);
    end Try_Scoped_Acquire;
 
-   overriding procedure Drive
-     (Item  : in out Connection_Operation;
-      Event : Flyology.Operations.Driver_Event)
-   is
+   overriding
+   procedure Drive (Item : in out Connection_Operation; Event : Flyology.Operations.Driver_Event) is
    begin
       if Event = Flyology.Operations.Deadline_Reached then
          Fail_Connection_Operation (Item, Deadline_Failure);
@@ -1939,15 +1739,11 @@ package body Flyology.IO.Connections is
             Try_Scoped_Acquire (Item);
          exception
             when Operation_Cancelled =>
-               Complete_Connection_Operation
-                 (Item, Flyology.Operations.Cancelled);
+               Complete_Connection_Operation (Item, Flyology.Operations.Cancelled);
             when others =>
                Fail_Connection_Operation (Item, State_Failure);
          end;
-      elsif Event in
-        Flyology.Operations.Source_Ready |
-        Flyology.Operations.Continue_Operation
-      then
+      elsif Event in Flyology.Operations.Source_Ready | Flyology.Operations.Continue_Operation then
          if Item.Guard.State = Registered then
             Try_Scoped_Acquire (Item);
          elsif Item.Guard.State = Acquired then
@@ -1960,11 +1756,10 @@ package body Flyology.IO.Connections is
       end if;
    end Drive;
 
-   overriding procedure Request_Cancellation
-     (Item : in out Connection_Operation) is
+   overriding
+   procedure Request_Cancellation (Item : in out Connection_Operation) is
    begin
-      Complete_Connection_Operation
-        (Item, Flyology.Operations.Cancelled);
+      Complete_Connection_Operation (Item, Flyology.Operations.Cancelled);
    exception
       when others =>
          --  Complete_Connection_Operation retains cleanup failure itself;
@@ -1973,21 +1768,18 @@ package body Flyology.IO.Connections is
    end Request_Cancellation;
 
    procedure Start_Scoped_IO
-     (Operation  : in out Connection_Operation'Class;
-      Item       : not null access Connection'Class;
-      Kind       : Scoped_IO_Kind;
-      Data       : not null access Ada.Streams.Stream_Element_Array;
-      Timeout    : Duration;
-      Token      : access Cancellation_Token)
-   is
+     (Operation : in out Connection_Operation'Class;
+      Item      : not null access Connection'Class;
+      Kind      : Scoped_IO_Kind;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration;
+      Token     : access Cancellation_Token) is
    begin
       if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with
-           "connection operation still owns a lease";
+         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
-      Operation.Token :=
-        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
       Operation.Guard.Item := Item.all'Unchecked_Access;
       Operation.Kind := Kind;
       Operation.Data := Data.all'Unchecked_Access;
@@ -2008,8 +1800,7 @@ package body Flyology.IO.Connections is
          Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
       end if;
       Flyology.Operations.Drive
-        (Flyology.Operations.Operation'Class (Operation),
-         Flyology.Operations.Start_Operation);
+        (Flyology.Operations.Operation'Class (Operation), Flyology.Operations.Start_Operation);
    exception
       when others =>
          if Flyology.Operations.Is_Active (Operation) then
@@ -2022,20 +1813,17 @@ package body Flyology.IO.Connections is
    end Start_Scoped_IO;
 
    procedure Start_Scoped_Send
-     (Operation  : in out Send_All_Operation;
-      Item       : not null access Connection'Class;
-      Data       : not null access constant Ada.Streams.Stream_Element_Array;
-      Timeout    : Duration;
-      Token      : access Cancellation_Token)
-   is
+     (Operation : in out Send_All_Operation;
+      Item      : not null access Connection'Class;
+      Data      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration;
+      Token     : access Cancellation_Token) is
    begin
       if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with
-           "connection operation still owns a lease";
+         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
-      Operation.Token :=
-        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
       Operation.Guard.Item := Item.all'Unchecked_Access;
       Operation.Kind := Send_Complete;
       Operation.Data := null;
@@ -2056,8 +1844,7 @@ package body Flyology.IO.Connections is
          Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
       end if;
       Flyology.Operations.Drive
-        (Flyology.Operations.Operation'Class (Operation),
-         Flyology.Operations.Start_Operation);
+        (Flyology.Operations.Operation'Class (Operation), Flyology.Operations.Start_Operation);
    exception
       when others =>
          if Flyology.Operations.Is_Active (Operation) then
@@ -2072,20 +1859,18 @@ package body Flyology.IO.Connections is
    procedure Start_Scoped_TLS_Upgrade
      (Operation : in out Connection_Operation'Class;
       Item      : not null access Connection'Class;
-      Factory   : not null access function
-        (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
+      Factory   :
+        not null access function (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
       Timeout   : Duration;
       Token     : access Cancellation_Token)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
       if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with
-           "connection operation still owns a lease";
+         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
-      Operation.Token :=
-        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
       Operation.Guard.Item := Item.all'Unchecked_Access;
       Operation.Kind := Upgrade_TLS_Transport;
       Operation.Data := null;
@@ -2122,17 +1907,14 @@ package body Flyology.IO.Connections is
          if Operation.Pending_TLS_Session = null then
             Fail_Connection_Operation (Operation, TLS_Failure);
             return;
-         elsif Timeout > 0.0
-           and then Remaining (Started, Timeout) = 0.0
-         then
+         elsif Timeout > 0.0 and then Remaining (Started, Timeout) = 0.0 then
             Fail_Connection_Operation (Operation, Deadline_Failure);
             return;
          end if;
          Try_Scoped_Acquire (Operation);
       exception
          when Operation_Cancelled =>
-            Complete_Connection_Operation
-              (Operation, Flyology.Operations.Cancelled);
+            Complete_Connection_Operation (Operation, Flyology.Operations.Cancelled);
          when TLS.TLS_Error =>
             Fail_Connection_Operation (Operation, TLS_Failure);
          when Sockets.Socket_Error =>
@@ -2156,12 +1938,10 @@ package body Flyology.IO.Connections is
       Item    : not null access Connection'Class;
       Data    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null) return Receive_Operation
-   is
+      Token   : access Cancellation_Token := null) return Receive_Operation is
    begin
       return Result : Receive_Operation (Set) do
-         Start_Scoped_IO
-           (Result, Item, Receive_One, Data, Timeout, Token);
+         Start_Scoped_IO (Result, Item, Receive_One, Data, Timeout, Token);
       end return;
    end Receive;
 
@@ -2172,8 +1952,7 @@ package body Flyology.IO.Connections is
       Token     : access Cancellation_Token := null;
       Operation : in out Receive_Operation) is
    begin
-      Start_Scoped_IO
-        (Operation, Item, Receive_One, Data, Timeout, Token);
+      Start_Scoped_IO (Operation, Item, Receive_One, Data, Timeout, Token);
    end Receive;
 
    function Receive_Exactly
@@ -2181,13 +1960,10 @@ package body Flyology.IO.Connections is
       Item    : not null access Connection'Class;
       Data    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null)
-      return Receive_Exactly_Operation
-   is
+      Token   : access Cancellation_Token := null) return Receive_Exactly_Operation is
    begin
       return Result : Receive_Exactly_Operation (Set) do
-         Start_Scoped_IO
-           (Result, Item, Receive_Complete, Data, Timeout, Token);
+         Start_Scoped_IO (Result, Item, Receive_Complete, Data, Timeout, Token);
       end return;
    end Receive_Exactly;
 
@@ -2198,8 +1974,7 @@ package body Flyology.IO.Connections is
       Token     : access Cancellation_Token := null;
       Operation : in out Receive_Exactly_Operation) is
    begin
-      Start_Scoped_IO
-        (Operation, Item, Receive_Complete, Data, Timeout, Token);
+      Start_Scoped_IO (Operation, Item, Receive_Complete, Data, Timeout, Token);
    end Receive_Exactly;
 
    function Send_All
@@ -2207,8 +1982,7 @@ package body Flyology.IO.Connections is
       Item    : not null access Connection'Class;
       Data    : not null access constant Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null) return Send_All_Operation
-   is
+      Token   : access Cancellation_Token := null) return Send_All_Operation is
    begin
       return Result : Send_All_Operation (Set) do
          Start_Scoped_Send (Result, Item, Data, Timeout, Token);
@@ -2225,54 +1999,49 @@ package body Flyology.IO.Connections is
       Start_Scoped_Send (Operation, Item, Data, Timeout, Token);
    end Send_All;
 
-   procedure Finish_Connection_Operation
-     (Item : in out Connection_Operation'Class)
-   is
-      Result : constant Flyology.Operations.Terminal_Outcome :=
-        Flyology.Operations.Outcome (Item);
+   procedure Finish_Connection_Operation (Item : in out Connection_Operation'Class) is
+      Result  : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Item);
       Failure : constant Scoped_IO_Failure := Item.Failure;
    begin
       Flyology.Operations.Consume (Item);
       case Result is
          when Flyology.Operations.Succeeded =>
             null;
+
          when Flyology.Operations.Cancelled =>
             raise Operation_Cancelled;
-         when Flyology.Operations.Failed =>
+
+         when Flyology.Operations.Failed    =>
             case Failure is
-               when Deadline_Failure =>
+               when Deadline_Failure    =>
                   raise Timeout_Error with "connection operation timed out";
-               when Socket_Failure =>
-                  raise Sockets.Socket_Error with
-                    "scoped connection socket operation failed";
-               when TLS_Failure =>
-                  raise TLS.TLS_Error with
-                    "scoped connection TLS operation failed";
+
+               when Socket_Failure      =>
+                  raise Sockets.Socket_Error with "scoped connection socket operation failed";
+
+               when TLS_Failure         =>
+                  raise TLS.TLS_Error with "scoped connection TLS operation failed";
+
                when Peer_Closed_Failure =>
-                  raise Device_Error with
-                    "connection closed while receiving";
+                  raise Device_Error with "connection closed while receiving";
+
                when No_Progress_Failure =>
-                  raise Device_Error with
-                    "connection closed while sending";
-               when State_Failure =>
-                  raise Program_Error with
-                    "scoped connection state is invalid";
-               when Cleanup_Failure =>
-                  raise Program_Error with
-                    "scoped connection cleanup failed";
-               when No_Failure =>
-                  raise Program_Error with
-                    "scoped connection operation failed";
+                  raise Device_Error with "connection closed while sending";
+
+               when State_Failure       =>
+                  raise Program_Error with "scoped connection state is invalid";
+
+               when Cleanup_Failure     =>
+                  raise Program_Error with "scoped connection cleanup failed";
+
+               when No_Failure          =>
+                  raise Program_Error with "scoped connection operation failed";
             end case;
       end case;
    end Finish_Connection_Operation;
 
-   procedure Finish
-     (Operation : in out Receive_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset)
-   is
-      Saved_Last : constant Ada.Streams.Stream_Element_Offset :=
-        Operation.Last;
+   procedure Finish (Operation : in out Receive_Operation; Last : out Ada.Streams.Stream_Element_Offset) is
+      Saved_Last : constant Ada.Streams.Stream_Element_Offset := Operation.Last;
    begin
       Finish_Connection_Operation (Operation);
       Last := Saved_Last;
@@ -2296,79 +2065,67 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Interrupts : Interrupt_Set (1 .. 3);
+      Interrupts      : Interrupt_Set (1 .. 3);
       Interrupt_Count : Natural;
-      FD : Descriptor;
-      Guard : Operation_Guard (Item'Unchecked_Access);
-      Owner : Server_Access;
-      Transport : Transport_Kind;
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      FD              : Descriptor;
+      Guard           : Operation_Guard (Item'Unchecked_Access);
+      Owner           : Server_Access;
+      Transport       : Transport_Kind;
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       pragma Unreferenced (Cancellation_Quantum);
       procedure Check is
       begin
-         Check_TLS_Operation
-           (Item, Guard.Generation, Owner, Token);
+         Check_TLS_Operation (Item, Guard.Generation, Owner, Token);
       end Check;
       procedure Await (Status : TLS.Step_Status) is
       begin
-         Await_TLS_Ready
-           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+         Await_TLS_Ready (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
       end Await;
    begin
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner, Transport);
-      pragma Assert
-        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+        (Item'Unchecked_Access, Started, Timeout, Token, FD, Guard, Interrupts (1), Owner, Transport);
+      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       if Transport = TLS_Transport then
          if Item.TLS_Session = null then
             raise Program_Error with "TLS transport has no provider session";
          end if;
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
          declare
-            Limit : constant Interfaces.C.int :=
-              Test_Receive_Limit (Interfaces.C.int (Data'Length));
+            Limit : constant Interfaces.C.int := Test_Receive_Limit (Interfaces.C.int (Data'Length));
          begin
             TLS_Driver.Receive
               (Item.TLS_Session.all,
-               Data
-                 (Data'First ..
-                    Data'First +
-                      Ada.Streams.Stream_Element_Offset (Limit) - 1),
-               Last, Check'Access, Await'Access);
+               Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
+               Last,
+               Check'Access,
+               Await'Access);
          end;
 #else
-         TLS_Driver.Receive
-           (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
+         TLS_Driver.Receive (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
 #end if;
          return;
       elsif Transport /= Plain_Transport then
          raise Operation_Cancelled;
       end if;
-      Interrupt_Sources
-        (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+      Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
       Test_Barrier (3);
 #end if;
       begin
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
          declare
-            Limit : constant Interfaces.C.int :=
-              Test_Receive_Limit (Interfaces.C.int (Data'Length));
+            Limit : constant Interfaces.C.int := Test_Receive_Limit (Interfaces.C.int (Data'Length));
          begin
             Flyology.IO.Sockets.Receive
               (Guard.Socket,
-               Data
-                 (Data'First ..
-                    Data'First +
-                      Ada.Streams.Stream_Element_Offset (Limit) - 1),
-               Last, Remaining (Started, Timeout),
+               Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
+               Last,
+               Remaining (Started, Timeout),
                Interrupts (1 .. Interrupt_Count + 1));
          end;
 #else
          Flyology.IO.Sockets.Receive
-           (Guard.Socket, Data, Last, Remaining (Started, Timeout),
-            Interrupts (1 .. Interrupt_Count + 1));
+           (Guard.Socket, Data, Last, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count + 1));
 #end if;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
@@ -2383,38 +2140,33 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      First          : Ada.Streams.Stream_Element_Offset := Data'First;
-      Last           : Ada.Streams.Stream_Element_Offset;
-      Interrupts     : Interrupt_Set (1 .. 3);
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      First           : Ada.Streams.Stream_Element_Offset := Data'First;
+      Last            : Ada.Streams.Stream_Element_Offset;
+      Interrupts      : Interrupt_Set (1 .. 3);
       Interrupt_Count : Natural;
-      FD             : Descriptor;
-      Guard          : Operation_Guard (Item'Unchecked_Access);
-      Owner          : Server_Access;
-      Transport      : Transport_Kind;
+      FD              : Descriptor;
+      Guard           : Operation_Guard (Item'Unchecked_Access);
+      Owner           : Server_Access;
+      Transport       : Transport_Kind;
       pragma Unreferenced (Cancellation_Quantum);
       procedure Check is
       begin
-         Check_TLS_Operation
-           (Item, Guard.Generation, Owner, Token);
+         Check_TLS_Operation (Item, Guard.Generation, Owner, Token);
       end Check;
       procedure Await (Status : TLS.Step_Status) is
       begin
-         Await_TLS_Ready
-           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+         Await_TLS_Ready (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
       end Await;
    begin
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner, Transport);
-      pragma Assert
-        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+        (Item'Unchecked_Access, Started, Timeout, Token, FD, Guard, Interrupts (1), Owner, Transport);
+      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       if Transport = TLS_Transport then
          if Item.TLS_Session = null then
             raise Program_Error with "TLS transport has no provider session";
          end if;
-         TLS_Driver.Receive_Exactly
-           (Item.TLS_Session.all, Data, Check'Access, Await'Access);
+         TLS_Driver.Receive_Exactly (Item.TLS_Session.all, Data, Check'Access, Await'Access);
          return;
       elsif Transport /= Plain_Transport then
          raise Operation_Cancelled;
@@ -2422,8 +2174,7 @@ package body Flyology.IO.Connections is
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
-            Interrupt_Sources
-              (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+            Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
             Test_Barrier (3);
 #end if;
@@ -2456,38 +2207,33 @@ package body Flyology.IO.Connections is
       Cancellation_Quantum : Duration := 0.050;
       Token                : access Cancellation_Token := null)
    is
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      First   : Ada.Streams.Stream_Element_Offset := Data'First;
-      Last    : Ada.Streams.Stream_Element_Offset;
-      Interrupts : Interrupt_Set (1 .. 3);
+      Started         : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      First           : Ada.Streams.Stream_Element_Offset := Data'First;
+      Last            : Ada.Streams.Stream_Element_Offset;
+      Interrupts      : Interrupt_Set (1 .. 3);
       Interrupt_Count : Natural;
-      FD : Descriptor;
-      Guard : Operation_Guard (Item'Unchecked_Access);
-      Owner : Server_Access;
-      Transport : Transport_Kind;
+      FD              : Descriptor;
+      Guard           : Operation_Guard (Item'Unchecked_Access);
+      Owner           : Server_Access;
+      Transport       : Transport_Kind;
       pragma Unreferenced (Cancellation_Quantum);
       procedure Check is
       begin
-         Check_TLS_Operation
-           (Item, Guard.Generation, Owner, Token);
+         Check_TLS_Operation (Item, Guard.Generation, Owner, Token);
       end Check;
       procedure Await (Status : TLS.Step_Status) is
       begin
-         Await_TLS_Ready
-           (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
+         Await_TLS_Ready (FD, Status, Started, Timeout, Interrupts (1), Owner, Token);
       end Await;
    begin
       Acquire_Operation
-        (Item'Unchecked_Access, Started, Timeout, Token,
-         FD, Guard, Interrupts (1), Owner, Transport);
-      pragma Assert
-        (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
+        (Item'Unchecked_Access, Started, Timeout, Token, FD, Guard, Interrupts (1), Owner, Transport);
+      pragma Assert (FD = Flyology.IO.Sockets.Native_Descriptor (Guard.Socket));
       if Transport = TLS_Transport then
          if Item.TLS_Session = null then
             raise Program_Error with "TLS transport has no provider session";
          end if;
-         TLS_Driver.Send_All
-           (Item.TLS_Session.all, Data, Check'Access, Await'Access);
+         TLS_Driver.Send_All (Item.TLS_Session.all, Data, Check'Access, Await'Access);
          return;
       elsif Transport /= Plain_Transport then
          raise Operation_Cancelled;
@@ -2495,8 +2241,7 @@ package body Flyology.IO.Connections is
       begin
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
-            Interrupt_Sources
-              (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
+            Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
             declare
                Chunk_Last : constant Ada.Streams.Stream_Element_Offset :=
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
@@ -2528,7 +2273,8 @@ package body Flyology.IO.Connections is
       end;
    end Send_All;
 
-   overriding procedure Finalize (Item : in out Connection) is
+   overriding
+   procedure Finalize (Item : in out Connection) is
    begin
       Close (Item);
    exception

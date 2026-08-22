@@ -13,14 +13,14 @@ private with Flyology.IO.TLS;
 --  Example:
 --
 --     Flyology.IO.Connections.Connect (Manager, Server, Client);
+
 package Flyology.IO.Connections is
 
    --  Raised when a Server no longer admits connections.
-   Admission_Closed : exception;
+   Admission_Closed    : exception;
    --  Raised when server shutdown, an explicit token, or concurrent Close
    --  interrupts an operation. This is the canonical cross-I/O exception.
-   Operation_Cancelled : exception renames
-     Flyology.Cancellation.Operation_Cancelled;
+   Operation_Cancelled : exception renames Flyology.Cancellation.Operation_Cancelled;
 
    --  Canonical thread-safe one-shot cancellation source. Request is
    --  idempotent. The token must outlive every operation using it.
@@ -119,8 +119,7 @@ package Flyology.IO.Connections is
    --  Opaque build-in-place storage for a managed connect's child operation.
    --  @exclude
    --  @field Owner Completion set shared with the child operation
-   type Connect_Operation_State
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+   type Connect_Operation_State (Owner : not null access Flyology.Operations.Completion_Set'Class) is
      limited private;
 
    --  Scoped managed connection construction. The operation reserves one
@@ -134,9 +133,9 @@ package Flyology.IO.Connections is
    --  successful result consume only the parent's slot.
    --  @field Owner Completion set that owns the parent and hidden child slots
    --  @field State Opaque build-in-place child and ownership storage
-   type Connect_Operation
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
-     new Flyology.Operations.Operation (Owner) with record
+   type Connect_Operation (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Owner)
+   with record
       State : Connect_Operation_State (Owner);
    end record;
 
@@ -167,9 +166,9 @@ package Flyology.IO.Connections is
       Timeout   : Duration := Infinite;
       Token     : access Cancellation_Token := null;
       Operation : in out Connect_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal managed connect. On success, transfer the operation's
    --  socket and permit to Item. A mismatched or open Item raises
@@ -186,9 +185,7 @@ package Flyology.IO.Connections is
    --  @exception Capacity_Error Completion-set child capacity was unavailable
    --  @exception Program_Error Item is open or bound to another Manager, or
    --     cleanup failed
-   procedure Finish
-     (Operation : in out Connect_Operation;
-      Item      : in out Connection'Class);
+   procedure Finish (Operation : in out Connect_Operation; Item : in out Connection'Class);
 
    --  Acquire capacity before accepting, so a full Manager backpressures the
    --  listening socket. Transient aborted admissions are retried; descriptor
@@ -337,8 +334,7 @@ package Flyology.IO.Connections is
    --  owning task must finish or cancel and drain its pending scoped
    --  operations before it calls synchronous Close; Close may wait for those
    --  operations, while only their owner can drive them to completion.
-   type Connection_Operation is
-     abstract new Flyology.Operations.Operation with private;
+   type Connection_Operation is abstract new Flyology.Operations.Operation with private;
 
    --  Scoped one-chunk plaintext-or-TLS receive.
    type Receive_Operation is new Connection_Operation with private;
@@ -375,9 +371,9 @@ package Flyology.IO.Connections is
       Timeout   : Duration := Infinite;
       Token     : access Cancellation_Token := null;
       Operation : in out Receive_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a high-level receive that fills Data.
    --  @param Set Completion set that owns the operation slot
@@ -391,8 +387,7 @@ package Flyology.IO.Connections is
       Item    : not null access Connection'Class;
       Data    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null)
-      return Receive_Exactly_Operation;
+      Token   : access Cancellation_Token := null) return Receive_Exactly_Operation;
 
    --  Start or restart an exact receive.
    --  @param Item Open admitted plaintext or TLS connection
@@ -406,9 +401,9 @@ package Flyology.IO.Connections is
       Timeout   : Duration := Infinite;
       Token     : access Cancellation_Token := null;
       Operation : in out Receive_Exactly_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a high-level complete send.
    --  @param Set Completion set that owns the operation slot
@@ -436,16 +431,14 @@ package Flyology.IO.Connections is
       Timeout   : Duration := Infinite;
       Token     : access Cancellation_Token := null;
       Operation : in out Send_All_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal receive and publish the familiar Last result.
    --  @param Operation Terminal receive operation
    --  @param Last Last element received, or Data'First - 1 on peer closure
-   procedure Finish
-     (Operation : in out Receive_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Receive_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume a terminal exact receive.
    --  @param Operation Terminal exact-receive operation
@@ -459,7 +452,7 @@ private
    type Connection_Access is access all Connection'Class;
    type Server_Access is access all Server;
 
-   type Descriptor_Generation is mod 2 ** 64;
+   type Descriptor_Generation is mod 2**64;
 
    --  Result of a nonblocking lease attempt.
    type Lease_Result is (Lease_Busy, Lease_Acquired, Lease_Cancelled);
@@ -471,8 +464,7 @@ private
 
    --  Transport replacement occurs under the descriptor operation lease. A
    --  connection never exposes the intermediate state to application I/O.
-   type Transport_Kind is
-     (No_Transport, Plain_Transport, TLS_Upgrading, TLS_Transport);
+   type Transport_Kind is (No_Transport, Plain_Transport, TLS_Upgrading, TLS_Transport);
 
    protected type Descriptor_Controller is
       --  Publish descriptor, socket, and admission ownership atomically.
@@ -493,17 +485,16 @@ private
          Owner        : out Server_Access);
       procedure Try_Acquire
         (Expected_Generation : Descriptor_Generation;
-         State        : not null access Operation_State;
-         Result       : out Lease_Result;
-         FD           : out Flyology.IO.Descriptor;
-         Close_Source : out Flyology.IO.Descriptor;
-         Socket       : in out Flyology.IO.Sockets.Socket_Type;
-         Owner        : out Server_Access;
-         Transport    : out Transport_Kind);
+         State               : not null access Operation_State;
+         Result              : out Lease_Result;
+         FD                  : out Flyology.IO.Descriptor;
+         Close_Source        : out Flyology.IO.Descriptor;
+         Socket              : in out Flyology.IO.Sockets.Socket_Type;
+         Owner               : out Server_Access;
+         Transport           : out Transport_Kind);
       --  Withdraw one operation whose lease acquisition did not complete.
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation;
-         State      : not null access Operation_State);
+        (Generation : Descriptor_Generation; State : not null access Operation_State);
       --  Reject further chunks after Close has marked this leased generation.
       procedure Check_Operation (Generation : Descriptor_Generation);
       --  Replace the plaintext operation generation while retaining the same
@@ -511,20 +502,15 @@ private
       --  Arm cleanup in the same protected action so abort cannot expose an
       --  upgrading transport without a terminal cleanup obligation.
       procedure Begin_TLS_Upgrade
-        (Generation : in out Descriptor_Generation;
-         Cleanup_Armed : not null access Boolean);
+        (Generation : in out Descriptor_Generation; Cleanup_Armed : not null access Boolean);
       procedure Finish_TLS_Upgrade (Generation : Descriptor_Generation);
       procedure Release
         (Generation : Descriptor_Generation;
          Socket     : in out Flyology.IO.Sockets.Socket_Type;
          State      : not null access Operation_State);
       procedure Begin_Close
-        (FD         : out Flyology.IO.Descriptor;
-         Generation : out Descriptor_Generation;
-         Leader     : out Boolean);
-      entry Await_Drained
-        (Socket : in out Flyology.IO.Sockets.Socket_Type;
-         Owner  : out Server_Access);
+        (FD : out Flyology.IO.Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean);
+      entry Await_Drained (Socket : in out Flyology.IO.Sockets.Socket_Type; Owner : out Server_Access);
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
       function Is_Open_State return Boolean;
@@ -549,8 +535,7 @@ private
       Current_Transport  : Transport_Kind := No_Transport;
    end Descriptor_Controller;
 
-   type Connection (Manager : access Server := null) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Connection (Manager : access Server := null) is new Ada.Finalization.Limited_Controlled with record
       Controller            : Descriptor_Controller;
       TLS_Session           : Flyology.IO.TLS.Session_Access := null;
       TLS_Shutdown_Complete : Boolean := False;
@@ -561,18 +546,14 @@ private
    --  Scope guard for one generation-checked descriptor operation. Descendant
    --  packages use this to add ownership-preserving capabilities without
    --  exposing the socket or controller publicly.
-   type Operation_Guard (Item : not null access Connection) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Operation_Guard (Item : not null access Connection) is new Ada.Finalization.Limited_Controlled
+   with record
       Generation : aliased Descriptor_Generation := 0;
       State      : aliased Operation_State := Unregistered;
       Socket     : Flyology.IO.Sockets.Socket_Type;
    end record;
 
-   type Scoped_IO_Kind is
-     (Receive_One,
-      Receive_Complete,
-      Send_Complete,
-      Upgrade_TLS_Transport);
+   type Scoped_IO_Kind is (Receive_One, Receive_Complete, Send_Complete, Upgrade_TLS_Transport);
    type Scoped_IO_Failure is
      (No_Failure,
       State_Failure,
@@ -582,14 +563,11 @@ private
       No_Progress_Failure,
       Deadline_Failure,
       Cleanup_Failure);
-   type Stream_Array_Access is
-     access all Ada.Streams.Stream_Element_Array;
-   type Constant_Stream_Array_Access is
-     access constant Ada.Streams.Stream_Element_Array;
+   type Stream_Array_Access is access all Ada.Streams.Stream_Element_Array;
+   type Constant_Stream_Array_Access is access constant Ada.Streams.Stream_Element_Array;
    type Cancellation_Access is access all Cancellation_Token;
 
-   type Pending_Connect_Owner is
-     new Ada.Finalization.Limited_Controlled with record
+   type Pending_Connect_Owner is new Ada.Finalization.Limited_Controlled with record
       Manager : Server_Access := null;
       Armed   : aliased Boolean := False;
       Socket  : aliased Flyology.IO.Sockets.Socket_Type;
@@ -597,10 +575,10 @@ private
 
    --  @exclude
    --  @param Item Pending socket and admission owner to release
-   overriding procedure Finalize (Item : in out Pending_Connect_Owner);
+   overriding
+   procedure Finalize (Item : in out Pending_Connect_Owner);
 
-   type Connect_Phase is
-     (Waiting_For_Admission, Waiting_For_Connect, Connection_Ready);
+   type Connect_Phase is (Waiting_For_Admission, Waiting_For_Connect, Connection_Ready);
    type Connect_Failure is
      (No_Connect_Failure,
       Admission_Failure,
@@ -610,14 +588,12 @@ private
       Connect_State_Failure,
       Connect_Cleanup_Failure);
 
-   type Connect_Operation_State
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
-     limited record
+   type Connect_Operation_State (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+   limited record
       Resources   : Pending_Connect_Owner;
       Child       : Flyology.IO.Sockets.Connect_Operation (Owner);
       Token       : Cancellation_Access := null;
-      Destination : Flyology.IO.Sockets.Endpoint :=
-        Flyology.IO.Sockets.No_Endpoint;
+      Destination : Flyology.IO.Sockets.Endpoint := Flyology.IO.Sockets.No_Endpoint;
       Started     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout     : Duration := Infinite;
       Phase       : Connect_Phase := Waiting_For_Admission;
@@ -630,18 +606,18 @@ private
    --  @exclude
    --  @param Item Managed connect operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Connect_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Connect_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Managed connect operation to cancel and drain
-   overriding procedure Request_Cancellation
-     (Item : in out Connect_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Connect_Operation);
 
    --  @exclude
    --  @param Guard Active lease cleanup scope
-   overriding procedure Finalize (Guard : in out Operation_Guard);
+   overriding
+   procedure Finalize (Guard : in out Operation_Guard);
 
    --  @exclude
    --  Release or abandon a generation-checked lease immediately. Finalize is
@@ -660,15 +636,15 @@ private
    --  @param Owner Admission owner that must outlive the operation
    --  @param Transport Active plaintext or TLS transport kind
    procedure Acquire_Operation
-     (Item          : not null Connection_Access;
-      Started       : Ada.Real_Time.Time;
-      Timeout       : Duration;
-      Token         : access Cancellation_Token;
-      FD            : out Flyology.IO.Descriptor;
-      Guard         : in out Operation_Guard;
-      Close_Source  : out Flyology.IO.Descriptor;
-      Owner         : out Server_Access;
-      Transport     : out Transport_Kind);
+     (Item         : not null Connection_Access;
+      Started      : Ada.Real_Time.Time;
+      Timeout      : Duration;
+      Token        : access Cancellation_Token;
+      FD           : out Flyology.IO.Descriptor;
+      Guard        : in out Operation_Guard;
+      Close_Source : out Flyology.IO.Descriptor;
+      Owner        : out Server_Access;
+      Transport    : out Transport_Kind);
 
    --  @exclude
    --  @param Item Connection whose generation remains active
@@ -685,9 +661,7 @@ private
    --  @param Started Shared deadline start
    --  @param Timeout Shared deadline interval
    --  @return Remaining deadline interval
-   function Remaining
-     (Started : Ada.Real_Time.Time;
-      Timeout : Duration) return Duration;
+   function Remaining (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration;
 
    --  @exclude
    --  @param Owner Admission owner supplying shutdown readiness
@@ -715,8 +689,8 @@ private
       Backend     : in out Flyology.IO.TLS.Provider'Class;
       Side        : Flyology.IO.TLS.Role;
       Server_Name : String;
-      Factory     : not null access function
-        (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
+      Factory     :
+        not null access function (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
       Timeout     : Duration;
       Token       : access Cancellation_Token);
 
@@ -727,17 +701,13 @@ private
    --  @return Stable query result copied before releasing the lease
    function Query_TLS_Session
      (Item  : in out Connection;
-      Query : not null access function
-        (Value : Flyology.IO.TLS.Session'Class) return String) return String;
+      Query : not null access function (Value : Flyology.IO.TLS.Session'Class) return String) return String;
 
    --  @exclude
    --  @param Item Upgraded admitted connection being shut down
    --  @param Timeout Shared operation deadline in seconds
    --  @param Token Optional cancellation source
-   procedure Shutdown_TLS
-     (Item    : in out Connection;
-      Timeout : Duration;
-      Token   : access Cancellation_Token);
+   procedure Shutdown_TLS (Item : in out Connection; Timeout : Duration; Token : access Cancellation_Token);
 
    type Scoped_Operation_Guard is limited record
       Item       : Connection_Access := null;
@@ -751,8 +721,7 @@ private
    --  @param Guard Registered or acquired scoped connection lease
    procedure Release_Operation (Guard : in out Scoped_Operation_Guard);
 
-   type Connection_Operation is
-     abstract new Flyology.Operations.Operation with record
+   type Connection_Operation is abstract new Flyology.Operations.Operation with record
       Item                 : Connection_Access := null;
       Token                : Cancellation_Access := null;
       Guard                : Scoped_Operation_Guard;
@@ -775,14 +744,13 @@ private
    --  @exclude
    --  @param Item Connection operation to advance
    --  @param Event Source event that caused the drive
-   overriding procedure Drive
-     (Item  : in out Connection_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Connection_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Connection operation to cancel and release
-   overriding procedure Request_Cancellation
-     (Item : in out Connection_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Connection_Operation);
 
    --  @exclude
    --  Start a high-level TLS upgrade. Factory is invoked synchronously before
@@ -795,8 +763,8 @@ private
    procedure Start_Scoped_TLS_Upgrade
      (Operation : in out Connection_Operation'Class;
       Item      : not null access Connection'Class;
-      Factory   : not null access function
-        (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
+      Factory   :
+        not null access function (FD : Flyology.IO.Descriptor) return Flyology.IO.TLS.Session_Access;
       Timeout   : Duration;
       Token     : access Cancellation_Token);
 
@@ -804,15 +772,14 @@ private
    --  Consume a terminal connection-family operation and raise its retained
    --  provider result using the familiar synchronous exception class.
    --  @param Item Terminal connection-family operation
-   procedure Finish_Connection_Operation
-     (Item : in out Connection_Operation'Class);
+   procedure Finish_Connection_Operation (Item : in out Connection_Operation'Class);
 
    type Receive_Operation is new Connection_Operation with null record;
-   type Receive_Exactly_Operation is
-     new Connection_Operation with null record;
+   type Receive_Exactly_Operation is new Connection_Operation with null record;
    type Send_All_Operation is new Connection_Operation with null record;
 
    --  Close Item without propagating cleanup errors.
    --  @param Item Connection being finalized
-   overriding procedure Finalize (Item : in out Connection);
+   overriding
+   procedure Finalize (Item : in out Connection);
 end Flyology.IO.Connections;

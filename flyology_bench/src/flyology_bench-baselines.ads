@@ -4,6 +4,7 @@
 with Ada.Strings.Unbounded;
 
 --  Persists raw benchmark samples and gates compatible later runs.
+
 package Flyology_Bench.Baselines is
    --  A baseline artifact is structurally invalid or uses an unsupported
    --  schema version.
@@ -39,11 +40,7 @@ package Flyology_Bench.Baselines is
    --  a newline or NUL byte.
    --  @exception Baseline_IO_Error The temporary file or atomic publication
    --  failed. An existing artifact remains unchanged before publication.
-   procedure Save
-     (Path        : String;
-      Name        : String;
-      Result      : Measurement;
-      Fingerprint : String := "");
+   procedure Save (Path : String; Name : String; Result : Measurement; Fingerprint : String := "");
 
    --  Load and validate a baseline written by Save. Version 2 validation
    --  includes required and duplicate fields, ranges, completeness, footer,
@@ -71,14 +68,13 @@ package Flyology_Bench.Baselines is
    --  @exception Baseline_Comparison_Error Sample data cannot be compared
    --  within the supported numeric domain.
    function Compare
-     (Saved      : Baseline;
-      Current    : Measurement;
-      Fingerprint : String := "";
+     (Saved                       : Baseline;
+      Current                     : Measurement;
+      Fingerprint                 : String := "";
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1;
-      Confidence_Level_Percent : Confidence_Percentage := 95.0;
-      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
-      return Regression;
+      Random_Seed                 : Long_Long_Integer := 1;
+      Confidence_Level_Percent    : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples         : Bootstrap_Resample_Count := 2_000) return Regression;
 
    --  Return the name stored in a baseline.
    --  @param Saved Loaded baseline.
@@ -123,14 +119,12 @@ package Flyology_Bench.Baselines is
    --  Return the lower endpoint of the current-time change interval.
    --  @param Result Compatible regression result.
    --  @return Lower time-change bound in percent; negative is faster.
-   function Time_Change_Confidence_Low
-     (Result : Regression) return Long_Float;
+   function Time_Change_Confidence_Low (Result : Regression) return Long_Float;
 
    --  Return the upper endpoint of the current-time change interval.
    --  @param Result Compatible regression result.
    --  @return Upper time-change bound in percent; negative is faster.
-   function Time_Change_Confidence_High
-     (Result : Regression) return Long_Float;
+   function Time_Change_Confidence_High (Result : Regression) return Long_Float;
 
    --  Return the practical/statistical regression verdict. A regression is
    --  established only when the complete change interval is above the
@@ -156,10 +150,10 @@ package Flyology_Bench.Baselines is
    --  neither a practical result nor a regression.
    type Gate_Policy is record
       Practical_Threshold_Percent : Threshold_Percentage := 1.0;
-      On_Missing      : Gate_Action := Report_Only;
-      On_Invalid      : Gate_Action := Report_Only;
-      On_Incompatible : Gate_Action := Report_Only;
-      On_Inconclusive : Gate_Action := Report_Only;
+      On_Missing                  : Gate_Action := Report_Only;
+      On_Invalid                  : Gate_Action := Report_Only;
+      On_Incompatible             : Gate_Action := Report_Only;
+      On_Inconclusive             : Gate_Action := Report_Only;
    end record;
 
    --  Interactive policy that reports exceptional states without rejection.
@@ -223,15 +217,14 @@ package Flyology_Bench.Baselines is
    --  @exception Constraint_Error Compatible samples request more than the
    --  bounded bootstrap analysis work.
    function Evaluate_Gate
-     (Path         : String;
-      Current_Name : String;
-      Current      : Measurement;
-      Fingerprint  : String := "";
-      Policy       : Gate_Policy := Permissive_Gate_Policy;
-      Random_Seed  : Long_Long_Integer := 1;
+     (Path                     : String;
+      Current_Name             : String;
+      Current                  : Measurement;
+      Fingerprint              : String := "";
+      Policy                   : Gate_Policy := Permissive_Gate_Policy;
+      Random_Seed              : Long_Long_Integer := 1;
       Confidence_Level_Percent : Confidence_Percentage := 95.0;
-      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
-      return Gate_Result;
+      Bootstrap_Resamples      : Bootstrap_Resample_Count := 2_000) return Gate_Result;
 
    --  Raise Regression_Gate_Failure when Result is rejected.
    --  @param Result Completed gate evaluation.
@@ -291,8 +284,7 @@ package Flyology_Bench.Baselines is
    --  Return the configured practical threshold.
    --  @param Result Completed gate evaluation.
    --  @return Threshold in percent.
-   function Practical_Threshold_Percent
-     (Result : Gate_Result) return Long_Float;
+   function Practical_Threshold_Percent (Result : Gate_Result) return Long_Float;
 
    --  Return the stable name of the independent bootstrap method.
    --  @param Result Completed gate evaluation.
@@ -302,8 +294,7 @@ package Flyology_Bench.Baselines is
    --  Return the confidence level used by the independent bootstrap.
    --  @param Result Completed gate evaluation.
    --  @return Confidence level in percent.
-   function Confidence_Level_Percent
-     (Result : Gate_Result) return Long_Float;
+   function Confidence_Level_Percent (Result : Gate_Result) return Long_Float;
 
    --  Return the number of bootstrap resamples used by the gate.
    --  @param Result Completed gate evaluation.
@@ -343,15 +334,13 @@ package Flyology_Bench.Baselines is
    --  @param Result Gate result with statistics.
    --  @return Lower time-change bound in percent; negative is faster.
    --  @exception Program_Error Has_Statistics is False.
-   function Time_Change_Confidence_Low
-     (Result : Gate_Result) return Long_Float;
+   function Time_Change_Confidence_Low (Result : Gate_Result) return Long_Float;
 
    --  Return the upper endpoint of the current-time change interval.
    --  @param Result Gate result with statistics.
    --  @return Upper time-change bound in percent; negative is faster.
    --  @exception Program_Error Has_Statistics is False.
-   function Time_Change_Confidence_High
-     (Result : Gate_Result) return Long_Float;
+   function Time_Change_Confidence_High (Result : Gate_Result) return Long_Float;
 
 private
    package Strings renames Ada.Strings.Unbounded;
@@ -380,21 +369,20 @@ private
    type Bootstrap_Method_Id is (Circular_Block_Mean_Ratio);
 
    type Gate_Result is record
-      Status_Value       : Gate_Status := Baseline_Error;
-      Rejected_Value     : Boolean := False;
-      Compatible_Value   : Boolean := False;
-      Issue_Value        : Compatibility_Issue := No_Compatibility_Issue;
-      Statistics_Ready   : Boolean := False;
-      Baseline_Name_Data : Strings.Unbounded_String;
-      Current_Name_Data  : Strings.Unbounded_String;
-      Path_Data          : Strings.Unbounded_String;
-      Reason_Data        : Strings.Unbounded_String;
-      Threshold_Value    : Long_Float := 1.0;
-      Bootstrap_Method_Value : Bootstrap_Method_Id :=
-        Circular_Block_Mean_Ratio;
-      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Status_Value             : Gate_Status := Baseline_Error;
+      Rejected_Value           : Boolean := False;
+      Compatible_Value         : Boolean := False;
+      Issue_Value              : Compatibility_Issue := No_Compatibility_Issue;
+      Statistics_Ready         : Boolean := False;
+      Baseline_Name_Data       : Strings.Unbounded_String;
+      Current_Name_Data        : Strings.Unbounded_String;
+      Path_Data                : Strings.Unbounded_String;
+      Reason_Data              : Strings.Unbounded_String;
+      Threshold_Value          : Long_Float := 1.0;
+      Bootstrap_Method_Value   : Bootstrap_Method_Id := Circular_Block_Mean_Ratio;
+      Confidence_Level_Value   : Confidence_Percentage := 95.0;
       Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
-      Random_Seed_Value  : Long_Long_Integer := 1;
-      Regression_Data    : Regression;
+      Random_Seed_Value        : Long_Long_Integer := 1;
+      Regression_Data          : Regression;
    end record;
 end Flyology_Bench.Baselines;

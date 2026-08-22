@@ -50,11 +50,11 @@ procedure Fairness_Smoke is
          null;
       end Await_Completion;
 
-      function Pulse_Preceded_Work return Boolean is
-        (Pulsed_At < Finished_At);
+      function Pulse_Preceded_Work return Boolean
+      is (Pulsed_At < Finished_At);
 
-      function Pulse_Latency return Time_Span is
-        (Pulsed_At - Armed_At);
+      function Pulse_Latency return Time_Span
+      is (Pulsed_At - Armed_At);
    end State;
 
    task CPU_Work is

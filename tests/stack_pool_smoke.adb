@@ -20,47 +20,45 @@ procedure Stack_Pool_Smoke is
    function Get_Page_Size return Interfaces.C.int;
    pragma Import (C, Get_Page_Size, "getpagesize");
 
-   function Arena_Capacity
-     (Usable_Bytes : Observation.Counter) return Observation.Counter
-   is
-      Page_Size : constant Observation.Counter :=
-        Observation.Counter (Get_Page_Size);
+   function Arena_Capacity (Usable_Bytes : Observation.Counter) return Observation.Counter is
+      Page_Size  : constant Observation.Counter := Observation.Counter (Get_Page_Size);
       Guard_Size : constant Observation.Counter :=
         (Minimum_Guard_Bytes + Page_Size - 1) / Page_Size * Page_Size;
-      Stride : constant Observation.Counter :=
-        Usable_Bytes + Guard_Size;
+      Stride     : constant Observation.Counter := Usable_Bytes + Guard_Size;
    begin
       if Stride >= Maximum_Arena_Bytes then
          return 1;
       end if;
-      return Observation.Counter'Min
-        (Arena_Slot_Limit, Maximum_Arena_Bytes / Stride);
+      return Observation.Counter'Min (Arena_Slot_Limit, Maximum_Arena_Bytes / Stride);
    end Arena_Capacity;
 
-   function Arena_Count
-     (Stack_Count, Usable_Bytes : Observation.Counter)
-      return Observation.Counter
-   is
+   function Arena_Count (Stack_Count, Usable_Bytes : Observation.Counter) return Observation.Counter is
       Capacity : constant Observation.Counter := Arena_Capacity (Usable_Bytes);
    begin
       return (Stack_Count + Capacity - 1) / Capacity;
    end Arena_Count;
 
-   procedure Print_Snapshot
-     (Label : String; Value : Observation.Stack_Pool_Snapshot)
-   is
+   procedure Print_Snapshot (Label : String; Value : Observation.Stack_Pool_Snapshot) is
       use Ada.Text_IO;
    begin
       Put_Line
         (Label
-         & " arenas=" & Value.Active_Arenas'Image
-         & " live=" & Value.Live_Stacks'Image
-         & " usable=" & Value.Live_Usable_Bytes'Image
-         & " reserved=" & Value.Reserved_Bytes'Image
-         & " maps=" & Value.Arena_Mappings'Image
-         & " unmaps=" & Value.Arena_Unmappings'Image
-         & " shared=" & Value.Shared_Stacks'Image
-         & " discarded=" & Value.Discarded_Stacks'Image);
+         & " arenas="
+         & Value.Active_Arenas'Image
+         & " live="
+         & Value.Live_Stacks'Image
+         & " usable="
+         & Value.Live_Usable_Bytes'Image
+         & " reserved="
+         & Value.Reserved_Bytes'Image
+         & " maps="
+         & Value.Arena_Mappings'Image
+         & " unmaps="
+         & Value.Arena_Unmappings'Image
+         & " shared="
+         & Value.Shared_Stacks'Image
+         & " discarded="
+         & Value.Discarded_Stacks'Image);
    end Print_Snapshot;
 
    procedure Wait_Until_Empty is
@@ -85,9 +83,7 @@ procedure Stack_Pool_Smoke is
    --  Task-body completion can precede the scheduler-side stack release. No
    --  new stack is allocated in either wait below, so release counters must
    --  move monotonically toward the expected intermediate state.
-   procedure Wait_For_Live_Count
-     (Expected : Observation.Counter;
-      Value    : out Observation.Stack_Pool_Snapshot)
+   procedure Wait_For_Live_Count (Expected : Observation.Counter; Value : out Observation.Stack_Pool_Snapshot)
    is
       Previous : Observation.Stack_Pool_Snapshot := Observation.Stack_Pool;
    begin
@@ -98,12 +94,9 @@ procedure Stack_Pool_Smoke is
             Value := Observation.Stack_Pool;
          end if;
 
-         if Value.Live_Stacks < Expected
-           or else Value.Live_Stacks > Previous.Live_Stacks
-         then
+         if Value.Live_Stacks < Expected or else Value.Live_Stacks > Previous.Live_Stacks then
             Print_Snapshot ("invalid live-stack transition:", Value);
-            raise Program_Error with
-              "live stack count moved away from completion";
+            raise Program_Error with "live stack count moved away from completion";
          end if;
 
          if Value.Live_Stacks = Expected then
@@ -137,13 +130,10 @@ procedure Stack_Pool_Smoke is
            or else Value.Discarded_Stacks < Previous.Discarded_Stacks
          then
             Print_Snapshot ("invalid release transition:", Value);
-            raise Program_Error with
-              "stack-pool release counters moved away from completion";
+            raise Program_Error with "stack-pool release counters moved away from completion";
          end if;
 
-         if Value.Live_Stacks = Expected_Live
-           and then Value.Discarded_Stacks = Expected_Discarded
-         then
+         if Value.Live_Stacks = Expected_Live and then Value.Discarded_Stacks = Expected_Discarded then
             return;
          end if;
 
@@ -151,8 +141,7 @@ procedure Stack_Pool_Smoke is
       end loop;
 
       Print_Snapshot ("release wait timed out:", Value);
-      raise Program_Error with
-        "stack-pool releases did not become observable";
+      raise Program_Error with "stack-pool releases did not become observable";
    end Wait_For_Releases;
 
    procedure Test_Partial_Churn is
@@ -171,10 +160,10 @@ procedure Stack_Pool_Smoke is
          entry First_Gate;
          entry Final_Gate;
       private
-         Arrivals       : Natural := 0;
-         Finishes       : Natural := 0;
-         First_Open     : Boolean := False;
-         Final_Open     : Boolean := False;
+         Arrivals   : Natural := 0;
+         Finishes   : Natural := 0;
+         First_Open : Boolean := False;
+         Final_Open : Boolean := False;
       end Control;
 
       protected body Control is
@@ -203,9 +192,7 @@ procedure Stack_Pool_Smoke is
             null;
          end Wait_Originals;
 
-         entry Wait_Replacements
-           when Arrivals >= Original_Count + Replacement_Count
-         is
+         entry Wait_Replacements when Arrivals >= Original_Count + Replacement_Count is
          begin
             null;
          end Wait_Replacements;
@@ -215,9 +202,7 @@ procedure Stack_Pool_Smoke is
             null;
          end Wait_First_Finished;
 
-         entry Wait_All_Finished
-           when Finishes >= Original_Count + Replacement_Count
-         is
+         entry Wait_All_Finished when Finishes >= Original_Count + Replacement_Count is
          begin
             null;
          end Wait_All_Finished;
@@ -263,16 +248,14 @@ procedure Stack_Pool_Smoke is
 
       type Original_Access is access Original;
       type Replacement_Access is access Replacement;
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Original, Original_Access);
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Replacement, Replacement_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Original, Original_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Replacement, Replacement_Access);
 
-      Originals : array (1 .. Original_Count) of Original_Access;
-      Replacements : array (1 .. Replacement_Count) of Replacement_Access :=
+      Originals                         : array (1 .. Original_Count) of Original_Access;
+      Replacements                      : array (1 .. Replacement_Count) of Replacement_Access :=
         (others => null);
       Before, During, Partial, Refilled : Observation.Stack_Pool_Snapshot;
-      Failed : Boolean := False;
+      Failed                            : Boolean := False;
    begin
       Before := Observation.Stack_Pool;
       for Index in Originals'Range loop
@@ -282,13 +265,10 @@ procedure Stack_Pool_Smoke is
       During := Observation.Stack_Pool;
       Small_Effective_Bytes := During.Live_Usable_Bytes / Original_Count;
       if During.Live_Stacks /= Original_Count
-        or else During.Active_Arenas
-          /= Arena_Count (Original_Count, Small_Effective_Bytes)
+        or else During.Active_Arenas /= Arena_Count (Original_Count, Small_Effective_Bytes)
         or else Small_Effective_Bytes < 16 * 1_024
-        or else During.Arena_Mappings
-          /= Before.Arena_Mappings + During.Active_Arenas
-        or else During.Shared_Stacks
-          /= Before.Shared_Stacks + Original_Count - During.Active_Arenas
+        or else During.Arena_Mappings /= Before.Arena_Mappings + During.Active_Arenas
+        or else During.Shared_Stacks /= Before.Shared_Stacks + Original_Count - During.Active_Arenas
       then
          Failed := True;
       end if;
@@ -300,16 +280,13 @@ procedure Stack_Pool_Smoke is
       end loop;
       Wait_For_Releases
         (Expected_Live      => Replacement_Count,
-         Expected_Discarded =>
-           Before.Discarded_Stacks + Replacement_Count,
+         Expected_Discarded => Before.Discarded_Stacks + Replacement_Count,
          Value              => Partial);
       if Partial.Active_Arenas
-          /= During.Active_Arenas
-             - Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
+        /= During.Active_Arenas - Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
         or else Partial.Arena_Mappings /= During.Arena_Mappings
         or else Partial.Arena_Unmappings
-          /= Before.Arena_Unmappings
-             + Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
+                /= Before.Arena_Unmappings + Replacement_Count / Arena_Capacity (Small_Effective_Bytes)
       then
          Failed := True;
       end if;
@@ -322,12 +299,12 @@ procedure Stack_Pool_Smoke is
       if Refilled.Live_Stacks /= Original_Count
         or else Refilled.Active_Arenas /= During.Active_Arenas
         or else Refilled.Arena_Mappings
-          /= During.Arena_Mappings
-             + During.Active_Arenas - Partial.Active_Arenas
+                /= During.Arena_Mappings + During.Active_Arenas - Partial.Active_Arenas
         or else Refilled.Arena_Unmappings /= Partial.Arena_Unmappings
         or else Refilled.Shared_Stacks
-          /= During.Shared_Stacks + Replacement_Count
-             - (Refilled.Arena_Mappings - During.Arena_Mappings)
+                /= During.Shared_Stacks
+                   + Replacement_Count
+                   - (Refilled.Arena_Mappings - During.Arena_Mappings)
       then
          Failed := True;
       end if;
@@ -363,11 +340,11 @@ procedure Stack_Pool_Smoke is
          entry Head_Gate;
          entry Older_Gate;
       private
-         Arrivals       : Natural := 0;
-         Head_Done      : Boolean := False;
-         Older_Done     : Boolean := False;
-         Head_Open      : Boolean := False;
-         Older_Open     : Boolean := False;
+         Arrivals   : Natural := 0;
+         Head_Done  : Boolean := False;
+         Older_Done : Boolean := False;
+         Head_Open  : Boolean := False;
+         Older_Open : Boolean := False;
       end Control;
 
       protected body Control is
@@ -452,15 +429,13 @@ procedure Stack_Pool_Smoke is
 
       type Older_Access is access Older;
       type Head_Access is access Head;
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Older, Older_Access);
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Head, Head_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Older, Older_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Head, Head_Access);
 
-      Older_Worker : Older_Access;
-      Head_Worker  : Head_Access;
+      Older_Worker               : Older_Access;
+      Head_Worker                : Head_Access;
       Before, During, After_Head : Observation.Stack_Pool_Snapshot;
-      Failed : Boolean := False;
+      Failed                     : Boolean := False;
    begin
       Before := Observation.Stack_Pool;
       Older_Worker := new Older;
@@ -468,8 +443,7 @@ procedure Stack_Pool_Smoke is
       Head_Worker := new Head;
       Control.Wait_Both;
       During := Observation.Stack_Pool;
-      Large_Effective_Bytes :=
-        During.Live_Usable_Bytes - Small_Effective_Bytes;
+      Large_Effective_Bytes := During.Live_Usable_Bytes - Small_Effective_Bytes;
       if During.Live_Stacks /= 2
         or else During.Active_Arenas /= 2
         or else During.Arena_Mappings /= Before.Arena_Mappings + 2
@@ -564,8 +538,8 @@ procedure Stack_Pool_Smoke is
       Small_Workers : array (1 .. Count_Per_Size) of Small;
       Large_Workers : array (1 .. Count_Per_Size) of Large;
       pragma Unreferenced (Small_Workers, Large_Workers);
-      During : Observation.Stack_Pool_Snapshot;
-      Failed : Boolean := False;
+      During        : Observation.Stack_Pool_Snapshot;
+      Failed        : Boolean := False;
    begin
       Control.Wait_All;
       During := Observation.Stack_Pool;
@@ -574,11 +548,9 @@ procedure Stack_Pool_Smoke is
       --  each fit in a four-MiB arena.
       if During.Live_Stacks /= 2 * Count_Per_Size
         or else During.Active_Arenas
-          /= Arena_Count (Count_Per_Size, Small_Effective_Bytes)
-             + Arena_Count (Count_Per_Size, Large_Effective_Bytes)
-        or else During.Live_Usable_Bytes
-          /= Count_Per_Size
-             * (Small_Effective_Bytes + Large_Effective_Bytes)
+                /= Arena_Count (Count_Per_Size, Small_Effective_Bytes)
+                   + Arena_Count (Count_Per_Size, Large_Effective_Bytes)
+        or else During.Live_Usable_Bytes /= Count_Per_Size * (Small_Effective_Bytes + Large_Effective_Bytes)
       then
          Failed := True;
       end if;
@@ -589,16 +561,16 @@ procedure Stack_Pool_Smoke is
    end Test_Mixed_Sizes;
 
 begin
-   if Observation.Stack_Pool /=
-     Observation.Stack_Pool_Snapshot'
-       (Active_Arenas    => 0,
-        Live_Stacks      => 0,
-        Live_Usable_Bytes => 0,
-        Reserved_Bytes   => 0,
-        Arena_Mappings   => 0,
-        Arena_Unmappings => 0,
-        Shared_Stacks    => 0,
-        Discarded_Stacks => 0)
+   if Observation.Stack_Pool
+     /= Observation.Stack_Pool_Snapshot'
+          (Active_Arenas     => 0,
+           Live_Stacks       => 0,
+           Live_Usable_Bytes => 0,
+           Reserved_Bytes    => 0,
+           Arena_Mappings    => 0,
+           Arena_Unmappings  => 0,
+           Shared_Stacks     => 0,
+           Discarded_Stacks  => 0)
    then
       raise Program_Error with "native-default startup touched stack pool";
    end if;

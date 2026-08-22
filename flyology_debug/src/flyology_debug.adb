@@ -6,8 +6,7 @@ with Interfaces.C;
 package body Flyology_Debug is
    use type Interfaces.C.int;
 
-   function Native_Clock
-     (Value : access Interfaces.Unsigned_64) return Interfaces.C.int;
+   function Native_Clock (Value : access Interfaces.Unsigned_64) return Interfaces.C.int;
    pragma Import (C, Native_Clock, "flyology_debug_clock_now");
 
    function Clock return Timestamp is

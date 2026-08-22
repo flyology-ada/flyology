@@ -11,21 +11,13 @@ package body Showcase_Support is
    function Current_Thread return System.Address;
    pragma Import (C, Current_Thread, "pthread_self");
 
-   function Thread_Image return String is
-     (System.Storage_Elements.Integer_Address'Image
-        (System.Storage_Elements.To_Integer (Current_Thread)));
+   function Thread_Image return String
+   is (System.Storage_Elements.Integer_Address'Image (System.Storage_Elements.To_Integer (Current_Thread)));
 
-   function Fixed_Image
-     (Value    : Long_Float;
-      Decimals : Natural := 3) return String
-   is
+   function Fixed_Image (Value : Long_Float; Decimals : Natural := 3) return String is
       Buffer : String (1 .. 64);
    begin
-      Long_Float_IO.Put
-        (To   => Buffer,
-         Item => Value,
-         Aft  => Decimals,
-         Exp  => 0);
+      Long_Float_IO.Put (To => Buffer, Item => Value, Aft => Decimals, Exp => 0);
       return Ada.Strings.Fixed.Trim (Buffer, Ada.Strings.Both);
    end Fixed_Image;
 

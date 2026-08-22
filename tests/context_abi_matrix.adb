@@ -53,11 +53,14 @@ procedure Context_ABI_Matrix is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
 
-      function Lightweight_Mask return Interfaces.C.unsigned is (Light_Mask);
+      function Lightweight_Mask return Interfaces.C.unsigned
+      is (Light_Mask);
 
-      function Native_Mask return Interfaces.C.unsigned is (Native_Bits);
+      function Native_Mask return Interfaces.C.unsigned
+      is (Native_Bits);
    end Results;
 
 begin
@@ -65,7 +68,8 @@ begin
    Support.Configure (Reader);
 
    declare
-      task Lightweight with CPU => 0 is
+      task Lightweight
+        with CPU => 0 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Lightweight;
 
@@ -73,16 +77,15 @@ begin
          pragma Task_Info (Flyology.Native_Task);
       end Native_Control;
 
-      task Lightweight_Sender with CPU => 0 is
+      task Lightweight_Sender
+        with CPU => 0 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Lightweight_Sender;
 
       task body Lightweight is
          Mask : Interfaces.C.unsigned := 0;
       begin
-         for Action in
-           Support.Cooperative_Yield .. Support.Cross_Group_Move
-         loop
+         for Action in Support.Cooperative_Yield .. Support.Cross_Group_Move loop
             Mask := Mask or Support.Probe (Action);
          end loop;
          Results.Report_Lightweight (Mask);
@@ -107,8 +110,7 @@ begin
          --  readiness-wait context switch without wall-clock ordering.
          Support.Wait_For_Descriptor_Request;
          Flyology.IO.Sockets.Send_All
-           (Writer, Ada.Streams.Stream_Element_Array'[1 => 16#5A#],
-            Timeout => 1.0);
+           (Writer, Ada.Streams.Stream_Element_Array'[1 => 16#5A#], Timeout => 1.0);
          Results.Report_Sender (True);
       exception
          when others =>
@@ -122,10 +124,11 @@ begin
    Flyology.IO.Sockets.Close_Socket (Writer);
 
    if not Results.Passed then
-      raise Program_Error with
-        "context ABI probe failed: lightweight="
-        & Interfaces.C.unsigned'Image (Results.Lightweight_Mask)
-        & ", native="
-        & Interfaces.C.unsigned'Image (Results.Native_Mask);
+      raise Program_Error
+        with
+          "context ABI probe failed: lightweight="
+          & Interfaces.C.unsigned'Image (Results.Lightweight_Mask)
+          & ", native="
+          & Interfaces.C.unsigned'Image (Results.Native_Mask);
    end if;
 end Context_ABI_Matrix;

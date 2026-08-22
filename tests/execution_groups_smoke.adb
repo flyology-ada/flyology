@@ -16,9 +16,7 @@ procedure Execution_Groups_Smoke is
    --  Report whether For_CPU refuses to translate CPU into a shared execution
    --  group. The value arrives as a parameter so the conversion is checked at
    --  run time.
-   function For_CPU_Rejects
-     (CPU : System.Multiprocessors.CPU_Range) return Boolean
-   is
+   function For_CPU_Rejects (CPU : System.Multiprocessors.CPU_Range) return Boolean is
    begin
       declare
          Selected : constant Groups.Shared_Group_Id := Groups.For_CPU (CPU);
@@ -32,10 +30,7 @@ procedure Execution_Groups_Smoke is
    end For_CPU_Rejects;
 
    protected Results is
-      procedure Static_Observation
-        (Group  : Groups.Group_Id;
-         Thread : System.Address;
-         Passed : Boolean);
+      procedure Static_Observation (Group : Groups.Group_Id; Thread : System.Address; Passed : Boolean);
       procedure Migration_Observation
         (Start_Thread     : System.Address;
          Group_Two_Thread : System.Address;
@@ -47,11 +42,11 @@ procedure Execution_Groups_Smoke is
       entry Wait;
       function Passed return Boolean;
    private
-      Count          : Natural := 0;
-      Mover_Count    : Natural := 0;
-      OK             : Boolean := True;
-      Group_One_Seen : Boolean := False;
-      Group_Two_Seen : Boolean := False;
+      Count            : Natural := 0;
+      Mover_Count      : Natural := 0;
+      OK               : Boolean := True;
+      Group_One_Seen   : Boolean := False;
+      Group_Two_Seen   : Boolean := False;
       Group_One_Thread : System.Address := System.Null_Address;
       Group_Two_Thread : System.Address := System.Null_Address;
       Migrator_Start   : System.Address := System.Null_Address;
@@ -61,11 +56,7 @@ procedure Execution_Groups_Smoke is
    end Results;
 
    protected body Results is
-      procedure Static_Observation
-        (Group  : Groups.Group_Id;
-         Thread : System.Address;
-         Passed : Boolean)
-      is
+      procedure Static_Observation (Group : Groups.Group_Id; Thread : System.Address; Passed : Boolean) is
       begin
          Count := Count + 1;
          OK := OK and Passed;
@@ -85,12 +76,11 @@ procedure Execution_Groups_Smoke is
       end Static_Observation;
 
       procedure Migration_Observation
-        (Start_Thread      : System.Address;
+        (Start_Thread     : System.Address;
          Group_Two_Thread : System.Address;
          Dedicated_Thread : System.Address;
          Return_Thread    : System.Address;
-         Passed           : Boolean)
-      is
+         Passed           : Boolean) is
       begin
          Count := Count + 1;
          OK := OK and Passed;
@@ -126,22 +116,27 @@ procedure Execution_Groups_Smoke is
            and Migrator_Return = Group_One_Thread;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Results;
 
-   task Group_One_A with CPU => 1 is
+   task Group_One_A
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_A;
 
-   task Group_One_B with CPU => 1 is
+   task Group_One_B
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_B;
 
-   task Group_Two with CPU => 2 is
+   task Group_Two
+     with CPU => 2 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two;
 
-   task Migrator with CPU => 1 is
+   task Migrator
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
    task Native is
@@ -182,8 +177,7 @@ procedure Execution_Groups_Smoke is
 
    task body Group_One_A is
    begin
-      Results.Static_Observation
-        (Groups.Current, Current_Thread, Groups.Current = 1);
+      Results.Static_Observation (Groups.Current, Current_Thread, Groups.Current = 1);
    exception
       when others =>
          Results.Static_Observation (0, Current_Thread, False);
@@ -191,8 +185,7 @@ procedure Execution_Groups_Smoke is
 
    task body Group_One_B is
    begin
-      Results.Static_Observation
-        (Groups.Current, Current_Thread, Groups.Current = 1);
+      Results.Static_Observation (Groups.Current, Current_Thread, Groups.Current = 1);
    exception
       when others =>
          Results.Static_Observation (0, Current_Thread, False);
@@ -200,21 +193,20 @@ procedure Execution_Groups_Smoke is
 
    task body Group_Two is
    begin
-      Results.Static_Observation
-        (Groups.Current, Current_Thread, Groups.Current = 2);
+      Results.Static_Observation (Groups.Current, Current_Thread, Groups.Current = 2);
    exception
       when others =>
          Results.Static_Observation (0, Current_Thread, False);
    end Group_Two;
 
    task body Migrator is
-      Dedicated : Groups.Dedicated_Group_Id;
-      Reused    : Groups.Dedicated_Group_Id;
-      Start_Thread : System.Address;
-      Two_Thread   : System.Address;
+      Dedicated      : Groups.Dedicated_Group_Id;
+      Reused         : Groups.Dedicated_Group_Id;
+      Start_Thread   : System.Address;
+      Two_Thread     : System.Address;
       Private_Thread : System.Address;
       Return_Thread  : System.Address;
-      OK : Boolean := True;
+      OK             : Boolean := True;
    begin
       Start_Thread := Current_Thread;
       OK := OK and Groups.Current = 1;
@@ -239,20 +231,11 @@ procedure Execution_Groups_Smoke is
       OK := OK and Current_Thread = Private_Thread;
       Groups.Migrate (1);
 
-      Results.Migration_Observation
-        (Start_Thread,
-         Two_Thread,
-         Private_Thread,
-         Return_Thread,
-         OK);
+      Results.Migration_Observation (Start_Thread, Two_Thread, Private_Thread, Return_Thread, OK);
    exception
       when others =>
          Results.Migration_Observation
-           (System.Null_Address,
-            System.Null_Address,
-            System.Null_Address,
-            System.Null_Address,
-            False);
+           (System.Null_Address, System.Null_Address, System.Null_Address, System.Null_Address, False);
    end Migrator;
 
    task body Native is
@@ -274,8 +257,7 @@ begin
    --  Ada reserves CPU value 0 as Not_A_Specific_CPU. It designates no
    --  processor, so it names no shared execution group either.
    if not For_CPU_Rejects (System.Multiprocessors.Not_A_Specific_CPU) then
-      raise Program_Error
-        with "For_CPU accepted the reserved Not_A_Specific_CPU value";
+      raise Program_Error with "For_CPU accepted the reserved Not_A_Specific_CPU value";
    end if;
    if For_CPU_Rejects (1) or else Groups.For_CPU (1) /= 1 then
       raise Program_Error with "For_CPU rejected a group-selecting CPU";

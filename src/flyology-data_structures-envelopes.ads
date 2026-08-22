@@ -12,10 +12,11 @@ private with Flyology.Data_Structures.Layouts;
 --  @formal Nested_Identity Stable identity exported by the nested leaf
 --  @formal Contract_Signature Nonzero 64-bit application contract identity
 --  @formal Contract_Version Nonzero 64-bit application contract version
+
 generic
-   Nested_Identity   : Layout_Identity;
+   Nested_Identity : Layout_Identity;
    Contract_Signature : Interfaces.Unsigned_64;
-   Contract_Version   : Interfaces.Unsigned_64;
+   Contract_Version : Interfaces.Unsigned_64;
 package Flyology.Data_Structures.Envelopes with Preelaborate is
 
    --  Eight-byte magic stored in every contract envelope.
@@ -28,8 +29,7 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete stable identity of the envelope layout itself.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached envelope view.
    type View is limited private;
@@ -40,8 +40,7 @@ package Flyology.Data_Structures.Envelopes with Preelaborate is
    --  @param Content_Alignment Required power-of-two nested alignment
    --  @return Complete envelope and nested byte extent
    function Required_Storage
-     (Content_Extent    : Byte_Count;
-      Content_Alignment : Byte_Count := 8) return Byte_Count;
+     (Content_Extent : Byte_Count; Content_Alignment : Byte_Count := 8) return Byte_Count;
 
    --  Initialize a contract envelope, atomically mark the nested leaf state
    --  incomplete, and then publish the envelope. The caller then initializes

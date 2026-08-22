@@ -10,8 +10,7 @@ procedure Stack_Size_Parity_Smoke is
    Small_Stack    : constant := 16 * 1_024;
    One_Byte       : constant Stream_Element_Array := [1 => 42];
 
-   type Socket_Array is
-     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+   type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    Servers : Socket_Array (1 .. Task_Count);
    Peers   : Socket_Array (1 .. Task_Count);
 
@@ -54,14 +53,15 @@ procedure Stack_Size_Parity_Smoke is
          null;
       end Wait_Finished;
 
-      function Passed return Boolean is (All_OK);
-      function First_Failure return Natural is (Failed_Index);
+      function Passed return Boolean
+      is (All_OK);
+      function First_Failure return Natural
+      is (Failed_Index);
    end State;
 
 begin
    for Index in Servers'Range loop
-      Flyology.IO.Sockets.Create_Socket_Pair
-        (Servers (Index), Peers (Index));
+      Flyology.IO.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
    end loop;
 
    declare
@@ -78,8 +78,7 @@ begin
          Success  : Boolean := False;
       begin
          State.Started;
-         Flyology.IO.Sockets.Receive_Exactly
-           (Servers (Index), Incoming, Timeout => 5.0);
+         Flyology.IO.Sockets.Receive_Exactly (Servers (Index), Incoming, Timeout => 5.0);
          Success := Incoming = One_Byte;
          State.Finished (Index, Success);
       exception
@@ -93,12 +92,10 @@ begin
       pragma Unreferenced (Workers);
    begin
       for Index in 1 .. Tasks_Per_Lane loop
-         Workers (Index) :=
-           new Worker (Index, Flyology.Lightweight_Task);
+         Workers (Index) := new Worker (Index, Flyology.Lightweight_Task);
       end loop;
       for Index in Tasks_Per_Lane + 1 .. Task_Count loop
-         Workers (Index) :=
-           new Worker (Index, Flyology.Native_Task);
+         Workers (Index) := new Worker (Index, Flyology.Native_Task);
       end loop;
 
       select
@@ -119,9 +116,7 @@ begin
          raise Program_Error with "16 KiB task failed to complete";
       end select;
 
-      pragma Assert
-        (State.Passed,
-         "16 KiB task failed, index=" & State.First_Failure'Image);
+      pragma Assert (State.Passed, "16 KiB task failed, index=" & State.First_Failure'Image);
    end;
 
    for Index in Peers'Range loop

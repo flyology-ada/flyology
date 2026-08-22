@@ -2,7 +2,10 @@ with Interfaces;
 with System;
 
 --  Shared private header and checked-layout operations.
-private package Flyology.Data_Structures.Layouts with Preelaborate is
+
+private package Flyology.Data_Structures.Layouts
+  with Preelaborate
+is
    --  @exclude Internal layout implementation, not part of the public API.
 
    --  Shared fixed-width header size.
@@ -15,11 +18,11 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @field Epoch_Value Initialization epoch cached for stale-view rejection
    --  @field Attached Whether the local view remains active
    type Local_View is record
-      Base          : System.Address := System.Null_Address;
-      Location      : Region_Offset := Null_Offset;
-      Extent        : Byte_Count := 0;
-      Epoch_Value   : Interfaces.Unsigned_32 := 0;
-      Attached      : Boolean := False;
+      Base        : System.Address := System.Null_Address;
+      Location    : Region_Offset := Null_Offset;
+      Extent      : Byte_Count := 0;
+      Epoch_Value : Interfaces.Unsigned_32 := 0;
+      Attached    : Boolean := False;
    end record;
 
    --  Structure-specific fields in the shared header.
@@ -30,12 +33,12 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @field Word_1 Structure-specific 64-bit state or geometry
    --  @field Word_2 Structure-specific 64-bit state or geometry
    type Header_Values is record
-      Capacity    : Interfaces.Unsigned_32;
+      Capacity     : Interfaces.Unsigned_32;
       Element_Size : Interfaces.Unsigned_32;
-      Alignment   : Interfaces.Unsigned_32;
-      Auxiliary   : Interfaces.Unsigned_32;
-      Word_1      : Interfaces.Unsigned_64;
-      Word_2      : Interfaces.Unsigned_64;
+      Alignment    : Interfaces.Unsigned_32;
+      Auxiliary    : Interfaces.Unsigned_32;
+      Word_1       : Interfaces.Unsigned_64;
+      Word_2       : Interfaces.Unsigned_64;
    end record;
 
    --  Add two layout values with explicit overflow rejection.
@@ -54,8 +57,7 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Value Unaligned byte count
    --  @param Alignment Required power-of-two boundary
    --  @return Smallest aligned value not below Value
-   function Align_Up
-     (Value, Alignment : Byte_Count) return Byte_Count;
+   function Align_Up (Value, Alignment : Byte_Count) return Byte_Count;
 
    --  Capture validated local geometry without persisting the native base.
    --  @param Region Attached caller-owned region
@@ -64,10 +66,8 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Alignment Required base alignment
    --  @return Cached local view
    function Capture
-     (Region    : Region_View;
-      Location  : Region_Offset;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count) return Local_View;
+     (Region : Region_View; Location : Region_Offset; Extent : Byte_Count; Alignment : Byte_Count)
+      return Local_View;
 
    --  Convert a structure-relative slice only after complete validation.
    --  @param Item Cached local view
@@ -76,10 +76,8 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Alignment Required native alignment
    --  @return Validated process-local address
    function Address_At
-     (Item      : Local_View;
-      Relative  : Byte_Count;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count := 1) return System.Address;
+     (Item : Local_View; Relative : Byte_Count; Extent : Byte_Count; Alignment : Byte_Count := 1)
+      return System.Address;
 
    --  Mark initialization incomplete and write immutable shared metadata.
    --  @param Item Captured view returned to the leaf
@@ -90,20 +88,19 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  @param Header Leaf-specific common-header fields
    --  @param Base_Alignment Required structure alignment
    procedure Begin_Initialize
-     (Item         : out Local_View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Identity     : Layout_Identity;
-      Extent       : Byte_Count;
-      Header       : Header_Values;
+     (Item           : out Local_View;
+      Region         : Region_View;
+      Location       : Region_Offset;
+      Identity       : Layout_Identity;
+      Extent         : Byte_Count;
+      Header         : Header_Values;
       Base_Alignment : Byte_Count);
 
    --  Result of atomically claiming an exact zero lifecycle sentinel.
    --  @enum Claimed_Virgin This caller owns initialization of virgin bytes
    --  @enum Existing_Ready A ready lifecycle must be validated and attached
    --  @enum Claim_In_Progress Another caller owns the initialization claim
-   type Initialization_Claim is
-     (Claimed_Virgin, Existing_Ready, Claim_In_Progress);
+   type Initialization_Claim is (Claimed_Virgin, Existing_Ready, Claim_In_Progress);
 
    --  Claim a virgin header for initialization without replacing an existing
    --  lifecycle. A successful claim publishes Initializing before metadata is
@@ -134,8 +131,7 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  is published. Relative must identify the nested shared-header state.
    --  @param Item Initialized containing view
    --  @param Relative Structure-relative nested leaf location
-   procedure Invalidate_Nested
-     (Item : Local_View; Relative : Byte_Count);
+   procedure Invalidate_Nested (Item : Local_View; Relative : Byte_Count);
 
    --  Acquire and validate the shared header of an existing structure.
    --  @param Item Captured full view returned to the leaf
@@ -187,7 +183,7 @@ private package Flyology.Data_Structures.Layouts with Preelaborate is
    --  Clear all process-local mapping geometry.
    --  @param Item Local view to detach
    procedure Detach (Item : in out Local_View);
-   pragma Inline_Always
-     (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready,
-      Invalidate_Nested, Is_Poisoned);
+   pragma
+     Inline_Always
+       (Checked_Add, Checked_Multiply, Align_Up, Address_At, Require_Ready, Invalidate_Nested, Is_Poisoned);
 end Flyology.Data_Structures.Layouts;

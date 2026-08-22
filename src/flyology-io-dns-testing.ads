@@ -5,6 +5,7 @@ with Ada.Streams;
 --  Example:
 --
 --     Flyology.IO.DNS.Testing.Use_Deterministic_Transaction_IDs (16#1234#);
+
 package Flyology.IO.DNS.Testing is
 
    --  Select a process-global deterministic transaction-ID sequence.

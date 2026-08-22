@@ -42,7 +42,8 @@ procedure Connection_TLS_Upgrade_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result_Box;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -58,17 +59,13 @@ procedure Connection_TLS_Upgrade_Smoke is
    procedure Configure_Complete (Backend : in out Provider.Provider) is
    begin
       Provider.Set_Script
-        (Backend, Provider.Handshake_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
       Provider.Set_Script
-        (Backend, Provider.Receive_Operation,
-         [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
+        (Backend, Provider.Receive_Operation, [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
       Provider.Set_Script
-        (Backend, Provider.Send_Operation,
-         [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
+        (Backend, Provider.Send_Operation, [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
       Provider.Set_Script
-        (Backend, Provider.Shutdown_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Shutdown_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
    end Configure_Complete;
 
    procedure Assert_Resources (Created : Natural) is
@@ -101,11 +98,10 @@ procedure Connection_TLS_Upgrade_Smoke is
          end Worker;
 
          task body Worker is
-            Data : Stream_Element_Array (1 .. 1);
+            Data            : Stream_Element_Array (1 .. 1);
             Double_Rejected : Boolean := False;
          begin
-            Connection_TLS.Upgrade
-              (Item, Backend, TLS.Server, "", Timeout => 1.0);
+            Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
             pragma Assert (Connections.Is_Open (Item));
             pragma Assert (Manager.Active = 1);
 
@@ -116,8 +112,7 @@ procedure Connection_TLS_Upgrade_Smoke is
             Connection_TLS.Shutdown (Item, Timeout => 0.0);
 
             begin
-               Connection_TLS.Upgrade
-                 (Item, Backend, TLS.Server, "", Timeout => 0.0);
+               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 0.0);
             exception
                when Program_Error =>
                   Double_Rejected := True;
@@ -146,12 +141,13 @@ procedure Connection_TLS_Upgrade_Smoke is
          State : Provider.State_Telemetry;
       begin
          Provider.Get_State_Telemetry (State);
-         pragma Assert
-           (State.Calls =
-              [Provider.Handshake_Operation => 1,
-               Provider.Receive_Operation => 1,
-               Provider.Send_Operation => 1,
-               Provider.Shutdown_Operation => 1]);
+         pragma
+           Assert
+             (State.Calls
+                = [Provider.Handshake_Operation => 1,
+                   Provider.Receive_Operation   => 1,
+                   Provider.Send_Operation      => 1,
+                   Provider.Shutdown_Operation  => 1]);
       end;
    end Run_Lifecycle;
 
@@ -165,8 +161,7 @@ procedure Connection_TLS_Upgrade_Smoke is
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
-        (Backend, Provider.Handshake_Operation,
-         [1 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Failed, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       Connections.Take (Manager, Socket, Item);
 
@@ -179,13 +174,10 @@ procedure Connection_TLS_Upgrade_Smoke is
             Failed_Closed : Boolean := False;
          begin
             begin
-               Connection_TLS.Upgrade
-                 (Item, Backend, TLS.Server, "", Timeout => 1.0);
+               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
             exception
                when TLS.TLS_Error =>
-                  Failed_Closed :=
-                    not Connections.Is_Open (Item)
-                    and then Manager.Active = 0;
+                  Failed_Closed := not Connections.Is_Open (Item) and then Manager.Active = 0;
             end;
             Result.Report (Failed_Closed);
          exception
@@ -214,14 +206,14 @@ procedure Connection_TLS_Upgrade_Smoke is
       begin
          Provider.Reset_State_Telemetry;
          case Kind is
-            when Unavailable =>
+            when Unavailable         =>
                Provider.Set_Available (Backend, False);
-            when Create_Raises =>
-               Provider.Set_Create_Behavior
-                 (Backend, Provider.Raise_On_Create);
+
+            when Create_Raises       =>
+               Provider.Set_Create_Behavior (Backend, Provider.Raise_On_Create);
+
             when Create_Returns_Null =>
-               Provider.Set_Create_Behavior
-                 (Backend, Provider.Return_Null);
+               Provider.Set_Create_Behavior (Backend, Provider.Return_Null);
          end case;
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
@@ -235,13 +227,10 @@ procedure Connection_TLS_Upgrade_Smoke is
                Failed_Closed : Boolean := False;
             begin
                begin
-                  Connection_TLS.Upgrade
-                    (Item, Backend, TLS.Server, "", Timeout => 1.0);
+                  Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
                exception
                   when TLS.TLS_Error =>
-                     Failed_Closed :=
-                       not Connections.Is_Open (Item)
-                       and then Manager.Active = 0;
+                     Failed_Closed := not Connections.Is_Open (Item) and then Manager.Active = 0;
                end;
                Result.Report (Failed_Closed);
             exception
@@ -288,16 +277,12 @@ procedure Connection_TLS_Upgrade_Smoke is
             Timed_Out : Boolean := False;
          begin
             begin
-               Connection_TLS.Upgrade
-                 (Item, Backend, TLS.Server, "", Timeout => 0.010);
+               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 0.010);
             exception
                when Flyology.IO.Timeout_Error =>
                   Timed_Out := True;
             end;
-            Result.Report
-              (Timed_Out
-               and then not Connections.Is_Open (Item)
-               and then Manager.Active = 0);
+            Result.Report (Timed_Out and then not Connections.Is_Open (Item) and then Manager.Active = 0);
          exception
             when others =>
                Result.Report (False);
@@ -317,17 +302,15 @@ procedure Connection_TLS_Upgrade_Smoke is
       end;
    end Run_Setup_Deadline;
 
-   procedure Run_Stale_Plaintext_Operation
-     (Model : Flyology.Execution_Model)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Item    : Connections.Connection;
-      Socket  : Sockets.Socket_Type;
-      Peer    : Sockets.Socket_Type;
-      Backend : Provider.Provider;
+   procedure Run_Stale_Plaintext_Operation (Model : Flyology.Execution_Model) is
+      Manager        : aliased Connections.Server (Capacity => 1);
+      Item           : Connections.Connection;
+      Socket         : Sockets.Socket_Type;
+      Peer           : Sockets.Socket_Type;
+      Backend        : Provider.Provider;
       Sender_Result  : Result_Box;
       Upgrade_Result : Result_Box;
-      Point : constant Connection_Testing.Barrier_Point :=
+      Point          : constant Connection_Testing.Barrier_Point :=
         Connection_Testing.Stale_Operation_Registration;
    begin
       Provider.Reset_State_Telemetry;
@@ -359,8 +342,7 @@ procedure Connection_TLS_Upgrade_Smoke is
       begin
          Connection_Testing.Wait_Reached (Point);
          pragma Assert (not Connection_Testing.Operation_Active (Item));
-         pragma Assert
-           (Connection_Testing.Waiting_Operations (Item) = 1);
+         pragma Assert (Connection_Testing.Waiting_Operations (Item) = 1);
 
          declare
             task Upgrader is
@@ -369,8 +351,7 @@ procedure Connection_TLS_Upgrade_Smoke is
 
             task body Upgrader is
             begin
-               Connection_TLS.Upgrade
-                 (Item, Backend, TLS.Server, "", Timeout => 1.0);
+               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
                Item.Send_All ([1 => 9], Timeout => 1.0);
                Upgrade_Result.Report (True);
             exception
@@ -383,8 +364,7 @@ procedure Connection_TLS_Upgrade_Smoke is
 
          pragma Assert (Upgrade_Result.Passed);
          pragma Assert (not Connection_Testing.Operation_Active (Item));
-         pragma Assert
-           (Connection_Testing.Waiting_Operations (Item) = 1);
+         pragma Assert (Connection_Testing.Waiting_Operations (Item) = 1);
          Connection_Testing.Release (Point);
          Sender_Result.Wait;
       exception
@@ -399,8 +379,8 @@ procedure Connection_TLS_Upgrade_Smoke is
       pragma Assert (not Connection_Testing.Operation_Active (Item));
       pragma Assert (Connection_Testing.Waiting_Operations (Item) = 0);
       declare
-         Probe : Stream_Element_Array (1 .. 1);
-         Last  : Stream_Element_Offset;
+         Probe        : Stream_Element_Array (1 .. 1);
+         Last         : Stream_Element_Offset;
          No_Plaintext : Boolean := False;
       begin
          begin
@@ -419,9 +399,10 @@ procedure Connection_TLS_Upgrade_Smoke is
          State : Provider.State_Telemetry;
       begin
          Provider.Get_State_Telemetry (State);
-         pragma Assert
-           (State.Calls (Provider.Handshake_Operation) = 1
-            and then State.Calls (Provider.Send_Operation) = 1);
+         pragma
+           Assert
+             (State.Calls (Provider.Handshake_Operation) = 1
+                and then State.Calls (Provider.Send_Operation) = 1);
       end;
    end Run_Stale_Plaintext_Operation;
 
@@ -431,8 +412,7 @@ procedure Connection_TLS_Upgrade_Smoke is
       Socket  : Sockets.Socket_Type;
       Peer    : Sockets.Socket_Type;
       Backend : Provider.Provider;
-      Point : constant Connection_Testing.Barrier_Point :=
-        Connection_Testing.TLS_Session_Installed;
+      Point   : constant Connection_Testing.Barrier_Point := Connection_Testing.TLS_Session_Installed;
    begin
       Provider.Reset_State_Telemetry;
       Configure_Complete (Backend);
@@ -448,8 +428,7 @@ procedure Connection_TLS_Upgrade_Smoke is
 
          task body Upgrader is
          begin
-            Connection_TLS.Upgrade
-              (Item, Backend, TLS.Server, "", Timeout => 1.0);
+            Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
          end Upgrader;
       begin
          Connection_Testing.Wait_Reached (Point);
@@ -494,15 +473,12 @@ procedure Connection_TLS_Upgrade_Smoke is
          task body Worker is
             Failed_Safely : Boolean := False;
          begin
-            Connection_TLS.Upgrade
-              (Item, Backend, TLS.Server, "", Timeout => 1.0);
+            Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
             begin
                Connections.Close (Item);
             exception
                when TLS.TLS_Error =>
-                  Failed_Safely :=
-                    not Connections.Is_Open (Item)
-                    and then Manager.Active = 0;
+                  Failed_Safely := not Connections.Is_Open (Item) and then Manager.Active = 0;
             end;
             Result.Report (Failed_Safely);
          exception
@@ -520,13 +496,13 @@ procedure Connection_TLS_Upgrade_Smoke is
    end Run_Finalizer_Failure;
 
    procedure Run_Concurrent_Close (Model : Flyology.Execution_Model) is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Item    : Connections.Connection;
-      Socket  : Sockets.Socket_Type;
-      Peer    : Sockets.Socket_Type;
-      Backend : Provider.Provider;
-      Upgrade_Result : Result_Box;
-      Close_Result   : Result_Box;
+      Manager          : aliased Connections.Server (Capacity => 1);
+      Item             : Connections.Connection;
+      Socket           : Sockets.Socket_Type;
+      Peer             : Sockets.Socket_Type;
+      Backend          : Provider.Provider;
+      Upgrade_Result   : Result_Box;
+      Close_Result     : Result_Box;
       Queued_Cancelled : Boolean := False;
    begin
       Provider.Reset_State_Telemetry;
@@ -543,8 +519,7 @@ procedure Connection_TLS_Upgrade_Smoke is
             Cancelled : Boolean := False;
          begin
             begin
-               Connection_TLS.Upgrade
-                 (Item, Backend, TLS.Server, "", Timeout => 2.0);
+               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 2.0);
             exception
                when Connections.Operation_Cancelled =>
                   Cancelled := True;
@@ -580,18 +555,15 @@ procedure Connection_TLS_Upgrade_Smoke is
          Closer.Start;
          if not Queued_Cancelled then
             Provider.Release_Handshake;
-            raise Program_Error with
-              "queued operation was not cancelled during TLS upgrade";
+            raise Program_Error with "queued operation was not cancelled during TLS upgrade";
          end if;
          declare
-            Deadline : constant Ada.Real_Time.Time :=
-              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+            Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
          begin
             while not Connection_Testing.Close_Requested (Item) loop
                if Ada.Real_Time.Clock >= Deadline then
                   Provider.Release_Handshake;
-                  raise Program_Error with
-                    "close did not publish its generation barrier";
+                  raise Program_Error with "close did not publish its generation barrier";
                end if;
                delay 0.001;
             end loop;
@@ -629,11 +601,8 @@ procedure Connection_TLS_Upgrade_Smoke is
       Assert_Resources (1);
    end Run_Concurrent_Close;
 
-   procedure Run_Handshake_Interruptions
-     (Model : Flyology.Execution_Model)
-   is
-      type Interruption_Kind is
-        (Deadline_Expires, Token_Requested, Manager_Shutdown);
+   procedure Run_Handshake_Interruptions (Model : Flyology.Execution_Model) is
+      type Interruption_Kind is (Deadline_Expires, Token_Requested, Manager_Shutdown);
 
       procedure Run_One (Kind : Interruption_Kind) is
          Manager : aliased Connections.Server (Capacity => 1);
@@ -646,8 +615,7 @@ procedure Connection_TLS_Upgrade_Smoke is
       begin
          Provider.Reset_State_Telemetry;
          Provider.Set_Script
-           (Backend, Provider.Handshake_Operation,
-            [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+           (Backend, Provider.Handshake_Operation, [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
 
@@ -665,10 +633,8 @@ procedure Connection_TLS_Upgrade_Smoke is
                      Backend,
                      TLS.Server,
                      "",
-                     Timeout =>
-                       (if Kind = Deadline_Expires then 0.020
-                        else Flyology.IO.Infinite),
-                     Token => Token'Access);
+                     Timeout => (if Kind = Deadline_Expires then 0.020 else Flyology.IO.Infinite),
+                     Token   => Token'Access);
                exception
                   when Flyology.IO.Timeout_Error =>
                      Interrupted := Kind = Deadline_Expires;
@@ -676,9 +642,7 @@ procedure Connection_TLS_Upgrade_Smoke is
                      Interrupted := Kind /= Deadline_Expires;
                end;
                Result.Report
-                 (Interrupted
-                  and then not Connections.Is_Open (Item)
-                  and then Manager.Active = 0);
+                 (Interrupted and then not Connections.Is_Open (Item) and then Manager.Active = 0);
             exception
                when others =>
                   Result.Report (False);
@@ -688,8 +652,10 @@ procedure Connection_TLS_Upgrade_Smoke is
             case Kind is
                when Deadline_Expires =>
                   null;
-               when Token_Requested =>
+
+               when Token_Requested  =>
                   Token.Request;
+
                when Manager_Shutdown =>
                   Manager.Request_Shutdown;
             end case;

@@ -5,6 +5,7 @@ private package Flyology_Cachelines.Linux is
          when True =>
             Line_Size  : Positive;
             Total_Size : Positive;
+
          when False =>
             null;
       end case;
@@ -36,6 +37,7 @@ private package Flyology_Cachelines.Linux is
             Capacity   : Natural;
             L2_Size    : Natural;
             L2_CPUs    : Natural;
+
          when False =>
             null;
       end case;
@@ -61,22 +63,19 @@ private package Flyology_Cachelines.Linux is
    --  host reports more distinct classes than the table holds, so a caller
    --  degrades instead of reading a truncated table.
    type Core_Classes is record
-      Count    : Class_Count    := 0;
+      Count    : Class_Count := 0;
       Ordering : Class_Ordering := Unordered;
       Classes  : Core_Class_Table;
    end record;
 
    No_Core_Classes : constant Core_Classes :=
-     (Count    => 0,
-      Ordering => Unordered,
-      Classes  => (others => (Available => False)));
+     (Count => 0, Ordering => Unordered, Classes => (others => (Available => False)));
 
    --  Location of the kernel's CPU descriptions.  Detection always reads this
    --  tree; the parameter below exists so tests can present a topology the
    --  test host does not have.
    Default_CPU_Root : constant String := "/sys/devices/system/cpu/";
 
-   function Detect_Core_Classes
-     (Root : String := Default_CPU_Root) return Core_Classes;
+   function Detect_Core_Classes (Root : String := Default_CPU_Root) return Core_Classes;
 
 end Flyology_Cachelines.Linux;

@@ -5,6 +5,7 @@ with Interfaces.C;
 --  by typed capability packages. It validates only the carrier channel and
 --  descriptor count; each public wrapper validates the received capability's
 --  type and semantics before adoption.
+
 private package Flyology.Descriptor_Handoffs is
    --  @exclude Internal capability-carrier implementation, not part of the
    --  public API.
@@ -36,9 +37,7 @@ private package Flyology.Descriptor_Handoffs is
    --  @param Socket Candidate AF_UNIX stream descriptor
    --  @param Trust Validation trust policy
    --  @exclude
-   procedure Validate_Carrier
-     (Socket : Socket_Descriptor;
-      Trust  : Peer_Trust := Trusted_Peer);
+   procedure Validate_Carrier (Socket : Socket_Descriptor; Trust : Peer_Trust := Trusted_Peer);
 
    --  Transfer one validated carrier into its internal owner.
    --  @param Item Closed destination channel
@@ -46,9 +45,7 @@ private package Flyology.Descriptor_Handoffs is
    --  @param Trust Validation trust policy
    --  @exclude
    procedure Adopt
-     (Item   : in out Handoff_Channel;
-      Socket : in out Socket_Descriptor;
-      Trust  : Peer_Trust := Trusted_Peer);
+     (Item : in out Handoff_Channel; Socket : in out Socket_Descriptor; Trust : Peer_Trust := Trusted_Peer);
 
    --  Close an internal carrier channel.
    --  @param Item Channel to close
@@ -73,17 +70,13 @@ private package Flyology.Descriptor_Handoffs is
    --  @param Channel Dedicated carrier channel
    --  @param Descriptor Capability descriptor to send
    --  @exclude
-   procedure Send
-     (Channel    : in out Handoff_Channel;
-      Descriptor : C.int);
+   procedure Send (Channel : in out Handoff_Channel; Descriptor : C.int);
 
    --  Receive one descriptor over the internal carrier.
    --  @param Channel Dedicated carrier channel
    --  @param Descriptor Sole received capability descriptor
    --  @exclude
-   procedure Receive
-     (Channel    : in out Handoff_Channel;
-      Descriptor : out C.int);
+   procedure Receive (Channel : in out Handoff_Channel; Descriptor : out C.int);
 
 private
    use type C.int;
@@ -92,17 +85,11 @@ private
    type Begin_Result is (Acquired, Was_Closed, Was_Busy, Was_Poisoned);
 
    protected type Channel_Controller is
-      procedure Adopt
-        (Descriptor : C.int;
-         Accepted   : out Boolean);
-      procedure Try_Begin
-        (Descriptor : out C.int;
-         Result     : out Begin_Result);
+      procedure Adopt (Descriptor : C.int; Accepted : out Boolean);
+      procedure Try_Begin (Descriptor : out C.int; Result : out Begin_Result);
       procedure Finish;
       procedure Poison (Descriptor : out C.int);
-      procedure Take_For_Close
-        (Descriptor : out C.int;
-         Busy_Now   : out Boolean);
+      procedure Take_For_Close (Descriptor : out C.int; Busy_Now : out Boolean);
       function Open return Boolean;
       function Failed return Boolean;
    private
@@ -117,7 +104,8 @@ private
    --  Release an internal carrier owner without propagating failures.
    --  @param Item Internal owner being finalized
    --  @exclude
-   overriding procedure Finalize (Item : in out Channel_Owner);
+   overriding
+   procedure Finalize (Item : in out Channel_Owner);
 
    type Handoff_Channel is limited record
       Owner : Channel_Owner;

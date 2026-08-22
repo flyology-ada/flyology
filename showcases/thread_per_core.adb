@@ -14,10 +14,8 @@ procedure Thread_Per_Core is
    use type Groups.Group_Id;
 
    Operations : constant Positive :=
-     (if Ada.Command_Line.Argument_Count = 0
-      then 1_000
-      else Positive'Value (Ada.Command_Line.Argument (1)));
-   Pool : constant Groups.Loop_Pool_Size := Groups.Configured_Pool_Size;
+     (if Ada.Command_Line.Argument_Count = 0 then 1_000 else Positive'Value (Ada.Command_Line.Argument (1)));
+   Pool       : constant Groups.Loop_Pool_Size := Groups.Configured_Pool_Size;
 
    protected Completion is
       procedure Finished (Passed : Boolean);
@@ -40,19 +38,14 @@ procedure Thread_Per_Core is
          null;
       end Wait;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Completion;
 
    task type Shard_Owner (Shard : Topology.Shard_Id) is
       pragma Task_Info (Flyology.Lightweight_Task);
-      entry Apply
-        (Hash     : Interfaces.Unsigned_64;
-         Amount   : Positive;
-         Accepted : out Boolean);
-      entry Snapshot
-        (Value     : out Natural;
-         Group     : out Groups.Group_Id;
-         Processor : out Integer);
+      entry Apply (Hash : Interfaces.Unsigned_64; Amount : Positive; Accepted : out Boolean);
+      entry Snapshot (Value : out Natural; Group : out Groups.Group_Id; Processor : out Integer);
       entry Stop;
    end Shard_Owner;
 
@@ -62,24 +55,14 @@ procedure Thread_Per_Core is
       Topology.Cross_To_Shard (Shard);
       loop
          select
-            accept Apply
-              (Hash     : Interfaces.Unsigned_64;
-               Amount   : Positive;
-               Accepted : out Boolean)
-            do
-               Accepted :=
-                 Groups.Current = Shard
-                 and then Topology.Shard_For_Hash (Hash) = Shard;
+            accept Apply (Hash : Interfaces.Unsigned_64; Amount : Positive; Accepted : out Boolean) do
+               Accepted := Groups.Current = Shard and then Topology.Shard_For_Hash (Hash) = Shard;
                if Accepted then
                   Total := Total + Amount;
                end if;
             end Apply;
          or
-            accept Snapshot
-              (Value     : out Natural;
-               Group     : out Groups.Group_Id;
-               Processor : out Integer)
-            do
+            accept Snapshot (Value : out Natural; Group : out Groups.Group_Id; Processor : out Integer) do
                Value := Total;
                Group := Groups.Current;
                Processor := Groups.Current_Processor;
@@ -92,8 +75,7 @@ procedure Thread_Per_Core is
    end Shard_Owner;
 
    type Owner_Access is access Shard_Owner;
-   type Owner_Array is
-     array (Topology.Shard_Id range <>) of Owner_Access;
+   type Owner_Array is array (Topology.Shard_Id range <>) of Owner_Access;
    Owners : Owner_Array (0 .. Topology.Shard_Id (Pool - 1));
 
    procedure Stop_Owners is
@@ -142,10 +124,8 @@ begin
          end;
          for Key in Natural range 0 .. Operations - 1 loop
             declare
-               Hash   : constant Interfaces.Unsigned_64 :=
-                 Interfaces.Unsigned_64 (Key);
-               Target : constant Topology.Shard_Id :=
-                 Topology.Shard_For_Hash (Hash);
+               Hash   : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Key);
+               Target : constant Topology.Shard_Id := Topology.Shard_For_Hash (Hash);
             begin
                Owners (Target).Apply (Hash, 1, Accepted);
                OK := OK and Accepted;
@@ -169,10 +149,8 @@ begin
          OK := Groups.Current = 0;
          for Key in Natural range 0 .. Operations - 1 loop
             declare
-               Hash   : constant Interfaces.Unsigned_64 :=
-                 Interfaces.Unsigned_64 (Key);
-               Target : constant Topology.Shard_Id :=
-                 Topology.Shard_For_Hash (Hash);
+               Hash   : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Key);
+               Target : constant Topology.Shard_Id := Topology.Shard_For_Hash (Hash);
             begin
                Owners (Target).Apply (Hash, 2, Accepted);
                OK := OK and Accepted;
@@ -195,8 +173,7 @@ begin
          for Target in Owners'Range loop
             Topology.Cross_To_Shard (Target);
             OK := OK and Groups.Current = Target;
-            Owners (Target).Apply
-              (Interfaces.Unsigned_64 (Target), 3, Accepted);
+            Owners (Target).Apply (Interfaces.Unsigned_64 (Target), 3, Accepted);
             OK := OK and Accepted;
          end loop;
          Completion.Finished (OK);
@@ -213,13 +190,12 @@ begin
    end if;
 
    Put_Line
-     ("configured_shards=" & Groups.Loop_Pool_Size'Image (Pool)
-      & " operations_per_client=" & Positive'Image (Operations));
-   Put_Line
-     ("native and lightweight callers routed keys to task-owned shard state;");
-   Put_Line
-     ("one lightweight caller also crossed each shard at an explicit "
-      & "safe point.");
+     ("configured_shards="
+      & Groups.Loop_Pool_Size'Image (Pool)
+      & " operations_per_client="
+      & Positive'Image (Operations));
+   Put_Line ("native and lightweight callers routed keys to task-owned shard state;");
+   Put_Line ("one lightweight caller also crossed each shard at an explicit " & "safe point.");
 
    declare
       Grand_Total : Natural := 0;
@@ -236,9 +212,12 @@ begin
             end if;
             Grand_Total := Grand_Total + Value;
             Put_Line
-              ("  shard=" & Topology.Shard_Id'Image (Shard)
-               & " value=" & Natural'Image (Value)
-               & " logical_processor=" & Integer'Image (Processor));
+              ("  shard="
+               & Topology.Shard_Id'Image (Shard)
+               & " value="
+               & Natural'Image (Value)
+               & " logical_processor="
+               & Integer'Image (Processor));
          end;
       end loop;
       if Grand_Total /= 3 * Operations + 3 * Natural (Pool) then

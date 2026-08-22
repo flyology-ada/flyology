@@ -50,28 +50,26 @@ procedure Stall_Watchdog is
    end Event_Work;
 
    procedure Print (Label : String) is
-      Report : constant Watchdogs.Watchdog_Report :=
-        Watchdogs.Latest_Report (Monitor);
+      Report : constant Watchdogs.Watchdog_Report := Watchdogs.Latest_Report (Monitor);
    begin
       TIO.Put_Line
-        (Label & ": " & Report.Condition'Image
-         & ", ready=" & Report.Ready'Image
-         & ", waiting=" & Report.Waiting'Image
-         & ", running=" & Report.Running'Image
+        (Label
+         & ": "
+         & Report.Condition'Image
+         & ", ready="
+         & Report.Ready'Image
+         & ", waiting="
+         & Report.Waiting'Image
+         & ", running="
+         & Report.Running'Image
          & ", observed-for="
-         & Showcase_Support.Fixed_Image
-             (Long_Float (Report.Observed_For), Decimals => 3)
-         & " s, episodes=" & Report.Stall_Episodes'Image);
+         & Showcase_Support.Fixed_Image (Long_Float (Report.Observed_For), Decimals => 3)
+         & " s, episodes="
+         & Report.Stall_Episodes'Image);
    end Print;
 begin
-   TIO.Put_Line
-     ("native watchdog sampling event group 0 every 25 ms; "
-      & "stall threshold 100 ms");
-   Watchdogs.Start
-     (Monitor,
-      (Group           => 0,
-       Sample_Interval => 0.025,
-       Stall_Threshold => 0.100));
+   TIO.Put_Line ("native watchdog sampling event group 0 every 25 ms; " & "stall threshold 100 ms");
+   Watchdogs.Start (Monitor, (Group => 0, Sample_Interval => 0.025, Stall_Threshold => 0.100));
 
    delay 0.075;
    Print ("normally parked");
@@ -79,9 +77,7 @@ begin
    declare
       Deadline : constant RT.Time := RT.Clock + RT.Seconds (2);
    begin
-      while Watchdogs.Latest_Report (Monitor).Stall_Episodes = 0
-        and then RT.Clock < Deadline
-      loop
+      while Watchdogs.Latest_Report (Monitor).Stall_Episodes = 0 and then RT.Clock < Deadline loop
          delay 0.025;
       end loop;
    end;

@@ -14,15 +14,11 @@ package body Flyology_Cachelines.Linux is
    SC_Level_1_DCache_Line_Size : constant Interfaces.C.int := 190;
 
    function Sysconf (Name : Interfaces.C.int) return Interfaces.C.long
-     with Import,
-          Convention    => C,
-          External_Name => "sysconf";
+   with Import, Convention => C, External_Name => "sysconf";
 
    function Detect_From_Sysconf return Cache_Parameters is
-      Line_Size  : constant Interfaces.C.long :=
-        Sysconf (SC_Level_1_DCache_Line_Size);
-      Total_Size : constant Interfaces.C.long :=
-        Sysconf (SC_Level_1_DCache_Size);
+      Line_Size  : constant Interfaces.C.long := Sysconf (SC_Level_1_DCache_Line_Size);
+      Total_Size : constant Interfaces.C.long := Sysconf (SC_Level_1_DCache_Size);
    begin
       if Line_Size <= 0
         or else Total_Size <= 0
@@ -32,18 +28,13 @@ package body Flyology_Cachelines.Linux is
          return No_Cache_Parameters;
       end if;
 
-      return
-        (Available  => True,
-         Line_Size  => Positive (Line_Size),
-         Total_Size => Positive (Total_Size));
+      return (Available => True, Line_Size => Positive (Line_Size), Total_Size => Positive (Total_Size));
    exception
       when others =>
          return No_Cache_Parameters;
    end Detect_From_Sysconf;
 
-   function Read_Trimmed
-     (Path : String) return Ada.Strings.Unbounded.Unbounded_String
-   is
+   function Read_Trimmed (Path : String) return Ada.Strings.Unbounded.Unbounded_String is
       File : Ada.Text_IO.File_Type;
    begin
       Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
@@ -51,9 +42,7 @@ package body Flyology_Cachelines.Linux is
          Line : constant String := Ada.Text_IO.Get_Line (File);
       begin
          Ada.Text_IO.Close (File);
-         return
-           Ada.Strings.Unbounded.To_Unbounded_String
-             (Ada.Strings.Fixed.Trim (Line, Ada.Strings.Both));
+         return Ada.Strings.Unbounded.To_Unbounded_String (Ada.Strings.Fixed.Trim (Line, Ada.Strings.Both));
       end;
    exception
       when others =>
@@ -110,10 +99,7 @@ package body Flyology_Cachelines.Linux is
          while From <= Text'Last and then Text (From) in '0' .. '9' loop
             From := From + 1;
          end loop;
-         return
-           (if From = Start
-            then 0
-            else Natural'Value (Text (Start .. From - 1)));
+         return (if From = Start then 0 else Natural'Value (Text (Start .. From - 1)));
       end Bound;
    begin
       while First <= Text'Last loop
@@ -152,6 +138,7 @@ package body Flyology_Cachelines.Linux is
             Leads_Cache : Boolean;
             L2_Size     : Natural;
             L2_CPUs     : Natural;
+
          when False =>
             null;
       end case;
@@ -159,73 +146,50 @@ package body Flyology_Cachelines.Linux is
 
    No_CPU_Description : constant CPU_Description := (Available => False);
 
-   function Describe_CPU
-     (Root : String;
-      CPU  : Natural) return CPU_Description
-   is
+   function Describe_CPU (Root : String; CPU : Natural) return CPU_Description is
       use Ada.Strings.Unbounded;
 
-      CPU_Image : constant String :=
-        Ada.Strings.Fixed.Trim (CPU'Image, Ada.Strings.Both);
+      CPU_Image : constant String := Ada.Strings.Fixed.Trim (CPU'Image, Ada.Strings.Both);
       CPU_Path  : constant String := Root & "cpu" & CPU_Image & "/";
       Base      : constant String := CPU_Path & "cache/index";
 
       --  A host that publishes no capacity leaves every class at zero, which
       --  orders nothing and selects the geometry rung.
-      Capacity_Text : constant String :=
-        To_String (Read_Trimmed (CPU_Path & "cpu_capacity"));
+      Capacity_Text : constant String := To_String (Read_Trimmed (CPU_Path & "cpu_capacity"));
       Capacity      : constant Natural :=
-        (if Capacity_Text'Length = 0 then 0
-         else Natural'Max (Leading_Index (Capacity_Text), 0));
+        (if Capacity_Text'Length = 0 then 0 else Natural'Max (Leading_Index (Capacity_Text), 0));
       --  The level 2 entry follows the level 1 entries, so both are found in
       --  one pass over the cache indexes.
-      L2_Size : Natural := 0;
-      L2_CPUs : Natural := 0;
+      L2_Size       : Natural := 0;
+      L2_CPUs       : Natural := 0;
 
-      Found_L1    : Boolean  := False;
-      L1_Line     : Positive := 1;
-      L1_Total    : Positive := 1;
-      L1_Leads    : Boolean  := True;
+      Found_L1 : Boolean := False;
+      L1_Line  : Positive := 1;
+      L1_Total : Positive := 1;
+      L1_Leads : Boolean := True;
    begin
       for Index in 0 .. 7 loop
          declare
-            Index_Image : constant String :=
-              Ada.Strings.Fixed.Trim (Index'Image, Ada.Strings.Both);
+            Index_Image : constant String := Ada.Strings.Fixed.Trim (Index'Image, Ada.Strings.Both);
             Path        : constant String := Base & Index_Image & "/";
-            Level       : constant String :=
-              To_String (Read_Trimmed (Path & "level"));
-            Kind        : constant String :=
-              To_String (Read_Trimmed (Path & "type"));
+            Level       : constant String := To_String (Read_Trimmed (Path & "level"));
+            Kind        : constant String := To_String (Read_Trimmed (Path & "type"));
          begin
-            if not Found_L1
-              and then Level = "1"
-              and then (Kind = "Data" or else Kind = "Unified")
-            then
+            if not Found_L1 and then Level = "1" and then (Kind = "Data" or else Kind = "Unified") then
                declare
-                  Shared : constant String :=
-                    To_String (Read_Trimmed (Path & "shared_cpu_list"));
+                  Shared : constant String := To_String (Read_Trimmed (Path & "shared_cpu_list"));
                   Leader : constant Integer := Leading_Index (Shared);
                begin
-                  L1_Line :=
-                    Parse_Size
-                      (To_String
-                         (Read_Trimmed (Path & "coherency_line_size")));
-                  L1_Total :=
-                    Parse_Size (To_String (Read_Trimmed (Path & "size")));
+                  L1_Line := Parse_Size (To_String (Read_Trimmed (Path & "coherency_line_size")));
+                  L1_Total := Parse_Size (To_String (Read_Trimmed (Path & "size")));
                   --  An unreadable sharing list makes every CPU its own core,
                   --  which is right whenever SMT is absent.
                   L1_Leads := Leader = CPU or else Leader < 0;
                   Found_L1 := True;
                end;
-            elsif L2_Size = 0
-              and then Level = "2"
-              and then (Kind = "Data" or else Kind = "Unified")
-            then
-               L2_Size :=
-                 Parse_Size (To_String (Read_Trimmed (Path & "size")));
-               L2_CPUs :=
-                 List_Count
-                   (To_String (Read_Trimmed (Path & "shared_cpu_list")));
+            elsif L2_Size = 0 and then Level = "2" and then (Kind = "Data" or else Kind = "Unified") then
+               L2_Size := Parse_Size (To_String (Read_Trimmed (Path & "size")));
+               L2_CPUs := List_Count (To_String (Read_Trimmed (Path & "shared_cpu_list")));
             end if;
          end;
       end loop;
@@ -252,9 +216,7 @@ package body Flyology_Cachelines.Linux is
    begin
       return
         (if Found.Available
-         then (Available  => True,
-               Line_Size  => Found.Line_Size,
-               Total_Size => Found.Total_Size)
+         then (Available => True, Line_Size => Found.Line_Size, Total_Size => Found.Total_Size)
          else No_Cache_Parameters);
    end Detect_From_Sysfs;
 
@@ -266,8 +228,7 @@ package body Flyology_Cachelines.Linux is
    --  trailing run of digits is the value wanted.  A missing or malformed
    --  list leaves only CPU 0 to enumerate.
    function Highest_Present_CPU (Root : String) return Natural is
-      Text  : constant String :=
-        Ada.Strings.Unbounded.To_String (Read_Trimmed (Root & "present"));
+      Text  : constant String := Ada.Strings.Unbounded.To_String (Read_Trimmed (Root & "present"));
       Last  : Natural := Text'Last;
       First : Natural;
    begin
@@ -284,8 +245,7 @@ package body Flyology_Cachelines.Linux is
          First := First - 1;
       end loop;
 
-      return Natural'Min (Natural'Value (Text (First .. Last)),
-                          Max_Enumerated_CPU);
+      return Natural'Min (Natural'Value (Text (First .. Last)), Max_Enumerated_CPU);
    exception
       when others =>
          return 0;
@@ -297,8 +257,7 @@ package body Flyology_Cachelines.Linux is
    function Separated_By_Capacity (Classes : Core_Classes) return Boolean is
    begin
       for Index in 2 .. Classes.Count loop
-         if Classes.Classes (Core_Class (Index)).Capacity /=
-              Classes.Classes (Fastest_Core_Class).Capacity
+         if Classes.Classes (Core_Class (Index)).Capacity /= Classes.Classes (Fastest_Core_Class).Capacity
          then
             return True;
          end if;
@@ -309,8 +268,7 @@ package body Flyology_Cachelines.Linux is
    function Separated_By_Geometry (Classes : Core_Classes) return Boolean is
    begin
       for Index in 2 .. Classes.Count loop
-         if Classes.Classes (Core_Class (Index)).Total_Size /=
-              Classes.Classes (Fastest_Core_Class).Total_Size
+         if Classes.Classes (Core_Class (Index)).Total_Size /= Classes.Classes (Fastest_Core_Class).Total_Size
          then
             return True;
          end if;
@@ -319,25 +277,17 @@ package body Flyology_Cachelines.Linux is
    end Separated_By_Geometry;
 
    --  Insertion sort into descending order of the selected key.
-   procedure Order_Classes
-     (Classes     : in out Core_Classes;
-      By_Capacity : Boolean)
-   is
-      function Key (Class : Core_Class_Parameters) return Natural is
-        (if By_Capacity then Class.Capacity else Class.Total_Size);
+   procedure Order_Classes (Classes : in out Core_Classes; By_Capacity : Boolean) is
+      function Key (Class : Core_Class_Parameters) return Natural
+      is (if By_Capacity then Class.Capacity else Class.Total_Size);
    begin
       for Index in 2 .. Classes.Count loop
          declare
-            Moving : constant Core_Class_Parameters :=
-              Classes.Classes (Core_Class (Index));
+            Moving : constant Core_Class_Parameters := Classes.Classes (Core_Class (Index));
             Place  : Natural := Index - 1;
          begin
-            while Place >= 1
-              and then Key (Classes.Classes (Core_Class (Place)))
-                         < Key (Moving)
-            loop
-               Classes.Classes (Core_Class (Place + 1)) :=
-                 Classes.Classes (Core_Class (Place));
+            while Place >= 1 and then Key (Classes.Classes (Core_Class (Place))) < Key (Moving) loop
+               Classes.Classes (Core_Class (Place + 1)) := Classes.Classes (Core_Class (Place));
                Place := Place - 1;
             end loop;
             Classes.Classes (Core_Class (Place + 1)) := Moving;
@@ -345,9 +295,7 @@ package body Flyology_Cachelines.Linux is
       end loop;
    end Order_Classes;
 
-   function Detect_Core_Classes
-     (Root : String := Default_CPU_Root) return Core_Classes
-   is
+   function Detect_Core_Classes (Root : String := Default_CPU_Root) return Core_Classes is
       Highest : constant Natural := Highest_Present_CPU (Root);
       Result  : Core_Classes := No_Core_Classes;
    begin
@@ -362,8 +310,7 @@ package body Flyology_Cachelines.Linux is
                --  differently.
                for Index in 1 .. Result.Count loop
                   declare
-                     Class : Core_Class_Parameters renames
-                       Result.Classes (Core_Class (Index));
+                     Class : Core_Class_Parameters renames Result.Classes (Core_Class (Index));
                   begin
                      if Class.Line_Size = Found.Line_Size
                        and then Class.Total_Size = Found.Total_Size
@@ -408,17 +355,22 @@ package body Flyology_Cachelines.Linux is
       --  geometry inference only when no capacity separates the classes.
       --  The specification records what each ordering is worth.
       Result.Ordering :=
-        (if Result.Count < 2 then Unordered
-         elsif Separated_By_Capacity (Result) then Host_Reported
-         elsif Separated_By_Geometry (Result) then Inferred
+        (if Result.Count < 2
+         then Unordered
+         elsif Separated_By_Capacity (Result)
+         then Host_Reported
+         elsif Separated_By_Geometry (Result)
+         then Inferred
          else Unordered);
 
       case Result.Ordering is
          when Host_Reported =>
             Order_Classes (Result, By_Capacity => True);
-         when Inferred =>
+
+         when Inferred      =>
             Order_Classes (Result, By_Capacity => False);
-         when Unordered =>
+
+         when Unordered     =>
             null;
       end case;
 

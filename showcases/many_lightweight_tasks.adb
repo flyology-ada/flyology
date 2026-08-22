@@ -40,8 +40,7 @@ procedure Many_Lightweight_Tasks is
             First_Last := Thread'Length;
             First (1 .. First_Last) := Thread;
          else
-            All_Matched :=
-              All_Matched and then Thread = First (1 .. First_Last);
+            All_Matched := All_Matched and then Thread = First (1 .. First_Last);
          end if;
       end Finished;
 
@@ -50,7 +49,8 @@ procedure Many_Lightweight_Tasks is
          null;
       end Wait;
 
-      function Same_Thread return Boolean is (All_Matched);
+      function Same_Thread return Boolean
+      is (All_Matched);
    end Completion;
 
    task type Worker is
@@ -72,7 +72,8 @@ procedure Many_Lightweight_Tasks is
 
 begin
    Put_Line
-     ("starting" & Worker_Count'Image
+     ("starting"
+      & Worker_Count'Image
       & " project-default timed Ada tasks; environment thread="
       & Showcase_Support.Thread_Image);
    Completion.Wait;
@@ -81,7 +82,5 @@ begin
       raise Program_Error with "lightweight workers escaped the event thread";
    end if;
 
-   Put_Line
-     ("completed" & Worker_Count'Image
-      & " tasks on one event thread");
+   Put_Line ("completed" & Worker_Count'Image & " tasks on one event thread");
 end Many_Lightweight_Tasks;

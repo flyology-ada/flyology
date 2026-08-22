@@ -24,12 +24,10 @@ procedure Stress_Randomized is
    package Files renames Flyology.IO.Files;
    package Random_Natural is new Ada.Numerics.Discrete_Random (Natural);
 
-   function Argument
-     (Position : Positive; Default : Positive) return Positive
-   is
-     (if Ada.Command_Line.Argument_Count >= Position
-      then Positive'Value (Ada.Command_Line.Argument (Position))
-      else Default);
+   function Argument (Position : Positive; Default : Positive) return Positive
+   is (if Ada.Command_Line.Argument_Count >= Position
+       then Positive'Value (Ada.Command_Line.Argument (Position))
+       else Default);
 
    Seed        : constant Positive := Argument (1, 1);
    Batch_Count : constant Positive := Argument (2, 8);
@@ -72,7 +70,8 @@ procedure Stress_Randomized is
          null;
       end Await_Done;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Progress;
 
    task Lightweight_Server is
@@ -128,15 +127,10 @@ procedure Stress_Randomized is
       end Abortee;
 
       type Abortee_Access is access Abortee;
-      procedure Free_Abortee is new Ada.Unchecked_Deallocation
-        (Abortee, Abortee_Access);
+      procedure Free_Abortee is new Ada.Unchecked_Deallocation (Abortee, Abortee_Access);
       Victim : Abortee_Access :=
-        new Abortee
-          ((if Ordinal mod 2 = 0
-            then Flyology.Lightweight_Task
-            else Flyology.Native_Task));
-      Limit : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+        new Abortee ((if Ordinal mod 2 = 0 then Flyology.Lightweight_Task else Flyology.Native_Task));
+      Limit  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       delay 0.0;
       abort Victim.all;
@@ -156,26 +150,22 @@ begin
       raise Constraint_Error with "stress width must be at most 512";
    end if;
    Ada.Text_IO.Put_Line
-     ("Flyology stress seed=" & Seed'Image
-      & " batches=" & Batch_Count'Image
-      & " width=" & Width'Image);
+     ("Flyology stress seed=" & Seed'Image & " batches=" & Batch_Count'Image & " width=" & Width'Image);
    Random_Natural.Reset (Generator, Integer (Seed));
 
    if Ada.Directories.Exists (Path) then
       Ada.Directories.Delete_File (Path);
    end if;
-   File := Files.Open
-     (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+   File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
 
    for Batch in 1 .. Batch_Count loop
       declare
-         type Socket_Array is
-           array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
-         Readers : Socket_Array (1 .. Width);
-         Peers   : Socket_Array (1 .. Width);
+         type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+         Readers           : Socket_Array (1 .. Width);
+         Peers             : Socket_Array (1 .. Width);
          Interrupt_Readers : Socket_Array (1 .. Width);
-         Interrupt_Peers : Socket_Array (1 .. Width);
-         State : Progress (Width);
+         Interrupt_Peers   : Socket_Array (1 .. Width);
+         State             : Progress (Width);
 
          type Natural_Array is array (Positive range <>) of Natural;
          Plans : Natural_Array (1 .. Width);
@@ -189,24 +179,19 @@ begin
          end Worker;
 
          task body Worker is
-            Reply      : Natural := 0;
-            Last       : Stream_Element_Offset;
-            Incoming   : Stream_Element_Array (1 .. 1);
-            Data       : constant Stream_Element_Array :=
+            Reply          : Natural := 0;
+            Last           : Stream_Element_Offset;
+            Incoming       : Stream_Element_Array (1 .. 1);
+            Data           : constant Stream_Element_Array :=
               [1 => Stream_Element ((Plan + Index + Batch) mod 251)];
-            Original   : constant System.Any_Priority :=
-              Ada.Dynamic_Priorities.Get_Priority;
-            Changed    : constant System.Any_Priority :=
-              (if Original < System.Any_Priority'Last
-               then Original + 1
-               else Original - 1);
-            Destination : constant Groups.Shared_Group_Id :=
-              Groups.Shared_Group_Id (1 + Plan mod 4);
-            Alternate : constant Groups.Shared_Group_Id :=
-              Groups.Shared_Group_Id (1 + (Plan + 1) mod 4);
-            Rejected : Boolean := False;
-            OK       : Boolean := True;
-            Outcome  : Flyology.IO.Wait_Outcome;
+            Original       : constant System.Any_Priority := Ada.Dynamic_Priorities.Get_Priority;
+            Changed        : constant System.Any_Priority :=
+              (if Original < System.Any_Priority'Last then Original + 1 else Original - 1);
+            Destination    : constant Groups.Shared_Group_Id := Groups.Shared_Group_Id (1 + Plan mod 4);
+            Alternate      : constant Groups.Shared_Group_Id := Groups.Shared_Group_Id (1 + (Plan + 1) mod 4);
+            Rejected       : Boolean := False;
+            OK             : Boolean := True;
+            Outcome        : Flyology.IO.Wait_Outcome;
             Will_Interrupt : constant Boolean := Plan mod 3 = 0;
          begin
             Ada.Dynamic_Priorities.Set_Priority (Changed);
@@ -240,37 +225,31 @@ begin
             else
                delay 0.0;
             end if;
-            OK := OK and then Flyology.IO.Wait_Interruptibly
-              (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
-               Flyology.IO.For_Read,
-               Timeout    => 0.0,
-               Interrupts =>
-                 (1 => Flyology.IO.Sockets.Native_Descriptor
-                    (Interrupt_Readers (Index))))
-              = Flyology.IO.Timed_Out;
+            OK :=
+              OK
+              and then Flyology.IO.Wait_Interruptibly
+                         (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
+                          Flyology.IO.For_Read,
+                          Timeout    => 0.0,
+                          Interrupts =>
+                            (1 => Flyology.IO.Sockets.Native_Descriptor (Interrupt_Readers (Index))))
+                       = Flyology.IO.Timed_Out;
             State.Started;
-            Outcome := Flyology.IO.Wait_Interruptibly
-              (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
-               Flyology.IO.For_Read,
-               Timeout    => 2.0,
-               Interrupts =>
-                 (1 => Flyology.IO.Sockets.Native_Descriptor
-                    (Interrupt_Readers (Index))));
+            Outcome :=
+              Flyology.IO.Wait_Interruptibly
+                (Flyology.IO.Sockets.Native_Descriptor (Readers (Index)),
+                 Flyology.IO.For_Read,
+                 Timeout    => 2.0,
+                 Interrupts => (1 => Flyology.IO.Sockets.Native_Descriptor (Interrupt_Readers (Index))));
             if Will_Interrupt then
                OK := OK and then Outcome = Flyology.IO.Interrupted;
             else
                OK := OK and then Outcome = Flyology.IO.Ready;
-               Flyology.IO.Sockets.Receive_Exactly
-                 (Readers (Index), Incoming, Timeout => 2.0);
-               OK := OK
-                 and then Incoming (1) = Stream_Element (Plan mod 251);
+               Flyology.IO.Sockets.Receive_Exactly (Readers (Index), Incoming, Timeout => 2.0);
+               OK := OK and then Incoming (1) = Stream_Element (Plan mod 251);
             end if;
 
-            Files.Write_At
-              (File,
-               Files.File_Offset ((Batch - 1) * Width + Index - 1),
-               Data,
-               Last);
+            Files.Write_At (File, Files.File_Offset ((Batch - 1) * Width + Index - 1), Data, Last);
             OK := OK and then Last = Data'Last;
             Ada.Dynamic_Priorities.Set_Priority (Original);
             State.Done (OK);
@@ -280,41 +259,34 @@ begin
          end Worker;
 
          type Worker_Access is access Worker;
-         procedure Free_Worker is new Ada.Unchecked_Deallocation
-           (Worker, Worker_Access);
+         procedure Free_Worker is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
          Workers : array (1 .. Width) of Worker_Access;
       begin
          for Index in 1 .. Width loop
             Plans (Index) := Random_Natural.Random (Generator) mod 100_000;
-            Flyology.IO.Sockets.Create_Socket_Pair
-              (Readers (Index), Peers (Index));
-            Flyology.IO.Sockets.Create_Socket_Pair
-              (Interrupt_Readers (Index), Interrupt_Peers (Index));
+            Flyology.IO.Sockets.Create_Socket_Pair (Readers (Index), Peers (Index));
+            Flyology.IO.Sockets.Create_Socket_Pair (Interrupt_Readers (Index), Interrupt_Peers (Index));
             Workers (Index) :=
               new Worker
-                (Index,
-                 (if (Plans (Index) + Batch) mod 2 = 0
-                  then Flyology.Lightweight_Task
-                  else Flyology.Native_Task),
-                 Plans (Index));
+                    (Index,
+                     (if (Plans (Index) + Batch) mod 2 = 0
+                      then Flyology.Lightweight_Task
+                      else Flyology.Native_Task),
+                     Plans (Index));
          end loop;
 
          State.Await_Started;
          for Index in 1 .. Width loop
             if Plans (Index) mod 3 = 0 then
-               Flyology.IO.Sockets.Send_All
-                 (Interrupt_Peers (Index), [1 => 1], Timeout => 2.0);
+               Flyology.IO.Sockets.Send_All (Interrupt_Peers (Index), [1 => 1], Timeout => 2.0);
             else
                Flyology.IO.Sockets.Send_All
-                 (Peers (Index),
-                  [1 => Stream_Element (Plans (Index) mod 251)],
-                  Timeout => 2.0);
+                 (Peers (Index), [1 => Stream_Element (Plans (Index) mod 251)], Timeout => 2.0);
             end if;
          end loop;
          State.Await_Done;
          if not State.Passed then
-            raise Program_Error with
-              "mixed-lane batch failed at" & Batch'Image;
+            raise Program_Error with "mixed-lane batch failed at" & Batch'Image;
          end if;
 
          for Index in 1 .. Width loop
@@ -340,8 +312,7 @@ begin
    Lightweight_Server.Stop;
    Native_Server.Stop;
    Ada.Text_IO.Put_Line
-     ("Flyology stress passed seed=" & Seed'Image
-      & " operations=" & Positive'Image (Batch_Count * Width));
+     ("Flyology stress passed seed=" & Seed'Image & " operations=" & Positive'Image (Batch_Count * Width));
 exception
    when others =>
       if File /= Files.Invalid_File then

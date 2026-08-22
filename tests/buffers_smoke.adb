@@ -31,19 +31,14 @@ procedure Buffers_Smoke is
       end if;
    end Assert;
 
-   procedure Check_Payload
-     (Item     : Buffers.Unique_Buffer;
-      Expected : Ada.Streams.Stream_Element_Array)
-   is
+   procedure Check_Payload (Item : Buffers.Unique_Buffer; Expected : Ada.Streams.Stream_Element_Array) is
       procedure Check (Data : Ada.Streams.Stream_Element_Array) is
       begin
          Assert (Data'Length = Expected'Length, "buffer length mismatch");
          for Offset in 0 .. Expected'Length - 1 loop
             Assert
-              (Data (Data'First + Ada.Streams.Stream_Element_Offset (Offset)) =
-                 Expected
-                   (Expected'First
-                    + Ada.Streams.Stream_Element_Offset (Offset)),
+              (Data (Data'First + Ada.Streams.Stream_Element_Offset (Offset))
+               = Expected (Expected'First + Ada.Streams.Stream_Element_Offset (Offset)),
                "buffer payload mismatch");
          end loop;
       end Check;
@@ -52,31 +47,26 @@ procedure Buffers_Smoke is
    end Check_Payload;
 
    procedure Run_Ownership is
-      Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 3);
-      Left    : Buffers.Unique_Buffer (Storage'Access);
-      Right   : Buffers.Unique_Buffer (Storage'Access);
-      Spare   : Buffers.Unique_Buffer (Storage'Access);
-      Extra   : Buffers.Unique_Buffer (Storage'Access);
-      Before  : System.Address := System.Null_Address;
-      After   : System.Address := System.Null_Address;
+      Storage  : aliased Buffers.Pool (Block_Size => 16, Capacity => 3);
+      Left     : Buffers.Unique_Buffer (Storage'Access);
+      Right    : Buffers.Unique_Buffer (Storage'Access);
+      Spare    : Buffers.Unique_Buffer (Storage'Access);
+      Extra    : Buffers.Unique_Buffer (Storage'Access);
+      Before   : System.Address := System.Null_Address;
+      After    : System.Address := System.Null_Address;
       Acquired : Boolean;
 
-      procedure Remember_Before
-        (Data : Ada.Streams.Stream_Element_Array) is
+      procedure Remember_Before (Data : Ada.Streams.Stream_Element_Array) is
       begin
          Before := Data'Address;
       end Remember_Before;
 
-      procedure Remember_After
-        (Data : Ada.Streams.Stream_Element_Array) is
+      procedure Remember_After (Data : Ada.Streams.Stream_Element_Array) is
       begin
          After := Data'Address;
       end Remember_After;
    begin
-      Assert
-        (Buffers.Current (Storage) =
-           (Available => 3, Outstanding => 0),
-         "new pool accounting is wrong");
+      Assert (Buffers.Current (Storage) = (Available => 3, Outstanding => 0), "new pool accounting is wrong");
       Buffers.Acquire (Left);
       Buffers.Copy_From (Left, [11, 22, 33, 44]);
       Buffers.Set_Tag (Left, 91);
@@ -98,16 +88,15 @@ procedure Buffers_Smoke is
       Buffers.Release (Right);
       Buffers.Release (Spare);
       Assert
-        (Buffers.Current (Storage) =
-           (Available => 3, Outstanding => 0),
+        (Buffers.Current (Storage) = (Available => 3, Outstanding => 0),
          "release did not restore pool accounting");
    end Run_Ownership;
 
    procedure Run_Pool_Exhaustion is
-      Storage : aliased Buffers.Pool (Block_Size => 8, Capacity => 1);
-      Held    : Buffers.Unique_Buffer (Storage'Access);
-      Waiting : Buffers.Unique_Buffer (Storage'Access);
-      Acquired : Boolean;
+      Storage   : aliased Buffers.Pool (Block_Size => 8, Capacity => 1);
+      Held      : Buffers.Unique_Buffer (Storage'Access);
+      Waiting   : Buffers.Unique_Buffer (Storage'Access);
+      Acquired  : Boolean;
       Timed_Out : Boolean := False;
    begin
       Buffers.Acquire (Held);
@@ -116,7 +105,8 @@ procedure Buffers_Smoke is
       begin
          Buffers.Acquire_For (Waiting, 0.0);
       exception
-         when Buffers.Timeout_Error => Timed_Out := True;
+         when Buffers.Timeout_Error =>
+            Timed_Out := True;
       end;
       Assert (Timed_Out, "zero-time pool acquisition did not time out");
       Assert (not Buffers.Has_Buffer (Waiting), "timeout attached a slot");
@@ -124,11 +114,11 @@ procedure Buffers_Smoke is
    end Run_Pool_Exhaustion;
 
    procedure Run_Channel_Semantics is
-      Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 3);
-      Queue   : Channels.Channel (Storage'Access, Capacity => 1);
-      First   : Buffers.Unique_Buffer (Storage'Access);
-      Second  : Buffers.Unique_Buffer (Storage'Access);
-      Target  : Buffers.Unique_Buffer (Storage'Access);
+      Storage        : aliased Buffers.Pool (Block_Size => 16, Capacity => 3);
+      Queue          : Channels.Channel (Storage'Access, Capacity => 1);
+      First          : Buffers.Unique_Buffer (Storage'Access);
+      Second         : Buffers.Unique_Buffer (Storage'Access);
+      Target         : Buffers.Unique_Buffer (Storage'Access);
       Send_Result    : Channels.Try_Send_Result;
       Receive_Result : Channels.Try_Receive_Result;
       Metadata       : Channels.Transfer_Metadata;
@@ -144,17 +134,15 @@ procedure Buffers_Smoke is
       Buffers.Copy_From (Second, [4, 5]);
       Queue.Try_Send_Move (Second, Send_Result);
       Assert
-        (Send_Result = Channels.Channel_Full
-         and then Buffers.Has_Buffer (Second),
+        (Send_Result = Channels.Channel_Full and then Buffers.Has_Buffer (Second),
          "full channel did not preserve sender ownership");
       begin
          Queue.Timed_Send_Move (Second, 0.0);
       exception
-         when Channels.Timeout_Error => Timed_Out := True;
+         when Channels.Timeout_Error =>
+            Timed_Out := True;
       end;
-      Assert
-        (Timed_Out and then Buffers.Has_Buffer (Second),
-         "timed send did not preserve ownership");
+      Assert (Timed_Out and then Buffers.Has_Buffer (Second), "timed send did not preserve ownership");
 
       Queue.Receive_Move (Target, Metadata);
       Assert (Buffers.Tag (Target) = 7, "channel lost FIFO metadata");
@@ -164,22 +152,18 @@ procedure Buffers_Smoke is
 
       Queue.Send_Move (Second);
       Queue.Receive_Move (Target, Metadata);
-      Assert
-        (Metadata = Channels.No_Metadata,
-         "default channel metadata did not round trip");
+      Assert (Metadata = Channels.No_Metadata, "default channel metadata did not round trip");
       Buffers.Release (Target);
       Buffers.Acquire (Second);
 
       Queue.Close;
       Queue.Try_Send_Move (Second, Send_Result);
       Assert
-        (Send_Result = Channels.Send_Closed
-         and then Buffers.Has_Buffer (Second),
+        (Send_Result = Channels.Send_Closed and then Buffers.Has_Buffer (Second),
          "closed channel consumed a sender buffer");
       Queue.Try_Receive_Move (Target, Receive_Result);
       Assert
-        (Receive_Result = Channels.Receive_Closed
-         and then not Buffers.Has_Buffer (Target),
+        (Receive_Result = Channels.Receive_Closed and then not Buffers.Has_Buffer (Target),
          "drained channel returned a phantom buffer");
       Buffers.Release (Second);
       Queue.Await_Drained;
@@ -187,12 +171,11 @@ procedure Buffers_Smoke is
 
    procedure Run_Concurrent_Handoff is
       Iterations : constant Positive := 2_000;
-      Storage : aliased Buffers.Pool (Block_Size => 8, Capacity => 8);
-      Queue   : Channels.Channel (Storage'Access, Capacity => 4);
+      Storage    : aliased Buffers.Pool (Block_Size => 8, Capacity => 8);
+      Queue      : Channels.Channel (Storage'Access, Capacity => 4);
       protected Completion is
          procedure Producer_Finished (Succeeded : Boolean);
-         procedure Consumer_Finished
-           (Succeeded : Boolean; Count : Natural);
+         procedure Consumer_Finished (Succeeded : Boolean; Count : Natural);
          entry Await_Result (Succeeded : out Boolean; Count : out Natural);
       private
          Producer_Done : Boolean := False;
@@ -209,8 +192,7 @@ procedure Buffers_Smoke is
             Producer_Done := True;
          end Producer_Finished;
 
-         procedure Consumer_Finished
-           (Succeeded : Boolean; Count : Natural) is
+         procedure Consumer_Finished (Succeeded : Boolean; Count : Natural) is
          begin
             Consumer_OK := Succeeded;
             Final_Count := Count;
@@ -239,8 +221,7 @@ procedure Buffers_Smoke is
       begin
          for Index in 1 .. Iterations loop
             Buffers.Acquire (Item);
-            Buffers.Copy_From
-              (Item, [1 => Ada.Streams.Stream_Element (Index mod 251)]);
+            Buffers.Copy_From (Item, [1 => Ada.Streams.Stream_Element (Index mod 251)]);
             Buffers.Set_Tag (Item, Interfaces.Unsigned_64 (Index));
             Queue.Send_Move (Item);
          end loop;
@@ -253,7 +234,7 @@ procedure Buffers_Smoke is
       end Producer;
 
       task body Consumer is
-         Item : Buffers.Unique_Buffer (Storage'Access);
+         Item  : Buffers.Unique_Buffer (Storage'Access);
          Count : Natural := 0;
          Valid : Boolean := True;
       begin
@@ -261,7 +242,8 @@ procedure Buffers_Smoke is
             begin
                Queue.Receive_Move (Item);
             exception
-               when Channels.Channel_Closed => exit;
+               when Channels.Channel_Closed =>
+                  exit;
             end;
             Count := Count + 1;
             if Buffers.Tag (Item) /= Interfaces.Unsigned_64 (Count) then
@@ -271,7 +253,8 @@ procedure Buffers_Smoke is
          end loop;
          Completion.Consumer_Finished (Valid, Count);
       exception
-         when others => Completion.Consumer_Finished (False, Count);
+         when others =>
+            Completion.Consumer_Finished (False, Count);
       end Consumer;
       Succeeded : Boolean;
       Count     : Natural;
@@ -330,9 +313,7 @@ procedure Buffers_Smoke is
          exit when Queue.Current.Waiting_Senders = 1;
          delay 0.001;
       end loop;
-      Assert
-        (Queue.Current.Waiting_Senders = 1,
-         "sender did not block at the full buffer channel");
+      Assert (Queue.Current.Waiting_Senders = 1, "sender did not block at the full buffer channel");
       abort Blocked_Sender;
       while not Blocked_Sender'Terminated loop
          delay 0.001;
@@ -341,20 +322,19 @@ procedure Buffers_Smoke is
       Buffers.Release (Target);
       Queue.Close;
       Assert
-        (Buffers.Current (Storage) =
-           (Available => 2, Outstanding => 0),
+        (Buffers.Current (Storage) = (Available => 2, Outstanding => 0),
          "aborted buffer send leaked or duplicated a slot");
    end Run_Abort_Safety;
 
    procedure Run_IO is
-      Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 2);
-      Outgoing : Buffers.Unique_Buffer (Storage'Access);
-      Incoming : Buffers.Unique_Buffer (Storage'Access);
+      Storage     : aliased Buffers.Pool (Block_Size => 16, Capacity => 2);
+      Outgoing    : Buffers.Unique_Buffer (Storage'Access);
+      Incoming    : Buffers.Unique_Buffer (Storage'Access);
       Left, Right : Sockets.Socket_Type;
-      Received : Natural;
-      Written  : Natural;
-      File     : Files.File_Descriptor := Files.Invalid_File;
-      Path     : constant String := "/tmp/flyology-buffer-smoke.bin";
+      Received    : Natural;
+      Written     : Natural;
+      File        : Files.File_Descriptor := Files.Invalid_File;
+      Path        : constant String := "/tmp/flyology-buffer-smoke.bin";
    begin
       Buffers.Acquire (Outgoing);
       Buffers.Acquire (Incoming);
@@ -367,8 +347,7 @@ procedure Buffers_Smoke is
       Sockets.Close_Socket (Left);
       Sockets.Close_Socket (Right);
 
-      File := Files.Open
-        (Path, Mode => Files.Write_Only, Create => True, Truncate => True);
+      File := Files.Open (Path, Mode => Files.Write_Only, Create => True, Truncate => True);
       Files.Write_At (File, 0, Outgoing, Written);
       Assert (Written = 4, "buffer file write length is wrong");
       Files.Close (File);

@@ -20,7 +20,7 @@ procedure Task_Scopes_Smoke is
       function Peak return Natural;
       procedure Reset;
    private
-      Active : Natural := 0;
+      Active  : Natural := 0;
       Maximum : Natural := 0;
    end Tracker;
 
@@ -36,7 +36,8 @@ procedure Task_Scopes_Smoke is
          Active := Active - 1;
       end Leave;
 
-      function Peak return Natural is (Maximum);
+      function Peak return Natural
+      is (Maximum);
 
       procedure Reset is
       begin
@@ -65,9 +66,7 @@ procedure Task_Scopes_Smoke is
             raise Flyology.Cancellation.Operation_Cancelled;
          end if;
          delay 0.01;
-         Result :=
-           (Value => Input * 2,
-            Lightweight => Flyology.IO.Is_Lightweight_Task);
+         Result := (Value => Input * 2, Lightweight => Flyology.IO.Is_Lightweight_Task);
       exception
          when others =>
             Tracker.Leave;
@@ -76,10 +75,8 @@ procedure Task_Scopes_Smoke is
       Tracker.Leave;
    end Work;
 
-   package Lightweight_Scopes is new
-     Flyology.Task_Scopes (Integer, Work_Result, Work);
-   package Native_Executor is new
-     Flyology.Native_Executors (Integer, Work_Result, Work);
+   package Lightweight_Scopes is new Flyology.Task_Scopes (Integer, Work_Result, Work);
+   package Native_Executor is new Flyology.Native_Executors (Integer, Work_Result, Work);
 
    Copy_Should_Fail : Boolean := False;
 
@@ -87,7 +84,8 @@ procedure Task_Scopes_Smoke is
       Value : Integer := 0;
    end record;
 
-   overriding procedure Adjust (Item : in out Copy_Checked_Input) is
+   overriding
+   procedure Adjust (Item : in out Copy_Checked_Input) is
       pragma Unreferenced (Item);
    begin
       if Copy_Should_Fail then
@@ -107,38 +105,34 @@ procedure Task_Scopes_Smoke is
       Result := Input.Value;
    end Copy_Checked_Work;
 
-   package Copy_Checked_Scopes is new
-     Flyology.Task_Scopes
-       (Copy_Checked_Input, Integer, Copy_Checked_Work);
+   package Copy_Checked_Scopes is new Flyology.Task_Scopes (Copy_Checked_Input, Integer, Copy_Checked_Work);
 
    procedure Check_Input_Copy_Failure is
-      Item : Copy_Checked_Scopes.Scope (Capacity => 1, Parent => null);
+      Item   : Copy_Checked_Scopes.Scope (Capacity => 1, Parent => null);
       Handle : Copy_Checked_Scopes.Operation_Handle;
       Failed : Boolean := False;
    begin
       Copy_Checked_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
       Copy_Should_Fail := True;
       begin
-         Copy_Checked_Scopes.Spawn
-           (Item, (Ada.Finalization.Controlled with Value => 1), Handle);
+         Copy_Checked_Scopes.Spawn (Item, (Ada.Finalization.Controlled with Value => 1), Handle);
       exception
-         when Program_Error => Failed := True;
+         when Program_Error =>
+            Failed := True;
       end;
       pragma Assert (Failed);
 
-      Copy_Checked_Scopes.Spawn
-        (Item, (Ada.Finalization.Controlled with Value => 2), Handle);
+      Copy_Checked_Scopes.Spawn (Item, (Ada.Finalization.Controlled with Value => 2), Handle);
       Copy_Checked_Scopes.Join (Item);
       pragma Assert (Copy_Checked_Scopes.Result (Item, Handle) = 2);
    end Check_Input_Copy_Failure;
 
    procedure Check_Lightweight is
-      Item : Lightweight_Scopes.Scope (Capacity => 2, Parent => null);
+      Item          : Lightweight_Scopes.Scope (Capacity => 2, Parent => null);
       First, Second : Lightweight_Scopes.Operation_Handle;
    begin
       Tracker.Reset;
-      Lightweight_Scopes.Configure
-        (Item, Ada.Real_Time.Time_Last);
+      Lightweight_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
       Lightweight_Scopes.Spawn (Item, 2, First);
       Lightweight_Scopes.Spawn (Item, 3, Second);
       Lightweight_Scopes.Join (Item);
@@ -150,36 +144,32 @@ procedure Task_Scopes_Smoke is
    end Check_Lightweight;
 
    procedure Check_Native is
-      Item : aliased Native_Executor.Executor (Workers => 2, Capacity => 2);
-      First, Second, Rejected : Native_Executor.Operation_Handle (Item'Access);
+      Item                        : aliased Native_Executor.Executor (Workers => 2, Capacity => 2);
+      First, Second, Rejected     : Native_Executor.Operation_Handle (Item'Access);
       First_Result, Second_Result : Work_Result;
-      Accepted : Boolean;
+      Accepted                    : Boolean;
    begin
       Tracker.Reset;
       Native_Executor.Start (Item);
-      Native_Executor.Submit
-        (Item, 4, null, Ada.Real_Time.Time_Last, First, Accepted);
+      Native_Executor.Submit (Item, 4, null, Ada.Real_Time.Time_Last, First, Accepted);
       pragma Assert (Accepted);
       declare
          Rejected_Reuse : Boolean := False;
       begin
          begin
-            Native_Executor.Submit
-              (Item, 99, null, Ada.Real_Time.Time_Last, First, Accepted);
+            Native_Executor.Submit (Item, 99, null, Ada.Real_Time.Time_Last, First, Accepted);
          exception
-            when Native_Executor.Invalid_Handle => Rejected_Reuse := True;
+            when Native_Executor.Invalid_Handle =>
+               Rejected_Reuse := True;
          end;
          pragma Assert (Rejected_Reuse);
       end;
-      Native_Executor.Submit
-        (Item, 5, null, Ada.Real_Time.Time_Last, Second, Accepted);
+      Native_Executor.Submit (Item, 5, null, Ada.Real_Time.Time_Last, Second, Accepted);
       pragma Assert (Accepted);
-      Native_Executor.Submit
-        (Item, 6, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
+      Native_Executor.Submit (Item, 6, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
       pragma Assert (not Accepted);
       declare
-         Sample : constant Native_Executor.Executor_Statistics :=
-           Native_Executor.Statistics (Item);
+         Sample : constant Native_Executor.Executor_Statistics := Native_Executor.Statistics (Item);
       begin
          pragma Assert (Sample.Accepted_Submissions = 2);
          pragma Assert (Sample.Rejected_Submissions = 1);
@@ -193,8 +183,7 @@ procedure Task_Scopes_Smoke is
       pragma Assert (Second_Result.Value = 10);
       pragma Assert (Tracker.Peak <= 2);
       declare
-         Sample : constant Native_Executor.Executor_Statistics :=
-           Native_Executor.Statistics (Item);
+         Sample : constant Native_Executor.Executor_Statistics := Native_Executor.Statistics (Item);
       begin
          pragma Assert (Sample.Successful_Executions = 2);
          pragma Assert (Sample.Failed_Executions = 0);
@@ -205,48 +194,46 @@ procedure Task_Scopes_Smoke is
    end Check_Native;
 
    procedure Check_Native_Exception_And_Deadline is
-      Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
+      Item     : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
       Accepted : Boolean;
    begin
       Native_Executor.Start (Item);
       declare
-         Failing : Native_Executor.Operation_Handle (Item'Access);
-         Value   : Work_Result;
+         Failing     : Native_Executor.Operation_Handle (Item'Access);
+         Value       : Work_Result;
          Saw_Failure : Boolean := False;
       begin
-         Native_Executor.Submit
-           (Item, -1, null, Ada.Real_Time.Time_Last, Failing, Accepted);
+         Native_Executor.Submit (Item, -1, null, Ada.Real_Time.Time_Last, Failing, Accepted);
          pragma Assert (Accepted);
          begin
             Native_Executor.Await (Item, Failing, Value);
          exception
-            when Constraint_Error => Saw_Failure := True;
+            when Constraint_Error =>
+               Saw_Failure := True;
          end;
          pragma Assert (Saw_Failure);
       end;
       declare
-         Expired : Native_Executor.Operation_Handle (Item'Access);
-         Value   : Work_Result;
+         Expired     : Native_Executor.Operation_Handle (Item'Access);
+         Value       : Work_Result;
          Saw_Timeout : Boolean := False;
       begin
-         Native_Executor.Submit
-           (Item, 1, null, Ada.Real_Time.Clock, Expired, Accepted);
+         Native_Executor.Submit (Item, 1, null, Ada.Real_Time.Clock, Expired, Accepted);
          pragma Assert (Accepted);
          begin
             Native_Executor.Await (Item, Expired, Value);
          exception
-            when Flyology.IO.Timeout_Error => Saw_Timeout := True;
+            when Flyology.IO.Timeout_Error =>
+               Saw_Timeout := True;
          end;
          pragma Assert (Saw_Timeout);
       end;
       for Attempt in 1 .. 100 loop
-         exit when
-           Native_Executor.Statistics (Item).Outstanding_Operations = 0;
+         exit when Native_Executor.Statistics (Item).Outstanding_Operations = 0;
          delay 0.001;
       end loop;
       declare
-         Sample : constant Native_Executor.Executor_Statistics :=
-           Native_Executor.Statistics (Item);
+         Sample : constant Native_Executor.Executor_Statistics := Native_Executor.Statistics (Item);
       begin
          pragma Assert (Sample.Failed_Executions = 2);
          pragma Assert (Sample.Outstanding_Operations = 0);
@@ -254,9 +241,9 @@ procedure Task_Scopes_Smoke is
    end Check_Native_Exception_And_Deadline;
 
    procedure Check_Native_Abandon is
-      Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
-      Parent : aliased Flyology.Cancellation.Token;
-      Accepted : Boolean;
+      Item             : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
+      Parent           : aliased Flyology.Cancellation.Token;
+      Accepted         : Boolean;
       Saw_Cancellation : Boolean := False;
    begin
       Tracker.Reset;
@@ -265,15 +252,11 @@ procedure Task_Scopes_Smoke is
          Waiting : Native_Executor.Operation_Handle (Item'Access);
          Ignored : Work_Result;
       begin
-         Native_Executor.Submit
-           (Item, 0, Parent'Access, Ada.Real_Time.Time_Last,
-            Waiting, Accepted);
+         Native_Executor.Submit (Item, 0, Parent'Access, Ada.Real_Time.Time_Last, Waiting, Accepted);
          pragma Assert (Accepted);
          Parent.Request;
          begin
-            Native_Executor.Await
-              (Item, Waiting, Ignored, Parent'Access,
-               Ada.Real_Time.Time_Last);
+            Native_Executor.Await (Item, Waiting, Ignored, Parent'Access, Ada.Real_Time.Time_Last);
          exception
             when Flyology.Cancellation.Operation_Cancelled =>
                Saw_Cancellation := True;
@@ -286,8 +269,7 @@ procedure Task_Scopes_Smoke is
          Value     : Work_Result;
       begin
          for Attempt in 1 .. 100 loop
-            Native_Executor.Submit
-              (Item, 7, null, Ada.Real_Time.Time_Last, Completed, Accepted);
+            Native_Executor.Submit (Item, 7, null, Ada.Real_Time.Time_Last, Completed, Accepted);
             exit when Accepted;
             delay 0.001;
          end loop;
@@ -299,26 +281,22 @@ procedure Task_Scopes_Smoke is
       declare
          Abandoned : Native_Executor.Operation_Handle (Item'Access);
       begin
-         Native_Executor.Submit
-           (Item, 9, null, Ada.Real_Time.Time_Last, Abandoned, Accepted);
+         Native_Executor.Submit (Item, 9, null, Ada.Real_Time.Time_Last, Abandoned, Accepted);
          pragma Assert (Accepted);
          for Attempt in 1 .. 100 loop
-            exit when
-              Native_Executor.Statistics (Item).Successful_Executions = 2;
+            exit when Native_Executor.Statistics (Item).Successful_Executions = 2;
             delay 0.001;
          end loop;
-         pragma Assert
-           (Native_Executor.Statistics (Item).Successful_Executions = 2);
-         --  Finalizing a completed handle requests its executor-owned token
-         --  and immediately releases the slot for reuse.
+         pragma Assert (Native_Executor.Statistics (Item).Successful_Executions = 2);
+      --  Finalizing a completed handle requests its executor-owned token
+      --  and immediately releases the slot for reuse.
       end;
       declare
          Reused : Native_Executor.Operation_Handle (Item'Access);
          Value  : Work_Result;
       begin
          for Attempt in 1 .. 100 loop
-            Native_Executor.Submit
-              (Item, 8, null, Ada.Real_Time.Time_Last, Reused, Accepted);
+            Native_Executor.Submit (Item, 8, null, Ada.Real_Time.Time_Last, Reused, Accepted);
             exit when Accepted;
             delay 0.001;
          end loop;
@@ -327,8 +305,7 @@ procedure Task_Scopes_Smoke is
          pragma Assert (Value.Value = 16);
       end;
       declare
-         Sample : constant Native_Executor.Executor_Statistics :=
-           Native_Executor.Statistics (Item);
+         Sample : constant Native_Executor.Executor_Statistics := Native_Executor.Statistics (Item);
       begin
          pragma Assert (Sample.Abandoned_Operations = 2);
          pragma Assert (Sample.Outstanding_Operations = 0);
@@ -336,10 +313,10 @@ procedure Task_Scopes_Smoke is
    end Check_Native_Abandon;
 
    procedure Check_Native_Shutdown_With_Active_Work is
-      Item : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
-      Waiting : Native_Executor.Operation_Handle (Item'Access);
-      Accepted : Boolean;
-      Value : Work_Result;
+      Item      : aliased Native_Executor.Executor (Workers => 1, Capacity => 1);
+      Waiting   : Native_Executor.Operation_Handle (Item'Access);
+      Accepted  : Boolean;
+      Value     : Work_Result;
       Cancelled : Boolean := False;
 
       type Atomic_Boolean is new Boolean with Atomic;
@@ -380,27 +357,23 @@ procedure Task_Scopes_Smoke is
          begin
             Native_Executor.Shutdown (Target.all);
          exception
-            when others => Failed.all := True;
+            when others =>
+               Failed.all := True;
          end;
       end Shutdown_Caller;
    begin
       Native_Executor.Start (Item);
-      Native_Executor.Submit
-        (Item, 0, null, Ada.Real_Time.Time_Last, Waiting, Accepted);
+      Native_Executor.Submit (Item, 0, null, Ada.Real_Time.Time_Last, Waiting, Accepted);
       pragma Assert (Accepted);
       for Attempt in 1 .. 100 loop
-         exit when
-           Native_Executor.Statistics (Item).Running_Operations = 1;
+         exit when Native_Executor.Statistics (Item).Running_Operations = 1;
          delay 0.001;
       end loop;
-      pragma Assert
-        (Native_Executor.Statistics (Item).Running_Operations = 1);
+      pragma Assert (Native_Executor.Statistics (Item).Running_Operations = 1);
       declare
-         Gate : aliased Start_Gate;
-         First : Shutdown_Caller
-           (Item'Access, Gate'Access, First_Failed'Access);
-         Second : Shutdown_Caller
-           (Item'Access, Gate'Access, Second_Failed'Access);
+         Gate   : aliased Start_Gate;
+         First  : Shutdown_Caller (Item'Access, Gate'Access, First_Failed'Access);
+         Second : Shutdown_Caller (Item'Access, Gate'Access, Second_Failed'Access);
       begin
          null;
       end;
@@ -416,8 +389,7 @@ procedure Task_Scopes_Smoke is
       declare
          Rejected : Native_Executor.Operation_Handle (Item'Access);
       begin
-         Native_Executor.Submit
-           (Item, 1, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
+         Native_Executor.Submit (Item, 1, null, Ada.Real_Time.Time_Last, Rejected, Accepted);
          pragma Assert (not Accepted);
       end;
       declare
@@ -426,28 +398,26 @@ procedure Task_Scopes_Smoke is
          begin
             Native_Executor.Start (Item);
          exception
-            when Program_Error => Restart_Rejected := True;
+            when Program_Error =>
+               Restart_Rejected := True;
          end;
          pragma Assert (Restart_Rejected);
       end;
    end Check_Native_Shutdown_With_Active_Work;
 
    procedure Check_Failure_Cancels_Sibling is
-      Item : Lightweight_Scopes.Scope (Capacity => 2, Parent => null);
+      Item             : Lightweight_Scopes.Scope (Capacity => 2, Parent => null);
       Waiting, Failing : Lightweight_Scopes.Operation_Handle;
-      Saw_Failure : Boolean := False;
+      Saw_Failure      : Boolean := False;
       Saw_Cancellation : Boolean := False;
    begin
-      Lightweight_Scopes.Configure
-        (Item, Ada.Real_Time.Time_Last,
-         Cancel_Siblings_On_Failure => True);
+      Lightweight_Scopes.Configure (Item, Ada.Real_Time.Time_Last, Cancel_Siblings_On_Failure => True);
       Lightweight_Scopes.Spawn (Item, 0, Waiting);
       Lightweight_Scopes.Spawn (Item, -1, Failing);
       Lightweight_Scopes.Join (Item);
       begin
          declare
-            Ignored : constant Work_Result :=
-              Lightweight_Scopes.Result (Item, Failing);
+            Ignored : constant Work_Result := Lightweight_Scopes.Result (Item, Failing);
             pragma Unreferenced (Ignored);
          begin
             null;
@@ -458,8 +428,7 @@ procedure Task_Scopes_Smoke is
       end;
       begin
          declare
-            Ignored : constant Work_Result :=
-              Lightweight_Scopes.Result (Item, Waiting);
+            Ignored : constant Work_Result := Lightweight_Scopes.Result (Item, Waiting);
             pragma Unreferenced (Ignored);
          begin
             null;
@@ -475,13 +444,10 @@ procedure Task_Scopes_Smoke is
       Parent : aliased Flyology.Cancellation.Token;
    begin
       declare
-         Item : Lightweight_Scopes.Scope
-           (Capacity => 2, Parent => Parent'Access);
+         Item             : Lightweight_Scopes.Scope (Capacity => 2, Parent => Parent'Access);
          Waiting, Failing : Lightweight_Scopes.Operation_Handle;
       begin
-         Lightweight_Scopes.Configure
-           (Item, Ada.Real_Time.Time_Last,
-            Cancel_Siblings_On_Failure => True);
+         Lightweight_Scopes.Configure (Item, Ada.Real_Time.Time_Last, Cancel_Siblings_On_Failure => True);
          Lightweight_Scopes.Spawn (Item, 0, Waiting);
          Lightweight_Scopes.Spawn (Item, -1, Failing);
          Lightweight_Scopes.Join (Item);
@@ -489,47 +455,44 @@ procedure Task_Scopes_Smoke is
       pragma Assert (not Parent.Requested);
 
       declare
-         Item : Lightweight_Scopes.Scope
-           (Capacity => 1, Parent => Parent'Access);
+         Item    : Lightweight_Scopes.Scope (Capacity => 1, Parent => Parent'Access);
          Waiting : Lightweight_Scopes.Operation_Handle;
       begin
-         Lightweight_Scopes.Configure
-           (Item, Ada.Real_Time.Time_Last);
+         Lightweight_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
          Lightweight_Scopes.Spawn (Item, 0, Waiting);
-         --  Scope finalization cancels and joins Waiting without requesting
-         --  the parent token.
+      --  Scope finalization cancels and joins Waiting without requesting
+      --  the parent token.
       end;
       pragma Assert (not Parent.Requested);
    end Check_Child_Cancellation_Is_Downward;
 
    procedure Check_Result_Requires_Join is
-      Item : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
+      Item   : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
       Handle : Lightweight_Scopes.Operation_Handle;
       Raised : Boolean := False;
    begin
-      Lightweight_Scopes.Configure
-        (Item, Ada.Real_Time.Time_Last);
+      Lightweight_Scopes.Configure (Item, Ada.Real_Time.Time_Last);
       Lightweight_Scopes.Spawn (Item, 2, Handle);
       begin
          declare
-            Ignored : constant Work_Result :=
-              Lightweight_Scopes.Result (Item, Handle);
+            Ignored : constant Work_Result := Lightweight_Scopes.Result (Item, Handle);
             pragma Unreferenced (Ignored);
          begin
             null;
          end;
       exception
-         when Program_Error => Raised := True;
+         when Program_Error =>
+            Raised := True;
       end;
       pragma Assert (Raised);
       Lightweight_Scopes.Join (Item);
    end Check_Result_Requires_Join;
 
    procedure Check_Handle_Scope_Identity is
-      First  : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
-      Second : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
-      Handle : Lightweight_Scopes.Operation_Handle;
-      Other  : Lightweight_Scopes.Operation_Handle;
+      First    : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
+      Second   : Lightweight_Scopes.Scope (Capacity => 1, Parent => null);
+      Handle   : Lightweight_Scopes.Operation_Handle;
+      Other    : Lightweight_Scopes.Operation_Handle;
       Rejected : Boolean := False;
    begin
       Lightweight_Scopes.Configure (First, Ada.Real_Time.Time_Last);
@@ -540,14 +503,14 @@ procedure Task_Scopes_Smoke is
       Lightweight_Scopes.Join (Second);
       begin
          declare
-            Ignored : constant Work_Result :=
-              Lightweight_Scopes.Result (Second, Handle);
+            Ignored : constant Work_Result := Lightweight_Scopes.Result (Second, Handle);
             pragma Unreferenced (Ignored);
          begin
             null;
          end;
       exception
-         when Lightweight_Scopes.Invalid_Handle => Rejected := True;
+         when Lightweight_Scopes.Invalid_Handle =>
+            Rejected := True;
       end;
       pragma Assert (Rejected);
       pragma Assert (Lightweight_Scopes.Result (First, Handle).Value = 4);
@@ -555,8 +518,8 @@ procedure Task_Scopes_Smoke is
    end Check_Handle_Scope_Identity;
 
    procedure Check_Sequential_Scope_Identity is
-      Stale : Lightweight_Scopes.Operation_Handle;
-      Fresh : Lightweight_Scopes.Operation_Handle;
+      Stale    : Lightweight_Scopes.Operation_Handle;
+      Fresh    : Lightweight_Scopes.Operation_Handle;
       Rejected : Boolean := False;
    begin
       declare
@@ -574,14 +537,14 @@ procedure Task_Scopes_Smoke is
          Lightweight_Scopes.Join (Item);
          begin
             declare
-               Ignored : constant Work_Result :=
-                 Lightweight_Scopes.Result (Item, Stale);
+               Ignored : constant Work_Result := Lightweight_Scopes.Result (Item, Stale);
                pragma Unreferenced (Ignored);
             begin
                null;
             end;
          exception
-            when Lightweight_Scopes.Invalid_Handle => Rejected := True;
+            when Lightweight_Scopes.Invalid_Handle =>
+               Rejected := True;
          end;
          pragma Assert (Lightweight_Scopes.Result (Item, Fresh).Value = 6);
       end;

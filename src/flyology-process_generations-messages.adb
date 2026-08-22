@@ -5,53 +5,44 @@ is
    use type Protocol.Octet;
 
    procedure Write_U64
-     (Payload : in out Protocol.Payload_Buffer;
-      Base    : Protocol.Payload_Index;
-      Value   : Interfaces.Unsigned_64)
+     (Payload : in out Protocol.Payload_Buffer; Base : Protocol.Payload_Index; Value : Interfaces.Unsigned_64)
    with Pre => Base + 8 <= Protocol.Maximum_Payload;
 
    procedure Write_U64
-     (Payload : in out Protocol.Payload_Buffer;
-      Base    : Protocol.Payload_Index;
-      Value   : Interfaces.Unsigned_64)
+     (Payload : in out Protocol.Payload_Buffer; Base : Protocol.Payload_Index; Value : Interfaces.Unsigned_64)
    is
    begin
       for Step in 0 .. 7 loop
-         Payload (Base + Step) := Protocol.Octet
-           (Interfaces.Shift_Right (Value, (7 - Step) * 8) and 16#FF#);
+         Payload (Base + Step) := Protocol.Octet (Interfaces.Shift_Right (Value, (7 - Step) * 8) and 16#FF#);
       end loop;
    end Write_U64;
 
    function Read_U64
-     (Payload : Protocol.Payload_Buffer;
-      Base    : Protocol.Payload_Index) return Interfaces.Unsigned_64
+     (Payload : Protocol.Payload_Buffer; Base : Protocol.Payload_Index) return Interfaces.Unsigned_64
    with Pre => Base + 8 <= Protocol.Maximum_Payload;
 
    function Read_U64
-     (Payload : Protocol.Payload_Buffer;
-      Base    : Protocol.Payload_Index) return Interfaces.Unsigned_64
+     (Payload : Protocol.Payload_Buffer; Base : Protocol.Payload_Index) return Interfaces.Unsigned_64
    is
       Value : Interfaces.Unsigned_64 := 0;
    begin
       for Step in 0 .. 7 loop
-         Value := Interfaces.Shift_Left (Value, 8) or
-           Interfaces.Unsigned_64 (Payload (Base + Step));
+         Value := Interfaces.Shift_Left (Value, 8) or Interfaces.Unsigned_64 (Payload (Base + Step));
       end loop;
       return Value;
    end Read_U64;
 
-   function Role_Code (Role : Candidate_Role) return Protocol.Octet is
-     (Protocol.Octet (Candidate_Role'Pos (Role) + 1));
+   function Role_Code (Role : Candidate_Role) return Protocol.Octet
+   is (Protocol.Octet (Candidate_Role'Pos (Role) + 1));
 
-   function Valid_Role (Code : Protocol.Octet) return Boolean is
-     (Code >= 1 and then
-        Natural (Code) <= Candidate_Role'Pos (Candidate_Role'Last) + 1);
+   function Valid_Role (Code : Protocol.Octet) return Boolean
+   is (Code >= 1 and then Natural (Code) <= Candidate_Role'Pos (Candidate_Role'Last) + 1);
 
    function Decode_Role (Code : Protocol.Octet) return Candidate_Role
    with Pre => Valid_Role (Code);
 
-   function Decode_Role (Code : Protocol.Octet) return Candidate_Role is
-     (Candidate_Role'Val (Natural (Code) - 1));
+   function Decode_Role (Code : Protocol.Octet) return Candidate_Role
+   is (Candidate_Role'Val (Natural (Code) - 1));
 
    procedure Reset (Item : out Provisioning_Data) is
    begin
@@ -63,10 +54,7 @@ is
          Role                  => Canary_Safe);
    end Reset;
 
-   procedure Encode_Provision
-     (Item    : Provisioning_Data;
-      Payload : out Protocol.Payload_Buffer)
-   is
+   procedure Encode_Provision (Item : Provisioning_Data; Payload : out Protocol.Payload_Buffer) is
    begin
       Payload := (others => 0);
       Write_U64 (Payload, 0, Item.Application_Signature);
@@ -102,9 +90,7 @@ is
       Application := Read_U64 (Payload, 0);
       Schema := Read_U64 (Payload, 8);
       Epoch := Read_U64 (Payload, 16);
-      if Application = 0 or else Schema = 0 or else Epoch = 0 or else
-        not Valid_Role (Payload (56))
-      then
+      if Application = 0 or else Schema = 0 or else Epoch = 0 or else not Valid_Role (Payload (56)) then
          Result := Invalid_Value;
          return;
       end if;
@@ -118,10 +104,7 @@ is
       Result := Decoded;
    end Decode_Provision;
 
-   procedure Encode_Topology_Proof
-     (Item    : Topology_Proof;
-      Payload : out Protocol.Payload_Buffer)
-   is
+   procedure Encode_Topology_Proof (Item : Topology_Proof; Payload : out Protocol.Payload_Buffer) is
    begin
       Payload := (others => 0);
       Write_U64 (Payload, 0, Item.Epoch);
@@ -155,19 +138,13 @@ is
       Result := Decoded;
    end Decode_Topology_Proof;
 
-   function Compensation_Code
-     (Item : Compensation_Result) return Protocol.Octet is
-     (Protocol.Octet (Compensation_Result'Pos (Item) + 1));
+   function Compensation_Code (Item : Compensation_Result) return Protocol.Octet
+   is (Protocol.Octet (Compensation_Result'Pos (Item) + 1));
 
-   function Valid_Compensation (Code : Protocol.Octet) return Boolean is
-     (Code >= 1 and then
-        Natural (Code) <=
-          Compensation_Result'Pos (Compensation_Result'Last) + 1);
+   function Valid_Compensation (Code : Protocol.Octet) return Boolean
+   is (Code >= 1 and then Natural (Code) <= Compensation_Result'Pos (Compensation_Result'Last) + 1);
 
-   procedure Encode_Compensation
-     (Item    : Compensation_Result;
-      Payload : out Protocol.Payload_Buffer)
-   is
+   procedure Encode_Compensation (Item : Compensation_Result; Payload : out Protocol.Payload_Buffer) is
    begin
       Payload := (others => 0);
       Payload (0) := Compensation_Code (Item);
@@ -177,8 +154,7 @@ is
      (Payload : Protocol.Payload_Buffer;
       Length  : Protocol.Payload_Length;
       Item    : out Compensation_Result;
-      Result  : out Decode_Result)
-   is
+      Result  : out Decode_Result) is
    begin
       Item := Not_Required;
       if Length /= Compensation_Length then

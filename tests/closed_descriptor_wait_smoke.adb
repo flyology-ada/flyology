@@ -12,6 +12,7 @@ with Flyology.IO.Timers;
 --  poller reported that EBADF as a cancellation failure the scheduler would
 --  escalate an ordinary close race into a whole-process abort, so both the
 --  deadline path and the multi-source wakeup path are exercised here.
+
 procedure Closed_Descriptor_Wait_Smoke is
    use Ada.Streams;
    use type Ada.Real_Time.Time;
@@ -58,7 +59,8 @@ procedure Closed_Descriptor_Wait_Smoke is
          null;
       end Wait_Deadline_Result;
 
-      function Deadline_Passed return Boolean is (Deadline_OK);
+      function Deadline_Passed return Boolean
+      is (Deadline_OK);
 
       procedure Fanout_Armed is
       begin
@@ -81,15 +83,16 @@ procedure Closed_Descriptor_Wait_Smoke is
          null;
       end Wait_Fanout_Result;
 
-      function Fanout_Index return Natural is (Fanout_Value);
+      function Fanout_Index return Natural
+      is (Fanout_Value);
    end Handshake;
 
-   Watched     : Flyology.IO.Sockets.Socket_Type;
+   Watched      : Flyology.IO.Sockets.Socket_Type;
    Watched_Peer : Flyology.IO.Sockets.Socket_Type;
-   Ready_Side  : Flyology.IO.Sockets.Socket_Type;
-   Ready_Peer  : Flyology.IO.Sockets.Socket_Type;
-   Closed_Side : Flyology.IO.Sockets.Socket_Type;
-   Closed_Peer : Flyology.IO.Sockets.Socket_Type;
+   Ready_Side   : Flyology.IO.Sockets.Socket_Type;
+   Ready_Peer   : Flyology.IO.Sockets.Socket_Type;
+   Closed_Side  : Flyology.IO.Sockets.Socket_Type;
+   Closed_Peer  : Flyology.IO.Sockets.Socket_Type;
 
    --  A descriptor closed while its readiness interest is armed must expire
    --  through the ordinary deadline path instead of aborting the process.
@@ -109,13 +112,10 @@ procedure Closed_Descriptor_Wait_Smoke is
          end Closer;
 
          task body Waiter is
-            FD : constant Flyology.IO.Descriptor :=
-              Flyology.IO.Sockets.Native_Descriptor (Watched);
+            FD : constant Flyology.IO.Descriptor := Flyology.IO.Sockets.Native_Descriptor (Watched);
          begin
             Handshake.Deadline_Armed;
-            Handshake.Deadline_Result
-              (not Flyology.IO.Wait
-                 (FD, Flyology.IO.For_Read, Timeout => 0.400));
+            Handshake.Deadline_Result (not Flyology.IO.Wait (FD, Flyology.IO.For_Read, Timeout => 0.400));
          exception
             when others =>
                --  Device_Error is an acceptable outcome for a descriptor the
@@ -136,12 +136,10 @@ procedure Closed_Descriptor_Wait_Smoke is
       Elapsed := Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started);
       Flyology.IO.Sockets.Close_Socket (Watched_Peer);
       if not Handshake.Deadline_Passed then
-         raise Program_Error with
-           "wait on a closed descriptor did not expire";
+         raise Program_Error with "wait on a closed descriptor did not expire";
       end if;
       if Elapsed > 5.0 then
-         raise Program_Error with
-           "wait on a closed descriptor did not respect its deadline";
+         raise Program_Error with "wait on a closed descriptor did not respect its deadline";
       end if;
    end Timeout_After_Close;
 
@@ -165,16 +163,12 @@ procedure Closed_Descriptor_Wait_Smoke is
 
          task body Waiter is
             Requests : constant Flyology.IO.Wait_Request_Array :=
-              [(FD        =>
-                  Flyology.IO.Sockets.Native_Descriptor (Ready_Side),
-                Condition => Flyology.IO.For_Read),
-               (FD        =>
-                  Flyology.IO.Sockets.Native_Descriptor (Closed_Side),
+              [(FD => Flyology.IO.Sockets.Native_Descriptor (Ready_Side), Condition => Flyology.IO.For_Read),
+               (FD        => Flyology.IO.Sockets.Native_Descriptor (Closed_Side),
                 Condition => Flyology.IO.For_Read)];
          begin
             Handshake.Fanout_Armed;
-            Handshake.Fanout_Result
-              (Flyology.IO.Wait_Any (Requests, Timeout => 2.0));
+            Handshake.Fanout_Result (Flyology.IO.Wait_Any (Requests, Timeout => 2.0));
          exception
             when others =>
                Handshake.Fanout_Result (0);
@@ -185,20 +179,17 @@ procedure Closed_Descriptor_Wait_Smoke is
             Handshake.Wait_Until_Fanout_Armed;
             Flyology.IO.Timers.Sleep_For (0.050);
             Flyology.IO.Sockets.Close_Socket (Closed_Side);
-            Flyology.IO.Sockets.Send_All
-              (Ready_Peer, [1 => 77], Timeout => 1.0);
+            Flyology.IO.Sockets.Send_All (Ready_Peer, [1 => 77], Timeout => 1.0);
          end Driver;
       begin
          Handshake.Wait_Fanout_Result;
       end;
       if Handshake.Fanout_Index /= 1 then
-         raise Program_Error with
-           "multi-source wait did not report the ready descriptor";
+         raise Program_Error with "multi-source wait did not report the ready descriptor";
       end if;
       Flyology.IO.Sockets.Receive (Ready_Side, Probe, Last, Timeout => 1.0);
       if Last /= Probe'Last or else Probe (1) /= 77 then
-         raise Program_Error with
-           "multi-source wait reported readiness without data";
+         raise Program_Error with "multi-source wait reported readiness without data";
       end if;
       Flyology.IO.Sockets.Close_Socket (Ready_Side);
       Flyology.IO.Sockets.Close_Socket (Ready_Peer);

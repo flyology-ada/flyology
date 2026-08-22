@@ -12,7 +12,6 @@ private package Flyology_NUMA.Uniform is
    --  @param Memory Total memory to attribute to the node, or No_Bytes when
    --     the caller cannot establish it.
    --  @return A single-node description of this host.
-   function Single_Domain_Facts
-     (Memory : Byte_Query := No_Bytes) return Machine_Facts;
+   function Single_Domain_Facts (Memory : Byte_Query := No_Bytes) return Machine_Facts;
 
 end Flyology_NUMA.Uniform;

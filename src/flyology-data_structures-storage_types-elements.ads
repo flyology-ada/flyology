@@ -14,18 +14,14 @@ with Interfaces;
 --  @formal Observe_Value Observe published storage without an intermediate
 --     representation copy
 --  @formal Direct_Constructor Optional direct unpublished-storage constructor
+
 generic
-   with package Representation is new
-     Flyology.Data_Structures.Storage_Types.Immutable (<>);
+   with package Representation is new Flyology.Data_Structures.Storage_Types.Immutable (<>);
    type Source_Type is private;
    type Observed_Type is private;
-   with function Create_Value
-     (Item : Source_Type) return Representation.Value;
-   with function Observe_Value
-     (Item : Representation.Const_Ref) return Observed_Type;
-   Direct_Constructor : access procedure
-     (Item : in out Representation.Builder;
-      Data : Source_Type) := null;
+   with function Create_Value (Item : Source_Type) return Representation.Value;
+   with function Observe_Value (Item : Representation.Const_Ref) return Observed_Type;
+   Direct_Constructor : access procedure (Item : in out Representation.Builder; Data : Source_Type) := null;
 package Flyology.Data_Structures.Storage_Types.Elements is
    pragma Preelaborate;
 
@@ -68,9 +64,7 @@ package Flyology.Data_Structures.Storage_Types.Elements is
    --  @param Item Active unpublished builder
    --  @param Data Application value to construct
    --  @exclude
-   procedure Construct
-     (Item : in out Builder;
-      Data : Source);
+   procedure Construct (Item : in out Builder; Data : Source);
    pragma Inline_Always (Construct);
 
    --  Observe published bytes without first copying their representation.
@@ -83,70 +77,56 @@ package Flyology.Data_Structures.Storage_Types.Elements is
    --  @param Item Independent immutable value
    --  @param Target Validated unpublished element storage
    --  @exclude
-   procedure Copy_To
-     (Item : Value; Target : Immutable_Storage_View)
-     renames Representation.Copy_To;
+   procedure Copy_To (Item : Value; Target : Immutable_Storage_View) renames Representation.Copy_To;
 
    --  Copy validated published storage into validated unpublished storage.
    --  @param Source Validated published element storage
    --  @param Target Validated unpublished element storage
    --  @exclude
-   procedure Copy
-     (Source : Immutable_Storage_View;
-      Target : Immutable_Storage_View)
-     renames Representation.Copy;
+   procedure Copy (Source : Immutable_Storage_View; Target : Immutable_Storage_View)
+   renames Representation.Copy;
 
    --  Copy validated published bytes into an independent Value.
    --  @param Source Validated published element storage
    --  @return Independent immutable representation
    --  @exclude
-   function Copy_From (Source : Immutable_Storage_View) return Value
-     renames Representation.Copy_From;
+   function Copy_From (Source : Immutable_Storage_View) return Value renames Representation.Copy_From;
 
    --  Bind a scoped read-only reference.
    --  @param Item Reference initialized on success
    --  @param Source Validated published element storage
    --  @exclude
-   procedure Bind
-     (Item : out Const_Ref; Source : Immutable_Storage_View)
-     renames Representation.Bind;
+   procedure Bind (Item : out Const_Ref; Source : Immutable_Storage_View) renames Representation.Bind;
 
    --  Bind a scoped unpublished builder.
    --  @param Item Builder initialized on success
    --  @param Target Validated unpublished element storage
    --  @exclude
-   procedure Bind
-     (Item : out Builder; Target : Immutable_Storage_View)
-     renames Representation.Bind;
+   procedure Bind (Item : out Builder; Target : Immutable_Storage_View) renames Representation.Bind;
 
    --  Hash independent immutable bytes.
    --  @param Item Immutable representation
    --  @return Stable 64-bit FNV-1a hash
    --  @exclude
-   function Hash (Item : Value) return Interfaces.Unsigned_64
-     renames Representation.Hash;
+   function Hash (Item : Value) return Interfaces.Unsigned_64 renames Representation.Hash;
 
    --  Hash published immutable bytes in place.
    --  @param Item Active published reference
    --  @return Stable 64-bit FNV-1a hash
    --  @exclude
-   function Hash (Item : Const_Ref) return Interfaces.Unsigned_64
-     renames Representation.Hash;
+   function Hash (Item : Const_Ref) return Interfaces.Unsigned_64 renames Representation.Hash;
 
    --  Compare independent and published immutable bytes.
    --  @param Left Independent representation
    --  @param Right Active published reference
    --  @return True when every representation byte matches
    --  @exclude
-   function Equivalent (Left : Value; Right : Const_Ref) return Boolean
-     renames Representation.Equivalent;
+   function Equivalent (Left : Value; Right : Const_Ref) return Boolean renames Representation.Equivalent;
 
    --  Compare two published immutable representations.
    --  @param Left First active reference
    --  @param Right Second active reference
    --  @return True when every representation byte matches
    --  @exclude
-   function Equivalent
-     (Left : Const_Ref; Right : Const_Ref) return Boolean
-     renames Representation.Equivalent;
+   function Equivalent (Left : Const_Ref; Right : Const_Ref) return Boolean renames Representation.Equivalent;
 end Flyology.Data_Structures.Storage_Types.Elements;

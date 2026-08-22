@@ -3,6 +3,7 @@ with Flyology.Operations;
 
 --  Maintains a bounded set of directory registrations below one root.
 --  Events describe the complete tree rather than one internal registration.
+
 package Flyology.IO.File_Watches.Recursive is
 
    --  Tree-wide notification returned after registration reconciliation.
@@ -14,7 +15,7 @@ package Flyology.IO.File_Watches.Recursive is
    --  @field Coverage_Complete Whether the last scan covered every real
    --     directory below the root and registered each one
    type Recursive_Event is record
-      Changes              : Change_Set := No_Changes;
+      Changes               : Change_Set := No_Changes;
       Registrations_Changed : Boolean := False;
       Directory_Count       : Natural := 0;
       Coverage_Complete     : Boolean := False;
@@ -23,15 +24,13 @@ package Flyology.IO.File_Watches.Recursive is
    --  Controlled owner of one recursive directory watch. Capacity bounds the
    --  root plus all real subdirectories. The default is 64. Operations are
    --  intentionally unsynchronized and can perform directory metadata work.
-   type Recursive_Watcher
-     (Capacity : Positive := Default_Capacity) is
+   type Recursive_Watcher (Capacity : Positive := Default_Capacity) is
      new Ada.Finalization.Limited_Controlled with private;
 
    --  Opaque storage for the recursively composed child operation.
    --  @exclude
    --  @field Owner Completion set shared with the child operation
-   type Next_Operation_State
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+   type Next_Operation_State (Owner : not null access Flyology.Operations.Completion_Set'Class) is
      limited private;
 
    --  Scoped recursive wait. Its terminal result includes both the raw
@@ -40,9 +39,9 @@ package Flyology.IO.File_Watches.Recursive is
    --  required by Ada for a child operation constrained by the same set.
    --  @field Owner Completion set that owns parent and child slots
    --  @field State Opaque build-in-place child storage
-   type Next_Operation
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
-     new Flyology.Operations.Operation (Owner) with record
+   type Next_Operation (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Owner)
+   with record
       State : Next_Operation_State (Owner);
    end record;
 
@@ -66,9 +65,9 @@ package Flyology.IO.File_Watches.Recursive is
      (Item      : not null access Recursive_Watcher'Class;
       Timeout   : Duration := Infinite;
       Operation : in out Next_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal recursive operation. A readiness timeout is a
    --  successful operation with Timed_Out. Reconciliation failure remains
@@ -80,9 +79,7 @@ package Flyology.IO.File_Watches.Recursive is
    --     failed
    --  @exception Operation_Cancelled Operation was cancelled
    procedure Finish
-     (Operation : in out Next_Operation;
-      Result    : out Recursive_Event;
-      Outcome   : out Wait_Outcome);
+     (Operation : in out Next_Operation; Result : out Recursive_Event; Outcome : out Wait_Outcome);
 
    --  Discover Root and register every real directory below it. The final
    --  symbolic-link component of Root is followed. Symbolic links found below
@@ -106,9 +103,7 @@ package Flyology.IO.File_Watches.Recursive is
    --  @param Result Reconciliation outcome
    --  @exception Device_Error Item is closed or discovery, registration, or
    --     cleanup fails
-   procedure Refresh
-     (Item   : in out Recursive_Watcher;
-      Result : out Recursive_Event);
+   procedure Refresh (Item : in out Recursive_Watcher; Result : out Recursive_Event);
 
    --  Wait for one tree hint, reconcile the directory registrations, and
    --  return a tree-wide event. Timeout and Interrupts apply to the readiness
@@ -153,8 +148,7 @@ package Flyology.IO.File_Watches.Recursive is
    --  and registered each one.
    --  @param Item Recursive watcher to inspect
    --  @return True only while Item is open with complete coverage
-   function Coverage_Is_Complete
-     (Item : Recursive_Watcher) return Boolean;
+   function Coverage_Is_Complete (Item : Recursive_Watcher) return Boolean;
 
 private
    type String_Access is access String;
@@ -165,14 +159,11 @@ private
    end record;
    type Directory_Array is array (Positive range <>) of Directory_Record;
 
-   type Recursive_Watcher_Class_Access is
-     access all Recursive_Watcher'Class;
-   type Recursive_Failure is
-     (No_Failure, State_Failure, Child_Failure, Reconcile_Failure);
+   type Recursive_Watcher_Class_Access is access all Recursive_Watcher'Class;
+   type Recursive_Failure is (No_Failure, State_Failure, Child_Failure, Reconcile_Failure);
 
-   type Recursive_Watcher
-     (Capacity : Positive := Default_Capacity) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Recursive_Watcher (Capacity : Positive := Default_Capacity) is new Ada.Finalization.Limited_Controlled
+   with record
       Source            : aliased Watcher (Capacity => Capacity);
       Root              : String_Access := null;
       Directories       : Directory_Array (1 .. Capacity);
@@ -181,9 +172,8 @@ private
       Scoped_Borrowed   : Boolean := False;
    end record;
 
-   type Next_Operation_State
-     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
-     limited record
+   type Next_Operation_State (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+   limited record
       Item        : Recursive_Watcher_Class_Access := null;
       Child       : File_Watches.Next_Operation (Owner);
       Result      : Recursive_Event;
@@ -197,16 +187,16 @@ private
    --  @exclude
    --  @param Item Recursive operation to advance
    --  @param Event Driver event that caused the step
-   overriding procedure Drive
-     (Item  : in out Next_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Next_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Recursive operation to cancel and drain
-   overriding procedure Request_Cancellation
-     (Item : in out Next_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Next_Operation);
 
    --  Close Item without propagating cleanup failures.
    --  @param Item Recursive watcher being finalized
-   overriding procedure Finalize (Item : in out Recursive_Watcher);
+   overriding
+   procedure Finalize (Item : in out Recursive_Watcher);
 end Flyology.IO.File_Watches.Recursive;

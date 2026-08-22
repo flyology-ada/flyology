@@ -8,6 +8,7 @@ with Interfaces;
 --  reports its event loop as almost entirely idle, a group whose task holds
 --  the loop in CPU code reports almost no idle time, and the reported idle
 --  time never exceeds the reported uptime or moves backwards.
+
 procedure Observability_Utilization_Smoke is
    package Observation renames Flyology.Observability;
    package Groups renames Flyology.Execution_Groups;
@@ -31,13 +32,10 @@ procedure Observability_Utilization_Smoke is
       return Natural ((Item.Idle_Nanoseconds * 100) / Item.Uptime_Nanoseconds);
    end Idle_Percent;
 
-   procedure Check_Consistent
-     (Item  : Observation.Group_Snapshot;
-      Label : String) is
+   procedure Check_Consistent (Item : Observation.Group_Snapshot; Label : String) is
    begin
       if Item.Idle_Nanoseconds > Item.Uptime_Nanoseconds then
-         raise Program_Error with
-           Label & " reports more idle time than uptime";
+         raise Program_Error with Label & " reports more idle time than uptime";
       end if;
    end Check_Consistent;
 
@@ -60,8 +58,7 @@ procedure Observability_Utilization_Smoke is
       --  A cooperative loop that never suspends keeps its event loop out of
       --  the poller for the whole window, which is what makes the busy case
       --  distinguishable from the sleeping one.
-      Deadline : constant Real_Time.Time :=
-        Real_Time.Clock + Real_Time.To_Time_Span (Window);
+      Deadline : constant Real_Time.Time := Real_Time.Clock + Real_Time.To_Time_Span (Window);
       Sink     : Interfaces.Unsigned_64 := 0;
    begin
       while Real_Time.Clock < Deadline loop
@@ -74,9 +71,9 @@ procedure Observability_Utilization_Smoke is
       end if;
    end Spinner;
 
-   Idle_First   : Observation.Group_Snapshot;
-   Idle_Second  : Observation.Group_Snapshot;
-   Busy_Sample  : Observation.Group_Snapshot;
+   Idle_First  : Observation.Group_Snapshot;
+   Idle_Second : Observation.Group_Snapshot;
+   Busy_Sample : Observation.Group_Snapshot;
 begin
    --  Sample while both tasks are still inside their window.
    delay Window / 2;
@@ -98,14 +95,12 @@ begin
       raise Program_Error with "sleeping group recorded no poller wait";
    end if;
    if Idle_Percent (Idle_First) < 80 then
-      raise Program_Error with
-        "sleeping group reports only"
-        & Natural'Image (Idle_Percent (Idle_First)) & "% idle";
+      raise Program_Error
+        with "sleeping group reports only" & Natural'Image (Idle_Percent (Idle_First)) & "% idle";
    end if;
    if Idle_Percent (Busy_Sample) > 20 then
-      raise Program_Error with
-        "spinning group reports"
-        & Natural'Image (Idle_Percent (Busy_Sample)) & "% idle";
+      raise Program_Error
+        with "spinning group reports" & Natural'Image (Idle_Percent (Busy_Sample)) & "% idle";
    end if;
 
    --  An in-progress poller wait is included in the reported idle time, so a

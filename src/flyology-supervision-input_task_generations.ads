@@ -12,6 +12,7 @@ with Ada.Task_Identification;
 --  @formal Task_Identity Return actual task identity, inferred by name when
 --  omitted
 --  @formal Abort_Task Issue Ada abort, inferred by name when omitted
+
 generic
    type Input_Type is private;
    type Application_Context (<>) is limited private;
@@ -24,11 +25,11 @@ generic
    --  task activation propagates from Run for the enclosing controller to
    --  classify. A directly visible profile-conformant Create is inferred by
    --  name when the generic actual is omitted.
-   with function Create
-     (Context : not null access Application_Context;
-      Input   : not null access constant Input_Type;
-      Control : not null access Generation_Control) return Generation_Task
-      is <>;
+   with
+     function Create
+       (Context : not null access Application_Context;
+        Input   : not null access constant Input_Type;
+        Control : not null access Generation_Control) return Generation_Task is <>;
 
    --  Invoke task-specific entries or package operations immediately after
    --  activation. Initialize runs outside supervisor locks, must not retain an
@@ -36,16 +37,15 @@ generic
    --  remain observable.
    --  @param Subject Newly activated application task object
    --  @param Control Borrowed generation control
-   with procedure Initialize
-     (Subject : in out Generation_Task;
-      Control : aliased in out Generation_Control) is null;
+   with
+     procedure Initialize (Subject : in out Generation_Task; Control : aliased in out Generation_Control)
+     is null;
 
    --  Return Subject'Identity without retaining Subject or performing a
    --  potentially blocking operation. A directly visible profile-conformant
    --  Task_Identity is inferred by name when omitted.
-   with function Task_Identity
-     (Subject : in out Generation_Task)
-      return Ada.Task_Identification.Task_Id is <>;
+   with
+     function Task_Identity (Subject : in out Generation_Task) return Ada.Task_Identification.Task_Id is <>;
 
    --  Perform "abort Subject" without retaining Subject. The adapter must
    --  return promptly; Ada may still defer the task's response to abort. A
@@ -53,7 +53,8 @@ generic
    --  omitted.
    with procedure Abort_Task (Subject : in out Generation_Task) is <>;
 
-package Flyology.Supervision.Input_Task_Generations is
+package Flyology.Supervision.Input_Task_Generations
+is
 
    --  Copy Input, construct the application-defined task, and return only
    --  after its termination and task-body finalization. Flyology.Task_Results

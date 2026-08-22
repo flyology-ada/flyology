@@ -26,16 +26,13 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Both the call number and the ioctl requests are computed by macros
    --  and differ between architectures, so the native unit publishes them.
    Native_Open_Call : constant C.long;
-   pragma Import
-     (C, Native_Open_Call, "flyology_bench_perf_event_open_call");
+   pragma Import (C, Native_Open_Call, "flyology_bench_perf_event_open_call");
 
    Native_Enable_Request : constant C.unsigned_long;
-   pragma Import
-     (C, Native_Enable_Request, "flyology_bench_perf_enable_request");
+   pragma Import (C, Native_Enable_Request, "flyology_bench_perf_enable_request");
 
    Native_Disable_Request : constant C.unsigned_long;
-   pragma Import
-     (C, Native_Disable_Request, "flyology_bench_perf_disable_request");
+   pragma Import (C, Native_Disable_Request, "flyology_bench_perf_disable_request");
 
    Native_Group_Flag : constant C.unsigned_long;
    pragma Import (C, Native_Group_Flag, "flyology_bench_perf_group_flag");
@@ -45,10 +42,14 @@ package body Flyology_Bench.Internal_Probes.Counters is
    Type_Hardware : constant := 0;
 
    Config_For : constant array (Counter_Index) of Interfaces.Unsigned_64 :=
-     [Cycles_Index        => 0,   --  PERF_COUNT_HW_CPU_CYCLES
-      Instructions_Index  => 1,   --  PERF_COUNT_HW_INSTRUCTIONS
-      Cache_Misses_Index  => 3,   --  PERF_COUNT_HW_CACHE_MISSES
-      Branches_Index      => 4,   --  PERF_COUNT_HW_BRANCH_INSTRUCTIONS
+     [Cycles_Index        => 0,
+      --  PERF_COUNT_HW_CPU_CYCLES
+      Instructions_Index  => 1,
+      --  PERF_COUNT_HW_INSTRUCTIONS
+      Cache_Misses_Index  => 3,
+      --  PERF_COUNT_HW_CACHE_MISSES
+      Branches_Index      => 4,
+      --  PERF_COUNT_HW_BRANCH_INSTRUCTIONS
       Branch_Misses_Index => 5];  --  PERF_COUNT_HW_BRANCH_MISSES
 
    Format_Total_Time_Enabled : constant := 16#1#;
@@ -57,23 +58,21 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Bit positions within the attribute flag word. The kernel declares
    --  them as bit fields of a __u64, which both supported architectures
    --  fill from the least significant end.
-   Disabled_Flag : constant := 16#1#;         --  bit 0
-   Inherit_Flag : constant := 16#2#;          --  bit 1
-   Exclude_Kernel_Flag : constant := 16#20#;  --  bit 5
+   Disabled_Flag           : constant := 16#1#;         --  bit 0
+   Inherit_Flag            : constant := 16#2#;          --  bit 1
+   Exclude_Kernel_Flag     : constant := 16#20#;  --  bit 5
    Exclude_Hypervisor_Flag : constant := 16#40#;  --  bit 6
-   Inherit_Stat_Flag : constant := 16#800#;   --  bit 11
+   Inherit_Stat_Flag       : constant := 16#800#;   --  bit 11
 
    --  The attribute record is versioned by its own size field. A kernel
    --  older than this version accepts a longer record whose tail is zero,
    --  and a newer one zero-fills what this record does not carry, so a
    --  fixed size is portable in both directions.
-   Attribute_Bytes : constant := 128;
+   Attribute_Bytes      : constant := 128;
    Attribute_Head_Bytes : constant := 48;
-   Attribute_Tail_Words : constant :=
-     (Attribute_Bytes - Attribute_Head_Bytes) / 8;
+   Attribute_Tail_Words : constant := (Attribute_Bytes - Attribute_Head_Bytes) / 8;
 
-   type Attribute_Tail is
-     array (1 .. Attribute_Tail_Words) of Interfaces.Unsigned_64;
+   type Attribute_Tail is array (1 .. Attribute_Tail_Words) of Interfaces.Unsigned_64;
 
    type Event_Attributes is record
       Kind          : Interfaces.Unsigned_32 := Type_Hardware;
@@ -85,14 +84,14 @@ package body Flyology_Bench.Internal_Probes.Counters is
       Flags         : Interfaces.Unsigned_64 := 0;
       Reserved      : Attribute_Tail := [others => 0];
    end record
-     with Convention => C;
+   with Convention => C;
 
    type Counter_Reading is record
       Value        : Interfaces.Unsigned_64 := 0;
       Time_Enabled : Interfaces.Unsigned_64 := 0;
       Time_Running : Interfaces.Unsigned_64 := 0;
    end record
-     with Convention => C;
+   with Convention => C;
 
    ---------------------------------------------------------------------
    --  Entry points                                                    --
@@ -107,18 +106,12 @@ package body Flyology_Bench.Internal_Probes.Counters is
       CPU        : C.int;
       Leader     : C.int;
       Flags      : C.unsigned_long) return C.long
-     with Import, Convention => C_Variadic_1, External_Name => "syscall";
+   with Import, Convention => C_Variadic_1, External_Name => "syscall";
 
-   function Control
-     (Descriptor : C.int;
-      Request    : C.unsigned_long;
-      Argument   : C.unsigned_long) return C.int
-     with Import, Convention => C_Variadic_2, External_Name => "ioctl";
+   function Control (Descriptor : C.int; Request : C.unsigned_long; Argument : C.unsigned_long) return C.int
+   with Import, Convention => C_Variadic_2, External_Name => "ioctl";
 
-   function Read_Descriptor
-     (Descriptor : C.int;
-      Buffer     : System.Address;
-      Count      : C.size_t) return C.long;
+   function Read_Descriptor (Descriptor : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
    pragma Import (C, Read_Descriptor, "read");
 
    function Close_Descriptor (Descriptor : C.int) return C.int;
@@ -139,11 +132,11 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Linux and Darwin agree on these numbers; the runtime records the
    --  ones where they differ.
    Error_Not_Permitted : constant := 1;
-   Error_No_Device : constant := 19;
-   Error_Busy : constant := 16;
-   Error_Table_Full : constant := 23;
-   Error_No_Space : constant := 28;
-   Error_Invalid : constant := OSC.EINVAL;
+   Error_No_Device     : constant := 19;
+   Error_Busy          : constant := 16;
+   Error_Table_Full    : constant := 23;
+   Error_No_Space      : constant := 28;
+   Error_Invalid       : constant := OSC.EINVAL;
 
    --  Classifies an errno reported by a counter control or read operation.
    --  EINVAL is deliberately absent: at open time it is ambiguous and is
@@ -153,10 +146,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
    begin
       if Error = OSC.EACCES or else Error = Error_Not_Permitted then
          return Permission_Denied;
-      elsif Error = Error_No_Device
-        or else Error = OSC.ENOENT
-        or else Error = OSC.EOPNOTSUPP
-      then
+      elsif Error = Error_No_Device or else Error = OSC.ENOENT or else Error = OSC.EOPNOTSUPP then
          return Unsupported_Event;
       elsif Error = Error_Busy
         or else Error = OSC.EMFILE
@@ -177,17 +167,13 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  the excludes are retained so a paranoid-level rejection still
    --  surfaces as a failure rather than being misread as an unsupported
    --  event.
-   function Probe_Event
-     (Config : Interfaces.Unsigned_64) return Metric_Availability
-   is
+   function Probe_Event (Config : Interfaces.Unsigned_64) return Metric_Availability is
       Attributes : aliased Event_Attributes;
       Descriptor : C.long;
    begin
       Attributes.Config := Config;
-      Attributes.Flags := Disabled_Flag or Exclude_Kernel_Flag
-        or Exclude_Hypervisor_Flag;
-      Descriptor := Open_Event
-        (Native_Open_Call, Attributes'Address, 0, -1, -1, 0);
+      Attributes.Flags := Disabled_Flag or Exclude_Kernel_Flag or Exclude_Hypervisor_Flag;
+      Descriptor := Open_Event (Native_Open_Call, Attributes'Address, 0, -1, -1, 0);
       if Descriptor < 0 then
          --  A bare generic event is unsupported when the PMU cannot map it.
          --  Permission and resource failures are preserved rather than
@@ -202,10 +188,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
    end Probe_Event;
 
    --  Classifies a failed open for one requested event.
-   function Open_Status
-     (Error  : Integer;
-      Config : Interfaces.Unsigned_64) return Metric_Availability
-   is
+   function Open_Status (Error : Integer; Config : Interfaces.Unsigned_64) return Metric_Availability is
       Probed : Metric_Availability;
    begin
       if Error /= Error_Invalid then
@@ -219,10 +202,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Descriptor bookkeeping                                          --
    ---------------------------------------------------------------------
 
-   procedure Retire
-     (Counters : in out Group;
-      Index    : Counter_Index;
-      Outcome  : Metric_Availability) is
+   procedure Retire (Counters : in out Group; Index : Counter_Index; Outcome : Metric_Availability) is
    begin
       if Counters.Descriptor (Index) >= 0 then
          Discard (Close_Descriptor (Counters.Descriptor (Index)));
@@ -232,9 +212,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
       Counters.Outcome (Index) := Outcome;
    end Retire;
 
-   procedure Retire_Pair
-     (Counters : in out Group;
-      Outcome  : Metric_Availability) is
+   procedure Retire_Pair (Counters : in out Group; Outcome : Metric_Availability) is
    begin
       Retire (Counters, Cycles_Index, Outcome);
       Retire (Counters, Instructions_Index, Outcome);
@@ -244,14 +222,9 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Retires one event. Cycles and instructions are retired together
    --  while they share a counting group, so instructions per cycle is
    --  never formed from two differently bounded windows.
-   procedure Fail
-     (Counters : in out Group;
-      Index    : Counter_Index;
-      Outcome  : Metric_Availability) is
+   procedure Fail (Counters : in out Group; Index : Counter_Index; Outcome : Metric_Availability) is
    begin
-      if Counters.Grouped
-        and then (Index = Cycles_Index or else Index = Instructions_Index)
-      then
+      if Counters.Grouped and then (Index = Cycles_Index or else Index = Instructions_Index) then
          Retire_Pair (Counters, Outcome);
       else
          Retire (Counters, Index, Outcome);
@@ -267,15 +240,11 @@ package body Flyology_Bench.Internal_Probes.Counters is
    is
       Sample : aliased Counter_Reading;
       Wanted : constant C.long := Counter_Reading'Size / 8;
-      Taken  : constant C.long := Read_Descriptor
-        (Descriptor, Sample'Address, C.size_t (Wanted));
+      Taken  : constant C.long := Read_Descriptor (Descriptor, Sample'Address, C.size_t (Wanted));
    begin
       if Taken /= Wanted then
          Reading := (others => 0);
-         Outcome :=
-           (if Taken < 0
-            then Failure_Status (GNAT.OS_Lib.Errno)
-            else Probe_Failed);
+         Outcome := (if Taken < 0 then Failure_Status (GNAT.OS_Lib.Errno) else Probe_Failed);
          Success := False;
          return;
       end if;
@@ -288,9 +257,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
    --  Group lifecycle                                                 --
    ---------------------------------------------------------------------
 
-   procedure Open
-     (Counters       : in out Group;
-      Requested_Mask : Interfaces.Unsigned_64) is
+   procedure Open (Counters : in out Group; Requested_Mask : Interfaces.Unsigned_64) is
    begin
       Counters.Descriptor := [others => -1];
       Counters.Mask := 0;
@@ -316,9 +283,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
                Leader     : C.int := -1;
                Descriptor : C.long;
             begin
-               if Index = Instructions_Index
-                 and then Counters.Descriptor (Cycles_Index) >= 0
-               then
+               if Index = Instructions_Index and then Counters.Descriptor (Cycles_Index) >= 0 then
                   Leader := Counters.Descriptor (Cycles_Index);
                end if;
                Attributes.Config := Config_For (Index);
@@ -326,12 +291,12 @@ package body Flyology_Bench.Internal_Probes.Counters is
                --  only a leader starts disabled.
                Attributes.Flags :=
                  (if Leader < 0 then Disabled_Flag else 0)
-                 or Inherit_Flag or Inherit_Stat_Flag
-                 or Exclude_Kernel_Flag or Exclude_Hypervisor_Flag;
-               Attributes.Read_Format := Format_Total_Time_Enabled
-                 or Format_Total_Time_Running;
-               Descriptor := Open_Event
-                 (Native_Open_Call, Attributes'Address, 0, -1, Leader, 0);
+                 or Inherit_Flag
+                 or Inherit_Stat_Flag
+                 or Exclude_Kernel_Flag
+                 or Exclude_Hypervisor_Flag;
+               Attributes.Read_Format := Format_Total_Time_Enabled or Format_Total_Time_Running;
+               Descriptor := Open_Event (Native_Open_Call, Attributes'Address, 0, -1, Leader, 0);
                if Descriptor >= 0 then
                   Counters.Descriptor (Index) := C.int (Descriptor);
                   Counters.Mask := Counters.Mask or Mask_Bit (Index);
@@ -340,8 +305,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
                      Counters.Grouped := True;
                   end if;
                else
-                  Counters.Outcome (Index) :=
-                    Open_Status (GNAT.OS_Lib.Errno, Config_For (Index));
+                  Counters.Outcome (Index) := Open_Status (GNAT.OS_Lib.Errno, Config_For (Index));
                end if;
             end;
          end if;
@@ -361,8 +325,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
       --  without relying on a reset.
       for Index in Counter_Index loop
          if Counters.Descriptor (Index) >= 0 then
-            Read_Counter
-              (Counters.Descriptor (Index), Reading, Outcome, Success);
+            Read_Counter (Counters.Descriptor (Index), Reading, Outcome, Success);
             if Success then
                Counters.Baseline_Value (Index) := Reading.Value;
                Counters.Baseline_Enabled (Index) := Reading.Time_Enabled;
@@ -377,22 +340,16 @@ package body Flyology_Bench.Internal_Probes.Counters is
          declare
             Leader : constant C.int := Counters.Descriptor (Cycles_Index);
          begin
-            if Leader < 0
-              or else Control (Leader, Native_Enable_Request,
-                               Native_Group_Flag) /= 0
-            then
+            if Leader < 0 or else Control (Leader, Native_Enable_Request, Native_Group_Flag) /= 0 then
                Retire_Pair (Counters, Failure_Status (GNAT.OS_Lib.Errno));
             end if;
          end;
       end if;
 
       for Index in Counter_Index loop
-         if not (Counters.Grouped
-                 and then (Index = Cycles_Index
-                           or else Index = Instructions_Index))
+         if not (Counters.Grouped and then (Index = Cycles_Index or else Index = Instructions_Index))
            and then Counters.Descriptor (Index) >= 0
-           and then Control (Counters.Descriptor (Index),
-                             Native_Enable_Request, 0) /= 0
+           and then Control (Counters.Descriptor (Index), Native_Enable_Request, 0) /= 0
          then
             Retire (Counters, Index, Failure_Status (GNAT.OS_Lib.Errno));
          end if;
@@ -420,19 +377,15 @@ package body Flyology_Bench.Internal_Probes.Counters is
          Fits := True;
          return;
       end if;
-      Estimate := Long_Float (Counted) * Long_Float (Enabled)
-        / Long_Float (Running);
-      if Estimate < 0.0 or else Estimate >= 2.0 ** 64 then
+      Estimate := Long_Float (Counted) * Long_Float (Enabled) / Long_Float (Running);
+      if Estimate < 0.0 or else Estimate >= 2.0**64 then
          return;
       end if;
       Result := Interfaces.Unsigned_64 (Long_Float'Floor (Estimate));
       Fits := True;
    end Scale;
 
-   procedure Finish
-     (Counters : in out Group;
-      Result   : out Perf_Values;
-      Mask     : out Interfaces.Unsigned_64) is
+   procedure Finish (Counters : in out Group; Result : out Perf_Values; Mask : out Interfaces.Unsigned_64) is
    begin
       Result := [others => 0];
 
@@ -440,22 +393,16 @@ package body Flyology_Bench.Internal_Probes.Counters is
          declare
             Leader : constant C.int := Counters.Descriptor (Cycles_Index);
          begin
-            if Leader < 0
-              or else Control (Leader, Native_Disable_Request,
-                               Native_Group_Flag) /= 0
-            then
+            if Leader < 0 or else Control (Leader, Native_Disable_Request, Native_Group_Flag) /= 0 then
                Retire_Pair (Counters, Failure_Status (GNAT.OS_Lib.Errno));
             end if;
          end;
       end if;
 
       for Index in Counter_Index loop
-         if not (Counters.Grouped
-                 and then (Index = Cycles_Index
-                           or else Index = Instructions_Index))
+         if not (Counters.Grouped and then (Index = Cycles_Index or else Index = Instructions_Index))
            and then Counters.Descriptor (Index) >= 0
-           and then Control (Counters.Descriptor (Index),
-                             Native_Disable_Request, 0) /= 0
+           and then Control (Counters.Descriptor (Index), Native_Disable_Request, 0) /= 0
          then
             Retire (Counters, Index, Failure_Status (GNAT.OS_Lib.Errno));
          end if;
@@ -473,8 +420,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
                Scaled  : Interfaces.Unsigned_64;
                Fits    : Boolean;
             begin
-               Read_Counter
-                 (Counters.Descriptor (Index), Reading, Outcome, Success);
+               Read_Counter (Counters.Descriptor (Index), Reading, Outcome, Success);
                if not Success then
                   Fail (Counters, Index, Outcome);
                --  All three totals accumulate for the life of the
@@ -482,18 +428,14 @@ package body Flyology_Bench.Internal_Probes.Counters is
                --  baseline captured in Start. A total that moved backwards
                --  would mean the kernel's accounting is not usable here.
                elsif Reading.Value < Counters.Baseline_Value (Index)
-                 or else Reading.Time_Enabled
-                   < Counters.Baseline_Enabled (Index)
-                 or else Reading.Time_Running
-                   < Counters.Baseline_Running (Index)
+                 or else Reading.Time_Enabled < Counters.Baseline_Enabled (Index)
+                 or else Reading.Time_Running < Counters.Baseline_Running (Index)
                then
                   Fail (Counters, Index, Probe_Failed);
                else
                   Counted := Reading.Value - Counters.Baseline_Value (Index);
-                  Enabled := Reading.Time_Enabled
-                    - Counters.Baseline_Enabled (Index);
-                  Running := Reading.Time_Running
-                    - Counters.Baseline_Running (Index);
+                  Enabled := Reading.Time_Enabled - Counters.Baseline_Enabled (Index);
+                  Running := Reading.Time_Running - Counters.Baseline_Running (Index);
                   if Running = 0 then
                      Fail (Counters, Index, Counter_Resources_Unavailable);
                   else
@@ -530,8 +472,7 @@ package body Flyology_Bench.Internal_Probes.Counters is
                Outcome : Metric_Availability;
                Success : Boolean;
             begin
-               Read_Counter
-                 (Counters.Descriptor (Index), Reading, Outcome, Success);
+               Read_Counter (Counters.Descriptor (Index), Reading, Outcome, Success);
                if Success then
                   Result (Index) := Reading.Value;
                   Enabled (Index) := Reading.Time_Enabled;
@@ -558,12 +499,11 @@ package body Flyology_Bench.Internal_Probes.Counters is
       Counters.Grouped := False;
    end Close;
 
-   function Status
-     (Counters : Group;
-      Index    : Counter_Index) return Metric_Availability is
-     (Counters.Outcome (Index));
+   function Status (Counters : Group; Index : Counter_Index) return Metric_Availability
+   is (Counters.Outcome (Index));
 
-   overriding procedure Finalize (Object : in out Handle) is
+   overriding
+   procedure Finalize (Object : in out Handle) is
    begin
       if Object.Initialized then
          Close (Object.Counters);

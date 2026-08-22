@@ -25,7 +25,7 @@ procedure Descriptor_Ownership_Smoke is
    use type Sockets.Error_Type;
 
    function C_Dup (FD : Interfaces.C.int) return Interfaces.C.int
-     with Import, Convention => C, External_Name => "dup";
+   with Import, Convention => C, External_Name => "dup";
 
    procedure Assert_No_Event_Waits is
       Sample : Flyology.Observability.Group_Snapshot;
@@ -35,18 +35,13 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Sample.Interrupt_Waits = 0);
    end Assert_No_Event_Waits;
 
-   procedure Await_Event_Waits
-     (Count : Natural;
-      Group : Flyology.Execution_Groups.Group_Id := 0)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
-      Sample : Flyology.Observability.Group_Snapshot;
+   procedure Await_Event_Waits (Count : Natural; Group : Flyology.Execution_Groups.Group_Id := 0) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Sample   : Flyology.Observability.Group_Snapshot;
    begin
       loop
          if Flyology.Observability.Snapshot (Group, Sample) then
-            exit when Sample.Descriptor_Waits =
-              Flyology.Observability.Counter (Count);
+            exit when Sample.Descriptor_Waits = Flyology.Observability.Counter (Count);
          end if;
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "descriptor wait did not reach poller";
@@ -55,13 +50,9 @@ procedure Descriptor_Ownership_Smoke is
       end loop;
    end Await_Event_Waits;
 
-   procedure Await_Bytes
-     (Socket : Sockets.Socket_Type;
-      Count  : Natural)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
-      Request : Sockets.Request_Type (Sockets.N_Bytes_To_Read);
+   procedure Await_Bytes (Socket : Sockets.Socket_Type; Count : Natural) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Request  : Sockets.Request_Type (Sockets.N_Bytes_To_Read);
    begin
       loop
          Sockets.Control_Socket (Socket, Request);
@@ -74,44 +65,33 @@ procedure Descriptor_Ownership_Smoke is
    end Await_Bytes;
 
    procedure Await_Operation_Waiter (Item : Connections.Connection) is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while Connection_Testing.Waiting_Operations (Item) = 0 loop
          if Ada.Real_Time.Clock >= Deadline then
-            raise Program_Error with
-              "connection operation did not queue at Acquire";
+            raise Program_Error with "connection operation did not queue at Acquire";
          end if;
          delay 0.001;
       end loop;
    end Await_Operation_Waiter;
 
-   procedure Await_Operation_Active
-     (Item : Connections.Connection;
-      Expected : Boolean := True)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   procedure Await_Operation_Active (Item : Connections.Connection; Expected : Boolean := True) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while Connection_Testing.Operation_Active (Item) /= Expected loop
          if Ada.Real_Time.Clock >= Deadline then
-            raise Program_Error with
-              "connection active-owner state did not converge";
+            raise Program_Error with "connection active-owner state did not converge";
          end if;
          delay 0.001;
       end loop;
    end Await_Operation_Active;
 
-   procedure Await_No_Operation_Waiters
-     (Item : Connections.Connection)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   procedure Await_No_Operation_Waiters (Item : Connections.Connection) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while Connection_Testing.Waiting_Operations (Item) /= 0 loop
          if Ada.Real_Time.Clock >= Deadline then
-            raise Program_Error with
-              "connection queued-operation count did not drain";
+            raise Program_Error with "connection queued-operation count did not drain";
          end if;
          delay 0.001;
       end loop;
@@ -135,17 +115,15 @@ procedure Descriptor_Ownership_Smoke is
       Sockets.Close_Socket (Replacement_Peer);
    end Close_And_Re_Adopt;
 
-   procedure Run_Abort_Handoff
-     (Model : Flyology.Execution_Model;
-      Point : Connection_Testing.Barrier_Point)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+   procedure Run_Abort_Handoff (Model : Flyology.Execution_Model; Point : Connection_Testing.Barrier_Point) is
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
    begin
-      pragma Assert
-        (Point = Connection_Testing.After_Registration
-         or else Point = Connection_Testing.After_Acquisition);
+      pragma
+        Assert
+          (Point = Connection_Testing.After_Registration
+             or else Point = Connection_Testing.After_Acquisition);
       Connection_Testing.Reset_Barriers;
       Connection_Testing.Arm (Point);
       Sockets.Create_Socket_Pair (Server, Peer);
@@ -165,12 +143,10 @@ procedure Descriptor_Ownership_Smoke is
          Connection_Testing.Wait_Reached (Point);
          if Point = Connection_Testing.After_Registration then
             pragma Assert (not Connection_Testing.Operation_Active (Owned));
-            pragma Assert
-              (Connection_Testing.Waiting_Operations (Owned) = 1);
+            pragma Assert (Connection_Testing.Waiting_Operations (Owned) = 1);
          else
             pragma Assert (Connection_Testing.Operation_Active (Owned));
-            pragma Assert
-              (Connection_Testing.Waiting_Operations (Owned) = 0);
+            pragma Assert (Connection_Testing.Waiting_Operations (Owned) = 0);
          end if;
          abort Worker;
          Connection_Testing.Release (Point);
@@ -190,11 +166,10 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Abort_Handoff;
 
    procedure Run_Abort_Queued (Model : Flyology.Execution_Model) is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
-      Point : constant Connection_Testing.Barrier_Point :=
-        Connection_Testing.Queued_Operation_Park;
+      Point        : constant Connection_Testing.Barrier_Point := Connection_Testing.Queued_Operation_Park;
 
       protected Start_Control is
          procedure Start_Queued;
@@ -249,8 +224,7 @@ procedure Descriptor_Ownership_Smoke is
          Await_Operation_Active (Owned);
          Start_Control.Start_Queued;
          Connection_Testing.Wait_Reached (Point);
-         pragma Assert
-           (Connection_Testing.Waiting_Operations (Owned) = 1);
+         pragma Assert (Connection_Testing.Waiting_Operations (Owned) = 1);
          abort Queued;
          Connection_Testing.Release (Point);
          Await_No_Operation_Waiters (Owned);
@@ -276,11 +250,10 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Abort_Queued;
 
    procedure Run_Abort_Active_Parked (Model : Flyology.Execution_Model) is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
-      Point : constant Connection_Testing.Barrier_Point :=
-        Connection_Testing.Active_Operation_Park;
+      Point        : constant Connection_Testing.Barrier_Point := Connection_Testing.Active_Operation_Park;
    begin
       Connection_Testing.Reset_Barriers;
       Connection_Testing.Arm (Point);
@@ -315,16 +288,13 @@ procedure Descriptor_Ownership_Smoke is
       end if;
    end Run_Abort_Active_Parked;
 
-   procedure Run_Partial_Receive_Close
-     (Model : Flyology.Execution_Model)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+   procedure Run_Partial_Receive_Close (Model : Flyology.Execution_Model) is
+      Manager                : aliased Connections.Server (Capacity => 1);
+      Owned                  : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Flyology.IO.Descriptor;
+      Duplicate              : Flyology.IO.Descriptor;
 
-      type Receive_Result is
-        (Not_Finished, Was_Cancelled, Raised_Other_Exception);
+      type Receive_Result is (Not_Finished, Was_Cancelled, Raised_Other_Exception);
 
       protected Progress is
          procedure Reader_Ready;
@@ -337,16 +307,14 @@ procedure Descriptor_Ownership_Smoke is
          entry Wait_Start_Contender;
          procedure Reader_Finished (Result : Receive_Result);
          procedure Contender_Finished (Result : Receive_Result);
-         entry Wait_Finished
-           (Reader_Result    : out Receive_Result;
-            Contender_Result : out Receive_Result);
+         entry Wait_Finished (Reader_Result : out Receive_Result; Contender_Result : out Receive_Result);
       private
-         Reader_Is_Ready       : Boolean := False;
-         Reader_Started        : Boolean := False;
-         Contender_Started     : Boolean := False;
+         Reader_Is_Ready         : Boolean := False;
+         Reader_Started          : Boolean := False;
+         Contender_Started       : Boolean := False;
          Contender_Is_Attempting : Boolean := False;
-         Reader_Outcome        : Receive_Result := Not_Finished;
-         Contender_Outcome     : Receive_Result := Not_Finished;
+         Reader_Outcome          : Receive_Result := Not_Finished;
+         Contender_Outcome       : Receive_Result := Not_Finished;
       end Progress;
 
       protected body Progress is
@@ -400,11 +368,8 @@ procedure Descriptor_Ownership_Smoke is
             Contender_Outcome := Result;
          end Contender_Finished;
 
-         entry Wait_Finished
-           (Reader_Result    : out Receive_Result;
-            Contender_Result : out Receive_Result)
-           when Reader_Outcome /= Not_Finished
-             and then Contender_Outcome /= Not_Finished
+         entry Wait_Finished (Reader_Result : out Receive_Result; Contender_Result : out Receive_Result)
+           when Reader_Outcome /= Not_Finished and then Contender_Outcome /= Not_Finished
          is
          begin
             Reader_Result := Reader_Outcome;
@@ -414,13 +379,11 @@ procedure Descriptor_Ownership_Smoke is
 
       Reader_Outcome    : Receive_Result;
       Contender_Outcome : Receive_Result;
-      Sent_Last : Ada.Streams.Stream_Element_Offset;
-      Byte      : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-        (1 => 16#5A#);
+      Sent_Last         : Ada.Streams.Stream_Element_Offset;
+      Byte              : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 16#5A#);
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Duplicate := Flyology.IO.Descriptor
-        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
+      Duplicate := Flyology.IO.Descriptor (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
          raise Program_Error with "dup failed in partial receive test";
       end if;
@@ -505,7 +468,7 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Manager.Active = 0);
 
       declare
-         Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Data              : Ada.Streams.Stream_Element_Array (1 .. 1);
          Rejected_At_Start : Boolean := False;
       begin
          begin
@@ -526,18 +489,14 @@ procedure Descriptor_Ownership_Smoke is
 
    type Queued_Interrupt is (By_Timeout, By_Token, By_Shutdown);
 
-   procedure Run_Queued_Lease_Interrupt
-     (Model : Flyology.Execution_Model;
-      Cause : Queued_Interrupt)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+   procedure Run_Queued_Lease_Interrupt (Model : Flyology.Execution_Model; Cause : Queued_Interrupt) is
+      Manager                : aliased Connections.Server (Capacity => 1);
+      Owned                  : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Flyology.IO.Descriptor;
-      Token : aliased Connections.Cancellation_Token;
+      Duplicate              : Flyology.IO.Descriptor;
+      Token                  : aliased Connections.Cancellation_Token;
 
-      type Operation_Result is
-        (Not_Finished, Completed, Timed_Out, Was_Cancelled, Failed);
+      type Operation_Result is (Not_Finished, Completed, Timed_Out, Was_Cancelled, Failed);
 
       protected Progress is
          procedure Start_Waiter;
@@ -545,9 +504,7 @@ procedure Descriptor_Ownership_Smoke is
          procedure Holder_Finished (Result : Operation_Result);
          procedure Waiter_Finished (Result : Operation_Result);
          entry Wait_Waiter (Result : out Operation_Result);
-         entry Wait_Both
-           (Holder_Result : out Operation_Result;
-            Waiter_Result : out Operation_Result);
+         entry Wait_Both (Holder_Result : out Operation_Result; Waiter_Result : out Operation_Result);
       private
          Waiter_Started : Boolean := False;
          Holder_Outcome : Operation_Result := Not_Finished;
@@ -575,18 +532,13 @@ procedure Descriptor_Ownership_Smoke is
             Waiter_Outcome := Result;
          end Waiter_Finished;
 
-         entry Wait_Waiter (Result : out Operation_Result)
-           when Waiter_Outcome /= Not_Finished
-         is
+         entry Wait_Waiter (Result : out Operation_Result) when Waiter_Outcome /= Not_Finished is
          begin
             Result := Waiter_Outcome;
          end Wait_Waiter;
 
-         entry Wait_Both
-           (Holder_Result : out Operation_Result;
-            Waiter_Result : out Operation_Result)
-           when Holder_Outcome /= Not_Finished
-             and then Waiter_Outcome /= Not_Finished
+         entry Wait_Both (Holder_Result : out Operation_Result; Waiter_Result : out Operation_Result)
+           when Holder_Outcome /= Not_Finished and then Waiter_Outcome /= Not_Finished
          is
          begin
             Holder_Result := Holder_Outcome;
@@ -596,13 +548,11 @@ procedure Descriptor_Ownership_Smoke is
 
       Holder_Outcome : Operation_Result;
       Waiter_Outcome : Operation_Result;
-      Sent_Last : Ada.Streams.Stream_Element_Offset;
-      Byte : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-        (1 => 16#33#);
+      Sent_Last      : Ada.Streams.Stream_Element_Offset;
+      Byte           : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 16#33#);
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
-      Duplicate := Flyology.IO.Descriptor
-        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
+      Duplicate := Flyology.IO.Descriptor (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
          raise Program_Error with "dup failed in queued lease test";
       end if;
@@ -643,8 +593,7 @@ procedure Descriptor_Ownership_Smoke is
                Owned.Receive_Exactly
                  (Data,
                   Timeout => (if Cause = By_Timeout then 0.050 else -1.0),
-                  Token =>
-                    (if Cause = By_Token then Token'Access else null));
+                  Token   => (if Cause = By_Token then Token'Access else null));
                Progress.Waiter_Finished (Completed);
             exception
                when Flyology.IO.Timeout_Error =>
@@ -668,10 +617,12 @@ procedure Descriptor_Ownership_Smoke is
          Progress.Start_Waiter;
          Await_Operation_Waiter (Owned);
          case Cause is
-            when By_Timeout =>
+            when By_Timeout  =>
                null;
-            when By_Token =>
+
+            when By_Token    =>
                Token.Request;
+
             when By_Shutdown =>
                Manager.Request_Shutdown;
          end case;
@@ -685,8 +636,7 @@ procedure Descriptor_Ownership_Smoke is
 
          if Cause /= By_Shutdown then
             --  The queued call must finish while Holder still owns the lease.
-            pragma Assert
-              (Connection_Testing.Waiting_Operations (Owned) = 0);
+            pragma Assert (Connection_Testing.Waiting_Operations (Owned) = 0);
             Sockets.Send_Socket (Peer, Byte, Sent_Last);
             pragma Assert (Sent_Last = Byte'Last);
          end if;
@@ -700,12 +650,14 @@ procedure Descriptor_Ownership_Smoke is
       end;
 
       case Cause is
-         when By_Timeout =>
+         when By_Timeout  =>
             pragma Assert (Waiter_Outcome = Timed_Out);
             pragma Assert (Holder_Outcome = Completed);
-         when By_Token =>
+
+         when By_Token    =>
             pragma Assert (Waiter_Outcome = Was_Cancelled);
             pragma Assert (Holder_Outcome = Completed);
+
          when By_Shutdown =>
             pragma Assert (Waiter_Outcome = Was_Cancelled);
             pragma Assert (Holder_Outcome = Was_Cancelled);
@@ -720,19 +672,16 @@ procedure Descriptor_Ownership_Smoke is
       end if;
    end Run_Queued_Lease_Interrupt;
 
-   procedure Run_Readable_Chunk_Cancellation
-     (Model : Flyology.Execution_Model)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+   procedure Run_Readable_Chunk_Cancellation (Model : Flyology.Execution_Model) is
+      Manager                : aliased Connections.Server (Capacity => 1);
+      Owned                  : Connections.Connection;
       Server, Peer, Observer : Sockets.Socket_Type;
-      Duplicate : Flyology.IO.Descriptor;
-      Token : aliased Connections.Cancellation_Token;
-      Point : constant Connection_Testing.Barrier_Point :=
+      Duplicate              : Flyology.IO.Descriptor;
+      Token                  : aliased Connections.Cancellation_Token;
+      Point                  : constant Connection_Testing.Barrier_Point :=
         Connection_Testing.Receive_Chunk_Boundary;
 
-      type Receive_Result is
-        (Not_Finished, Was_Cancelled, Raised_Other_Exception);
+      type Receive_Result is (Not_Finished, Was_Cancelled, Raised_Other_Exception);
 
       protected Progress is
          procedure Add_Packet;
@@ -746,11 +695,11 @@ procedure Descriptor_Ownership_Smoke is
          procedure Reader_Finished (Result : Receive_Result);
          entry Wait_Reader (Result : out Receive_Result);
       private
-         Packets_Sent : Natural := 0;
+         Packets_Sent   : Natural := 0;
          Reader_Started : Boolean := False;
          Stop_Requested : Boolean := False;
-         Writer_Done : Boolean := False;
-         Writer_OK : Boolean := False;
+         Writer_Done    : Boolean := False;
+         Writer_OK      : Boolean := False;
          Reader_Outcome : Receive_Result := Not_Finished;
       end Progress;
 
@@ -763,8 +712,7 @@ procedure Descriptor_Ownership_Smoke is
          entry Wait_Prefilled when Packets_Sent >= 4 or else Writer_Done is
          begin
             if Writer_Done and then Packets_Sent < 4 then
-               raise Program_Error with
-                 "continuous-readability writer stopped before prefill";
+               raise Program_Error with "continuous-readability writer stopped before prefill";
             end if;
          end Wait_Prefilled;
 
@@ -783,7 +731,8 @@ procedure Descriptor_Ownership_Smoke is
             Stop_Requested := True;
          end Stop_Writer;
 
-         function Writer_Should_Stop return Boolean is (Stop_Requested);
+         function Writer_Should_Stop return Boolean
+         is (Stop_Requested);
 
          procedure Writer_Finished (Succeeded : Boolean) is
          begin
@@ -801,31 +750,25 @@ procedure Descriptor_Ownership_Smoke is
             Reader_Outcome := Result;
          end Reader_Finished;
 
-         entry Wait_Reader (Result : out Receive_Result)
-           when Reader_Outcome /= Not_Finished
-         is
+         entry Wait_Reader (Result : out Receive_Result) when Reader_Outcome /= Not_Finished is
          begin
             Result := Reader_Outcome;
          end Wait_Reader;
       end Progress;
 
       type Buffer_Access is access Ada.Streams.Stream_Element_Array;
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Ada.Streams.Stream_Element_Array, Buffer_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Ada.Streams.Stream_Element_Array, Buffer_Access);
 
       Reader_Outcome : Receive_Result;
-      Writer_OK : Boolean;
-      Request : Sockets.Request_Type (Sockets.N_Bytes_To_Read);
+      Writer_OK      : Boolean;
+      Request        : Sockets.Request_Type (Sockets.N_Bytes_To_Read);
    begin
       Connection_Testing.Reset_Barriers;
       Connection_Testing.Arm (Point);
-      Sockets.Create_Socket_Pair
-        (Server, Peer, Mode => Sockets.Socket_Datagram);
-      Duplicate := Flyology.IO.Descriptor
-        (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
+      Sockets.Create_Socket_Pair (Server, Peer, Mode => Sockets.Socket_Datagram);
+      Duplicate := Flyology.IO.Descriptor (C_Dup (Interfaces.C.int (Sockets.Native_Descriptor (Server))));
       if Duplicate < 0 then
-         raise Program_Error with
-           "dup failed in continuous-readability test";
+         raise Program_Error with "dup failed in continuous-readability test";
       end if;
       Sockets.Adopt (Duplicate, Observer);
       Connections.Take (Manager, Server, Owned);
@@ -840,22 +783,16 @@ procedure Descriptor_Ownership_Smoke is
          end Reader;
 
          task body Writer is
-            Message : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
-              (others => 16#A5#);
-            Length : Ada.Streams.Stream_Element_Offset := Message'First;
-            Last : Ada.Streams.Stream_Element_Offset;
+            Message : constant Ada.Streams.Stream_Element_Array (1 .. 64) := (others => 16#A5#);
+            Length  : Ada.Streams.Stream_Element_Offset := Message'First;
+            Last    : Ada.Streams.Stream_Element_Offset;
          begin
             loop
                exit when Progress.Writer_Should_Stop;
                begin
-                  Flyology.IO.Sockets.Send
-                    (Peer,
-                     Message (Message'First .. Length),
-                     Last,
-                     Timeout => 0.005);
+                  Flyology.IO.Sockets.Send (Peer, Message (Message'First .. Length), Last, Timeout => 0.005);
                   if Last /= Length then
-                     raise Program_Error with
-                       "datagram writer made partial progress";
+                     raise Program_Error with "datagram writer made partial progress";
                   end if;
                   Progress.Add_Packet;
                   if Length = Message'Last then
@@ -867,9 +804,7 @@ procedure Descriptor_Ownership_Smoke is
                   when Flyology.IO.Timeout_Error =>
                      null;
                   when Occurrence : Sockets.Socket_Error =>
-                     if Sockets.Resolve_Exception (Occurrence) /=
-                       Sockets.No_Buffer_Space_Available
-                     then
+                     if Sockets.Resolve_Exception (Occurrence) /= Sockets.No_Buffer_Space_Available then
                         raise;
                      end if;
                      delay 0.001;
@@ -882,13 +817,11 @@ procedure Descriptor_Ownership_Smoke is
          end Writer;
 
          task body Reader is
-            Data : Buffer_Access :=
-              new Ada.Streams.Stream_Element_Array (1 .. 64 * 1024 * 1024);
+            Data : Buffer_Access := new Ada.Streams.Stream_Element_Array (1 .. 64 * 1024 * 1024);
          begin
             Progress.Wait_Start_Reader;
             begin
-               Owned.Receive_Exactly
-                 (Data.all, Timeout => 5.0, Token => Token'Access);
+               Owned.Receive_Exactly (Data.all, Timeout => 5.0, Token => Token'Access);
                Progress.Reader_Finished (Raised_Other_Exception);
             exception
                when Connections.Operation_Cancelled =>
@@ -909,8 +842,7 @@ procedure Descriptor_Ownership_Smoke is
             Progress.Wait_Prefilled;
          or
             delay 2.0;
-            raise Program_Error with
-              "continuous-readability socket did not prefill";
+            raise Program_Error with "continuous-readability socket did not prefill";
          end select;
          Progress.Start_Reader;
          Connection_Testing.Wait_Reached (Point);
@@ -926,15 +858,13 @@ procedure Descriptor_Ownership_Smoke is
             Progress.Wait_Reader (Reader_Outcome);
          or
             delay 2.0;
-            raise Program_Error with
-              "continuously readable receive ignored cancellation";
+            raise Program_Error with "continuously readable receive ignored cancellation";
          end select;
          select
             Progress.Wait_Writer (Writer_OK);
          or
             delay 2.0;
-            raise Program_Error with
-              "continuous-readability writer did not stop";
+            raise Program_Error with "continuous-readability writer did not stop";
          end select;
       exception
          when others =>
@@ -950,9 +880,7 @@ procedure Descriptor_Ownership_Smoke is
       pragma Assert (Reader_Outcome = Was_Cancelled);
       pragma Assert (Writer_OK);
       Sockets.Control_Socket (Observer, Request);
-      pragma Assert
-        (Request.Size > 0,
-         "receive drained readable datagrams before noticing cancellation");
+      pragma Assert (Request.Size > 0, "receive drained readable datagrams before noticing cancellation");
 
       Owned.Close;
       Sockets.Close_Socket (Observer);
@@ -964,28 +892,24 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Readable_Chunk_Cancellation;
 
    procedure Run_Writable_Send_Close (Model : Flyology.Execution_Model) is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
-      Point : constant Connection_Testing.Barrier_Point :=
-        Connection_Testing.Send_Chunk_Boundary;
+      Point        : constant Connection_Testing.Barrier_Point := Connection_Testing.Send_Chunk_Boundary;
 
-      type Send_Result is
-        (Not_Finished, Completed, Was_Cancelled, Failed);
+      type Send_Result is (Not_Finished, Completed, Was_Cancelled, Failed);
 
       protected Progress is
          procedure Start_Close;
          entry Wait_Start_Close;
          procedure Sender_Finished (Result : Send_Result);
          procedure Close_Finished (Passed : Boolean);
-         entry Wait_Both
-           (Result : out Send_Result;
-            Close_Passed : out Boolean);
+         entry Wait_Both (Result : out Send_Result; Close_Passed : out Boolean);
       private
-         Close_Started : Boolean := False;
+         Close_Started  : Boolean := False;
          Sender_Outcome : Send_Result := Not_Finished;
-         Close_Done : Boolean := False;
-         Close_OK : Boolean := False;
+         Close_Done     : Boolean := False;
+         Close_OK       : Boolean := False;
       end Progress;
 
       protected body Progress is
@@ -1010,9 +934,7 @@ procedure Descriptor_Ownership_Smoke is
             Close_Done := True;
          end Close_Finished;
 
-         entry Wait_Both
-           (Result : out Send_Result;
-            Close_Passed : out Boolean)
+         entry Wait_Both (Result : out Send_Result; Close_Passed : out Boolean)
            when Sender_Outcome /= Not_Finished and then Close_Done
          is
          begin
@@ -1021,9 +943,8 @@ procedure Descriptor_Ownership_Smoke is
          end Wait_Both;
       end Progress;
 
-      Data : constant Ada.Streams.Stream_Element_Array (1 .. 2_048) :=
-        (others => 16#C3#);
-      Outcome : Send_Result;
+      Data     : constant Ada.Streams.Stream_Element_Array (1 .. 2_048) := (others => 16#C3#);
+      Outcome  : Send_Result;
       Close_OK : Boolean;
    begin
       Connection_Testing.Reset_Barriers;
@@ -1070,13 +991,11 @@ procedure Descriptor_Ownership_Smoke is
          pragma Assert (Connection_Testing.Operation_Active (Owned));
          Progress.Start_Close;
          declare
-            Deadline : constant Ada.Real_Time.Time :=
-              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+            Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
          begin
             while not Connection_Testing.Close_Requested (Owned) loop
                if Ada.Real_Time.Clock >= Deadline then
-                  raise Program_Error with
-                    "Close did not publish at the send chunk boundary";
+                  raise Program_Error with "Close did not publish at the send chunk boundary";
                end if;
                delay 0.001;
             end loop;
@@ -1111,10 +1030,10 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Writable_Send_Close;
 
    procedure Run_Close_Reuse (Model : Flyology.Execution_Model) is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
-      Old_FD : Flyology.IO.Descriptor;
+      Old_FD       : Flyology.IO.Descriptor;
 
       protected Progress is
          procedure Entering;
@@ -1123,9 +1042,9 @@ procedure Descriptor_Ownership_Smoke is
          entry Wait_Finished;
          function Passed return Boolean;
       private
-         Has_Entered : Boolean := False;
+         Has_Entered  : Boolean := False;
          Has_Finished : Boolean := False;
-         OK : Boolean := False;
+         OK           : Boolean := False;
       end Progress;
 
       protected body Progress is
@@ -1138,9 +1057,16 @@ procedure Descriptor_Ownership_Smoke is
             OK := Cancelled;
             Has_Finished := True;
          end Finished;
-         entry Wait_Entering when Has_Entered is begin null; end Wait_Entering;
-         entry Wait_Finished when Has_Finished is begin null; end Wait_Finished;
-         function Passed return Boolean is (OK);
+         entry Wait_Entering when Has_Entered is
+         begin
+            null;
+         end Wait_Entering;
+         entry Wait_Finished when Has_Finished is
+         begin
+            null;
+         end Wait_Finished;
+         function Passed return Boolean
+         is (OK);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
@@ -1154,7 +1080,7 @@ procedure Descriptor_Ownership_Smoke is
          end Reader;
 
          task body Reader is
-            Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+            Data      : Ada.Streams.Stream_Element_Array (1 .. 1);
             Cancelled : Boolean := False;
          begin
             Progress.Entering;
@@ -1189,15 +1115,14 @@ procedure Descriptor_Ownership_Smoke is
       --  returned after the old generation removed its poller registration.
       declare
          New_Server, New_Peer : Sockets.Socket_Type;
-         Sent, Last : Ada.Streams.Stream_Element_Offset;
-         Outgoing : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-           (1 => 73);
-         Incoming : Ada.Streams.Stream_Element_Array (1 .. 1);
-         Reuse_OK : Boolean := False with Atomic;
+         Sent, Last           : Ada.Streams.Stream_Element_Offset;
+         Outgoing             : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 73);
+         Incoming             : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Reuse_OK             : Boolean := False
+         with Atomic;
       begin
          Sockets.Create_Socket_Pair (New_Server, New_Peer);
-         pragma Assert
-           (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
+         pragma Assert (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
          declare
             task Reused_Reader is
                pragma Task_Info (Model);
@@ -1206,8 +1131,7 @@ procedure Descriptor_Ownership_Smoke is
             begin
                if Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, 0.5) then
                   Sockets.Receive_Socket (New_Server, Incoming, Last);
-                  Reuse_OK :=
-                    Last = Incoming'Last and then Incoming = Outgoing;
+                  Reuse_OK := Last = Incoming'Last and then Incoming = Outgoing;
                end if;
             exception
                when others =>
@@ -1232,12 +1156,10 @@ procedure Descriptor_Ownership_Smoke is
       end if;
    end Run_Close_Reuse;
 
-   procedure Run_Cancellation_Close_Race
-     (Model : Flyology.Execution_Model)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Token   : aliased Connections.Cancellation_Token;
-      Owned   : Connections.Connection;
+   procedure Run_Cancellation_Close_Race (Model : Flyology.Execution_Model) is
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Token        : aliased Connections.Cancellation_Token;
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
 
       protected Progress is
@@ -1251,15 +1173,25 @@ procedure Descriptor_Ownership_Smoke is
       end Progress;
 
       protected body Progress is
-         procedure Entering is begin Entered := True; end Entering;
+         procedure Entering is
+         begin
+            Entered := True;
+         end Entering;
          procedure Finished (Cancelled : Boolean) is
          begin
             OK := Cancelled;
             Done := True;
          end Finished;
-         entry Wait_Entering when Entered is begin null; end Wait_Entering;
-         entry Wait_Finished when Done is begin null; end Wait_Finished;
-         function Passed return Boolean is (OK);
+         entry Wait_Entering when Entered is
+         begin
+            null;
+         end Wait_Entering;
+         entry Wait_Finished when Done is
+         begin
+            null;
+         end Wait_Finished;
+         function Passed return Boolean
+         is (OK);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
@@ -1273,7 +1205,7 @@ procedure Descriptor_Ownership_Smoke is
          end Requester;
 
          task body Reader is
-            Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+            Data      : Ada.Streams.Stream_Element_Array (1 .. 1);
             Cancelled : Boolean := False;
          begin
             Progress.Entering;
@@ -1315,28 +1247,25 @@ procedure Descriptor_Ownership_Smoke is
 
    type Adoption_Path is (Take_Path, Accept_Path);
 
-   procedure Run_Close_In_Progress_Re_Adoption
-     (Model : Flyology.Execution_Model;
-      Path  : Adoption_Path)
-   is
+   procedure Run_Close_In_Progress_Re_Adoption (Model : Flyology.Execution_Model; Path : Adoption_Path) is
       package Groups renames Flyology.Execution_Groups;
 
-      Original_Manager : aliased Connections.Server (Capacity => 1);
-      Candidate_Manager : aliased Connections.Server (Capacity => 1);
-      Owned : Connections.Connection;
-      Original, Original_Peer : Sockets.Socket_Type;
+      Original_Manager          : aliased Connections.Server (Capacity => 1);
+      Candidate_Manager         : aliased Connections.Server (Capacity => 1);
+      Owned                     : Connections.Connection;
+      Original, Original_Peer   : Sockets.Socket_Type;
       Candidate, Candidate_Peer : Sockets.Socket_Type;
-      Listener : Sockets.Socket_Type;
+      Listener                  : Sockets.Socket_Type;
 
       type Atomic_Boolean is new Boolean with Atomic;
-      Spinning          : aliased Atomic_Boolean := False;
-      Stop_Spinning     : Atomic_Boolean := False;
-      Reader_Done       : aliased Atomic_Boolean := False;
-      Reader_Cancelled  : Atomic_Boolean := False;
-      Close_Done        : aliased Atomic_Boolean := False;
-      Close_OK          : Atomic_Boolean := False;
-      Attempt_Done      : aliased Atomic_Boolean := False;
-      Attempt_Rejected  : Atomic_Boolean := False;
+      Spinning         : aliased Atomic_Boolean := False;
+      Stop_Spinning    : Atomic_Boolean := False;
+      Reader_Done      : aliased Atomic_Boolean := False;
+      Reader_Cancelled : Atomic_Boolean := False;
+      Close_Done       : aliased Atomic_Boolean := False;
+      Close_OK         : Atomic_Boolean := False;
+      Attempt_Done     : aliased Atomic_Boolean := False;
+      Attempt_Rejected : Atomic_Boolean := False;
 
       protected Spinner_Control is
          procedure Open;
@@ -1358,8 +1287,7 @@ procedure Descriptor_Ownership_Smoke is
       end Spinner_Control;
 
       procedure Wait_Until (Flag : not null access Atomic_Boolean) is
-         Deadline : constant Ada.Real_Time.Time :=
-           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+         Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
       begin
          while not Flag.all loop
             if Ada.Real_Time.Clock >= Deadline then
@@ -1374,14 +1302,10 @@ procedure Descriptor_Ownership_Smoke is
          Sockets.Create_Socket_Pair (Candidate, Candidate_Peer);
       else
          Sockets.Create_Socket (Listener);
-         Sockets.Bind_Socket
-           (Listener,
-            Sockets.Network_Endpoint
-              (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Sockets.Listen_Socket (Listener);
          Sockets.Create_Socket (Candidate_Peer);
-         Sockets.Connect_Socket
-           (Candidate_Peer, Sockets.Get_Socket_Name (Listener));
+         Sockets.Connect_Socket (Candidate_Peer, Sockets.Get_Socket_Name (Listener));
       end if;
       Connections.Take (Original_Manager, Original, Owned);
 
@@ -1455,11 +1379,7 @@ procedure Descriptor_Ownership_Smoke is
                      declare
                         Peer_Address : Sockets.Endpoint;
                      begin
-                        Connections.Accept_Connection
-                          (Candidate_Manager,
-                           Listener,
-                           Owned,
-                           Peer_Address);
+                        Connections.Accept_Connection (Candidate_Manager, Listener, Owned, Peer_Address);
                      end;
                   end if;
                exception
@@ -1481,8 +1401,7 @@ procedure Descriptor_Ownership_Smoke is
 
          Closer.Start;
          declare
-            Deadline : constant Ada.Real_Time.Time :=
-              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+            Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
          begin
             while Connections.Is_Open (Owned) loop
                if Ada.Real_Time.Clock >= Deadline then
@@ -1502,10 +1421,10 @@ procedure Descriptor_Ownership_Smoke is
       end;
 
       pragma Assert (Attempt_Rejected);
-      pragma Assert
-        ((Path = Take_Path and then Sockets.Is_Open (Candidate))
-         or else (Path = Accept_Path
-                  and then not Sockets.Is_Open (Candidate)));
+      pragma
+        Assert
+          ((Path = Take_Path and then Sockets.Is_Open (Candidate))
+             or else (Path = Accept_Path and then not Sockets.Is_Open (Candidate)));
       pragma Assert (Candidate_Manager.Active = 0);
       pragma Assert (Reader_Cancelled);
       pragma Assert (Close_OK);
@@ -1522,15 +1441,13 @@ procedure Descriptor_Ownership_Smoke is
       end if;
    end Run_Close_In_Progress_Re_Adoption;
 
-   procedure Run_Competing_Adopters
-     (Model : Flyology.Execution_Model)
-   is
+   procedure Run_Competing_Adopters (Model : Flyology.Execution_Model) is
       package Groups renames Flyology.Execution_Groups;
 
-      First_Manager  : aliased Connections.Server (Capacity => 1);
-      Second_Manager : aliased Connections.Server (Capacity => 1);
-      Owned : Connections.Connection;
-      First, First_Peer : Sockets.Socket_Type;
+      First_Manager       : aliased Connections.Server (Capacity => 1);
+      Second_Manager      : aliased Connections.Server (Capacity => 1);
+      Owned               : Connections.Connection;
+      First, First_Peer   : Sockets.Socket_Type;
       Second, Second_Peer : Sockets.Socket_Type;
 
       protected Control is
@@ -1578,9 +1495,7 @@ procedure Descriptor_Ownership_Smoke is
             All_Valid := All_Valid and Valid;
          end Finished;
 
-         entry Wait_Finished (Passed : out Boolean)
-           when Finished_Count = 2
-         is
+         entry Wait_Finished (Passed : out Boolean) when Finished_Count = 2 is
          begin
             Passed := All_Valid and Winners = 1;
          end Wait_Finished;
@@ -1674,8 +1589,8 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Competing_Adopters;
 
    procedure Run_Exclusive_Waiters is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Owned   : Connections.Connection;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Owned        : Connections.Connection;
       Server, Peer : Sockets.Socket_Type;
 
       protected Progress is
@@ -1683,14 +1598,12 @@ procedure Descriptor_Ownership_Smoke is
          entry Wait;
          function Passed return Boolean;
       private
-         Count : Natural := 0;
+         Count                   : Natural := 0;
          Seen_First, Seen_Second : Boolean := False;
       end Progress;
 
       protected body Progress is
-         procedure Finished
-           (Index : Positive; Value : Ada.Streams.Stream_Element)
-         is
+         procedure Finished (Index : Positive; Value : Ada.Streams.Stream_Element) is
          begin
             if Index = 1 then
                Seen_First := Value in 1 | 2;
@@ -1699,8 +1612,12 @@ procedure Descriptor_Ownership_Smoke is
             end if;
             Count := Count + 1;
          end Finished;
-         entry Wait when Count = 2 is begin null; end Wait;
-         function Passed return Boolean is (Seen_First and Seen_Second);
+         entry Wait when Count = 2 is
+         begin
+            null;
+         end Wait;
+         function Passed return Boolean
+         is (Seen_First and Seen_Second);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
@@ -1715,14 +1632,13 @@ procedure Descriptor_Ownership_Smoke is
             Owned.Receive_Exactly (Data);
             Progress.Finished (Index, Data (Data'First));
          end Reader;
-         First : Reader (1);
+         First  : Reader (1);
          Second : Reader (2);
          pragma Unreferenced (First, Second);
       begin
          Await_Event_Waits (2);
          declare
-            Data : constant Ada.Streams.Stream_Element_Array (1 .. 2) :=
-              (1, 2);
+            Data : constant Ada.Streams.Stream_Element_Array (1 .. 2) := (1, 2);
             Last : Ada.Streams.Stream_Element_Offset;
          begin
             Sockets.Send_Socket (Peer, Data, Last);
@@ -1738,8 +1654,9 @@ procedure Descriptor_Ownership_Smoke is
 
    procedure Run_Timeout_Close_Reuse is
       Server, Peer : Sockets.Socket_Type;
-      Old_FD : Flyology.IO.Descriptor;
-      Timed_Out : Boolean := False with Atomic;
+      Old_FD       : Flyology.IO.Descriptor;
+      Timed_Out    : Boolean := False
+      with Atomic;
    begin
       Sockets.Create_Socket_Pair (Server, Peer);
       Old_FD := Flyology.IO.Sockets.Native_Descriptor (Server);
@@ -1749,8 +1666,7 @@ procedure Descriptor_Ownership_Smoke is
          end Waiter;
          task body Waiter is
          begin
-            Timed_Out := not Flyology.IO.Wait
-              (Old_FD, Flyology.IO.For_Read, Timeout => 0.020);
+            Timed_Out := not Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, Timeout => 0.020);
          end Waiter;
       begin
          null;
@@ -1762,22 +1678,20 @@ procedure Descriptor_Ownership_Smoke is
 
       declare
          New_Server, New_Peer : Sockets.Socket_Type;
-         Ready : Boolean := False with Atomic;
-         Data : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-           (1 => 42);
-         Last : Ada.Streams.Stream_Element_Offset;
+         Ready                : Boolean := False
+         with Atomic;
+         Data                 : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 42);
+         Last                 : Ada.Streams.Stream_Element_Offset;
       begin
          Sockets.Create_Socket_Pair (New_Server, New_Peer);
-         pragma Assert
-           (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
+         pragma Assert (Flyology.IO.Sockets.Native_Descriptor (New_Server) = Old_FD);
          declare
             task Reused_Waiter is
                pragma Task_Info (Flyology.Lightweight_Task);
             end Reused_Waiter;
             task body Reused_Waiter is
             begin
-               Ready := Flyology.IO.Wait
-                 (Old_FD, Flyology.IO.For_Read, Timeout => 0.5);
+               Ready := Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, Timeout => 0.5);
             end Reused_Waiter;
          begin
             Await_Event_Waits (1);
@@ -1790,16 +1704,14 @@ procedure Descriptor_Ownership_Smoke is
       Assert_No_Event_Waits;
    end Run_Timeout_Close_Reuse;
 
-   procedure Run_Timeout_Readiness_Races
-     (Model : Flyology.Execution_Model)
-   is
+   procedure Run_Timeout_Readiness_Races (Model : Flyology.Execution_Model) is
    begin
       for Iteration in 1 .. 12 loop
          declare
-            Manager : aliased Connections.Server (Capacity => 1);
-            Owned   : Connections.Connection;
+            Manager      : aliased Connections.Server (Capacity => 1);
+            Owned        : Connections.Connection;
             Server, Peer : Sockets.Socket_Type;
-            Finished : Boolean := False;
+            Finished     : Boolean := False;
          begin
             Sockets.Create_Socket_Pair (Server, Peer);
             Connections.Take (Manager, Server, Owned);
@@ -1822,8 +1734,7 @@ procedure Descriptor_Ownership_Smoke is
                end Reader;
 
                task body Writer is
-                  Data : constant Ada.Streams.Stream_Element_Array
-                    (1 .. 1) := (1 => 9);
+                  Data : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 9);
                   Last : Ada.Streams.Stream_Element_Offset;
                begin
                   delay (if Iteration mod 2 = 0 then 0.002 else 0.006);
@@ -1847,14 +1758,10 @@ procedure Descriptor_Ownership_Smoke is
    end Run_Timeout_Readiness_Races;
 
 begin
-   Run_Abort_Handoff
-     (Flyology.Lightweight_Task, Connection_Testing.After_Registration);
-   Run_Abort_Handoff
-     (Flyology.Native_Task, Connection_Testing.After_Registration);
-   Run_Abort_Handoff
-     (Flyology.Lightweight_Task, Connection_Testing.After_Acquisition);
-   Run_Abort_Handoff
-     (Flyology.Native_Task, Connection_Testing.After_Acquisition);
+   Run_Abort_Handoff (Flyology.Lightweight_Task, Connection_Testing.After_Registration);
+   Run_Abort_Handoff (Flyology.Native_Task, Connection_Testing.After_Registration);
+   Run_Abort_Handoff (Flyology.Lightweight_Task, Connection_Testing.After_Acquisition);
+   Run_Abort_Handoff (Flyology.Native_Task, Connection_Testing.After_Acquisition);
    Run_Abort_Queued (Flyology.Lightweight_Task);
    Run_Abort_Queued (Flyology.Native_Task);
    Run_Abort_Active_Parked (Flyology.Lightweight_Task);
@@ -1873,14 +1780,10 @@ begin
    Run_Close_Reuse (Flyology.Native_Task);
    Run_Cancellation_Close_Race (Flyology.Lightweight_Task);
    Run_Cancellation_Close_Race (Flyology.Native_Task);
-   Run_Close_In_Progress_Re_Adoption
-     (Flyology.Lightweight_Task, Take_Path);
-   Run_Close_In_Progress_Re_Adoption
-     (Flyology.Native_Task, Take_Path);
-   Run_Close_In_Progress_Re_Adoption
-     (Flyology.Lightweight_Task, Accept_Path);
-   Run_Close_In_Progress_Re_Adoption
-     (Flyology.Native_Task, Accept_Path);
+   Run_Close_In_Progress_Re_Adoption (Flyology.Lightweight_Task, Take_Path);
+   Run_Close_In_Progress_Re_Adoption (Flyology.Native_Task, Take_Path);
+   Run_Close_In_Progress_Re_Adoption (Flyology.Lightweight_Task, Accept_Path);
+   Run_Close_In_Progress_Re_Adoption (Flyology.Native_Task, Accept_Path);
    Run_Competing_Adopters (Flyology.Lightweight_Task);
    Run_Competing_Adopters (Flyology.Native_Task);
    Run_Exclusive_Waiters;

@@ -1,17 +1,12 @@
 package body Flyology.Buffers.Drivers is
 
-   function Has_Buffer (Item : Detached_Buffer) return Boolean is
-     (Item.Owner /= null and then Item.Token.Slot /= No_Slot);
+   function Has_Buffer (Item : Detached_Buffer) return Boolean
+   is (Item.Owner /= null and then Item.Token.Slot /= No_Slot);
 
-   function Same_Pool
-     (Source : Detached_Buffer;
-      Target : Unique_Buffer) return Boolean is
-     (Has_Buffer (Source) and then Source.Owner = Target.Owner);
+   function Same_Pool (Source : Detached_Buffer; Target : Unique_Buffer) return Boolean
+   is (Has_Buffer (Source) and then Source.Owner = Target.Owner);
 
-   procedure Move_From
-     (Item   : in out Unique_Buffer;
-      Target : in out Detached_Buffer)
-   is
+   procedure Move_From (Item : in out Unique_Buffer; Target : in out Detached_Buffer) is
    begin
       if not Flyology.Buffers.Has_Buffer (Item) then
          raise Program_Error with "move from a vacant buffer";
@@ -22,10 +17,7 @@ package body Flyology.Buffers.Drivers is
       Detach (Item, Target.Token);
    end Move_From;
 
-   procedure Move_To
-     (Source : in out Detached_Buffer;
-      Item   : in out Unique_Buffer)
-   is
+   procedure Move_To (Source : in out Detached_Buffer; Item : in out Unique_Buffer) is
    begin
       if not Has_Buffer (Source) then
          raise Program_Error with "move from a vacant detached buffer";
@@ -38,10 +30,7 @@ package body Flyology.Buffers.Drivers is
       Source.Owner := null;
    end Move_To;
 
-   procedure Move
-     (Source : in out Detached_Buffer;
-      Target : in out Detached_Buffer)
-   is
+   procedure Move (Source : in out Detached_Buffer; Target : in out Detached_Buffer) is
    begin
       if not Has_Buffer (Source) then
          raise Program_Error with "move from a vacant detached buffer";
@@ -62,10 +51,7 @@ package body Flyology.Buffers.Drivers is
       end if;
    end Release;
 
-   procedure Set_Channel_Metadata
-     (Item  : in out Detached_Buffer;
-      Value : Interfaces.Unsigned_64)
-   is
+   procedure Set_Channel_Metadata (Item : in out Detached_Buffer; Value : Interfaces.Unsigned_64) is
    begin
       if not Has_Buffer (Item) then
          raise Program_Error with "metadata on a vacant detached buffer";
@@ -73,28 +59,23 @@ package body Flyology.Buffers.Drivers is
       Item.Token.Channel_Metadata := Value;
    end Set_Channel_Metadata;
 
-   function Channel_Metadata
-     (Item : Detached_Buffer) return Interfaces.Unsigned_64 is
-     (Item.Token.Channel_Metadata);
+   function Channel_Metadata (Item : Detached_Buffer) return Interfaces.Unsigned_64
+   is (Item.Token.Channel_Metadata);
 
    function Address (Item : Detached_Buffer) return System.Address is
       First : constant Storage_Offset :=
-        Storage_Offset (Item.Token.Slot - 1)
-        * Storage_Offset (Item.Owner.Block_Size) + 1;
+        Storage_Offset (Item.Token.Slot - 1) * Storage_Offset (Item.Owner.Block_Size) + 1;
    begin
       return Item.Owner.Data.all (First)'Address;
    end Address;
 
-   function Capacity (Item : Detached_Buffer) return Positive is
-     (Item.Owner.Block_Size);
+   function Capacity (Item : Detached_Buffer) return Positive
+   is (Item.Owner.Block_Size);
 
-   function Length (Item : Detached_Buffer) return Natural is
-     (Item.Token.Length);
+   function Length (Item : Detached_Buffer) return Natural
+   is (Item.Token.Length);
 
-   procedure Set_Length
-     (Item   : in out Detached_Buffer;
-      Length : Natural)
-   is
+   procedure Set_Length (Item : in out Detached_Buffer; Length : Natural) is
    begin
       if Length > Item.Owner.Block_Size then
          raise Constraint_Error with "buffer length exceeds capacity";
@@ -102,7 +83,8 @@ package body Flyology.Buffers.Drivers is
       Item.Token.Length := Length;
    end Set_Length;
 
-   overriding procedure Finalize (Item : in out Detached_Buffer) is
+   overriding
+   procedure Finalize (Item : in out Detached_Buffer) is
    begin
       Release (Item);
    end Finalize;

@@ -47,7 +47,8 @@ procedure Connection_Driver_Smoke is
          null;
       end Await_Finished;
 
-      function Passed return Boolean is (Is_OK);
+      function Passed return Boolean
+      is (Is_OK);
    end Coordination;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -88,28 +89,24 @@ procedure Connection_Driver_Smoke is
                Ready    : Drivers.Wait_Result;
             begin
                Drivers.Receive (IO, Incoming, Last, Step);
-               pragma Assert
-                 (Step = Drivers.Made_Progress
-                    and then Last = Incoming'Last
-                    and then Incoming = [11, 12, 13]);
+               pragma
+                 Assert
+                   (Step = Drivers.Made_Progress
+                      and then Last = Incoming'Last
+                      and then Incoming = [11, 12, 13]);
                Drivers.Send (IO, [1 => 21, 2 => 22], Last, Step);
-               pragma Assert
-                 (Step = Drivers.Made_Progress and then Last = 2);
+               pragma Assert (Step = Drivers.Made_Progress and then Last = 2);
 
                Drivers.Receive (IO, Incoming, Last, Step);
-               pragma Assert
-                 (Step = Drivers.Need_Read and then Last < Incoming'First);
+               pragma Assert (Step = Drivers.Need_Read and then Last < Incoming'First);
 
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only, 0.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, 0.0, Ready);
                pragma Assert (Ready = Drivers.Outbound_Ready);
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only, 0.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, 0.0, Ready);
                pragma Assert (Ready = Drivers.Wait_Timed_Out);
 
                State.Waiting;
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only, 1.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, 1.0, Ready);
                pragma Assert (Ready = Drivers.Outbound_Ready);
             end Pump;
          begin
@@ -157,8 +154,7 @@ procedure Connection_Driver_Smoke is
 
          task body Worker is
             procedure Pump (IO : in out Drivers.Capability) is
-               Data    : constant Stream_Element_Array (1 .. 65_536) :=
-                 [others => 7];
+               Data    : constant Stream_Element_Array (1 .. 65_536) := [others => 7];
                Last    : Stream_Element_Offset;
                Step    : Drivers.Step_Result := Drivers.Made_Progress;
                Blocked : Boolean := False;
@@ -169,8 +165,7 @@ procedure Connection_Driver_Smoke is
                      Blocked := True;
                      exit;
                   end if;
-                  pragma Assert
-                    (Step = Drivers.Made_Progress and then Last >= Data'First);
+                  pragma Assert (Step = Drivers.Made_Progress and then Last >= Data'First);
                end loop;
                pragma Assert (Blocked);
             end Pump;
@@ -194,9 +189,7 @@ procedure Connection_Driver_Smoke is
 
    type Interruption_Kind is (Token_Cancel, Manager_Shutdown, Concurrent_Close);
 
-   procedure Run_Interruption
-     (Model : Flyology.Execution_Model; Kind : Interruption_Kind)
-   is
+   procedure Run_Interruption (Model : Flyology.Execution_Model; Kind : Interruption_Kind) is
       Manager : aliased Connections.Server (Capacity => 1);
       Token   : aliased Connections.Cancellation_Token;
       Item    : Connections.Connection;
@@ -218,14 +211,11 @@ procedure Connection_Driver_Smoke is
                Ready : Drivers.Wait_Result;
             begin
                State.Waiting;
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only,
-                  Flyology.IO.Infinite, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, Flyology.IO.Infinite, Ready);
             end Pump;
          begin
             begin
-               Drivers.Run
-                 (Item, Pump'Access, Timeout => 2.0, Token => Token'Access);
+               Drivers.Run (Item, Pump'Access, Timeout => 2.0, Token => Token'Access);
                State.Finish (False);
             exception
                when Connections.Operation_Cancelled =>
@@ -238,10 +228,12 @@ procedure Connection_Driver_Smoke is
       begin
          State.Await_Waiting;
          case Kind is
-            when Token_Cancel =>
+            when Token_Cancel     =>
                Token.Request;
+
             when Manager_Shutdown =>
                Manager.Request_Shutdown;
+
             when Concurrent_Close =>
                Connections.Close (Item);
          end case;
@@ -250,11 +242,9 @@ procedure Connection_Driver_Smoke is
 
       pragma Assert (State.Passed);
       if Kind = Concurrent_Close then
-         pragma Assert
-           (not Connections.Is_Open (Item) and then Manager.Active = 0);
+         pragma Assert (not Connections.Is_Open (Item) and then Manager.Active = 0);
       else
-         pragma Assert
-           (Connections.Is_Open (Item) and then Manager.Active = 1);
+         pragma Assert (Connections.Is_Open (Item) and then Manager.Active = 1);
          Connections.Close (Item);
       end if;
       if Kind = Manager_Shutdown then
@@ -286,9 +276,7 @@ procedure Connection_Driver_Smoke is
                Ready : Drivers.Wait_Result;
             begin
                State.Waiting;
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only,
-                  Flyology.IO.Infinite, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, Flyology.IO.Infinite, Ready);
             end Pump;
          begin
             Drivers.Run (Item, Pump'Access);
@@ -376,9 +364,7 @@ procedure Connection_Driver_Smoke is
             procedure Pump (IO : in out Drivers.Capability) is
                Ready : Drivers.Wait_Result;
             begin
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Protocol_Only,
-                  Flyology.IO.Infinite, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Protocol_Only, Flyology.IO.Infinite, Ready);
             end Pump;
          begin
             begin

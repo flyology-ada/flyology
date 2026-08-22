@@ -31,26 +31,16 @@ procedure Lightweight_Vs_Native is
       end Wait;
    end Completion_Counter;
 
-   procedure Report
-     (Lightweight_Elapsed : Duration;
-      Native_Elapsed  : Duration)
-   is
-      Ratio : constant Long_Float :=
-        Long_Float (Native_Elapsed) / Long_Float (Lightweight_Elapsed);
+   procedure Report (Lightweight_Elapsed : Duration; Native_Elapsed : Duration) is
+      Ratio : constant Long_Float := Long_Float (Native_Elapsed) / Long_Float (Lightweight_Elapsed);
    begin
+      Put_Line ("  event loop: " & Lightweight_Elapsed'Image & " s (one OS thread)");
+      Put_Line ("  pthreads:   " & Native_Elapsed'Image & " s");
       Put_Line
-        ("  event loop: " & Lightweight_Elapsed'Image
-         & " s (one OS thread)");
-      Put_Line
-        ("  pthreads:   " & Native_Elapsed'Image & " s");
-      Put_Line
-        ("  native/event-loop time ratio: "
-         & Showcase_Support.Fixed_Image (Ratio, Decimals => 2) & "x");
+        ("  native/event-loop time ratio: " & Showcase_Support.Fixed_Image (Ratio, Decimals => 2) & "x");
       if Ratio >= 1.0 then
          Put_Line
-           ("  result: event loop is "
-            & Showcase_Support.Fixed_Image (Ratio, Decimals => 2)
-            & "x faster");
+           ("  result: event loop is " & Showcase_Support.Fixed_Image (Ratio, Decimals => 2) & "x faster");
       else
          Put_Line
            ("  result: pthreads are "
@@ -60,13 +50,12 @@ procedure Lightweight_Vs_Native is
    end Report;
 
    Lightweight_Elapsed : Duration;
-   Native_Elapsed  : Duration;
-   Started         : Time;
+   Native_Elapsed      : Duration;
+   Started             : Time;
 
 begin
    Put_Line
-     ("case 1: scheduling throughput (" & Yield_Workers'Image
-      & " tasks x" & Yield_Turns'Image & " yields)");
+     ("case 1: scheduling throughput (" & Yield_Workers'Image & " tasks x" & Yield_Turns'Image & " yields)");
 
    Started := Clock;
    declare
@@ -115,8 +104,7 @@ begin
 
    New_Line;
    Put_Line
-     ("case 2: high-fanout waiting (" & Wait_Workers'Image
-      & " tasks each wait" & Wait_Time'Image & " s)");
+     ("case 2: high-fanout waiting (" & Wait_Workers'Image & " tasks each wait" & Wait_Time'Image & " s)");
 
    Started := Clock;
    declare

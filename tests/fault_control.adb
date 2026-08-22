@@ -2,26 +2,20 @@ package body Fault_Control is
 
    use type Interfaces.C.int;
 
-   function Id (At_Point : Point) return Interfaces.C.int is
-     (Interfaces.C.int (Point'Enum_Rep (At_Point)));
+   function Id (At_Point : Point) return Interfaces.C.int
+   is (Interfaces.C.int (Point'Enum_Rep (At_Point)));
 
-   function Enabled return Boolean is (C_Enabled /= 0);
+   function Enabled return Boolean
+   is (C_Enabled /= 0);
 
    procedure Reset is
    begin
       C_Reset;
    end Reset;
 
-   procedure Arm
-     (At_Point : Point;
-      First    : Natural := 0;
-      Count    : Positive := 1)
-   is
+   procedure Arm (At_Point : Point; First : Natural := 0; Count : Positive := 1) is
    begin
-      if C_Arm
-        (Id (At_Point), Interfaces.C.unsigned (First),
-         Interfaces.C.unsigned (Count)) /= 0
-      then
+      if C_Arm (Id (At_Point), Interfaces.C.unsigned (First), Interfaces.C.unsigned (Count)) /= 0 then
          raise Program_Error with "runtime fault injection is disabled";
       end if;
    end Arm;
@@ -33,17 +27,17 @@ package body Fault_Control is
       end if;
    end Disarm;
 
-   function Calls (At_Point : Point) return Natural is
-     (Natural (C_Calls (Id (At_Point))));
+   function Calls (At_Point : Point) return Natural
+   is (Natural (C_Calls (Id (At_Point))));
 
-   function Create_Registration_Parked return Boolean is
-     (C_Create_Registration_Parked /= 0);
+   function Create_Registration_Parked return Boolean
+   is (C_Create_Registration_Parked /= 0);
 
-   function Automatic_Placement_Parked return Boolean is
-     (C_Automatic_Placement_Parked /= 0);
+   function Automatic_Placement_Parked return Boolean
+   is (C_Automatic_Placement_Parked /= 0);
 
-   function Automatic_Placement_Claim_Group return Integer is
-     (Integer (C_Automatic_Placement_Claim_Group));
+   function Automatic_Placement_Claim_Group return Integer
+   is (Integer (C_Automatic_Placement_Claim_Group));
 
    procedure Release_Create_Registration is
    begin
@@ -56,31 +50,23 @@ package body Fault_Control is
    end Release_Automatic_Placement;
 
    function File_Cancel_Count
-     (Backend     : File_Cancel_Backend;
-      Disposition : File_Cancel_Disposition;
-      Terminal    : Boolean) return Natural
-   is
-     (Natural
-        (C_File_Cancel_Count
-           (Interfaces.C.int (File_Cancel_Backend'Enum_Rep (Backend)),
-            Interfaces.C.int
-              (File_Cancel_Disposition'Enum_Rep (Disposition)),
-            Boolean'Pos (Terminal))));
+     (Backend : File_Cancel_Backend; Disposition : File_Cancel_Disposition; Terminal : Boolean) return Natural
+   is (Natural
+         (C_File_Cancel_Count
+            (Interfaces.C.int (File_Cancel_Backend'Enum_Rep (Backend)),
+             Interfaces.C.int (File_Cancel_Disposition'Enum_Rep (Disposition)),
+             Boolean'Pos (Terminal))));
 
-   function Atomic_Store_Model_Count (Model : Memory_Model) return Natural is
-     (Natural
-        (C_Atomic_Store_Model_Count
-           (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
+   function Atomic_Store_Model_Count (Model : Memory_Model) return Natural
+   is (Natural (C_Atomic_Store_Model_Count (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
 
-   function Uring_Identity_Count (Reused : Boolean) return Natural is
-     (Natural
-        (C_Uring_Identity_Count
-           (Interfaces.C.int (Boolean'Pos (Reused)))));
+   function Uring_Identity_Count (Reused : Boolean) return Natural
+   is (Natural (C_Uring_Identity_Count (Interfaces.C.int (Boolean'Pos (Reused)))));
 
-   function Uring_Admin_Complete_Count return Natural is
-     (Natural (C_Uring_Admin_Complete_Count));
+   function Uring_Admin_Complete_Count return Natural
+   is (Natural (C_Uring_Admin_Complete_Count));
 
-   function Uring_CQ_Capacity return Natural is
-     (Natural (C_Uring_CQ_Capacity));
+   function Uring_CQ_Capacity return Natural
+   is (Natural (C_Uring_CQ_Capacity));
 
 end Fault_Control;

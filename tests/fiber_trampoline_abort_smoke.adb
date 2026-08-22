@@ -7,10 +7,11 @@ with Flyology;
 --  fiber. Nothing here asserts a value; the test fails by hanging, aborting on
 --  a scheduler invariant, or corrupting the trampoline pool for the task that
 --  keeps running afterwards.
+
 procedure Fiber_Trampoline_Abort_Smoke is
    type Callback_Access is access procedure;
 
-   Sink : Callback_Access := null;
+   Sink     : Callback_Access := null;
    pragma Volatile (Sink);
    Observed : Natural := 0;
    pragma Volatile (Observed);
@@ -47,13 +48,15 @@ procedure Fiber_Trampoline_Abort_Smoke is
       end Await_Survivor;
    end Gate;
 
-   task Holder with CPU => 1 is
+   task Holder
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Holder;
 
    --  Shares Holder's event loop, so a trampoline pool damaged by the abort
    --  would be observed here.
-   task Survivor with CPU => 1 is
+   task Survivor
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Survivor;
 

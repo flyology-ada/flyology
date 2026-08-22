@@ -52,13 +52,13 @@ package body System.Flyology.Scheduler is
    --  a negative reading, so this cannot collide with a real one.
    No_Timestamp         : constant Duration := -1.0;
 
-   Dedicated_First_Id  : constant C.int := Scheduling.First_Dedicated_Group;
-   Maximum_Group_Id    : constant C.int := Scheduling.Last_Group;
+   Dedicated_First_Id : constant C.int := Scheduling.First_Dedicated_Group;
+   Maximum_Group_Id   : constant C.int := Scheduling.Last_Group;
    subtype Group_Index is Natural range 0 .. Natural (Maximum_Group_Id);
 
-   No_Placement_Mode       : constant C.int := 0;
-   Strict_CPU_Mode         : constant C.int := 1;
-   Advisory_Tag_Mode       : constant C.int := 2;
+   No_Placement_Mode : constant C.int := 0;
+   Strict_CPU_Mode   : constant C.int := 1;
+   Advisory_Tag_Mode : constant C.int := 2;
    subtype Placement_Request is Placement_Config.Placement_Request;
    subtype Placement_Request_Array is Placement_Config.Placement_Request_Array;
 
@@ -69,74 +69,64 @@ package body System.Flyology.Scheduler is
       Error_Code : C.int;
    end record;
    pragma Convention (C, Runtime_Placement_Status);
-   type Runtime_Placement_Status_Access is
-     access all Runtime_Placement_Status;
-   function To_Runtime_Placement_Status is new Ada.Unchecked_Conversion
-     (System.Address, Runtime_Placement_Status_Access);
+   type Runtime_Placement_Status_Access is access all Runtime_Placement_Status;
+   function To_Runtime_Placement_Status is new
+     Ada.Unchecked_Conversion (System.Address, Runtime_Placement_Status_Access);
 
    type Runtime_Pool_Reduction_Status is record
-      Phase                  : C.int;
-      Target_Size            : C.int;
-      Automatic_Tasks        : C.unsigned_long_long;
-      Pinned_Automatic_Tasks : C.unsigned_long_long;
+      Phase                   : C.int;
+      Target_Size             : C.int;
+      Automatic_Tasks         : C.unsigned_long_long;
+      Pinned_Automatic_Tasks  : C.unsigned_long_long;
       Waiting_Automatic_Tasks : C.unsigned_long_long;
-      Explicit_Tasks         : C.unsigned_long_long;
-      Placement_Claims       : C.unsigned_long_long;
-   end record with Convention => C;
-   type Runtime_Pool_Reduction_Status_Access is
-     access all Runtime_Pool_Reduction_Status;
-   function To_Runtime_Pool_Reduction_Status is new Ada.Unchecked_Conversion
-     (System.Address, Runtime_Pool_Reduction_Status_Access);
+      Explicit_Tasks          : C.unsigned_long_long;
+      Placement_Claims        : C.unsigned_long_long;
+   end record
+   with Convention => C;
+   type Runtime_Pool_Reduction_Status_Access is access all Runtime_Pool_Reduction_Status;
+   function To_Runtime_Pool_Reduction_Status is new
+     Ada.Unchecked_Conversion (System.Address, Runtime_Pool_Reduction_Status_Access);
 
    --  A prime-sized table avoids clustering when aligned ATCB allocations
    --  advance by a regular stride. For the expected task populations,
    --  separate chaining keeps lookup and removal constant-time on average
    --  without introducing resize allocation into wake paths.
-   Registry_Bucket_Count : constant := 16_381;
-   subtype Registry_Bucket_Index is
-     Natural range 0 .. Registry_Bucket_Count - 1;
-   Registry_Shard_Count : constant := 64;
-   subtype Registry_Shard_Index is
-     Natural range 0 .. Registry_Shard_Count - 1;
-   Instance_Shard_Span : constant C.unsigned_long_long := 2**58;
-   Instance_Sequence_Last : constant C.unsigned_long_long :=
-     Instance_Shard_Span - 1;
+   Registry_Bucket_Count  : constant := 16_381;
+   subtype Registry_Bucket_Index is Natural range 0 .. Registry_Bucket_Count - 1;
+   Registry_Shard_Count   : constant := 64;
+   subtype Registry_Shard_Index is Natural range 0 .. Registry_Shard_Count - 1;
+   Instance_Shard_Span    : constant C.unsigned_long_long := 2**58;
+   Instance_Sequence_Last : constant C.unsigned_long_long := Instance_Shard_Span - 1;
    --  Readiness is local to a loop, so each group owns a smaller prime-sized
    --  descriptor table. Collision chains also represent legitimate fan-out
    --  when several tasks wait on the same descriptor and direction.
-   IO_Bucket_Count : constant := 8_191;
+   IO_Bucket_Count        : constant := 8_191;
    subtype IO_Bucket_Index is Natural range 0 .. IO_Bucket_Count - 1;
    --  One completion-set operation can arm a transport plus three lifecycle
    --  interests. Keep parity with Flyology.IO.Max_Wait_Requests.
-   Max_IO_Link_Count : constant := 128;
+   Max_IO_Link_Count      : constant := 128;
    subtype IO_Link_Kind is Positive range 1 .. Max_IO_Link_Count;
-   Primary_IO : constant IO_Link_Kind := 1;
+   Primary_IO             : constant IO_Link_Kind := 1;
 
    type Runtime_Wait_Request is record
       Descriptor : C.int;
       For_Write  : C.int;
    end record
-     with Convention => C;
-   type Runtime_Wait_Request_Array is
-     array (Natural range <>) of Runtime_Wait_Request
-     with Convention => C;
-   package C_Char_Conversions is new
-     System.Address_To_Access_Conversions (C.char);
-   package Wait_Request_Conversions is new
-     System.Address_To_Access_Conversions (Runtime_Wait_Request);
+   with Convention => C;
+   type Runtime_Wait_Request_Array is array (Natural range <>) of Runtime_Wait_Request with Convention => C;
+   package C_Char_Conversions is new System.Address_To_Access_Conversions (C.char);
+   package Wait_Request_Conversions is new System.Address_To_Access_Conversions (Runtime_Wait_Request);
 
    type Fiber_State is (Running, Ready, Waiting, Migrating, Finished);
    type Dormancy_Advice is (Prompt_Advice, Cold_Advice, Pageout_Advice);
 
-   function Phase_Of
-     (State : Fiber_State) return Scheduling.Fiber_Phase
-   is
-     (case State is
-         when Running  => Scheduling.Running,
-         when Ready    => Scheduling.Ready,
-         when Waiting  => Scheduling.Waiting,
+   function Phase_Of (State : Fiber_State) return Scheduling.Fiber_Phase
+   is (case State is
+         when Running   => Scheduling.Running,
+         when Ready     => Scheduling.Ready,
+         when Waiting   => Scheduling.Waiting,
          when Migrating => Scheduling.Migrating,
-         when Finished => Scheduling.Finished);
+         when Finished  => Scheduling.Finished);
 
    type Fiber;
    type Fiber_Access is access all Fiber;
@@ -163,16 +153,15 @@ package body System.Flyology.Scheduler is
       Cancelled        : C.int := 0;
       Cancel_Requested : C.int := 0;
       Next             : System.Address := System.Null_Address;
-   end record with Convention => C;
+   end record
+   with Convention => C;
    type Async_File_Node_Access is access all Async_File_Node;
-   function To_Async_File_Node is new Ada.Unchecked_Conversion
-     (System.Address, Async_File_Node_Access);
+   function To_Async_File_Node is new Ada.Unchecked_Conversion (System.Address, Async_File_Node_Access);
 
    type Loop_Group;
    type Loop_Group_Access is access all Loop_Group;
-   subtype Ready_Priority is C.int range
-     C.int (System.Any_Priority'First) ..
-     C.int (System.Any_Priority'Last);
+   subtype Ready_Priority is
+     C.int range C.int (System.Any_Priority'First) .. C.int (System.Any_Priority'Last);
    type Ready_Bucket is record
       Head : Fiber_Access;
       Tail : Fiber_Access;
@@ -190,12 +179,10 @@ package body System.Flyology.Scheduler is
       Registered : Boolean := False;
       Next       : IO_Wait_Link_Access := null;
    end record;
-   type IO_Wait_Link_Array is
-     array (IO_Link_Kind range <>) of aliased IO_Wait_Link;
-   package IO_Link_Conversions is new
-     System.Address_To_Access_Conversions (IO_Wait_Link);
-   function To_IO_Link_Access is new Ada.Unchecked_Conversion
-     (IO_Link_Conversions.Object_Pointer, IO_Wait_Link_Access);
+   type IO_Wait_Link_Array is array (IO_Link_Kind range <>) of aliased IO_Wait_Link;
+   package IO_Link_Conversions is new System.Address_To_Access_Conversions (IO_Wait_Link);
+   function To_IO_Link_Access is new
+     Ada.Unchecked_Conversion (IO_Link_Conversions.Object_Pointer, IO_Wait_Link_Access);
    type IO_Bucket_Array is array (IO_Bucket_Index) of IO_Wait_Link_Access;
    type Timer_Heap_Array is array (Positive range <>) of Fiber_Access;
    type Timer_Heap_Access is access Timer_Heap_Array;
@@ -239,8 +226,8 @@ package body System.Flyology.Scheduler is
    end record;
    pragma Convention (C, Runtime_Group_Snapshot);
    type Runtime_Group_Snapshot_Access is access all Runtime_Group_Snapshot;
-   function To_Runtime_Group_Snapshot is new Ada.Unchecked_Conversion
-     (System.Address, Runtime_Group_Snapshot_Access);
+   function To_Runtime_Group_Snapshot is new
+     Ada.Unchecked_Conversion (System.Address, Runtime_Group_Snapshot_Access);
 
    Task_Snapshot_ABI_Version : constant C.unsigned := 1;
    type Runtime_Task_Snapshot is record
@@ -249,20 +236,21 @@ package body System.Flyology.Scheduler is
       Base_Priority      : C.int;
       Flags              : C.unsigned;
       Stack_Usable_Bytes : C.unsigned_long_long;
-   end record with Convention => C;
+   end record
+   with Convention => C;
    type Runtime_Task_Snapshot_Access is access all Runtime_Task_Snapshot;
-   function To_Runtime_Task_Snapshot is new Ada.Unchecked_Conversion
-     (System.Address, Runtime_Task_Snapshot_Access);
+   function To_Runtime_Task_Snapshot is new
+     Ada.Unchecked_Conversion (System.Address, Runtime_Task_Snapshot_Access);
 
    type Runtime_Task_Snapshot_Metadata is record
       Version : C.unsigned;
       Written : C.unsigned_long_long;
       Total   : C.unsigned_long_long;
-   end record with Convention => C;
-   type Runtime_Task_Snapshot_Metadata_Access is
-     access all Runtime_Task_Snapshot_Metadata;
-   function To_Runtime_Task_Snapshot_Metadata is new Ada.Unchecked_Conversion
-     (System.Address, Runtime_Task_Snapshot_Metadata_Access);
+   end record
+   with Convention => C;
+   type Runtime_Task_Snapshot_Metadata_Access is access all Runtime_Task_Snapshot_Metadata;
+   function To_Runtime_Task_Snapshot_Metadata is new
+     Ada.Unchecked_Conversion (System.Address, Runtime_Task_Snapshot_Metadata_Access);
 
    Task_Pinned_Flag            : constant C.unsigned := 2#000001#;
    Task_Timer_Wait_Flag        : constant C.unsigned := 2#000010#;
@@ -272,71 +260,71 @@ package body System.Flyology.Scheduler is
    Task_Destroy_Requested_Flag : constant C.unsigned := 2#100000#;
 
    type Fiber is record
-      T          : System.Address := System.Null_Address;
-      Instance   : C.unsigned_long_long := 0;
+      T                       : System.Address := System.Null_Address;
+      Instance                : C.unsigned_long_long := 0;
       --  This fiber's most recent live nested-subprogram trampoline, which
       --  links back through the ones it still holds. The compiler's helper
       --  releases trampolines in stack order, an order that holds within a
       --  fiber but not within an event-loop thread shared by several. The
       --  scheduler releases whatever remains when the fiber is reaped.
-      Trampoline_Control : aliased System.Address := System.Null_Address;
-      Context    : Contexts.Context_Access;
-      Wrapper    : System.Address := System.Null_Address;
-      Priority   : C.int := 0;
-      Deadline   : Duration := No_Deadline;
-      Timer_Index : Natural := 0;
-      Timed_Out  : Boolean := False;
-      State      : Fiber_State := Waiting;
-      IO_Wait    : Boolean := False;
-      IO_Interrupt_Wait : Boolean := False;
-      IO_Result  : C.int := 0;
+      Trampoline_Control      : aliased System.Address := System.Null_Address;
+      Context                 : Contexts.Context_Access;
+      Wrapper                 : System.Address := System.Null_Address;
+      Priority                : C.int := 0;
+      Deadline                : Duration := No_Deadline;
+      Timer_Index             : Natural := 0;
+      Timed_Out               : Boolean := False;
+      State                   : Fiber_State := Waiting;
+      IO_Wait                 : Boolean := False;
+      IO_Interrupt_Wait       : Boolean := False;
+      IO_Result               : C.int := 0;
       --  File cancellation needs one descriptor link that outlives the
       --  submission call. Descriptor-set waits keep their bounded link array
       --  on the suspended fiber's stack instead.
-      Inline_IO_Links : aliased IO_Wait_Link_Array (1 .. 1);
-      Active_IO_Links : IO_Wait_Link_Access := null;
-      Active_IO_Link_Count : Natural range 0 .. Max_IO_Link_Count := 0;
-      File_Wait  : Boolean := False;
-      File_Pending : Boolean := False;
-      File_Result : C.long_long := 0;
-      File_Error  : C.int := 0;
-      File_Descriptor : C.int := -1;
-      File_Buffer : System.Address := System.Null_Address;
-      File_Length : C.size_t := 0;
-      File_Offset : C.long_long := 0;
-      File_For_Write : Boolean := False;
-      File_Send_ZC : Boolean := False;
-      File_Cancel_Descriptor : C.int := -1;
-      File_Cancel_Requested : Boolean := False;
-      File_Cancel_Queued : Boolean := False;
+      Inline_IO_Links         : aliased IO_Wait_Link_Array (1 .. 1);
+      Active_IO_Links         : IO_Wait_Link_Access := null;
+      Active_IO_Link_Count    : Natural range 0 .. Max_IO_Link_Count := 0;
+      File_Wait               : Boolean := False;
+      File_Pending            : Boolean := False;
+      File_Result             : C.long_long := 0;
+      File_Error              : C.int := 0;
+      File_Descriptor         : C.int := -1;
+      File_Buffer             : System.Address := System.Null_Address;
+      File_Length             : C.size_t := 0;
+      File_Offset             : C.long_long := 0;
+      File_For_Write          : Boolean := False;
+      File_Send_ZC            : Boolean := False;
+      File_Cancel_Descriptor  : C.int := -1;
+      File_Cancel_Requested   : Boolean := False;
+      File_Cancel_Queued      : Boolean := False;
       File_Cancel_Disposition : C.int := 0;
-      File_Cancel_Error : C.int := 0;
-      Active_Async_Files : Natural := 0;
-      Destroy_Requested : Boolean := False;
-      Reaping     : Boolean := False;
-      Can_Migrate : Boolean := True;
-      Automatic_Placement : Boolean := False;
-      Thread_Pin_Count : Natural := 0;
-      Dormancy_Policy : Dormancy_Advice := Prompt_Advice;
-      Dormancy_Minimum_Wait : Duration := 1.0;
-      Stack_Cold : Boolean := False;
+      File_Cancel_Error       : C.int := 0;
+      Active_Async_Files      : Natural := 0;
+      Destroy_Requested       : Boolean := False;
+      Reaping                 : Boolean := False;
+      Can_Migrate             : Boolean := True;
+      Automatic_Placement     : Boolean := False;
+      Thread_Pin_Count        : Natural := 0;
+      Dormancy_Policy         : Dormancy_Advice := Prompt_Advice;
+      Dormancy_Minimum_Wait   : Duration := 1.0;
+      Stack_Cold              : Boolean := False;
       --  RM D.2.2(9) puts a runnable task at the head of its new priority
       --  queue when it loses inherited priority.  GNARL can report that
       --  transition while this fiber is still running, so remember it until
       --  the next scheduler handoff.
-      Enqueue_At_Head : Boolean := False;
-      Group      : Loop_Group_Access;
-      Migration_Target : Loop_Group_Access;
-      Reserved_Group : Loop_Group_Access;
-      Previous_Ready : Fiber_Access;
-      Next_Ready : Fiber_Access;
-      Previous_Group : Fiber_Access;
-      Next_Group : Fiber_Access;
-      Next_File  : Fiber_Access;
-      Next_File_Cancel : Fiber_Access;
-      Next_Registry : Fiber_Access;
-      Registry_Bucket : Registry_Bucket_Index := 0;
-      Registry_Shard  : Registry_Shard_Index := 0;
+      Enqueue_At_Head         : Boolean := False;
+      Group                   : Loop_Group_Access;
+      Migration_Target        : Loop_Group_Access;
+      Reserved_Group          : Loop_Group_Access;
+      Previous_Ready          : Fiber_Access;
+      Next_Ready              : Fiber_Access;
+      Previous_Group          : Fiber_Access;
+      Next_Group              : Fiber_Access;
+      Next_File               : Fiber_Access;
+      Next_File_Cancel        : Fiber_Access;
+      Next_Registry           : Fiber_Access;
+      Registry_Bucket         : Registry_Bucket_Index := 0;
+      Registry_Shard          : Registry_Shard_Index := 0;
    end record;
 
    --  Older Darwin System.OS_Locks representations omit the leading
@@ -349,110 +337,96 @@ package body System.Flyology.Scheduler is
    end record;
 
    type Loop_Group is limited record
-      Id          : C.int := -1;
-      Dedicated   : Boolean := False;
-      Lock        : Scheduler_Mutex;
-      Started     : Boolean := False with Volatile;
-      Start_Failed : Boolean := False with Volatile;
-      Event_Thread : aliased OSI.pthread_t;
-      Placement_Mode    : C.int := No_Placement_Mode;
-      Placement_Value   : C.int := 0;
-      Placement_Result  : C.int := 0;
-      Placement_Applied : Boolean := False;
-      Scheduler_Context : Contexts.Context_Access;
-      Scheduler_Poller  : Pollers.Poller;
-      Current_Fiber     : Fiber_Access;
+      Id                       : C.int := -1;
+      Dedicated                : Boolean := False;
+      Lock                     : Scheduler_Mutex;
+      Started                  : Boolean := False with Volatile;
+      Start_Failed             : Boolean := False with Volatile;
+      Event_Thread             : aliased OSI.pthread_t;
+      Placement_Mode           : C.int := No_Placement_Mode;
+      Placement_Value          : C.int := 0;
+      Placement_Result         : C.int := 0;
+      Placement_Applied        : Boolean := False;
+      Scheduler_Context        : Contexts.Context_Access;
+      Scheduler_Poller         : Pollers.Poller;
+      Current_Fiber            : Fiber_Access;
       --  The fiber this group's event thread has handed control to. Unlike
       --  Current_Fiber it is cleared the moment the fiber suspends, so
       --  scheduler work is never charged to a fiber's trampoline cursor. Only
       --  the group's own event thread touches it.
-      Trampoline_Fiber  : Fiber_Access;
-      Ready_Buckets     : Ready_Bucket_Array :=
-        (others => (Head => null, Tail => null));
-      Ready_Count       : Natural := 0;
-      Highest_Ready     : Ready_Priority := Ready_Priority'First;
-      Fibers            : Fiber_Access;
-      IO_Waiters        : IO_Bucket_Array := (others => null);
-      Pending_File_Head : Fiber_Access;
-      Pending_File_Tail : Fiber_Access;
-      Pending_Async_File_Head : Async_File_Node_Access;
-      Pending_Async_File_Tail : Async_File_Node_Access;
+      Trampoline_Fiber         : Fiber_Access;
+      Ready_Buckets            : Ready_Bucket_Array := (others => (Head => null, Tail => null));
+      Ready_Count              : Natural := 0;
+      Highest_Ready            : Ready_Priority := Ready_Priority'First;
+      Fibers                   : Fiber_Access;
+      IO_Waiters               : IO_Bucket_Array := (others => null);
+      Pending_File_Head        : Fiber_Access;
+      Pending_File_Tail        : Fiber_Access;
+      Pending_Async_File_Head  : Async_File_Node_Access;
+      Pending_Async_File_Tail  : Async_File_Node_Access;
       Pending_Async_File_Count : Natural := 0;
-      File_Cancel_Head  : Fiber_Access;
-      File_Cancel_Tail  : Fiber_Access;
-      Timers            : Timer_Heap_Access;
-      Timer_Count       : Natural := 0;
-      Timer_Capacity    : Natural := 0;
-      Member_Count      : Natural := 0;
-      Reserved_For      : System.Address := System.Null_Address;
-      Dispatches        : C.unsigned_long_long := 0;
-      Poll_Batches      : C.unsigned_long_long := 0;
-      Poll_Events       : C.unsigned_long_long := 0;
-      Wakeups           : C.unsigned_long_long := 0;
-      Migrations_In     : C.unsigned_long_long := 0;
-      Migrations_Out    : C.unsigned_long_long := 0;
-      Cold_Stacks          : C.unsigned_long_long := 0;
-      Cold_Stack_Bytes     : C.unsigned_long_long := 0;
-      Cold_Advice_Attempts : C.unsigned_long_long := 0;
-      Cold_Advice_Accepted : C.unsigned_long_long := 0;
-      Cold_Advice_Failures : C.unsigned_long_long := 0;
-      Pageout_Advice_Attempts : C.unsigned_long_long := 0;
-      Pageout_Advice_Accepted : C.unsigned_long_long := 0;
-      Pageout_Advice_Failures : C.unsigned_long_long := 0;
+      File_Cancel_Head         : Fiber_Access;
+      File_Cancel_Tail         : Fiber_Access;
+      Timers                   : Timer_Heap_Access;
+      Timer_Count              : Natural := 0;
+      Timer_Capacity           : Natural := 0;
+      Member_Count             : Natural := 0;
+      Reserved_For             : System.Address := System.Null_Address;
+      Dispatches               : C.unsigned_long_long := 0;
+      Poll_Batches             : C.unsigned_long_long := 0;
+      Poll_Events              : C.unsigned_long_long := 0;
+      Wakeups                  : C.unsigned_long_long := 0;
+      Migrations_In            : C.unsigned_long_long := 0;
+      Migrations_Out           : C.unsigned_long_long := 0;
+      Cold_Stacks              : C.unsigned_long_long := 0;
+      Cold_Stack_Bytes         : C.unsigned_long_long := 0;
+      Cold_Advice_Attempts     : C.unsigned_long_long := 0;
+      Cold_Advice_Accepted     : C.unsigned_long_long := 0;
+      Cold_Advice_Failures     : C.unsigned_long_long := 0;
+      Pageout_Advice_Attempts  : C.unsigned_long_long := 0;
+      Pageout_Advice_Accepted  : C.unsigned_long_long := 0;
+      Pageout_Advice_Failures  : C.unsigned_long_long := 0;
       --  Loop utilization accounting. The event thread stamps Started_At once
       --  before its first dispatch and accumulates only the intervals it
       --  spends blocked in the poller with no ready fiber to run. A wait that
       --  has not returned yet stays in Idle_Since so an observer can add it
       --  instead of reporting a long block as busy time. The event thread
       --  writes all four under this group's lock, where observers read them.
-      Started_At        : Duration := No_Timestamp;
-      Idle_Time         : Duration := 0.0;
-      Idle_Since        : Duration := No_Timestamp;
-      Idle_Waits        : C.unsigned_long_long := 0;
+      Started_At               : Duration := No_Timestamp;
+      Idle_Time                : Duration := 0.0;
+      Idle_Since               : Duration := No_Timestamp;
+      Idle_Waits               : C.unsigned_long_long := 0;
       --  Signal stacks belong to OS threads, not fibers. Keeping one with
       --  each permanent loop prevents Task_Wrapper from reserving and
       --  installing 32 KiB inside every lightweight task stack.
-      Signal_Stack      : aliased SSE.Storage_Array
-        (1 .. OSI.Alternate_Stack_Size);
-      Stop_Requested    : Boolean := False;
+      Signal_Stack             : aliased SSE.Storage_Array (1 .. OSI.Alternate_Stack_Size);
+      Stop_Requested           : Boolean := False;
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
    type Automatic_Claim_Array is array (Group_Index) of Natural;
-   type Registry_Bucket_Array is
-     array (Registry_Bucket_Index) of Fiber_Access;
-   type Registry_Shard_Lock_Array is
-     array (Registry_Shard_Index) of Scheduler_Mutex;
-   type Registry_Instance_Array is
-     array (Registry_Shard_Index) of C.unsigned_long_long;
-   type Registry_Creator_Array is
-     array (Registry_Shard_Index) of Natural;
+   type Registry_Bucket_Array is array (Registry_Bucket_Index) of Fiber_Access;
+   type Registry_Shard_Lock_Array is array (Registry_Shard_Index) of Scheduler_Mutex;
+   type Registry_Instance_Array is array (Registry_Shard_Index) of C.unsigned_long_long;
+   type Registry_Creator_Array is array (Registry_Shard_Index) of Natural;
 
-   Placement_Requests : Placement_Request_Array;
-   Placement_Platform_Initialized : Boolean := False;
+   Placement_Requests              : Placement_Request_Array;
+   Placement_Platform_Initialized  : Boolean := False;
    Placement_Initialization_Result : C.int := 0;
 
-   function Fiber_To_Address is new Ada.Unchecked_Conversion
-     (Fiber_Access, System.Address);
-   function Address_To_Fiber is new Ada.Unchecked_Conversion
-     (System.Address, Fiber_Access);
-   function Group_To_Address is new Ada.Unchecked_Conversion
-     (Loop_Group_Access, System.Address);
-   function Address_To_Group is new Ada.Unchecked_Conversion
-     (System.Address, Loop_Group_Access);
-   function Async_File_Token (Node : System.Address) return System.Address is
-     (Node + SSE.Storage_Offset (1));
-   function Async_File_Node_Address
-     (Token : System.Address) return System.Address is
-     (Token - SSE.Storage_Offset (1));
-   function Is_Async_File_Token (Token : System.Address) return Boolean is
-     (SSE.To_Integer (Token) mod 2 = 1);
-   procedure Free_Fiber is new Ada.Unchecked_Deallocation
-     (Fiber, Fiber_Access);
-   procedure Free_Group is new Ada.Unchecked_Deallocation
-     (Loop_Group, Loop_Group_Access);
-   procedure Free_Timer_Heap is new Ada.Unchecked_Deallocation
-     (Timer_Heap_Array, Timer_Heap_Access);
+   function Fiber_To_Address is new Ada.Unchecked_Conversion (Fiber_Access, System.Address);
+   function Address_To_Fiber is new Ada.Unchecked_Conversion (System.Address, Fiber_Access);
+   function Group_To_Address is new Ada.Unchecked_Conversion (Loop_Group_Access, System.Address);
+   function Address_To_Group is new Ada.Unchecked_Conversion (System.Address, Loop_Group_Access);
+   function Async_File_Token (Node : System.Address) return System.Address
+   is (Node + SSE.Storage_Offset (1));
+   function Async_File_Node_Address (Token : System.Address) return System.Address
+   is (Token - SSE.Storage_Offset (1));
+   function Is_Async_File_Token (Token : System.Address) return Boolean
+   is (SSE.To_Integer (Token) mod 2 = 1);
+   procedure Free_Fiber is new Ada.Unchecked_Deallocation (Fiber, Fiber_Access);
+   procedure Free_Group is new Ada.Unchecked_Deallocation (Loop_Group, Loop_Group_Access);
+   procedure Free_Timer_Heap is new Ada.Unchecked_Deallocation (Timer_Heap_Array, Timer_Heap_Access);
 
    --  Each registry shard protects its hash chains, fiber lifetime, and the
    --  Fiber.Group ownership pointer. Topology_Lock protects the group table,
@@ -460,42 +434,41 @@ package body System.Flyology.Scheduler is
    --  group's membership count, fiber list, ready queue, timers, I/O state,
    --  and current fiber. Code needing all three takes shard, topology, group.
    --  Hot Wake and Set_Priority paths take only one shard and one group.
-   Topology_Lock  : Scheduler_Mutex;
-   Registry_Shard_Locks : Registry_Shard_Lock_Array;
-   Registry_Instances : Registry_Instance_Array := (others => 0);
+   Topology_Lock              : Scheduler_Mutex;
+   Registry_Shard_Locks       : Registry_Shard_Lock_Array;
+   Registry_Instances         : Registry_Instance_Array := (others => 0);
    --  Creates that passed the lifecycle guard and may still name, read, or
    --  lock an execution group. Guarded by the matching shard lock, so
    --  Finalize observes every claim while it holds all shards.
-   Registry_Creators : Registry_Creator_Array := (others => 0);
-   Initialized    : Boolean := False;
-   Event_Runtime_Active : C.int := 0;
+   Registry_Creators          : Registry_Creator_Array := (others => 0);
+   Initialized                : Boolean := False;
+   Event_Runtime_Active       : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
    --  0 dormant, 1 running, 2 finalizing, 3 stopped, 4 cleanup deferred.
-   Lifecycle_State : C.int := 0;
+   Lifecycle_State            : C.int := 0;
    pragma Atomic (Lifecycle_State);
-   Created_Group_Count : C.int := 0;
+   Created_Group_Count        : C.int := 0;
    pragma Atomic (Created_Group_Count);
-   Fork_Child_State : C.int := 0;
+   Fork_Child_State           : C.int := 0;
    pragma Atomic (Fork_Child_State);
-   Last_Fatal_Context : C.int := 0;
+   Last_Fatal_Context         : C.int := 0;
    pragma Atomic (Last_Fatal_Context);
-   Groups         : Group_Array := (others => null);
-   Fiber_Registry : Registry_Bucket_Array := (others => null);
-   Automatic_Pool_Size : Positive := Pool_Config.Prepared_Pool_Size;
+   Groups                     : Group_Array := (others => null);
+   Fiber_Registry             : Registry_Bucket_Array := (others => null);
+   Automatic_Pool_Size        : Positive := Pool_Config.Prepared_Pool_Size;
    pragma Atomic (Automatic_Pool_Size);
    Automatic_Placement_Claims : Automatic_Claim_Array := (others => 0);
    --  Reduction fields are written under Topology_Lock. Event loops read the
    --  atomics only to decide whether a ready fiber should be transferred at
    --  the next cooperative dispatch point.
-   Reduction_Phase_Code : C.int :=
-     C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
+   Reduction_Phase_Code       : C.int := C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
    pragma Atomic (Reduction_Phase_Code);
-   Reduction_Target : C.int := C.int (Pool_Config.Prepared_Pool_Size);
+   Reduction_Target           : C.int := C.int (Pool_Config.Prepared_Pool_Size);
    pragma Atomic (Reduction_Target);
-   Reduction_Destination : System.Address := System.Null_Address;
+   Reduction_Destination      : System.Address := System.Null_Address;
    pragma Atomic (Reduction_Destination);
-   Next_Automatic_Group : C.unsigned_long_long := 0;
-   Thread_Group   : Loop_Group_Access := null;
+   Next_Automatic_Group       : C.unsigned_long_long := 0;
+   Thread_Group               : Loop_Group_Access := null;
    pragma Thread_Local_Storage (Thread_Group);
 
    function Mutex_Unlock (Mutex : System.Address) return C.int;
@@ -510,35 +483,21 @@ package body System.Flyology.Scheduler is
    pragma Import (C, C_Getenv, "getenv");
 
    function Initialize_Thread_Placement return C.int;
-   pragma Import
-     (C,
-      Initialize_Thread_Placement,
-      "flyology_thread_placement_initialize");
+   pragma Import (C, Initialize_Thread_Placement, "flyology_thread_placement_initialize");
    function Thread_Placement_Supported (Mode : C.int) return C.int;
-   pragma Import
-     (C,
-      Thread_Placement_Supported,
-      "flyology_thread_placement_supported");
-   function Validate_Thread_Placement
-     (Mode : C.int; Value : C.int) return C.int;
-   pragma Import
-     (C,
-      Validate_Thread_Placement,
-      "flyology_thread_placement_validate");
-   function Apply_Thread_Placement
-     (Mode : C.int; Value : C.int) return C.int;
-   pragma Import
-     (C, Apply_Thread_Placement, "flyology_thread_placement_apply");
+   pragma Import (C, Thread_Placement_Supported, "flyology_thread_placement_supported");
+   function Validate_Thread_Placement (Mode : C.int; Value : C.int) return C.int;
+   pragma Import (C, Validate_Thread_Placement, "flyology_thread_placement_validate");
+   function Apply_Thread_Placement (Mode : C.int; Value : C.int) return C.int;
+   pragma Import (C, Apply_Thread_Placement, "flyology_thread_placement_apply");
    function Thread_Current_Processor return C.int;
-   pragma Import
-     (C, Thread_Current_Processor, "flyology_thread_current_processor");
+   pragma Import (C, Thread_Current_Processor, "flyology_thread_current_processor");
 
    --  Return every trampoline a reaped fiber still holds to the pool it came
    --  from. The host bridge owns nothing on platforms where GNAT does not
    --  allocate trampolines off the stack, where this is a no-op.
    procedure Release_Heap_Trampolines (Control : System.Address);
-   pragma Import
-     (C, Release_Heap_Trampolines, "flyology_heap_trampoline_release");
+   pragma Import (C, Release_Heap_Trampolines, "flyology_heap_trampoline_release");
 
    procedure Scheduler_Main (Argument : System.Address);
    pragma Convention (C, Scheduler_Main);
@@ -566,8 +525,7 @@ package body System.Flyology.Scheduler is
 
    procedure Fatal (Context : C.int := Scheduler_Invariant);
    pragma No_Return (Fatal);
-   function Ensure_Group
-     (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    function Ensure_Placement_Platform return C.int;
    function Select_Automatic_Group return C.int;
    procedure Release_Automatic_Placement_Claim (Group : C.int);
@@ -578,27 +536,20 @@ package body System.Flyology.Scheduler is
       Waiting_Tasks    : out Natural;
       Explicit_Tasks   : out Natural;
       Placement_Claims : out Natural);
-   procedure Collect_Pool_Reduction_Status_Locked
-     (Status : out Runtime_Pool_Reduction_Status);
+   procedure Collect_Pool_Reduction_Status_Locked (Status : out Runtime_Pool_Reduction_Status);
    function Startup_Pool_Size return C.int;
    --  Registry operations require the bucket's shard lock after bootstrap
    --  publishes Initialized. The environment task is deliberately absent
    --  from this registry: only lightweight tasks become fibers.
-   function Registry_Bucket_For
-     (T : System.Address) return Registry_Bucket_Index;
-   function Registry_Shard_For
-     (T : System.Address) return Registry_Shard_Index;
+   function Registry_Bucket_For (T : System.Address) return Registry_Bucket_Index;
+   function Registry_Shard_For (T : System.Address) return Registry_Shard_Index;
    function Find (T : System.Address) return Fiber_Access;
    procedure Register_Locked (Item : not null Fiber_Access);
    procedure Unregister_Locked (Item : not null Fiber_Access);
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index;
-   function Active_IO_Link
-     (Item : not null Fiber_Access;
-      Kind : IO_Link_Kind) return IO_Wait_Link_Access;
+   function Active_IO_Link (Item : not null Fiber_Access; Kind : IO_Link_Kind) return IO_Wait_Link_Access;
    function IO_Interest_Registered_Locked
-     (Group      : not null Loop_Group_Access;
-      Descriptor : C.int;
-      Interest   : Pollers.Interest) return Boolean;
+     (Group : not null Loop_Group_Access; Descriptor : C.int; Interest : Pollers.Interest) return Boolean;
    procedure Register_IO_Wait_Locked
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
@@ -607,23 +558,15 @@ package body System.Flyology.Scheduler is
       Kind       : IO_Link_Kind;
       Outcome    : C.int);
    procedure Remove_IO_Waits_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access;
+     (Group               : not null Loop_Group_Access;
+      Item                : not null Fiber_Access;
       Consumed_Descriptor : C.int := -1;
       Read_Consumed       : Boolean := False;
       Write_Consumed      : Boolean := False);
-   procedure Queue_Pending_File_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Remove_Pending_File_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Queue_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Remove_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
+   procedure Queue_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Remove_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Queue_File_Cancel_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Remove_File_Cancel_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
    procedure Complete_File_Locked
      (Group     : not null Loop_Group_Access;
       Item      : not null Fiber_Access;
@@ -631,14 +574,10 @@ package body System.Flyology.Scheduler is
       Error     : C.int;
       Cancelled : Boolean);
    function Request_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access) return Boolean;
-   procedure Process_File_Cancellations_Locked
-     (Group : not null Loop_Group_Access);
-   procedure Submit_Pending_Files_Locked
-     (Group : not null Loop_Group_Access);
-   procedure Submit_Pending_Async_Files_Locked
-     (Group : not null Loop_Group_Access);
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access) return Boolean;
+   procedure Process_File_Cancellations_Locked (Group : not null Loop_Group_Access);
+   procedure Submit_Pending_Files_Locked (Group : not null Loop_Group_Access);
+   procedure Submit_Pending_Async_Files_Locked (Group : not null Loop_Group_Access);
    function Is_Event_Thread return Boolean;
    procedure Signal_Async_File (Node : not null Async_File_Node_Access);
    procedure Complete_Async_File_Locked
@@ -648,14 +587,14 @@ package body System.Flyology.Scheduler is
       Error     : C.int;
       Cancelled : Boolean);
    function Start_Async_File
-     (Node        : System.Address;
-      Node_Size   : C.size_t;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : C.int;
-      Signal_FD   : C.int) return C.int
+     (Node       : System.Address;
+      Node_Size  : C.size_t;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Offset     : C.long_long;
+      For_Write  : C.int;
+      Signal_FD  : C.int) return C.int
    is
       Group : constant Loop_Group_Access := Thread_Group;
       Item  : Fiber_Access;
@@ -666,8 +605,7 @@ package body System.Flyology.Scheduler is
         or else Group = null
         or else Group.Current_Fiber = null
         or else Node = System.Null_Address
-        or else Node_Size /=
-          C.size_t (Async_File_Node'Size / System.Storage_Unit)
+        or else Node_Size /= C.size_t (Async_File_Node'Size / System.Storage_Unit)
         or else SSE.To_Integer (Node) mod Async_File_Node'Alignment /= 0
         or else Descriptor < 0
         or else Buffer = System.Null_Address
@@ -704,14 +642,14 @@ package body System.Flyology.Scheduler is
       Value.Next := System.Null_Address;
       Value.State := Async_File_Submitted;
       if not Pollers.Submit_File
-        (Group.Scheduler_Poller,
-         Descriptor,
-         Buffer,
-         Length,
-         Offset,
-         For_Write /= 0,
-         Async_File_Token (Node),
-         Error)
+               (Group.Scheduler_Poller,
+                Descriptor,
+                Buffer,
+                Length,
+                Offset,
+                For_Write /= 0,
+                Async_File_Token (Node),
+                Error)
       then
          if Error = C.int (OSI.EAGAIN) then
             Value.State := Async_File_Queued;
@@ -721,8 +659,7 @@ package body System.Flyology.Scheduler is
                Group.Pending_Async_File_Tail.Next := Node;
             end if;
             Group.Pending_Async_File_Tail := Value;
-            Group.Pending_Async_File_Count :=
-              Group.Pending_Async_File_Count + 1;
+            Group.Pending_Async_File_Count := Group.Pending_Async_File_Count + 1;
          else
             Value.Error_Code := Error;
             Value.Descriptor := -1;
@@ -738,25 +675,21 @@ package body System.Flyology.Scheduler is
       return 0;
    end Start_Async_File;
 
-   function Cancel_Async_File
-     (Node      : System.Address;
-      Node_Size : C.size_t) return C.int
-   is
-      Group : constant Loop_Group_Access := Thread_Group;
-      Item  : Fiber_Access;
-      Value : Async_File_Node_Access;
+   function Cancel_Async_File (Node : System.Address; Node_Size : C.size_t) return C.int is
+      Group          : constant Loop_Group_Access := Thread_Group;
+      Item           : Fiber_Access;
+      Value          : Async_File_Node_Access;
       Completion     : File_Engines.Completion;
       Has_Completion : Boolean;
-      Error           : C.int;
-      Disposition     : File_Engines.Cancellation_Disposition;
+      Error          : C.int;
+      Disposition    : File_Engines.Cancellation_Disposition;
       pragma Unreferenced (Disposition);
    begin
       if not Is_Event_Thread
         or else Group = null
         or else Group.Current_Fiber = null
         or else Node = System.Null_Address
-        or else Node_Size /=
-          C.size_t (Async_File_Node'Size / System.Storage_Unit)
+        or else Node_Size /= C.size_t (Async_File_Node'Size / System.Storage_Unit)
         or else SSE.To_Integer (Node) mod Async_File_Node'Alignment /= 0
       then
          return -1;
@@ -774,39 +707,31 @@ package body System.Flyology.Scheduler is
 
       Lock_Group (Group);
       Item := Group.Current_Fiber;
-      if Item = null
-        or else Value.Owner /= Fiber_To_Address (Item)
-        or else Item.Active_Async_Files = 0
-      then
+      if Item = null or else Value.Owner /= Fiber_To_Address (Item) or else Item.Active_Async_Files = 0 then
          Unlock_Group (Group);
          return -1;
       end if;
       Value.Cancel_Requested := 1;
       if Value.State = Async_File_Queued then
          declare
-            Position : Async_File_Node_Access :=
-              Group.Pending_Async_File_Head;
+            Position : Async_File_Node_Access := Group.Pending_Async_File_Head;
             Previous : Async_File_Node_Access := null;
          begin
             while Position /= null and then Position /= Value loop
                Previous := Position;
                Position := To_Async_File_Node (Position.Next);
             end loop;
-            if Position = null
-              or else Group.Pending_Async_File_Count = 0
-            then
+            if Position = null or else Group.Pending_Async_File_Count = 0 then
                Fatal;
             elsif Previous = null then
-               Group.Pending_Async_File_Head :=
-                 To_Async_File_Node (Value.Next);
+               Group.Pending_Async_File_Head := To_Async_File_Node (Value.Next);
             else
                Previous.Next := Value.Next;
             end if;
             if Group.Pending_Async_File_Tail = Value then
                Group.Pending_Async_File_Tail := Previous;
             end if;
-            Group.Pending_Async_File_Count :=
-              Group.Pending_Async_File_Count - 1;
+            Group.Pending_Async_File_Count := Group.Pending_Async_File_Count - 1;
             Value.Next := System.Null_Address;
          end;
          Complete_Async_File_Locked (Group, Value, 0, 0, True);
@@ -814,20 +739,16 @@ package body System.Flyology.Scheduler is
          return 0;
       end if;
       Value.State := Async_File_Cancelling;
-      Disposition := Pollers.Cancel_File
-        (Group.Scheduler_Poller,
-         Value.Descriptor,
-         Async_File_Token (Node),
-         Completion,
-         Has_Completion,
-         Error);
+      Disposition :=
+        Pollers.Cancel_File
+          (Group.Scheduler_Poller,
+           Value.Descriptor,
+           Async_File_Token (Node),
+           Completion,
+           Has_Completion,
+           Error);
       if Has_Completion then
-         Complete_Async_File_Locked
-           (Group,
-            Value,
-            Completion.Result,
-            Completion.Error_Code,
-            True);
+         Complete_Async_File_Locked (Group, Value, Completion.Result, Completion.Error_Code, True);
          Submit_Pending_Async_Files_Locked (Group);
       end if;
       Unlock_Group (Group);
@@ -846,103 +767,66 @@ package body System.Flyology.Scheduler is
       Transferred : access C.long_long;
       Error_Code  : access C.int;
       Cancelled   : access C.int) return C.int;
-   function Ensure_Timer_Capacity
-     (Group : not null Loop_Group_Access) return Boolean;
+   function Ensure_Timer_Capacity (Group : not null Loop_Group_Access) return Boolean;
    function Register_Timer_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access) return Boolean;
-   procedure Remove_Timer_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Enqueue
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Clear_Stack_Advice
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Remove_From_Ready
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   function Ready_Present
-     (Group : not null Loop_Group_Access) return Boolean;
-   function Dequeue
-     (Group : not null Loop_Group_Access) return Fiber_Access;
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access) return Boolean;
+   procedure Remove_Timer_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Enqueue (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Clear_Stack_Advice (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Remove_From_Ready (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   function Ready_Present (Group : not null Loop_Group_Access) return Boolean;
+   function Dequeue (Group : not null Loop_Group_Access) return Fiber_Access;
    procedure Reap_Locked (Item : not null Fiber_Access);
-   procedure Link_Group_Head_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Unlink_Group_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Reap_From_Scheduler
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   procedure Transfer
-     (Item   : not null Fiber_Access;
-      Source : not null Loop_Group_Access);
+   procedure Link_Group_Head_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Unlink_Group_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Reap_From_Scheduler (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Transfer (Item : not null Fiber_Access; Source : not null Loop_Group_Access);
    function Clock return Duration;
    function To_Nanoseconds (Value : Duration) return C.unsigned_long_long;
    procedure Begin_Idle_Wait_Locked (Group : not null Loop_Group_Access);
    procedure End_Idle_Wait_Locked (Group : not null Loop_Group_Access);
    procedure Read_Utilization_Locked
-     (Group  : not null Loop_Group_Access;
-      Uptime : out Duration;
-      Idle   : out Duration);
-   procedure Consider_Dormant_Stack
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access);
-   function Promote_Expired_Timers
-     (Group : not null Loop_Group_Access) return Duration;
-   procedure Handle_Poll_Event
-     (Group : not null Loop_Group_Access;
-      Event : Pollers.Poll_Event);
+     (Group : not null Loop_Group_Access; Uptime : out Duration; Idle : out Duration);
+   procedure Consider_Dormant_Stack (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   function Promote_Expired_Timers (Group : not null Loop_Group_Access) return Duration;
+   procedure Handle_Poll_Event (Group : not null Loop_Group_Access; Event : Pollers.Poll_Event);
    procedure Poll_Ready_Events (Group : not null Loop_Group_Access);
    function In_Fork_Child return Boolean;
-   function Group_Quiescent_Locked
-     (Group : not null Loop_Group_Access) return Boolean;
+   function Group_Quiescent_Locked (Group : not null Loop_Group_Access) return Boolean;
 
    procedure C_Abort;
    pragma Import (C, C_Abort, "abort");
    pragma No_Return (C_Abort);
 
-   function C_Write
-     (FD     : C.int;
-      Buffer : System.Address;
-      Count  : C.size_t) return C.long;
+   function C_Write (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
    pragma Import (C, C_Write, "write");
 
    function Install_Fork_Guard (Flag : System.Address) return C.int;
-   pragma Import
-     (C, Install_Fork_Guard, "flyology_install_fork_guard");
+   pragma Import (C, Install_Fork_Guard, "flyology_install_fork_guard");
 
-   function Pthread_Join
-     (Thread : OSI.pthread_t; Value : System.Address) return C.int;
+   function Pthread_Join (Thread : OSI.pthread_t; Value : System.Address) return C.int;
    pragma Import (C, Pthread_Join, "pthread_join");
 
-   function In_Fork_Child return Boolean is
-     (Fork_Child_State /= 0);
+   function In_Fork_Child return Boolean
+   is (Fork_Child_State /= 0);
 
    function Startup_Pool_Size return C.int is
-      Name : aliased constant C.char_array :=
-        C.To_C ("FLYOLOGY_LOOP_POOL_SIZE");
-      Text : constant System.Address := C_Getenv (Name'Address);
+      Name    : aliased constant C.char_array := C.To_C ("FLYOLOGY_LOOP_POOL_SIZE");
+      Text    : constant System.Address := C_Getenv (Name'Address);
       Maximum : constant Natural := Natural (Dedicated_First_Id);
-      Value : Natural := 0;
-      Offset : Natural := 0;
-      Item : C.char;
-      Digit : Natural;
+      Value   : Natural := 0;
+      Offset  : Natural := 0;
+      Item    : C.char;
+      Digit   : Natural;
    begin
       if Text = System.Null_Address then
          return C.int (Pool_Config.Prepared_Pool_Size);
       end if;
 
       loop
-         Item := C_Char_Conversions.To_Pointer
-           (Text + SSE.Storage_Offset (Offset)).all;
+         Item := C_Char_Conversions.To_Pointer (Text + SSE.Storage_Offset (Offset)).all;
          exit when Item = C.nul;
-         if C.char'Pos (Item) < Character'Pos ('0')
-           or else C.char'Pos (Item) > Character'Pos ('9')
-         then
+         if C.char'Pos (Item) < Character'Pos ('0') or else C.char'Pos (Item) > Character'Pos ('9') then
             return -1;
          end if;
          Digit := C.char'Pos (Item) - Character'Pos ('0');
@@ -953,61 +837,47 @@ package body System.Flyology.Scheduler is
          Offset := Offset + 1;
       end loop;
 
-      if Offset = 0
-        or else Value = 0
-        or else Value > Maximum
-      then
+      if Offset = 0 or else Value = 0 or else Value > Maximum then
          return -1;
       end if;
       return C.int (Value);
    end Startup_Pool_Size;
 
-   function Group_Quiescent_Locked
-     (Group : not null Loop_Group_Access) return Boolean
-   is
-     (Group.Member_Count = 0
-      and then Group.Fibers = null
-      and then Group.Current_Fiber = null
-      and then Group.Ready_Count = 0
-      and then Group.Timer_Count = 0
-      and then Group.Pending_File_Head = null
-      and then Group.Pending_File_Tail = null
-      and then Group.Pending_Async_File_Head = null
-      and then Group.Pending_Async_File_Tail = null
-      and then Group.Pending_Async_File_Count = 0
-      and then Group.File_Cancel_Head = null
-      and then Group.File_Cancel_Tail = null
-      and then Pollers.File_Quiescent (Group.Scheduler_Poller));
+   function Group_Quiescent_Locked (Group : not null Loop_Group_Access) return Boolean
+   is (Group.Member_Count = 0
+       and then Group.Fibers = null
+       and then Group.Current_Fiber = null
+       and then Group.Ready_Count = 0
+       and then Group.Timer_Count = 0
+       and then Group.Pending_File_Head = null
+       and then Group.Pending_File_Tail = null
+       and then Group.Pending_Async_File_Head = null
+       and then Group.Pending_Async_File_Tail = null
+       and then Group.Pending_Async_File_Count = 0
+       and then Group.File_Cancel_Head = null
+       and then Group.File_Cancel_Tail = null
+       and then Pollers.File_Quiescent (Group.Scheduler_Poller));
 
    procedure Fatal (Context : C.int := Scheduler_Invariant) is
-      Invariant_Message : aliased constant String :=
-        "Flyology fatal: scheduler invariant" & ASCII.LF;
-      Mutex_Message : aliased constant String :=
-        "Flyology fatal: scheduler mutex" & ASCII.LF;
-      Poller_Message : aliased constant String :=
-        "Flyology fatal: event poller" & ASCII.LF;
-      Context_Message : aliased constant String :=
-        "Flyology fatal: context switch" & ASCII.LF;
-      Fork_Message : aliased constant String :=
+      Invariant_Message : aliased constant String := "Flyology fatal: scheduler invariant" & ASCII.LF;
+      Mutex_Message     : aliased constant String := "Flyology fatal: scheduler mutex" & ASCII.LF;
+      Poller_Message    : aliased constant String := "Flyology fatal: event poller" & ASCII.LF;
+      Context_Message   : aliased constant String := "Flyology fatal: context switch" & ASCII.LF;
+      Fork_Message      : aliased constant String :=
         "Flyology fatal: event runtime used after fork" & ASCII.LF;
-      Written : C.long;
+      Written           : C.long;
    begin
       Last_Fatal_Context := Context;
       if Context = Mutex_Failure then
-         Written := C_Write
-           (2, Mutex_Message'Address, Mutex_Message'Length);
+         Written := C_Write (2, Mutex_Message'Address, Mutex_Message'Length);
       elsif Context = Poller_Failure then
-         Written := C_Write
-           (2, Poller_Message'Address, Poller_Message'Length);
+         Written := C_Write (2, Poller_Message'Address, Poller_Message'Length);
       elsif Context = Context_Failure then
-         Written := C_Write
-           (2, Context_Message'Address, Context_Message'Length);
+         Written := C_Write (2, Context_Message'Address, Context_Message'Length);
       elsif Context = Fork_Child_Failure then
-         Written := C_Write
-           (2, Fork_Message'Address, Fork_Message'Length);
+         Written := C_Write (2, Fork_Message'Address, Fork_Message'Length);
       else
-         Written := C_Write
-           (2, Invariant_Message'Address, Invariant_Message'Length);
+         Written := C_Write (2, Invariant_Message'Address, Invariant_Message'Length);
       end if;
       pragma Unreferenced (Written);
       C_Abort;
@@ -1026,8 +896,7 @@ package body System.Flyology.Scheduler is
    end Lock_Topology;
 
    procedure Unlock_Topology is
-      Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Topology_Lock.Value'Access);
+      Result : constant C.int := OSI.pthread_mutex_unlock (Topology_Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal (Mutex_Failure);
@@ -1040,17 +909,14 @@ package body System.Flyology.Scheduler is
       if In_Fork_Child then
          Fatal (Fork_Child_Failure);
       end if;
-      Result := OSI.pthread_mutex_lock
-        (Registry_Shard_Locks (Shard).Value'Access);
+      Result := OSI.pthread_mutex_lock (Registry_Shard_Locks (Shard).Value'Access);
       if Result /= 0 then
          Fatal (Mutex_Failure);
       end if;
    end Lock_Registry_Shard;
 
    procedure Unlock_Registry_Shard (Shard : Registry_Shard_Index) is
-      Result : constant C.int :=
-        OSI.pthread_mutex_unlock
-          (Registry_Shard_Locks (Shard).Value'Access);
+      Result : constant C.int := OSI.pthread_mutex_unlock (Registry_Shard_Locks (Shard).Value'Access);
    begin
       if Result /= 0 then
          Fatal (Mutex_Failure);
@@ -1070,8 +936,7 @@ package body System.Flyology.Scheduler is
    end Lock_Group;
 
    procedure Unlock_Group (Group : not null Loop_Group_Access) is
-      Result : constant C.int :=
-        OSI.pthread_mutex_unlock (Group.Lock.Value'Access);
+      Result : constant C.int := OSI.pthread_mutex_unlock (Group.Lock.Value'Access);
    begin
       if Result /= 0 then
          Fatal (Mutex_Failure);
@@ -1091,18 +956,15 @@ package body System.Flyology.Scheduler is
    end Ensure_Placement_Platform;
 
    function Group_Thread (Argument : System.Address) return System.Address is
-      Group : constant Loop_Group_Access := Address_To_Group (Argument);
-      Stack : aliased OSI.stack_t :=
-        (ss_sp    => Group.Signal_Stack'Address,
-         ss_size  => OSI.Alternate_Stack_Size,
-         ss_flags => 0);
+      Group  : constant Loop_Group_Access := Address_To_Group (Argument);
+      Stack  : aliased OSI.stack_t :=
+        (ss_sp => Group.Signal_Stack'Address, ss_size => OSI.Alternate_Stack_Size, ss_flags => 0);
       Result : C.int;
    begin
       Thread_Group := Group;
       Lock_Topology;
       if Group.Placement_Mode /= No_Placement_Mode then
-         Result := Apply_Thread_Placement
-           (Group.Placement_Mode, Group.Placement_Value);
+         Result := Apply_Thread_Placement (Group.Placement_Mode, Group.Placement_Value);
          Group.Placement_Result := Result;
          Group.Placement_Applied := Result = 0;
       else
@@ -1111,8 +973,7 @@ package body System.Flyology.Scheduler is
       if Result = 0 then
          Result := OSI.sigaltstack (Stack'Access, null);
       end if;
-      Group.Scheduler_Context :=
-        (if Result = 0 then Contexts.Capture else null);
+      Group.Scheduler_Context := (if Result = 0 then Contexts.Capture else null);
       Group.Started := Group.Scheduler_Context /= null;
       Group.Start_Failed := not Group.Started;
       if Group.Start_Failed then
@@ -1126,9 +987,7 @@ package body System.Flyology.Scheduler is
       return System.Null_Address;
    end Group_Thread;
 
-   function Ensure_Group
-     (Id : C.int; Dedicated : Boolean) return Loop_Group_Access
-   is
+   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access is
       Group  : Loop_Group_Access;
       Result : C.int;
       Ready  : Boolean;
@@ -1150,9 +1009,7 @@ package body System.Flyology.Scheduler is
       end if;
       Group := Groups (Group_Index (Id));
       if Group /= null then
-         if Group.Dedicated /= Dedicated
-           and then Scheduling.Dedicated_Group (Id)
-         then
+         if Group.Dedicated /= Dedicated and then Scheduling.Dedicated_Group (Id) then
             Unlock_Topology;
             return null;
          end if;
@@ -1165,13 +1022,9 @@ package body System.Flyology.Scheduler is
          Group := new Loop_Group;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
-         Group.Placement_Mode :=
-           Placement_Requests (Group_Index (Id)).Mode;
-         Group.Placement_Value :=
-           Placement_Requests (Group_Index (Id)).Value;
-         if Group.Placement_Mode /= No_Placement_Mode
-           and then Ensure_Placement_Platform /= 0
-         then
+         Group.Placement_Mode := Placement_Requests (Group_Index (Id)).Mode;
+         Group.Placement_Value := Placement_Requests (Group_Index (Id)).Value;
+         if Group.Placement_Mode /= No_Placement_Mode and then Ensure_Placement_Platform /= 0 then
             Free_Group (Group);
             Unlock_Topology;
             return null;
@@ -1193,10 +1046,7 @@ package body System.Flyology.Scheduler is
          Lifecycle_State := 1;
          Result :=
            OSI.pthread_create
-             (Group.Event_Thread'Access,
-              null,
-              Group_Thread'Access,
-              Group_To_Address (Group));
+             (Group.Event_Thread'Access, null, Group_Thread'Access, Group_To_Address (Group));
          --  pthread_create is the sole writer of Event_Thread. The new thread
          --  cannot publish Started until it acquires Topology_Lock, which is
          --  still held here, so readers cannot observe an uninitialized id.
@@ -1243,13 +1093,9 @@ package body System.Flyology.Scheduler is
       --  this function returns.  The modular counter can wrap indefinitely
       --  without changing the round-robin sequence.
       Lock_Topology;
-      Selected :=
-        C.int
-          (Next_Automatic_Group
-           mod C.unsigned_long_long (Automatic_Pool_Size));
+      Selected := C.int (Next_Automatic_Group mod C.unsigned_long_long (Automatic_Pool_Size));
       Next_Automatic_Group := Next_Automatic_Group + 1;
-      if Automatic_Placement_Claims (Group_Index (Selected)) = Natural'Last
-      then
+      if Automatic_Placement_Claims (Group_Index (Selected)) = Natural'Last then
          Fatal;
       end if;
       Automatic_Placement_Claims (Group_Index (Selected)) :=
@@ -1281,23 +1127,17 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Release_Automatic_Placement_Claim;
 
-   function Registry_Bucket_For
-     (T : System.Address) return Registry_Bucket_Index
-   is
+   function Registry_Bucket_For (T : System.Address) return Registry_Bucket_Index is
       --  Express the address in 16-byte allocation quanta before taking the
       --  prime modulus; sub-quantum variation merely shares a collision chain.
       Value : constant SSE.Integer_Address := SSE.To_Integer (T) / 16;
    begin
-      return Registry_Bucket_Index
-        (Value mod SSE.Integer_Address (Registry_Bucket_Count));
+      return Registry_Bucket_Index (Value mod SSE.Integer_Address (Registry_Bucket_Count));
    end Registry_Bucket_For;
 
-   function Registry_Shard_For
-     (T : System.Address) return Registry_Shard_Index
-   is
+   function Registry_Shard_For (T : System.Address) return Registry_Shard_Index is
    begin
-      return Registry_Shard_Index
-        (Registry_Bucket_For (T) mod Registry_Shard_Count);
+      return Registry_Shard_Index (Registry_Bucket_For (T) mod Registry_Shard_Count);
    end Registry_Shard_For;
 
    function Find (T : System.Address) return Fiber_Access is
@@ -1315,12 +1155,10 @@ package body System.Flyology.Scheduler is
    end Find;
 
    procedure Register_Locked (Item : not null Fiber_Access) is
-      Bucket : constant Registry_Bucket_Index :=
-        Registry_Bucket_For (Item.T);
+      Bucket : constant Registry_Bucket_Index := Registry_Bucket_For (Item.T);
    begin
       Item.Registry_Bucket := Bucket;
-      Item.Registry_Shard := Registry_Shard_Index
-        (Bucket mod Registry_Shard_Count);
+      Item.Registry_Shard := Registry_Shard_Index (Bucket mod Registry_Shard_Count);
       Item.Next_Registry := Fiber_Registry (Bucket);
       Fiber_Registry (Bucket) := Item;
    end Register_Locked;
@@ -1345,37 +1183,23 @@ package body System.Flyology.Scheduler is
       Item.Next_Registry := null;
    end Unregister_Locked;
 
-   function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index is
-     (IO_Bucket_Index
-        (Scheduling.Descriptor_Bucket
-           (Natural (Descriptor), IO_Bucket_Count)));
+   function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index
+   is (IO_Bucket_Index (Scheduling.Descriptor_Bucket (Natural (Descriptor), IO_Bucket_Count)));
 
-   function Active_IO_Link
-     (Item : not null Fiber_Access;
-      Kind : IO_Link_Kind) return IO_Wait_Link_Access
-   is
+   function Active_IO_Link (Item : not null Fiber_Access; Kind : IO_Link_Kind) return IO_Wait_Link_Access is
       Bytes : constant SSE.Storage_Offset :=
-        SSE.Storage_Offset
-          ((Kind - 1) *
-           (IO_Wait_Link_Array'Component_Size / System.Storage_Unit));
+        SSE.Storage_Offset ((Kind - 1) * (IO_Wait_Link_Array'Component_Size / System.Storage_Unit));
    begin
-      if Item.Active_IO_Links = null
-        or else Kind > Item.Active_IO_Link_Count
-      then
+      if Item.Active_IO_Links = null or else Kind > Item.Active_IO_Link_Count then
          Fatal;
       end if;
-      return To_IO_Link_Access
-        (IO_Link_Conversions.To_Pointer
-           (Item.Active_IO_Links.all'Address + Bytes));
+      return To_IO_Link_Access (IO_Link_Conversions.To_Pointer (Item.Active_IO_Links.all'Address + Bytes));
    end Active_IO_Link;
 
    function IO_Interest_Registered_Locked
-     (Group      : not null Loop_Group_Access;
-      Descriptor : C.int;
-      Interest   : Pollers.Interest) return Boolean
+     (Group : not null Loop_Group_Access; Descriptor : C.int; Interest : Pollers.Interest) return Boolean
    is
-      Position : IO_Wait_Link_Access :=
-        Group.IO_Waiters (IO_Bucket_For (Descriptor));
+      Position : IO_Wait_Link_Access := Group.IO_Waiters (IO_Bucket_For (Descriptor));
    begin
       while Position /= null loop
          if Position.Registered
@@ -1424,27 +1248,21 @@ package body System.Flyology.Scheduler is
    end Register_IO_Wait_Locked;
 
    procedure Remove_IO_Waits_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access;
+     (Group               : not null Loop_Group_Access;
+      Item                : not null Fiber_Access;
       Consumed_Descriptor : C.int := -1;
       Read_Consumed       : Boolean := False;
       Write_Consumed      : Boolean := False)
    is
-      Position : IO_Wait_Link_Access;
-      Previous : IO_Wait_Link_Access;
-      Link     : IO_Wait_Link_Access;
-      Cancellations : Pollers.Interest_Request_Array
-        (1 .. Item.Active_IO_Link_Count);
+      Position           : IO_Wait_Link_Access;
+      Previous           : IO_Wait_Link_Access;
+      Link               : IO_Wait_Link_Access;
+      Cancellations      : Pollers.Interest_Request_Array (1 .. Item.Active_IO_Link_Count);
       Cancellation_Count : Natural := 0;
 
-      function Already_Listed
-        (Descriptor : C.int;
-         Interest   : Pollers.Interest) return Boolean;
+      function Already_Listed (Descriptor : C.int; Interest : Pollers.Interest) return Boolean;
 
-      function Already_Listed
-        (Descriptor : C.int;
-         Interest   : Pollers.Interest) return Boolean
-      is
+      function Already_Listed (Descriptor : C.int; Interest : Pollers.Interest) return Boolean is
       begin
          for Index in 1 .. Cancellation_Count loop
             if Cancellations (Index).Descriptor = Descriptor
@@ -1498,19 +1316,14 @@ package body System.Flyology.Scheduler is
       for Kind in 1 .. Item.Active_IO_Link_Count loop
          Link := Active_IO_Link (Item, Kind);
          if Link.Descriptor >= 0
-           and then not
-             (Link.Descriptor = Consumed_Descriptor
-              and then
-                ((Link.Interest = Pollers.Readable and then Read_Consumed)
-                 or else
-                   (Link.Interest = Pollers.Writable and then Write_Consumed)))
-           and then not IO_Interest_Registered_Locked
-             (Group, Link.Descriptor, Link.Interest)
+           and then not (Link.Descriptor = Consumed_Descriptor
+                         and then ((Link.Interest = Pollers.Readable and then Read_Consumed)
+                                   or else (Link.Interest = Pollers.Writable and then Write_Consumed)))
+           and then not IO_Interest_Registered_Locked (Group, Link.Descriptor, Link.Interest)
            and then not Already_Listed (Link.Descriptor, Link.Interest)
          then
             Cancellation_Count := Cancellation_Count + 1;
-            Cancellations (Cancellation_Count) :=
-              (Descriptor => Link.Descriptor, Condition => Link.Interest);
+            Cancellations (Cancellation_Count) := (Descriptor => Link.Descriptor, Condition => Link.Interest);
          end if;
          Link.Owner := null;
          Link.Descriptor := -1;
@@ -1518,9 +1331,7 @@ package body System.Flyology.Scheduler is
       end loop;
       if Cancellation_Count > 0
         and then not Pollers.Retains_Orphaned_One_Shots
-        and then not Pollers.Cancel_Many
-          (Group.Scheduler_Poller,
-           Cancellations (1 .. Cancellation_Count))
+        and then not Pollers.Cancel_Many (Group.Scheduler_Poller, Cancellations (1 .. Cancellation_Count))
       then
          Fatal (Poller_Failure);
       end if;
@@ -1528,10 +1339,7 @@ package body System.Flyology.Scheduler is
       Item.IO_Interrupt_Wait := False;
    end Remove_IO_Waits_Locked;
 
-   procedure Queue_Pending_File_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Queue_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
    begin
       if not Item.File_Wait or else Item.File_Pending then
          Fatal;
@@ -1546,10 +1354,7 @@ package body System.Flyology.Scheduler is
       Group.Pending_File_Tail := Item;
    end Queue_Pending_File_Locked;
 
-   procedure Remove_Pending_File_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Remove_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Position : Fiber_Access := Group.Pending_File_Head;
       Previous : Fiber_Access := null;
    begin
@@ -1574,10 +1379,7 @@ package body System.Flyology.Scheduler is
       Item.File_Pending := False;
    end Remove_Pending_File_Locked;
 
-   procedure Queue_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Queue_File_Cancel_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
    begin
       if Item.Group /= Group or else not Item.File_Wait then
          Fatal;
@@ -1595,10 +1397,7 @@ package body System.Flyology.Scheduler is
       Group.File_Cancel_Tail := Item;
    end Queue_File_Cancel_Locked;
 
-   procedure Remove_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Remove_File_Cancel_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Position : Fiber_Access := Group.File_Cancel_Head;
       Previous : Fiber_Access := null;
    begin
@@ -1628,13 +1427,9 @@ package body System.Flyology.Scheduler is
       Item      : not null Fiber_Access;
       Result    : C.long_long;
       Error     : C.int;
-      Cancelled : Boolean)
-   is
+      Cancelled : Boolean) is
    begin
-      if Item.Group /= Group
-        or else Item.State /= Waiting
-        or else not Item.File_Wait
-      then
+      if Item.Group /= Group or else Item.State /= Waiting or else not Item.File_Wait then
          Fatal;
       end if;
       Remove_File_Cancel_Locked (Group, Item);
@@ -1660,12 +1455,8 @@ package body System.Flyology.Scheduler is
    begin
       loop
          Written := C_Write (Node.Signal_FD, Byte'Address, 1);
-         exit when Written = 1
-           or else
-             (Written < 0 and then C.int (OSI.errno) = C.int (OSI.EAGAIN));
-         if Written >= 0
-           or else C.int (OSI.errno) /= C.int (OSI.EINTR)
-         then
+         exit when Written = 1 or else (Written < 0 and then C.int (OSI.errno) = C.int (OSI.EAGAIN));
+         if Written >= 0 or else C.int (OSI.errno) /= C.int (OSI.EINTR) then
             Fatal (Poller_Failure);
          end if;
       end loop;
@@ -1683,8 +1474,7 @@ package body System.Flyology.Scheduler is
       if Owner = null
         or else Owner.Group /= Group
         or else Owner.Active_Async_Files = 0
-        or else Node.State not in
-          Async_File_Submitted | Async_File_Cancelling | Async_File_Queued
+        or else Node.State not in Async_File_Submitted | Async_File_Cancelling | Async_File_Queued
       then
          Fatal;
       end if;
@@ -1700,8 +1490,7 @@ package body System.Flyology.Scheduler is
    end Complete_Async_File_Locked;
 
    function Request_File_Cancel_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access) return Boolean
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access) return Boolean
    is
       Completion     : File_Engines.Completion;
       Has_Completion : Boolean;
@@ -1712,42 +1501,36 @@ package body System.Flyology.Scheduler is
          return False;
       end if;
       Remove_File_Cancel_Locked (Group, Item);
-      case Scheduling.Plan_File_Cancel
-        (Item.File_Wait,
-         Item.File_Pending,
-         Item.File_Cancel_Disposition /= 0)
+      case Scheduling.Plan_File_Cancel (Item.File_Wait, Item.File_Pending, Item.File_Cancel_Disposition /= 0)
       is
-         when Scheduling.Ignore_Cancel =>
+         when Scheduling.Ignore_Cancel         =>
             return False;
-         when Scheduling.Complete_Pending =>
+
+         when Scheduling.Complete_Pending      =>
             Item.File_Cancel_Requested := True;
             Remove_IO_Waits_Locked (Group, Item);
             Item.File_Cancel_Descriptor := -1;
             Complete_File_Locked (Group, Item, 0, 0, True);
             return True;
+
          when Scheduling.Request_Kernel_Cancel =>
             Item.File_Cancel_Requested := True;
             Remove_IO_Waits_Locked (Group, Item);
             Item.File_Cancel_Descriptor := -1;
       end case;
 
-      Disposition := Pollers.Cancel_File
-        (Group.Scheduler_Poller,
-         Item.File_Descriptor,
-         Fiber_To_Address (Item),
-         Completion,
-         Has_Completion,
-         Error);
-      Item.File_Cancel_Disposition :=
-        C.int (File_Engines.Cancellation_Disposition'Pos (Disposition) + 1);
+      Disposition :=
+        Pollers.Cancel_File
+          (Group.Scheduler_Poller,
+           Item.File_Descriptor,
+           Fiber_To_Address (Item),
+           Completion,
+           Has_Completion,
+           Error);
+      Item.File_Cancel_Disposition := C.int (File_Engines.Cancellation_Disposition'Pos (Disposition) + 1);
       Item.File_Cancel_Error := Error;
       if Has_Completion then
-         Complete_File_Locked
-           (Group,
-            Item,
-            Completion.Result,
-            Completion.Error_Code,
-            True);
+         Complete_File_Locked (Group, Item, Completion.Result, Completion.Error_Code, True);
          Submit_Pending_Files_Locked (Group);
          return True;
       end if;
@@ -1758,26 +1541,19 @@ package body System.Flyology.Scheduler is
       return False;
    end Request_File_Cancel_Locked;
 
-   procedure Process_File_Cancellations_Locked
-     (Group : not null Loop_Group_Access)
-   is
+   procedure Process_File_Cancellations_Locked (Group : not null Loop_Group_Access) is
       File_Cancel_Budget : constant Positive := 64;
-      Item : Fiber_Access;
-      Made_Ready : Boolean;
-      Processed : Natural := 0;
+      Item               : Fiber_Access;
+      Made_Ready         : Boolean;
+      Processed          : Natural := 0;
    begin
       --  Bound abort/token work per scheduler turn so a cancellation burst
       --  cannot indefinitely postpone ready tasks or completion delivery.
-      while Group.File_Cancel_Head /= null
-        and then Processed < File_Cancel_Budget
-      loop
+      while Group.File_Cancel_Head /= null and then Processed < File_Cancel_Budget loop
          Item := Group.File_Cancel_Head;
          Remove_File_Cancel_Locked (Group, Item);
          Processed := Processed + 1;
-         if Item.Group = Group
-           and then Item.State = Waiting
-           and then Item.File_Wait
-         then
+         if Item.Group = Group and then Item.State = Waiting and then Item.File_Wait then
             Made_Ready := Request_File_Cancel_Locked (Group, Item);
             if Made_Ready then
                Group.Wakeups := Group.Wakeups + 1;
@@ -1785,16 +1561,12 @@ package body System.Flyology.Scheduler is
          end if;
       end loop;
       Submit_Pending_Files_Locked (Group);
-      if Group.File_Cancel_Head /= null
-        and then not Pollers.Wake (Group.Scheduler_Poller)
-      then
+      if Group.File_Cancel_Head /= null and then not Pollers.Wake (Group.Scheduler_Poller) then
          Fatal (Poller_Failure);
       end if;
    end Process_File_Cancellations_Locked;
 
-   procedure Submit_Pending_Files_Locked
-     (Group : not null Loop_Group_Access)
-   is
+   procedure Submit_Pending_Files_Locked (Group : not null Loop_Group_Access) is
       Item  : Fiber_Access;
       Error : C.int;
    begin
@@ -1805,22 +1577,24 @@ package body System.Flyology.Scheduler is
          end if;
 
          if (if Item.File_Send_ZC
-             then Pollers.Submit_Send_ZC
-               (Group.Scheduler_Poller,
-                Item.File_Descriptor,
-                Item.File_Buffer,
-                Item.File_Length,
-                Fiber_To_Address (Item),
-                Error)
-             else Pollers.Submit_File
-               (Group.Scheduler_Poller,
-                Item.File_Descriptor,
-                Item.File_Buffer,
-                Item.File_Length,
-                Item.File_Offset,
-                Item.File_For_Write,
-                Fiber_To_Address (Item),
-                Error))
+             then
+               Pollers.Submit_Send_ZC
+                 (Group.Scheduler_Poller,
+                  Item.File_Descriptor,
+                  Item.File_Buffer,
+                  Item.File_Length,
+                  Fiber_To_Address (Item),
+                  Error)
+             else
+               Pollers.Submit_File
+                 (Group.Scheduler_Poller,
+                  Item.File_Descriptor,
+                  Item.File_Buffer,
+                  Item.File_Length,
+                  Item.File_Offset,
+                  Item.File_For_Write,
+                  Fiber_To_Address (Item),
+                  Error))
          then
             Group.Pending_File_Head := Item.Next_File;
             if Group.Pending_File_Head = null then
@@ -1842,9 +1616,7 @@ package body System.Flyology.Scheduler is
       end loop;
    end Submit_Pending_Files_Locked;
 
-   procedure Submit_Pending_Async_Files_Locked
-     (Group : not null Loop_Group_Access)
-   is
+   procedure Submit_Pending_Async_Files_Locked (Group : not null Loop_Group_Access) is
       Node  : Async_File_Node_Access;
       Error : C.int;
    begin
@@ -1859,43 +1631,37 @@ package body System.Flyology.Scheduler is
          end if;
 
          if Pollers.Submit_File
-           (Group.Scheduler_Poller,
-            Node.Descriptor,
-            Node.Buffer,
-            Node.Length,
-            Node.Offset,
-            Node.For_Write /= 0,
-            Async_File_Token (Node.all'Address),
-            Error)
+              (Group.Scheduler_Poller,
+               Node.Descriptor,
+               Node.Buffer,
+               Node.Length,
+               Node.Offset,
+               Node.For_Write /= 0,
+               Async_File_Token (Node.all'Address),
+               Error)
          then
-            Group.Pending_Async_File_Head :=
-              To_Async_File_Node (Node.Next);
+            Group.Pending_Async_File_Head := To_Async_File_Node (Node.Next);
             if Group.Pending_Async_File_Head = null then
                Group.Pending_Async_File_Tail := null;
             end if;
-            Group.Pending_Async_File_Count :=
-              Group.Pending_Async_File_Count - 1;
+            Group.Pending_Async_File_Count := Group.Pending_Async_File_Count - 1;
             Node.Next := System.Null_Address;
             Node.State := Async_File_Submitted;
          elsif Error = C.int (OSI.EAGAIN) then
             return;
          else
-            Group.Pending_Async_File_Head :=
-              To_Async_File_Node (Node.Next);
+            Group.Pending_Async_File_Head := To_Async_File_Node (Node.Next);
             if Group.Pending_Async_File_Head = null then
                Group.Pending_Async_File_Tail := null;
             end if;
-            Group.Pending_Async_File_Count :=
-              Group.Pending_Async_File_Count - 1;
+            Group.Pending_Async_File_Count := Group.Pending_Async_File_Count - 1;
             Node.Next := System.Null_Address;
             Complete_Async_File_Locked (Group, Node, 0, Error, False);
          end if;
       end loop;
    end Submit_Pending_Async_Files_Locked;
 
-   function Ensure_Timer_Capacity
-     (Group : not null Loop_Group_Access) return Boolean
-   is
+   function Ensure_Timer_Capacity (Group : not null Loop_Group_Access) return Boolean is
       New_Capacity : Natural;
       Replacement  : Timer_Heap_Access;
       Previous     : Timer_Heap_Access;
@@ -1927,11 +1693,10 @@ package body System.Flyology.Scheduler is
    end Ensure_Timer_Capacity;
 
    function Register_Timer_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access) return Boolean
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access) return Boolean
    is
-      Position : Natural;
-      Parent   : Natural;
+      Position    : Natural;
+      Parent      : Natural;
       Parent_Item : Fiber_Access;
    begin
       if Item.Deadline < 0.0 then
@@ -1957,10 +1722,7 @@ package body System.Flyology.Scheduler is
       return True;
    end Register_Timer_Locked;
 
-   procedure Remove_Timer_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Remove_Timer_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Position : Natural := Item.Timer_Index;
       Parent   : Natural;
       Child    : Natural;
@@ -1968,9 +1730,7 @@ package body System.Flyology.Scheduler is
    begin
       if Position = 0 then
          return;
-      elsif Item.Group /= Group
-        or else Position > Group.Timer_Count
-        or else Group.Timers (Position) /= Item
+      elsif Item.Group /= Group or else Position > Group.Timer_Count or else Group.Timers (Position) /= Item
       then
          Fatal;
       end if;
@@ -1989,9 +1749,7 @@ package body System.Flyology.Scheduler is
       if Position > 1 then
          Parent := Natural (Scheduling.Heap_Parent (Positive (Position)));
       end if;
-      if Position > 1
-        and then Last.Deadline < Group.Timers (Parent).Deadline
-      then
+      if Position > 1 and then Last.Deadline < Group.Timers (Parent).Deadline then
          while Position > 1 loop
             Parent := Natural (Scheduling.Heap_Parent (Positive (Position)));
             exit when Group.Timers (Parent).Deadline <= Last.Deadline;
@@ -2003,14 +1761,10 @@ package body System.Flyology.Scheduler is
          Last.Timer_Index := Position;
       else
          loop
-            exit when not Scheduling.Heap_Has_Child
-              (Positive (Position), Group.Timer_Count);
-            Child := Natural
-              (Scheduling.Heap_First_Child
-                 (Positive (Position), Group.Timer_Count));
+            exit when not Scheduling.Heap_Has_Child (Positive (Position), Group.Timer_Count);
+            Child := Natural (Scheduling.Heap_First_Child (Positive (Position), Group.Timer_Count));
             if Child < Group.Timer_Count
-              and then Group.Timers (Child + 1).Deadline <
-                Group.Timers (Child).Deadline
+              and then Group.Timers (Child + 1).Deadline < Group.Timers (Child).Deadline
             then
                Child := Child + 1;
             end if;
@@ -2024,30 +1778,22 @@ package body System.Flyology.Scheduler is
       end if;
    end Remove_Timer_Locked;
 
-   procedure Clear_Stack_Advice
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Clear_Stack_Advice (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
    begin
       if Item.Stack_Cold then
          if Group.Cold_Stacks = 0
-           or else Group.Cold_Stack_Bytes
-             < C.unsigned_long_long (Contexts.Stack_Size (Item.Context))
+           or else Group.Cold_Stack_Bytes < C.unsigned_long_long (Contexts.Stack_Size (Item.Context))
          then
             Fatal;
          end if;
          Group.Cold_Stacks := Group.Cold_Stacks - 1;
          Group.Cold_Stack_Bytes :=
-           Group.Cold_Stack_Bytes
-           - C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
+           Group.Cold_Stack_Bytes - C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
          Item.Stack_Cold := False;
       end if;
    end Clear_Stack_Advice;
 
-   procedure Enqueue
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Enqueue (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Priority : constant Ready_Priority := Ready_Priority (Item.Priority);
       Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
       At_Head  : constant Boolean := Item.Enqueue_At_Head;
@@ -2082,10 +1828,7 @@ package body System.Flyology.Scheduler is
       Group.Ready_Count := Group.Ready_Count + 1;
    end Enqueue;
 
-   procedure Remove_From_Ready
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Remove_From_Ready (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Priority : constant Ready_Priority := Ready_Priority (Item.Priority);
       Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
    begin
@@ -2118,11 +1861,9 @@ package body System.Flyology.Scheduler is
          Group.Highest_Ready := Ready_Priority'First;
       elsif Priority = Group.Highest_Ready and then Bucket.Head = null then
          while Group.Highest_Ready > Ready_Priority'First
-           and then
-             Group.Ready_Buckets (Group.Highest_Ready).Head = null
+           and then Group.Ready_Buckets (Group.Highest_Ready).Head = null
          loop
-            Group.Highest_Ready :=
-              Ready_Priority'Pred (Group.Highest_Ready);
+            Group.Highest_Ready := Ready_Priority'Pred (Group.Highest_Ready);
          end loop;
          if Group.Ready_Buckets (Group.Highest_Ready).Head = null then
             Fatal;
@@ -2130,14 +1871,10 @@ package body System.Flyology.Scheduler is
       end if;
    end Remove_From_Ready;
 
-   function Ready_Present
-     (Group : not null Loop_Group_Access) return Boolean
-   is
-     (Group.Ready_Count /= 0);
+   function Ready_Present (Group : not null Loop_Group_Access) return Boolean
+   is (Group.Ready_Count /= 0);
 
-   function Dequeue
-     (Group : not null Loop_Group_Access) return Fiber_Access
-   is
+   function Dequeue (Group : not null Loop_Group_Access) return Fiber_Access is
       Item : Fiber_Access;
    begin
       if not Ready_Present (Group) then
@@ -2152,10 +1889,7 @@ package body System.Flyology.Scheduler is
       return Item;
    end Dequeue;
 
-   procedure Link_Group_Head_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Link_Group_Head_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
    begin
       if Item.Previous_Group /= null or else Item.Next_Group /= null then
          Fatal;
@@ -2167,10 +1901,7 @@ package body System.Flyology.Scheduler is
       Group.Fibers := Item;
    end Link_Group_Head_Locked;
 
-   procedure Unlink_Group_Locked
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Unlink_Group_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Previous : constant Fiber_Access := Item.Previous_Group;
       Next     : constant Fiber_Access := Item.Next_Group;
    begin
@@ -2196,8 +1927,8 @@ package body System.Flyology.Scheduler is
    end Unlink_Group_Locked;
 
    procedure Reap_Locked (Item : not null Fiber_Access) is
-      Victim           : Fiber_Access := Item;
-      Group            : constant Loop_Group_Access := Item.Group;
+      Victim : Fiber_Access := Item;
+      Group  : constant Loop_Group_Access := Item.Group;
    begin
       if Scheduling.Plan_Destroy (Phase_Of (Item.State)) = Scheduling.Defer
         or else Item.File_Wait
@@ -2236,17 +1967,12 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Reap_Locked;
 
-   procedure Reap_From_Scheduler
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Reap_From_Scheduler (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Shard : constant Registry_Shard_Index := Item.Registry_Shard;
    begin
       Item.Reaping := True;
       Unlock_Group (Group);
-      if Faults.Enabled
-        and then Faults.Fail (Faults.Final_Reap_Window)
-        and then not Faults.Pause_Final_Reaper
+      if Faults.Enabled and then Faults.Fail (Faults.Final_Reap_Window) and then not Faults.Pause_Final_Reaper
       then
          Fatal;
       end if;
@@ -2258,12 +1984,9 @@ package body System.Flyology.Scheduler is
       Unlock_Registry_Shard (Shard);
    end Reap_From_Scheduler;
 
-   procedure Transfer
-     (Item   : not null Fiber_Access;
-      Source : not null Loop_Group_Access)
-   is
-      Target : constant Loop_Group_Access := Item.Migration_Target;
-      Shard : constant Registry_Shard_Index := Item.Registry_Shard;
+   procedure Transfer (Item : not null Fiber_Access; Source : not null Loop_Group_Access) is
+      Target      : constant Loop_Group_Access := Item.Migration_Target;
+      Shard       : constant Registry_Shard_Index := Item.Registry_Shard;
       Wake_Target : Boolean := True;
    begin
       if Target = null or else Item.Group /= Source then
@@ -2364,9 +2087,7 @@ package body System.Flyology.Scheduler is
    --  reading, and Idle is clamped so a caller can always divide by Uptime.
    --  The caller holds Group's lock.
    procedure Read_Utilization_Locked
-     (Group  : not null Loop_Group_Access;
-      Uptime : out Duration;
-      Idle   : out Duration)
+     (Group : not null Loop_Group_Access; Uptime : out Duration; Idle : out Duration)
    is
       Now : Duration;
    begin
@@ -2381,9 +2102,7 @@ package body System.Flyology.Scheduler is
       if Now > Group.Started_At then
          Uptime := Now - Group.Started_At;
       end if;
-      if Group.Idle_Since /= No_Timestamp
-        and then Now > Group.Idle_Since
-      then
+      if Group.Idle_Since /= No_Timestamp and then Now > Group.Idle_Since then
          Idle := Idle + (Now - Group.Idle_Since);
       end if;
       if Idle > Uptime then
@@ -2391,10 +2110,7 @@ package body System.Flyology.Scheduler is
       end if;
    end Read_Utilization_Locked;
 
-   procedure Consider_Dormant_Stack
-     (Group : not null Loop_Group_Access;
-      Item  : not null Fiber_Access)
-   is
+   procedure Consider_Dormant_Stack (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
       Result : C.int;
    begin
       if Item.Dormancy_Policy = Prompt_Advice
@@ -2409,47 +2125,43 @@ package body System.Flyology.Scheduler is
       end if;
 
       case Item.Dormancy_Policy is
-         when Prompt_Advice =>
+         when Prompt_Advice  =>
             return;
-         when Cold_Advice =>
+
+         when Cold_Advice    =>
             if not Contexts.Cold_Advice_Supported then
                return;
             end if;
             Group.Cold_Advice_Attempts := Group.Cold_Advice_Attempts + 1;
             Result := Contexts.Advise_Stack_Cold (Item.Context);
+
          when Pageout_Advice =>
             if not Contexts.Pageout_Advice_Supported then
                return;
             end if;
-            Group.Pageout_Advice_Attempts :=
-              Group.Pageout_Advice_Attempts + 1;
+            Group.Pageout_Advice_Attempts := Group.Pageout_Advice_Attempts + 1;
             Result := Contexts.Advise_Stack_Pageout (Item.Context);
       end case;
       if Result = 1 then
          Item.Stack_Cold := True;
          Group.Cold_Stacks := Group.Cold_Stacks + 1;
          Group.Cold_Stack_Bytes :=
-           Group.Cold_Stack_Bytes
-           + C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
+           Group.Cold_Stack_Bytes + C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
          if Item.Dormancy_Policy = Cold_Advice then
             Group.Cold_Advice_Accepted := Group.Cold_Advice_Accepted + 1;
          else
-            Group.Pageout_Advice_Accepted :=
-              Group.Pageout_Advice_Accepted + 1;
+            Group.Pageout_Advice_Accepted := Group.Pageout_Advice_Accepted + 1;
          end if;
       elsif Result < 0 then
          if Item.Dormancy_Policy = Cold_Advice then
             Group.Cold_Advice_Failures := Group.Cold_Advice_Failures + 1;
          else
-            Group.Pageout_Advice_Failures :=
-              Group.Pageout_Advice_Failures + 1;
+            Group.Pageout_Advice_Failures := Group.Pageout_Advice_Failures + 1;
          end if;
       end if;
    end Consider_Dormant_Stack;
 
-   function Promote_Expired_Timers
-     (Group : not null Loop_Group_Access) return Duration
-   is
+   function Promote_Expired_Timers (Group : not null Loop_Group_Access) return Duration is
       Now  : constant Duration := Clock;
       Item : Fiber_Access;
    begin
@@ -2461,7 +2173,8 @@ package body System.Flyology.Scheduler is
          case Scheduling.Classify_Deadline (Item.Deadline, Now) is
             when Scheduling.No_Deadline_Set =>
                Fatal;
-            when Scheduling.Expired =>
+
+            when Scheduling.Expired         =>
                Remove_Timer_Locked (Group, Item);
                Item.Timed_Out := True;
                if Item.IO_Wait then
@@ -2469,7 +2182,8 @@ package body System.Flyology.Scheduler is
                end if;
                Remove_IO_Waits_Locked (Group, Item);
                Enqueue (Group, Item);
-            when Scheduling.Pending =>
+
+            when Scheduling.Pending         =>
                return Scheduling.Time_Until (Item.Deadline, Now);
          end case;
       end loop;
@@ -2478,11 +2192,10 @@ package body System.Flyology.Scheduler is
 
    function Initialize (Environment : System.Address) return C.int is
       Invalid_Pool_Size_Message : aliased constant String :=
-        "flyology: FLYOLOGY_LOOP_POOL_SIZE must be an integer from 1 through"
-        & " 128" & ASCII.LF;
-      Result    : C.int;
-      Pool_Size : C.int;
-      Written   : C.long;
+        "flyology: FLYOLOGY_LOOP_POOL_SIZE must be an integer from 1 through" & " 128" & ASCII.LF;
+      Result                    : C.int;
+      Pool_Size                 : C.int;
+      Written                   : C.long;
       pragma Unreferenced (Written);
    begin
       if Environment = System.Null_Address or else Initialized then
@@ -2491,10 +2204,7 @@ package body System.Flyology.Scheduler is
 
       Pool_Size := Startup_Pool_Size;
       if Pool_Size < 1 or else Pool_Size > Dedicated_First_Id then
-         Written := C_Write
-           (2,
-            Invalid_Pool_Size_Message'Address,
-            Invalid_Pool_Size_Message'Length);
+         Written := C_Write (2, Invalid_Pool_Size_Message'Address, Invalid_Pool_Size_Message'Length);
          return -1;
       end if;
 
@@ -2503,8 +2213,7 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
       for Shard in Registry_Shard_Index loop
-         Result := OSI.pthread_mutex_init
-           (Registry_Shard_Locks (Shard).Value'Access, null);
+         Result := OSI.pthread_mutex_init (Registry_Shard_Locks (Shard).Value'Access, null);
          if Result /= 0 then
             return -1;
          end if;
@@ -2529,8 +2238,7 @@ package body System.Flyology.Scheduler is
       --  stay on the stock GNARL execution path.
       Automatic_Pool_Size := Positive (Pool_Size);
       Automatic_Placement_Claims := (others => 0);
-      Reduction_Phase_Code :=
-        C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
+      Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
       Reduction_Target := Pool_Size;
       Reduction_Destination := System.Null_Address;
       Initialized := True;
@@ -2693,10 +2401,7 @@ package body System.Flyology.Scheduler is
       --  failure must not turn finalization into an unbounded join.
       for Index in Group_Index loop
          Target := Groups (Index);
-         if Target /= null
-           and then Target.Started
-           and then not Pollers.Wake (Target.Scheduler_Poller)
-         then
+         if Target /= null and then Target.Started and then not Pollers.Wake (Target.Scheduler_Poller) then
             Lifecycle_State := 4;
             return;
          end if;
@@ -2705,8 +2410,7 @@ package body System.Flyology.Scheduler is
       for Index in Group_Index loop
          Target := Groups (Index);
          if Target /= null then
-            Result := Pthread_Join
-              (Target.Event_Thread, System.Null_Address);
+            Result := Pthread_Join (Target.Event_Thread, System.Null_Address);
             if Result /= 0 then
                Lifecycle_State := 4;
                return;
@@ -2718,9 +2422,7 @@ package body System.Flyology.Scheduler is
       --  claimed a shard before the finalizing state was stored can still be
       --  holding a group pointer. Destroying group resources is admitted only
       --  once the registry is quiescent and every claim has been released.
-      if not Scheduling.Teardown_Admitted
-               (Lifecycle_State, Safe, Drained_Create_Claims)
-      then
+      if not Scheduling.Teardown_Admitted (Lifecycle_State, Safe, Drained_Create_Claims) then
          Lifecycle_State := 4;
          return;
       end if;
@@ -2746,8 +2448,7 @@ package body System.Flyology.Scheduler is
       Event_Runtime_Active := 0;
 
       for Shard in Registry_Shard_Index loop
-         Result := OSI.pthread_mutex_destroy
-           (Registry_Shard_Locks (Shard).Value'Access);
+         Result := OSI.pthread_mutex_destroy (Registry_Shard_Locks (Shard).Value'Access);
          if Result /= 0 then
             Lifecycle_State := 4;
             return;
@@ -2767,17 +2468,14 @@ package body System.Flyology.Scheduler is
    end Finalize;
 
    function Create
-     (T          : System.Address;
-      Stack_Size : C.size_t;
-      Priority   : C.int;
-      Wrapper    : System.Address;
-      Group      : C.int) return C.int
+     (T : System.Address; Stack_Size : C.size_t; Priority : C.int; Wrapper : System.Address; Group : C.int)
+      return C.int
    is
-      Item   : Fiber_Access;
-      Target : Loop_Group_Access;
-      Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
-      Group_Id : C.int := Group;
-      Automatic : constant Boolean := Group < 0;
+      Item              : Fiber_Access;
+      Target            : Loop_Group_Access;
+      Shard             : constant Registry_Shard_Index := Registry_Shard_For (T);
+      Group_Id          : C.int := Group;
+      Automatic         : constant Boolean := Group < 0;
       Automatic_Claimed : Boolean := False;
 
       procedure Release_Claim;
@@ -2859,11 +2557,7 @@ package body System.Flyology.Scheduler is
       Item.Group := Target;
       Item.Automatic_Placement := Automatic;
       Item.Context :=
-        Contexts.Create
-          (Stack_Size,
-           Fiber_Main'Address,
-           Fiber_To_Address (Item),
-           Target.Scheduler_Context);
+        Contexts.Create (Stack_Size, Fiber_Main'Address, Fiber_To_Address (Item), Target.Scheduler_Context);
       if Item.Context = null then
          Free_Fiber (Item);
          if Automatic_Claimed then
@@ -2896,9 +2590,7 @@ package body System.Flyology.Scheduler is
       --  the finalizing state before it acquires any shard, so a creator that
       --  passed the unlocked guard and then lost the race must refuse rather
       --  than register into a group Finalize has already stopped.
-      if not Scheduling.Creation_Admitted (Lifecycle_State)
-        or else Find (T) /= null
-      then
+      if not Scheduling.Creation_Admitted (Lifecycle_State) or else Find (T) /= null then
          if Automatic_Claimed then
             Release_Automatic_Placement_Claim (Group_Id);
             Automatic_Claimed := False;
@@ -2912,9 +2604,7 @@ package body System.Flyology.Scheduler is
          Fatal;
       end if;
       Registry_Instances (Shard) := Registry_Instances (Shard) + 1;
-      Item.Instance :=
-        C.unsigned_long_long (Shard) * Instance_Shard_Span
-        + Registry_Instances (Shard);
+      Item.Instance := C.unsigned_long_long (Shard) * Instance_Shard_Span + Registry_Instances (Shard);
       Lock_Group (Target);
       --  Fail closed rather than trust the claim alone. A member added to a
       --  stopped group makes the event loop's stop check an invariant
@@ -2964,50 +2654,42 @@ package body System.Flyology.Scheduler is
       return Result;
    end Is_Lightweight_Task;
 
-   function Is_Event_Thread return Boolean is
-     (Initialized
-      and then Thread_Group /= null
-      and then OSI.pthread_self = Thread_Group.Event_Thread);
+   function Is_Event_Thread return Boolean
+   is (Initialized and then Thread_Group /= null and then OSI.pthread_self = Thread_Group.Event_Thread);
 
-   function Current_Task return System.Address is
-     (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
-      then Thread_Group.Current_Fiber.T
-      else System.Null_Address);
+   function Current_Task return System.Address
+   is (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
+       then Thread_Group.Current_Fiber.T
+       else System.Null_Address);
 
-   function Task_Thread
-     (T : System.Address) return OSI.Thread_Id
-   is
+   function Task_Thread (T : System.Address) return OSI.Thread_Id is
       Item   : Fiber_Access;
       Result : OSI.Thread_Id;
       Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
       Lock_Registry_Shard (Shard);
       Item := Find (T);
-      Result :=
-        (if Item = null then OSI.pthread_self else Item.Group.Event_Thread);
+      Result := (if Item = null then OSI.pthread_self else Item.Group.Event_Thread);
       Unlock_Registry_Shard (Shard);
       return Result;
    end Task_Thread;
 
-   function Current_Group return C.int is
-     (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
+   function Current_Group return C.int
+   is (if Current_Task = System.Null_Address then -1 else Thread_Group.Id);
 
-   function Current_Task_Instance return C.unsigned_long_long is
-     (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
-      then Thread_Group.Current_Fiber.Instance
-      else 0);
+   function Current_Task_Instance return C.unsigned_long_long
+   is (if Is_Event_Thread and then Thread_Group.Current_Fiber /= null
+       then Thread_Group.Current_Fiber.Instance
+       else 0);
 
    --  Native tasks and the environment task never set Thread_Group, so they
    --  keep the compiler's ordinary per-thread cursor.
-   function Current_Trampoline_Control_Slot return System.Address is
-     (if Thread_Group /= null and then Thread_Group.Trampoline_Fiber /= null
-      then Thread_Group.Trampoline_Fiber.Trampoline_Control'Address
-      else System.Null_Address);
+   function Current_Trampoline_Control_Slot return System.Address
+   is (if Thread_Group /= null and then Thread_Group.Trampoline_Fiber /= null
+       then Thread_Group.Trampoline_Fiber.Trampoline_Control'Address
+       else System.Null_Address);
 
-   function Set_Current_Dormancy
-     (Policy                   : C.int;
-      Minimum_Wait_Nanoseconds : C.long_long) return C.int
-   is
+   function Set_Current_Dormancy (Policy : C.int; Minimum_Wait_Nanoseconds : C.long_long) return C.int is
       Group     : constant Loop_Group_Access := Thread_Group;
       Item      : Fiber_Access;
       Whole     : C.long_long;
@@ -3026,8 +2708,7 @@ package body System.Flyology.Scheduler is
       Lock_Group (Group);
       Item := Group.Current_Fiber;
       Item.Dormancy_Policy := Dormancy_Advice'Val (Policy);
-      Item.Dormancy_Minimum_Wait :=
-        Duration (Whole) + Duration (Remainder) / 1_000_000_000;
+      Item.Dormancy_Minimum_Wait := Duration (Whole) + Duration (Remainder) / 1_000_000_000;
       Unlock_Group (Group);
       return 0;
    exception
@@ -3053,14 +2734,14 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Current_Dormancy;
 
-   function Cold_Advice_Supported return C.int is
-     (if Contexts.Cold_Advice_Supported then 1 else 0);
+   function Cold_Advice_Supported return C.int
+   is (if Contexts.Cold_Advice_Supported then 1 else 0);
 
-   function Pageout_Advice_Supported return C.int is
-     (if Contexts.Pageout_Advice_Supported then 1 else 0);
+   function Pageout_Advice_Supported return C.int
+   is (if Contexts.Pageout_Advice_Supported then 1 else 0);
 
-   function Configured_Pool_Size return C.int is
-     (C.int (Automatic_Pool_Size));
+   function Configured_Pool_Size return C.int
+   is (C.int (Automatic_Pool_Size));
 
    procedure Count_Pool_Reduction_Population_Locked
      (Target_Size      : C.int;
@@ -3079,11 +2760,8 @@ package body System.Flyology.Scheduler is
       Explicit_Tasks := 0;
       Placement_Claims := 0;
 
-      for Index in Group_Index range
-        Natural (Target_Size) .. Natural (Dedicated_First_Id - 1)
-      loop
-         Placement_Claims :=
-           Placement_Claims + Automatic_Placement_Claims (Index);
+      for Index in Group_Index range Natural (Target_Size) .. Natural (Dedicated_First_Id - 1) loop
+         Placement_Claims := Placement_Claims + Automatic_Placement_Claims (Index);
          Group := Groups (Index);
          if Group /= null then
             Lock_Group (Group);
@@ -3107,9 +2785,7 @@ package body System.Flyology.Scheduler is
       end loop;
    end Count_Pool_Reduction_Population_Locked;
 
-   procedure Collect_Pool_Reduction_Status_Locked
-     (Status : out Runtime_Pool_Reduction_Status)
-   is
+   procedure Collect_Pool_Reduction_Status_Locked (Status : out Runtime_Pool_Reduction_Status) is
       Automatic_Tasks : Natural := 0;
       Pinned_Tasks    : Natural := 0;
       Waiting_Tasks   : Natural := 0;
@@ -3119,8 +2795,7 @@ package body System.Flyology.Scheduler is
         Scheduling.Reduction_Phase'Val (Integer (Reduction_Phase_Code));
    begin
       Status :=
-        (Phase                   =>
-           C.int (Scheduling.Reduction_Phase'Pos (Phase)),
+        (Phase                   => C.int (Scheduling.Reduction_Phase'Pos (Phase)),
          Target_Size             => Reduction_Target,
          Automatic_Tasks         => 0,
          Pinned_Automatic_Tasks  => 0,
@@ -3141,18 +2816,15 @@ package body System.Flyology.Scheduler is
          Explicit_Tasks   => Explicit_Tasks,
          Placement_Claims => Claims);
 
-      if Phase = Scheduling.Reduction_Draining
-        and then Scheduling.Reduction_Drained (Automatic_Tasks, Claims)
+      if Phase = Scheduling.Reduction_Draining and then Scheduling.Reduction_Drained (Automatic_Tasks, Claims)
       then
          Phase := Scheduling.Reduction_Complete;
-         Reduction_Phase_Code :=
-           C.int (Scheduling.Reduction_Phase'Pos (Phase));
+         Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Phase));
          Reduction_Destination := System.Null_Address;
       end if;
 
       Status :=
-        (Phase                   =>
-           C.int (Scheduling.Reduction_Phase'Pos (Phase)),
+        (Phase                   => C.int (Scheduling.Reduction_Phase'Pos (Phase)),
          Target_Size             => Reduction_Target,
          Automatic_Tasks         => C.unsigned_long_long (Automatic_Tasks),
          Pinned_Automatic_Tasks  => C.unsigned_long_long (Pinned_Tasks),
@@ -3174,29 +2846,17 @@ package body System.Flyology.Scheduler is
       end if;
 
       Lock_Topology;
-      if Initialized
-        and then Scheduling.Creation_Admitted (Lifecycle_State)
-      then
-         if Reduction_Phase_Code =
-           C.int
-             (Scheduling.Reduction_Phase'Pos
-                (Scheduling.Reduction_Draining))
-         then
+      if Initialized and then Scheduling.Creation_Admitted (Lifecycle_State) then
+         if Reduction_Phase_Code = C.int (Scheduling.Reduction_Phase'Pos (Scheduling.Reduction_Draining)) then
             Collect_Pool_Reduction_Status_Locked (Status);
          end if;
-         if Reduction_Phase_Code /=
-           C.int
-             (Scheduling.Reduction_Phase'Pos
-                (Scheduling.Reduction_Draining))
+         if Reduction_Phase_Code /= C.int (Scheduling.Reduction_Phase'Pos (Scheduling.Reduction_Draining))
          then
-            Automatic_Pool_Size := Positive
-              (Scheduling.Growth_Target
-                 (Scheduling.Pool_Size (Automatic_Pool_Size),
-                  Scheduling.Pool_Size (Minimum_Size)));
-            Reduction_Phase_Code :=
-              C.int
-                (Scheduling.Reduction_Phase'Pos
-                   (Scheduling.No_Reduction));
+            Automatic_Pool_Size :=
+              Positive
+                (Scheduling.Growth_Target
+                   (Scheduling.Pool_Size (Automatic_Pool_Size), Scheduling.Pool_Size (Minimum_Size)));
+            Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
             Reduction_Target := C.int (Automatic_Pool_Size);
             Reduction_Destination := System.Null_Address;
             Result := 0;
@@ -3210,9 +2870,9 @@ package body System.Flyology.Scheduler is
    end Grow_Configured_Pool;
 
    function Request_Pool_Reduction (Maximum_Size : C.int) return C.int is
-      Decision : Scheduling.Reduction_Decision;
-      Status   : Runtime_Pool_Reduction_Status;
-      Target   : Loop_Group_Access;
+      Decision        : Scheduling.Reduction_Decision;
+      Status          : Runtime_Pool_Reduction_Status;
+      Target          : Loop_Group_Access;
       Start_Phase     : Scheduling.Reduction_Phase;
       Automatic_Tasks : Natural;
       Pinned_Tasks    : Natural;
@@ -3229,26 +2889,24 @@ package body System.Flyology.Scheduler is
       end if;
 
       Lock_Topology;
-      if Reduction_Phase_Code =
-        C.int
-          (Scheduling.Reduction_Phase'Pos
-             (Scheduling.Reduction_Draining))
-      then
+      if Reduction_Phase_Code = C.int (Scheduling.Reduction_Phase'Pos (Scheduling.Reduction_Draining)) then
          Collect_Pool_Reduction_Status_Locked (Status);
       end if;
-      Decision := Scheduling.Plan_Reduction
-        (Scheduling.Pool_Size (Automatic_Pool_Size),
-         Scheduling.Pool_Size (Maximum_Size),
-         Scheduling.Reduction_Phase'Val
-           (Integer (Reduction_Phase_Code)));
+      Decision :=
+        Scheduling.Plan_Reduction
+          (Scheduling.Pool_Size (Automatic_Pool_Size),
+           Scheduling.Pool_Size (Maximum_Size),
+           Scheduling.Reduction_Phase'Val (Integer (Reduction_Phase_Code)));
       case Decision is
-         when Scheduling.Already_At_Or_Below =>
+         when Scheduling.Already_At_Or_Below   =>
             Unlock_Topology;
             return 1;
+
          when Scheduling.Reduction_In_Progress =>
             Unlock_Topology;
             return 2;
-         when Scheduling.Start_Reduction =>
+
+         when Scheduling.Start_Reduction       =>
             Count_Pool_Reduction_Population_Locked
               (Target_Size      => Maximum_Size,
                Automatic_Tasks  => Automatic_Tasks,
@@ -3256,8 +2914,7 @@ package body System.Flyology.Scheduler is
                Waiting_Tasks    => Waiting_Tasks,
                Explicit_Tasks   => Explicit_Tasks,
                Placement_Claims => Claims);
-            Start_Phase := Scheduling.Reduction_Start_Phase
-              (Automatic_Tasks, Claims);
+            Start_Phase := Scheduling.Reduction_Start_Phase (Automatic_Tasks, Claims);
             if Start_Phase = Scheduling.Reduction_Complete then
                --  No automatic work or pre-cutover selection needs a drainage
                --  destination. Publish the completed cutover without starting
@@ -3265,8 +2922,7 @@ package body System.Flyology.Scheduler is
                Reduction_Target := Maximum_Size;
                Automatic_Pool_Size := Positive (Maximum_Size);
                Reduction_Destination := System.Null_Address;
-               Reduction_Phase_Code :=
-                 C.int (Scheduling.Reduction_Phase'Pos (Start_Phase));
+               Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Start_Phase));
                Unlock_Topology;
                return 0;
             end if;
@@ -3282,33 +2938,28 @@ package body System.Flyology.Scheduler is
       end if;
 
       Lock_Topology;
-      if Reduction_Phase_Code =
-        C.int
-          (Scheduling.Reduction_Phase'Pos
-             (Scheduling.Reduction_Draining))
-      then
+      if Reduction_Phase_Code = C.int (Scheduling.Reduction_Phase'Pos (Scheduling.Reduction_Draining)) then
          Collect_Pool_Reduction_Status_Locked (Status);
       end if;
-      Decision := Scheduling.Plan_Reduction
-        (Scheduling.Pool_Size (Automatic_Pool_Size),
-         Scheduling.Pool_Size (Maximum_Size),
-         Scheduling.Reduction_Phase'Val
-           (Integer (Reduction_Phase_Code)));
+      Decision :=
+        Scheduling.Plan_Reduction
+          (Scheduling.Pool_Size (Automatic_Pool_Size),
+           Scheduling.Pool_Size (Maximum_Size),
+           Scheduling.Reduction_Phase'Val (Integer (Reduction_Phase_Code)));
       case Decision is
-         when Scheduling.Already_At_Or_Below =>
+         when Scheduling.Already_At_Or_Below   =>
             Unlock_Topology;
             return 1;
+
          when Scheduling.Reduction_In_Progress =>
             Unlock_Topology;
             return 2;
-         when Scheduling.Start_Reduction =>
+
+         when Scheduling.Start_Reduction       =>
             Reduction_Destination := Group_To_Address (Target);
             Reduction_Target := Maximum_Size;
             Automatic_Pool_Size := Positive (Maximum_Size);
-            Reduction_Phase_Code :=
-              C.int
-                (Scheduling.Reduction_Phase'Pos
-                   (Scheduling.Reduction_Draining));
+            Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Scheduling.Reduction_Draining));
             Collect_Pool_Reduction_Status_Locked (Status);
             Unlock_Topology;
             return 0;
@@ -3318,12 +2969,8 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Request_Pool_Reduction;
 
-   function Query_Pool_Reduction
-     (Status      : System.Address;
-      Status_Size : C.size_t) return C.int
-   is
-      Output : constant Runtime_Pool_Reduction_Status_Access :=
-        To_Runtime_Pool_Reduction_Status (Status);
+   function Query_Pool_Reduction (Status : System.Address; Status_Size : C.size_t) return C.int is
+      Output : constant Runtime_Pool_Reduction_Status_Access := To_Runtime_Pool_Reduction_Status (Status);
    begin
       if In_Fork_Child
         or else not Initialized
@@ -3341,7 +2988,8 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Query_Pool_Reduction;
 
-   function Configured_Placement return C.int is (0);
+   function Configured_Placement return C.int
+   is (0);
 
    function Placement_Supported (Mode : C.int) return C.int is
    begin
@@ -3354,10 +3002,7 @@ package body System.Flyology.Scheduler is
       end if;
    end Placement_Supported;
 
-   function Placement_Value_Available
-     (Mode  : C.int;
-      Value : C.int) return C.int
-   is
+   function Placement_Value_Available (Mode : C.int; Value : C.int) return C.int is
       Result : C.int;
    begin
       if Mode = No_Placement_Mode then
@@ -3379,11 +3024,7 @@ package body System.Flyology.Scheduler is
       return (if Result = 0 then 1 else 0);
    end Placement_Value_Available;
 
-   function Configure_Group_Placement
-     (Group : C.int;
-      Mode  : C.int;
-      Value : C.int) return C.int
-   is
+   function Configure_Group_Placement (Group : C.int; Mode : C.int; Value : C.int) return C.int is
       Target  : Loop_Group_Access;
       Current : Placement_Request;
       Result  : C.int;
@@ -3391,14 +3032,11 @@ package body System.Flyology.Scheduler is
       if In_Fork_Child or else not Initialized then
          return 5;
       elsif not Scheduling.Valid_Group (Group)
-        or else Mode not in No_Placement_Mode |
-          Strict_CPU_Mode | Advisory_Tag_Mode
+        or else Mode not in No_Placement_Mode | Strict_CPU_Mode | Advisory_Tag_Mode
         or else (Mode = No_Placement_Mode and then Value /= 0)
       then
          return 3;
-      elsif Mode /= No_Placement_Mode
-        and then Thread_Placement_Supported (Mode) = 0
-      then
+      elsif Mode /= No_Placement_Mode and then Thread_Placement_Supported (Mode) = 0 then
          return 2;
       end if;
 
@@ -3406,26 +3044,19 @@ package body System.Flyology.Scheduler is
       Current := Placement_Requests (Group_Index (Group));
       Target := Groups (Group_Index (Group));
       if Target /= null then
-         if Target.Placement_Mode = Mode
-           and then Target.Placement_Value = Value
-         then
+         if Target.Placement_Mode = Mode and then Target.Placement_Value = Value then
             Result := 1;
          else
             Result := 4;
          end if;
       elsif Current.Mode = Mode and then Current.Value = Value then
          Result := 1;
-      elsif Mode /= No_Placement_Mode
-        and then Ensure_Placement_Platform /= 0
-      then
+      elsif Mode /= No_Placement_Mode and then Ensure_Placement_Platform /= 0 then
          Result := 5;
-      elsif Mode /= No_Placement_Mode
-        and then Validate_Thread_Placement (Mode, Value) /= 0
-      then
+      elsif Mode /= No_Placement_Mode and then Validate_Thread_Placement (Mode, Value) /= 0 then
          Result := 3;
       else
-         Placement_Requests (Group_Index (Group)) :=
-           (Mode => Mode, Value => Value);
+         Placement_Requests (Group_Index (Group)) := (Mode => Mode, Value => Value);
          Result := 0;
       end if;
       Unlock_Topology;
@@ -3433,9 +3064,7 @@ package body System.Flyology.Scheduler is
    end Configure_Group_Placement;
 
    function Query_Group_Placement
-     (Group       : C.int;
-      Status      : System.Address;
-      Status_Size : C.size_t) return C.int
+     (Group : C.int; Status : System.Address; Status_Size : C.size_t) return C.int
    is
       Output  : Runtime_Placement_Status_Access;
       Target  : Loop_Group_Access;
@@ -3449,9 +3078,7 @@ package body System.Flyology.Scheduler is
       end if;
       Output := To_Runtime_Placement_Status (Status);
       if In_Fork_Child or else not Initialized then
-         Output.all :=
-           (Mode => No_Placement_Mode, Value => 0, State => 4,
-            Error_Code => 0);
+         Output.all := (Mode => No_Placement_Mode, Value => 0, State => 4, Error_Code => 0);
          return 0;
       end if;
 
@@ -3462,17 +3089,19 @@ package body System.Flyology.Scheduler is
          Output.all :=
            (Mode       => Request.Mode,
             Value      => Request.Value,
-            State      =>
-              (if Request.Mode = No_Placement_Mode then 0 else 1),
+            State      => (if Request.Mode = No_Placement_Mode then 0 else 1),
             Error_Code => 0);
       else
          Output.all :=
            (Mode       => Target.Placement_Mode,
             Value      => Target.Placement_Value,
             State      =>
-              (if Target.Placement_Mode = No_Placement_Mode then 0
-               elsif Target.Placement_Applied then 2
-               elsif Target.Placement_Result /= 0 then 3
+              (if Target.Placement_Mode = No_Placement_Mode
+               then 0
+               elsif Target.Placement_Applied
+               then 2
+               elsif Target.Placement_Result /= 0
+               then 3
                else 1),
             Error_Code => Target.Placement_Result);
       end if;
@@ -3480,30 +3109,26 @@ package body System.Flyology.Scheduler is
       return 0;
    end Query_Group_Placement;
 
-   function Current_Processor return C.int is
-     (Thread_Current_Processor);
+   function Current_Processor return C.int
+   is (Thread_Current_Processor);
 
    function Create_Dedicated_Group return C.int is
-      Id      : C.int;
-      Group   : Loop_Group_Access;
-      Item    : Fiber_Access;
-      Current : constant System.Address := Current_Task;
-      Shard   : constant Registry_Shard_Index :=
-        Registry_Shard_For (Current);
+      Id        : C.int;
+      Group     : Loop_Group_Access;
+      Item      : Fiber_Access;
+      Current   : constant System.Address := Current_Task;
+      Shard     : constant Registry_Shard_Index := Registry_Shard_For (Current);
       Available : Boolean;
    begin
       if not Initialized or else Current = System.Null_Address then
          return -1;
       end if;
 
-      for Attempt in 1 .. Natural (Maximum_Group_Id - Dedicated_First_Id + 1)
-      loop
+      for Attempt in 1 .. Natural (Maximum_Group_Id - Dedicated_First_Id + 1) loop
          Lock_Registry_Shard (Shard);
          Lock_Topology;
          Item := Find (Current);
-         if Item = null or else not Item.Can_Migrate
-           or else Item.Reserved_Group /= null
-         then
+         if Item = null or else not Item.Can_Migrate or else Item.Reserved_Group /= null then
             Unlock_Topology;
             Unlock_Registry_Shard (Shard);
             return -1;
@@ -3517,9 +3142,9 @@ package body System.Flyology.Scheduler is
             Available := False;
             if Group.Dedicated then
                Lock_Group (Group);
-               Available := Scheduling.Dedicated_Available
-                 (Group.Member_Count,
-                  Group.Reserved_For /= System.Null_Address);
+               Available :=
+                 Scheduling.Dedicated_Available
+                   (Group.Member_Count, Group.Reserved_For /= System.Null_Address);
                Unlock_Group (Group);
             end if;
             exit when Available;
@@ -3564,11 +3189,7 @@ package body System.Flyology.Scheduler is
       return Result;
    end Is_Dedicated_Group;
 
-   function Observe_Group
-     (Group         : C.int;
-      Snapshot      : System.Address;
-      Snapshot_Size : C.size_t) return C.int
-   is
+   function Observe_Group (Group : C.int; Snapshot : System.Address; Snapshot_Size : C.size_t) return C.int is
       Target : Loop_Group_Access;
       Item   : Fiber_Access;
       Output : Runtime_Group_Snapshot_Access;
@@ -3596,23 +3217,17 @@ package body System.Flyology.Scheduler is
       Output := To_Runtime_Group_Snapshot (Snapshot);
       Output.all :=
         (ABI_Version              => 6,
-         Thread_State             =>
-           (if Target.Start_Failed then 3
-            elsif Target.Started then 2
-            else 1),
+         Thread_State             => (if Target.Start_Failed then 3 elsif Target.Started then 2 else 1),
          Dedicated                => (if Target.Dedicated then 1 else 0),
-         Reserved                 =>
-           (if Target.Reserved_For = System.Null_Address then 0 else 1),
-         Members                  =>
-           C.unsigned_long_long (Target.Member_Count),
+         Reserved                 => (if Target.Reserved_For = System.Null_Address then 0 else 1),
+         Members                  => C.unsigned_long_long (Target.Member_Count),
          Pinned_Members           => 0,
          Ready                    => 0,
          Waiting                  => 0,
          Running                  => 0,
          Migrating                => 0,
          Finished                 => 0,
-         Timer_Waits              =>
-           C.unsigned_long_long (Target.Timer_Count),
+         Timer_Waits              => C.unsigned_long_long (Target.Timer_Count),
          Descriptor_Waits         => 0,
          Interrupt_Waits          => 0,
          File_Waits               => 0,
@@ -3637,21 +3252,24 @@ package body System.Flyology.Scheduler is
          Idle_Nanoseconds         => To_Nanoseconds (Idle),
          Idle_Waits               => Target.Idle_Waits);
 
-      Output.Pending_File_Submissions :=
-        C.unsigned_long_long (Target.Pending_Async_File_Count);
+      Output.Pending_File_Submissions := C.unsigned_long_long (Target.Pending_Async_File_Count);
 
       Item := Target.Fibers;
       while Item /= null loop
          case Item.State is
-            when Ready =>
+            when Ready     =>
                Output.Ready := Output.Ready + 1;
-            when Waiting =>
+
+            when Waiting   =>
                Output.Waiting := Output.Waiting + 1;
-            when Running =>
+
+            when Running   =>
                Output.Running := Output.Running + 1;
+
             when Migrating =>
                Output.Migrating := Output.Migrating + 1;
-            when Finished =>
+
+            when Finished  =>
                Output.Finished := Output.Finished + 1;
          end case;
          if Item.IO_Wait then
@@ -3666,23 +3284,18 @@ package body System.Flyology.Scheduler is
          if Item.File_Wait then
             Output.File_Waits := Output.File_Waits + 1;
          end if;
-         Output.File_Waits := Output.File_Waits
-           + C.unsigned_long_long (Item.Active_Async_Files);
+         Output.File_Waits := Output.File_Waits + C.unsigned_long_long (Item.Active_Async_Files);
          if Item.File_Pending then
-            Output.Pending_File_Submissions :=
-              Output.Pending_File_Submissions + 1;
+            Output.Pending_File_Submissions := Output.Pending_File_Submissions + 1;
          end if;
          if Item.State = Waiting
            and then Item.Timer_Index /= 0
            and then not Item.IO_Wait
            and then not Item.File_Wait
          then
-            Output.Dormancy_Candidates :=
-              Output.Dormancy_Candidates + 1;
+            Output.Dormancy_Candidates := Output.Dormancy_Candidates + 1;
             Output.Dormancy_Candidate_Bytes :=
-              Output.Dormancy_Candidate_Bytes
-              + C.unsigned_long_long
-                  (Contexts.Stack_Size (Item.Context));
+              Output.Dormancy_Candidate_Bytes + C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
          end if;
          Item := Item.Next_Group;
       end loop;
@@ -3740,10 +3353,9 @@ package body System.Flyology.Scheduler is
       Expected := Natural'Min (Target.Member_Count, Natural (Capacity));
       Item := Target.Fibers;
       while Item /= null and then Written < Expected loop
-         Output := To_Runtime_Task_Snapshot
-           (Items
-            + SSE.Storage_Offset (Written)
-              * SSE.Storage_Offset (Runtime_Task_Snapshot'Size / 8));
+         Output :=
+           To_Runtime_Task_Snapshot
+             (Items + SSE.Storage_Offset (Written) * SSE.Storage_Offset (Runtime_Task_Snapshot'Size / 8));
          Flags := 0;
          if Item.Thread_Pin_Count /= 0 then
             Flags := Flags or Task_Pinned_Flag;
@@ -3767,15 +3379,14 @@ package body System.Flyology.Scheduler is
            (Instance           => Item.Instance,
             State              =>
               (case Item.State is
-                  when Ready     => 0,
-                  when Waiting   => 1,
-                  when Running   => 2,
-                  when Migrating => 3,
-                  when Finished  => 4),
+                 when Ready     => 0,
+                 when Waiting   => 1,
+                 when Running   => 2,
+                 when Migrating => 3,
+                 when Finished  => 4),
             Base_Priority      => Item.Priority,
             Flags              => Flags,
-            Stack_Usable_Bytes =>
-              C.unsigned_long_long (Contexts.Stack_Size (Item.Context)));
+            Stack_Usable_Bytes => C.unsigned_long_long (Contexts.Stack_Size (Item.Context)));
          Written := Written + 1;
          Item := Item.Next_Group;
       end loop;
@@ -3791,27 +3402,25 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Observe_Tasks;
 
-   function Observe_Last_Fatal return C.int is (Last_Fatal_Context);
+   function Observe_Last_Fatal return C.int
+   is (Last_Fatal_Context);
 
-   function Observe_Lifecycle return C.int is
-     (if In_Fork_Child then 5 else Lifecycle_State);
+   function Observe_Lifecycle return C.int
+   is (if In_Fork_Child then 5 else Lifecycle_State);
 
-   function Observe_Created_Groups return C.int is
-     (if In_Fork_Child then 0 else Created_Group_Count);
+   function Observe_Created_Groups return C.int
+   is (if In_Fork_Child then 0 else Created_Group_Count);
 
    function Migrate (Group : C.int) return C.int is
-      Item   : Fiber_Access;
-      Source : Loop_Group_Access;
-      Target : Loop_Group_Access;
-      Current : constant System.Address := Current_Task;
-      Shard : constant Registry_Shard_Index :=
-        Registry_Shard_For (Current);
+      Item                : Fiber_Access;
+      Source              : Loop_Group_Access;
+      Target              : Loop_Group_Access;
+      Current             : constant System.Address := Current_Task;
+      Shard               : constant Registry_Shard_Index := Registry_Shard_For (Current);
       Target_Member_Count : Natural := 0;
       Reservation_Matches : Boolean := False;
    begin
-      if Current = System.Null_Address
-        or else not Scheduling.Valid_Group (Group)
-      then
+      if Current = System.Null_Address or else not Scheduling.Valid_Group (Group) then
          return -1;
       end if;
 
@@ -3824,10 +3433,7 @@ package body System.Flyology.Scheduler is
       --  change its pin count, and it cannot run concurrently with this call.
       Lock_Group (Source);
       Item := Source.Current_Fiber;
-      if Item = null
-        or else Item.Thread_Pin_Count /= 0
-        or else Item.Active_Async_Files /= 0
-      then
+      if Item = null or else Item.Thread_Pin_Count /= 0 or else Item.Active_Async_Files /= 0 then
          Unlock_Group (Source);
          return -1;
       end if;
@@ -3850,8 +3456,7 @@ package body System.Flyology.Scheduler is
          Lock_Group (Target);
          Target_Member_Count := Target.Member_Count;
          Unlock_Group (Target);
-         Reservation_Matches :=
-           Target.Reserved_For = Current;
+         Reservation_Matches := Target.Reserved_For = Current;
       end if;
       Lock_Group (Source);
       Item := Source.Current_Fiber;
@@ -3860,14 +3465,11 @@ package body System.Flyology.Scheduler is
         or else Find (Current) /= Item
         or else Item.Thread_Pin_Count /= 0
         or else Item.Active_Async_Files /= 0
-        or else
-          not Scheduling.Migration_Allowed
-            (Can_Migrate         => Item.Can_Migrate,
-             Target_Dedicated    => Target.Dedicated,
-             Target_Member_Count => Target_Member_Count,
-             Reservation_Matches =>
-               Reservation_Matches
-               and then Item.Reserved_Group = Target)
+        or else not Scheduling.Migration_Allowed
+                      (Can_Migrate         => Item.Can_Migrate,
+                       Target_Dedicated    => Target.Dedicated,
+                       Target_Member_Count => Target_Member_Count,
+                       Reservation_Matches => Reservation_Matches and then Item.Reserved_Group = Target)
       then
          Unlock_Group (Source);
          Unlock_Topology;
@@ -3887,11 +3489,9 @@ package body System.Flyology.Scheduler is
       return 0;
    end Migrate;
 
-   function Pin_Current_Thread
-     (Owner : access System.Address) return C.int
-   is
-      Group : constant Loop_Group_Access := Thread_Group;
-      Item  : Fiber_Access;
+   function Pin_Current_Thread (Owner : access System.Address) return C.int is
+      Group   : constant Loop_Group_Access := Thread_Group;
+      Item    : Fiber_Access;
       Current : constant System.Address := Current_Task;
    begin
       if Owner = null then
@@ -3908,10 +3508,7 @@ package body System.Flyology.Scheduler is
 
       Lock_Group (Group);
       Item := Group.Current_Fiber;
-      if Item = null
-        or else Item.Group /= Group
-        or else Item.Thread_Pin_Count = Natural'Last
-      then
+      if Item = null or else Item.Group /= Group or else Item.Thread_Pin_Count = Natural'Last then
          Unlock_Group (Group);
          return -1;
       end if;
@@ -3923,9 +3520,7 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Pin_Current_Thread;
 
-   function Unpin_Current_Thread
-     (Owner : System.Address) return C.int
-   is
+   function Unpin_Current_Thread (Owner : System.Address) return C.int is
       Group : constant Loop_Group_Access := Thread_Group;
       Item  : Fiber_Access;
    begin
@@ -3940,10 +3535,7 @@ package body System.Flyology.Scheduler is
 
       Lock_Group (Group);
       Item := Group.Current_Fiber;
-      if Item = null
-        or else Item.Group /= Group
-        or else Item.Thread_Pin_Count = 0
-      then
+      if Item = null or else Item.Group /= Group or else Item.Thread_Pin_Count = 0 then
          Unlock_Group (Group);
          return -1;
       end if;
@@ -3969,11 +3561,7 @@ package body System.Flyology.Scheduler is
       Lock_Group (Group);
       Item := Group.Current_Fiber;
       Result :=
-        (if Item /= null
-           and then Item.Group = Group
-           and then Item.Thread_Pin_Count /= 0
-         then 1
-         else 0);
+        (if Item /= null and then Item.Group = Group and then Item.Thread_Pin_Count /= 0 then 1 else 0);
       Unlock_Group (Group);
       return Result;
    exception
@@ -3981,8 +3569,8 @@ package body System.Flyology.Scheduler is
          Fatal;
    end Current_Thread_Is_Pinned;
 
-   function In_Lightweight_Task return C.int is
-     (if Current_Task = System.Null_Address then 0 else 1);
+   function In_Lightweight_Task return C.int
+   is (if Current_Task = System.Null_Address then 0 else 1);
 
    function Wait_IO_Many
      (Requests            : System.Address;
@@ -3998,13 +3586,12 @@ package body System.Flyology.Scheduler is
       function Do_Wait (Actual_Count : IO_Link_Kind) return C.int;
 
       function Do_Wait (Actual_Count : IO_Link_Kind) return C.int is
-         Item : Fiber_Access;
+         Item               : Fiber_Access;
          --  The suspended fiber owns exactly the links needed by this wait.
          --  Raising the heterogeneous-set ceiling therefore does not charge
          --  every ordinary one-descriptor wait for the maximum stack frame.
-         Links : aliased IO_Wait_Link_Array (1 .. Actual_Count);
-         Kernel_Watches : Pollers.Interest_Request_Array
-           (1 .. Actual_Count);
+         Links              : aliased IO_Wait_Link_Array (1 .. Actual_Count);
+         Kernel_Watches     : Pollers.Interest_Request_Array (1 .. Actual_Count);
          Kernel_Watch_Count : Natural := 0;
 
          function Request_At (Index : Positive) return Runtime_Wait_Request;
@@ -4014,27 +3601,21 @@ package body System.Flyology.Scheduler is
          function Request_At (Index : Positive) return Runtime_Wait_Request is
             Bytes : constant SSE.Storage_Offset :=
               SSE.Storage_Offset
-                ((Index - 1) *
-                 (Runtime_Wait_Request_Array'Component_Size /
-                  System.Storage_Unit));
+                ((Index - 1) * (Runtime_Wait_Request_Array'Component_Size / System.Storage_Unit));
          begin
             return Wait_Request_Conversions.To_Pointer (Requests + Bytes).all;
          end Request_At;
 
          function Plan_Arm (Index : Positive) return Boolean is
-            Request : constant Runtime_Wait_Request := Request_At (Index);
-            Interest : constant Pollers.Interest :=
-              (if Request.For_Write = 0
-               then Pollers.Readable else Pollers.Writable);
+            Request            : constant Runtime_Wait_Request := Request_At (Index);
+            Interest           : constant Pollers.Interest :=
+              (if Request.For_Write = 0 then Pollers.Readable else Pollers.Writable);
             Needs_Kernel_Watch : Boolean;
          begin
-            if Request.Descriptor < 0
-              or else Request.For_Write not in 0 | 1
-            then
+            if Request.Descriptor < 0 or else Request.For_Write not in 0 | 1 then
                return False;
             end if;
-            Needs_Kernel_Watch := not IO_Interest_Registered_Locked
-              (Group, Request.Descriptor, Interest);
+            Needs_Kernel_Watch := not IO_Interest_Registered_Locked (Group, Request.Descriptor, Interest);
             if Needs_Kernel_Watch then
                for Planned in 1 .. Kernel_Watch_Count loop
                   if Kernel_Watches (Planned).Descriptor = Request.Descriptor
@@ -4054,22 +3635,19 @@ package body System.Flyology.Scheduler is
          end Plan_Arm;
 
          procedure Register_Arm (Index : Positive) is
-            Request : constant Runtime_Wait_Request := Request_At (Index);
+            Request  : constant Runtime_Wait_Request := Request_At (Index);
             Interest : constant Pollers.Interest :=
-              (if Request.For_Write = 0
-               then Pollers.Readable else Pollers.Writable);
+              (if Request.For_Write = 0 then Pollers.Readable else Pollers.Writable);
          begin
             Register_IO_Wait_Locked
-              (Group, Item, Request.Descriptor, Interest,
-               IO_Link_Kind (Index), C.int (Index));
+              (Group, Item, Request.Descriptor, Interest, IO_Link_Kind (Index), C.int (Index));
          end Register_Arm;
       begin
          Lock_Group (Group);
          Item := Group.Current_Fiber;
          Item.Active_IO_Links := Links (1)'Unchecked_Access;
          Item.Active_IO_Link_Count := Natural (Actual_Count);
-         Item.Deadline :=
-           (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
+         Item.Deadline := (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
          Item.Timed_Out := False;
          Item.IO_Result := 0;
          Item.IO_Interrupt_Wait := Interrupt_Wait /= 0;
@@ -4096,14 +3674,9 @@ package body System.Flyology.Scheduler is
             end if;
          end loop;
          if Kernel_Watch_Count > 0
-           and then not Pollers.Watch_Many
-             (Group.Scheduler_Poller,
-              Kernel_Watches (1 .. Kernel_Watch_Count))
+           and then not Pollers.Watch_Many (Group.Scheduler_Poller, Kernel_Watches (1 .. Kernel_Watch_Count))
          then
-            if not Pollers.Cancel_Many
-              (Group.Scheduler_Poller,
-               Kernel_Watches (1 .. Kernel_Watch_Count))
-            then
+            if not Pollers.Cancel_Many (Group.Scheduler_Poller, Kernel_Watches (1 .. Kernel_Watch_Count)) then
                Fatal (Poller_Failure);
             end if;
             Remove_Timer_Locked (Group, Item);
@@ -4141,8 +3714,7 @@ package body System.Flyology.Scheduler is
       else
          Whole := Timeout_Nanoseconds / 1_000_000_000;
          Remainder := Timeout_Nanoseconds mod 1_000_000_000;
-         Timeout := Duration (Whole)
-           + Duration (Remainder) / 1_000_000_000;
+         Timeout := Duration (Whole) + Duration (Remainder) / 1_000_000_000;
       end if;
 
       return Do_Wait (IO_Link_Kind (Count));
@@ -4161,9 +3733,9 @@ package body System.Flyology.Scheduler is
       Error_Code  : access C.int;
       Cancelled   : access C.int) return C.int
    is
-      Group : constant Loop_Group_Access := Thread_Group;
-      Item  : Fiber_Access;
-      Error : C.int := 0;
+      Group       : constant Loop_Group_Access := Thread_Group;
+      Item        : Fiber_Access;
+      Error       : C.int := 0;
       Lock_Result : C.int;
    begin
       --  The submitted buffer lives on the fiber stack and remains valid
@@ -4180,9 +3752,7 @@ package body System.Flyology.Scheduler is
         or else Task_Lock = System.Null_Address
       then
          return -1;
-      elsif For_Send_ZC
-        and then not Pollers.Supports_Send_ZC (Group.Scheduler_Poller)
-      then
+      elsif For_Send_ZC and then not Pollers.Supports_Send_ZC (Group.Scheduler_Poller) then
          Transferred.all := 0;
          Error_Code.all := 0;
          Cancelled.all := 0;
@@ -4220,13 +3790,10 @@ package body System.Flyology.Scheduler is
       Item.Active_IO_Links := null;
       Item.Active_IO_Link_Count := 0;
       if Cancel_FD >= 0 then
-         Item.Active_IO_Links :=
-           Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
+         Item.Active_IO_Links := Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
          Item.Active_IO_Link_Count := 1;
-         if not IO_Interest_Registered_Locked
-           (Group, Cancel_FD, Pollers.Readable)
-           and then not Pollers.Watch
-             (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable)
+         if not IO_Interest_Registered_Locked (Group, Cancel_FD, Pollers.Readable)
+           and then not Pollers.Watch (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable)
          then
             Item.File_Wait := False;
             Item.File_Cancel_Descriptor := -1;
@@ -4236,32 +3803,22 @@ package body System.Flyology.Scheduler is
             Unlock_Group (Group);
             return -1;
          end if;
-         Register_IO_Wait_Locked
-           (Group,
-            Item,
-            Cancel_FD,
-            Pollers.Readable,
-            Primary_IO,
-            0);
+         Register_IO_Wait_Locked (Group, Item, Cancel_FD, Pollers.Readable, Primary_IO, 0);
       end if;
-      if not
-        (if For_Send_ZC
-         then Pollers.Submit_Send_ZC
-           (Group.Scheduler_Poller,
-            Descriptor,
-            Buffer,
-            Length,
-            Fiber_To_Address (Item),
-            Error)
-         else Pollers.Submit_File
-           (Group.Scheduler_Poller,
-            Descriptor,
-            Buffer,
-            Length,
-            Offset,
-            For_Write /= 0,
-            Fiber_To_Address (Item),
-            Error))
+      if not (if For_Send_ZC
+              then
+                Pollers.Submit_Send_ZC
+                  (Group.Scheduler_Poller, Descriptor, Buffer, Length, Fiber_To_Address (Item), Error)
+              else
+                Pollers.Submit_File
+                  (Group.Scheduler_Poller,
+                   Descriptor,
+                   Buffer,
+                   Length,
+                   Offset,
+                   For_Write /= 0,
+                   Fiber_To_Address (Item),
+                   Error))
       then
          if Error = C.int (OSI.EAGAIN) then
             Queue_Pending_File_Locked (Group, Item);
@@ -4319,32 +3876,28 @@ package body System.Flyology.Scheduler is
       Task_Lock   : System.Address;
       Transferred : access C.long_long;
       Error_Code  : access C.int;
-      Cancelled   : access C.int) return C.int
-   is
+      Cancelled   : access C.int) return C.int is
    begin
       --  Value 2 is an internal extension of the existing GNARL handoff for
       --  a socket SEND_ZC. Reusing this entry point preserves the task-lock
       --  abort boundary without adding another platform patch surface.
-      return File_Operation
-        (Descriptor,
-         Buffer,
-         Length,
-         Offset,
-         (if For_Write = 2 then 0 else For_Write),
-         For_Write = 2,
-         Cancel_FD,
-         Task_Lock,
-         Transferred,
-         Error_Code,
-         Cancelled);
+      return
+        File_Operation
+          (Descriptor,
+           Buffer,
+           Length,
+           Offset,
+           (if For_Write = 2 then 0 else For_Write),
+           For_Write = 2,
+           Cancel_FD,
+           Task_Lock,
+           Transferred,
+           Error_Code,
+           Cancelled);
    end File_IO;
 
-   function Set_Priority
-     (T                   : System.Address;
-      Priority            : C.int;
-      Loss_Of_Inheritance : C.int) return C.int
-   is
-      Item : Fiber_Access;
+   function Set_Priority (T : System.Address; Priority : C.int; Loss_Of_Inheritance : C.int) return C.int is
+      Item  : Fiber_Access;
       Shard : Registry_Shard_Index;
    begin
       if T = System.Null_Address
@@ -4367,14 +3920,12 @@ package body System.Flyology.Scheduler is
          Remove_From_Ready (Item.Group, Item);
          Item.Priority := Priority;
          Item.Enqueue_At_Head :=
-           Scheduling.Placement_After_Priority_Update
-             (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
+           Scheduling.Placement_After_Priority_Update (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
          Enqueue (Item.Group, Item);
       else
          Item.Priority := Priority;
          Item.Enqueue_At_Head :=
-           Scheduling.Placement_After_Priority_Update
-             (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
+           Scheduling.Placement_After_Priority_Update (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
       end if;
       Unlock_Group (Item.Group);
       Unlock_Registry_Shard (Shard);
@@ -4398,11 +3949,7 @@ package body System.Flyology.Scheduler is
       return 0;
    end Yield;
 
-   function Sleep
-     (Task_Lock : System.Address;
-      Deadline  : Duration;
-      Timed_Out : access C.int) return C.int
-   is
+   function Sleep (Task_Lock : System.Address; Deadline : Duration; Timed_Out : access C.int) return C.int is
       Group  : constant Loop_Group_Access := Thread_Group;
       Item   : Fiber_Access;
       Result : C.int;
@@ -4452,10 +3999,10 @@ package body System.Flyology.Scheduler is
    end Sleep;
 
    function Wake (T : System.Address) return C.int is
-      Item       : Fiber_Access;
-      Group      : Loop_Group_Access;
-      Need_Wake  : Boolean := False;
-      Shard      : constant Registry_Shard_Index := Registry_Shard_For (T);
+      Item      : Fiber_Access;
+      Group     : Loop_Group_Access;
+      Need_Wake : Boolean := False;
+      Shard     : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
       Lock_Registry_Shard (Shard);
       Item := Find (T);
@@ -4491,7 +4038,7 @@ package body System.Flyology.Scheduler is
    end Wake;
 
    function Destroy (T : System.Address) return C.int is
-      Item : Fiber_Access;
+      Item  : Fiber_Access;
       Shard : Registry_Shard_Index;
    begin
       if not Initialized or else T = System.Null_Address then
@@ -4520,11 +4067,12 @@ package body System.Flyology.Scheduler is
       Item.Destroy_Requested := True;
 
       case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
-         when Scheduling.Defer =>
+         when Scheduling.Defer    =>
             Unlock_Group (Item.Group);
             Unlock_Topology;
             Unlock_Registry_Shard (Shard);
             return 0;
+
          when Scheduling.Reap_Now =>
             declare
                Group : constant Loop_Group_Access := Item.Group;
@@ -4539,12 +4087,11 @@ package body System.Flyology.Scheduler is
    end Destroy;
 
    procedure Fiber_Main (Argument : System.Address) is
-      Item : constant Fiber_Access := Address_To_Fiber (Argument);
+      Item  : constant Fiber_Access := Address_To_Fiber (Argument);
       Group : Loop_Group_Access;
       type Wrapper_Access is access procedure (T : System.Address);
       pragma Convention (C, Wrapper_Access);
-      function To_Wrapper is new Ada.Unchecked_Conversion
-        (System.Address, Wrapper_Access);
+      function To_Wrapper is new Ada.Unchecked_Conversion (System.Address, Wrapper_Access);
    begin
       To_Wrapper (Item.Wrapper).all (Item.T);
 
@@ -4580,10 +4127,7 @@ package body System.Flyology.Scheduler is
       Fatal (Context_Failure);
    end Fiber_Main;
 
-   procedure Handle_Poll_Event
-     (Group : not null Loop_Group_Access;
-      Event : Pollers.Poll_Event)
-   is
+   procedure Handle_Poll_Event (Group : not null Loop_Group_Access; Event : Pollers.Poll_Event) is
       Bucket  : IO_Bucket_Index;
       Item    : Fiber_Access;
       Link    : IO_Wait_Link_Access;
@@ -4596,20 +4140,13 @@ package body System.Flyology.Scheduler is
          elsif Is_Async_File_Token (Event.Token) then
             declare
                Node : constant Async_File_Node_Access :=
-                 To_Async_File_Node
-                   (Async_File_Node_Address (Event.Token));
+                 To_Async_File_Node (Async_File_Node_Address (Event.Token));
             begin
-               if Node = null
-                 or else Node.Version /= Async_File_Node_Version
-               then
+               if Node = null or else Node.Version /= Async_File_Node_Version then
                   Fatal;
                end if;
                Complete_Async_File_Locked
-                 (Group,
-                  Node,
-                  Event.Result,
-                  Event.Error_Code,
-                  Node.Cancel_Requested /= 0);
+                 (Group, Node, Event.Result, Event.Error_Code, Node.Cancel_Requested /= 0);
                Submit_Pending_Async_Files_Locked (Group);
                Submit_Pending_Files_Locked (Group);
                return;
@@ -4623,21 +4160,12 @@ package body System.Flyology.Scheduler is
          then
             Fatal;
          end if;
-         Complete_File_Locked
-           (Group,
-            Item,
-            Event.Result,
-            Event.Error_Code,
-            Item.File_Cancel_Requested);
+         Complete_File_Locked (Group, Item, Event.Result, Event.Error_Code, Item.File_Cancel_Requested);
          Submit_Pending_Files_Locked (Group);
          return;
       end if;
 
-      if Event.Kind not in
-        Pollers.Readable_Event |
-        Pollers.Writable_Event |
-        Pollers.Read_Write_Event
-      then
+      if Event.Kind not in Pollers.Readable_Event | Pollers.Writable_Event | Pollers.Read_Write_Event then
          return;
       end if;
 
@@ -4651,21 +4179,15 @@ package body System.Flyology.Scheduler is
          Matches :=
            Item /= null
            and then Link.Registered
-           and then
-           Item.State = Waiting
+           and then Item.State = Waiting
            and then Item.IO_Wait
            and then Link.Descriptor = Event.Descriptor
-           and then
-             ((Event.Kind in Pollers.Readable_Event | Pollers.Read_Write_Event
-               and then Link.Interest = Pollers.Readable)
-              or else
-                (Event.Kind in
-                   Pollers.Writable_Event | Pollers.Read_Write_Event
-                 and then Link.Interest = Pollers.Writable));
+           and then ((Event.Kind in Pollers.Readable_Event | Pollers.Read_Write_Event
+                      and then Link.Interest = Pollers.Readable)
+                     or else (Event.Kind in Pollers.Writable_Event | Pollers.Read_Write_Event
+                              and then Link.Interest = Pollers.Writable));
          if Matches then
-            if Item.File_Wait
-              and then Link.Descriptor = Item.File_Cancel_Descriptor
-            then
+            if Item.File_Wait and then Link.Descriptor = Item.File_Cancel_Descriptor then
                if Request_File_Cancel_Locked (Group, Item) then
                   Submit_Pending_Files_Locked (Group);
                end if;
@@ -4679,12 +4201,8 @@ package body System.Flyology.Scheduler is
                  (Group,
                   Item,
                   Consumed_Descriptor => Event.Descriptor,
-                  Read_Consumed =>
-                    Event.Kind in
-                      Pollers.Readable_Event | Pollers.Read_Write_Event,
-                  Write_Consumed =>
-                    Event.Kind in
-                      Pollers.Writable_Event | Pollers.Read_Write_Event);
+                  Read_Consumed       => Event.Kind in Pollers.Readable_Event | Pollers.Read_Write_Event,
+                  Write_Consumed      => Event.Kind in Pollers.Writable_Event | Pollers.Read_Write_Event);
                Enqueue (Group, Item);
                --  Removing all of Item's links may have changed this bucket at
                --  any position, so restart from its head. Each pass wakes one
@@ -4703,15 +4221,13 @@ package body System.Flyology.Scheduler is
       Count  : Natural;
    begin
       Unlock_Group (Group);
-      Waited := Pollers.Wait_Batch
-        (Group.Scheduler_Poller, 0.0, Events, Count);
+      Waited := Pollers.Wait_Batch (Group.Scheduler_Poller, 0.0, Events, Count);
       Lock_Group (Group);
       if not Waited then
          Fatal (Poller_Failure);
       end if;
       Group.Poll_Batches := Group.Poll_Batches + 1;
-      Group.Poll_Events :=
-        Group.Poll_Events + C.unsigned_long_long (Count);
+      Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
       Process_File_Cancellations_Locked (Group);
       for Index in 1 .. Count loop
          Handle_Poll_Event (Group, Events (Index));
@@ -4719,13 +4235,13 @@ package body System.Flyology.Scheduler is
    end Poll_Ready_Events;
 
    procedure Scheduler_Main (Argument : System.Address) is
-      Group : constant Loop_Group_Access := Address_To_Group (Argument);
+      Group                        : constant Loop_Group_Access := Address_To_Group (Argument);
       Dispatches_Until_Timer_Check : Natural := 0;
-      Timeout : Duration;
-      Next    : Fiber_Access;
-      Waited  : Boolean;
-      Events  : Pollers.Poll_Event_Array (1 .. Poll_Event_Budget);
-      Count   : Natural;
+      Timeout                      : Duration;
+      Next                         : Fiber_Access;
+      Waited                       : Boolean;
+      Events                       : Pollers.Poll_Event_Array (1 .. Poll_Event_Budget);
+      Count                        : Natural;
    begin
       --  Group_Thread holds this group's lock across the call, and this is
       --  the loop's first act, so the utilization window starts before any
@@ -4742,9 +4258,7 @@ package body System.Flyology.Scheduler is
          end if;
          Process_File_Cancellations_Locked (Group);
          Timeout := No_Deadline;
-         if Scheduling.Maintenance_Due
-           (Ready_Present (Group), Dispatches_Until_Timer_Check)
-         then
+         if Scheduling.Maintenance_Due (Ready_Present (Group), Dispatches_Until_Timer_Check) then
             Timeout := Promote_Expired_Timers (Group);
             Dispatches_Until_Timer_Check := Timer_Check_Interval;
             if Ready_Present (Group) then
@@ -4754,8 +4268,7 @@ package body System.Flyology.Scheduler is
 
          Submit_Pending_Files_Locked (Group);
          Submit_Pending_Async_Files_Locked (Group);
-         if (Group.Pending_File_Head /= null
-             or else Group.Pending_Async_File_Head /= null)
+         if (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
            and then (Timeout < 0.0 or else Timeout > 0.001)
          then
             --  Darwin's AIO limit is process-wide, so a group may need to
@@ -4771,22 +4284,15 @@ package body System.Flyology.Scheduler is
                Fatal;
             end if;
             if Scheduling.Should_Drain
-              (Phase                 =>
-                 Scheduling.Reduction_Phase'Val
-                   (Integer (Reduction_Phase_Code)),
-               Source                => Group.Id,
-               Target                =>
-                 Scheduling.Pool_Size (Reduction_Target),
-               Automatic_Placement   => Next.Automatic_Placement,
-               Pinned                => Next.Thread_Pin_Count /= 0,
-               Can_Migrate           =>
-                 Next.Can_Migrate
-                   and then Next.Active_Async_Files = 0,
-               Destination_Available =>
-                 Reduction_Destination /= System.Null_Address)
+                 (Phase                 => Scheduling.Reduction_Phase'Val (Integer (Reduction_Phase_Code)),
+                  Source                => Group.Id,
+                  Target                => Scheduling.Pool_Size (Reduction_Target),
+                  Automatic_Placement   => Next.Automatic_Placement,
+                  Pinned                => Next.Thread_Pin_Count /= 0,
+                  Can_Migrate           => Next.Can_Migrate and then Next.Active_Async_Files = 0,
+                  Destination_Available => Reduction_Destination /= System.Null_Address)
             then
-               Next.Migration_Target :=
-                 Address_To_Group (Reduction_Destination);
+               Next.Migration_Target := Address_To_Group (Reduction_Destination);
                Transfer (Next, Group);
             else
                Next.State := Running;
@@ -4796,8 +4302,7 @@ package body System.Flyology.Scheduler is
                   Fatal;
                end if;
                Dispatches_Until_Timer_Check :=
-                 Scheduling.After_Dispatch
-                   (Positive (Dispatches_Until_Timer_Check));
+                 Scheduling.After_Dispatch (Positive (Dispatches_Until_Timer_Check));
                Unlock_Group (Group);
                --  Own the trampoline cursor only while the fiber holds the
                --  thread. Control returns here from every suspension point,
@@ -4810,9 +4315,7 @@ package body System.Flyology.Scheduler is
 
                if Next.Migration_Target /= null then
                   Transfer (Next, Group);
-               elsif Scheduling.Should_Reap_After_Switch
-                 (Phase_Of (Next.State), Next.Destroy_Requested)
-               then
+               elsif Scheduling.Should_Reap_After_Switch (Phase_Of (Next.State), Next.Destroy_Requested) then
                   Reap_From_Scheduler (Group, Next);
                end if;
             end if;
@@ -4823,16 +4326,14 @@ package body System.Flyology.Scheduler is
             --  while work remains ready and is deliberately not counted.
             Begin_Idle_Wait_Locked (Group);
             Unlock_Group (Group);
-            Waited := Pollers.Wait_Batch
-              (Group.Scheduler_Poller, Timeout, Events, Count);
+            Waited := Pollers.Wait_Batch (Group.Scheduler_Poller, Timeout, Events, Count);
             Lock_Group (Group);
             End_Idle_Wait_Locked (Group);
             if not Waited then
                Fatal (Poller_Failure);
             end if;
             Group.Poll_Batches := Group.Poll_Batches + 1;
-            Group.Poll_Events :=
-              Group.Poll_Events + C.unsigned_long_long (Count);
+            Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
             Process_File_Cancellations_Locked (Group);
             for Index in 1 .. Count loop
                Handle_Poll_Event (Group, Events (Index));

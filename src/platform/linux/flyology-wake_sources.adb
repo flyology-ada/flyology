@@ -10,16 +10,13 @@ package body Flyology.Wake_Sources is
    O_CLOEXEC  : constant C.int := 16#8_0000#;
    O_NONBLOCK : constant C.int := 16#800#;
 
-   type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int
-     with Convention => C;
+   type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int with Convention => C;
 
    function Pipe_2 (Ends : System.Address; Flags : C.int) return C.int;
    pragma Import (C, Pipe_2, "pipe2");
-   function Write
-     (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
+   function Write (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
-   function Read
-     (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
+   function Read (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Read, "read");
    function Close (FD : C.int) return C.int;
    pragma Import (C, Close, "close");
@@ -30,9 +27,7 @@ package body Flyology.Wake_Sources is
       if Item.Read_End >= 0 then
          return;
       elsif Pipe_2 (Ends'Address, O_CLOEXEC + O_NONBLOCK) /= 0 then
-         raise Program_Error with
-           "cannot create cancellation wake source, errno="
-           & GNAT.OS_Lib.Errno'Image;
+         raise Program_Error with "cannot create cancellation wake source, errno=" & GNAT.OS_Lib.Errno'Image;
       end if;
       Item.Read_End := Ends (0);
       Item.Write_End := Ends (1);
@@ -74,16 +69,15 @@ package body Flyology.Wake_Sources is
 
    procedure Consume_All (Item : in out Source) is
       type Byte_Array is array (Positive range <>) of C.unsigned_char;
-      Buffer : aliased Byte_Array (1 .. 256);
-      Result : C.long;
+      Buffer   : aliased Byte_Array (1 .. 256);
+      Result   : C.long;
       Consumed : Boolean := False;
    begin
       if Item.Read_End < 0 then
          raise Program_Error with "cannot consume absent wake source";
       end if;
       loop
-         Result := Read
-           (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
+         Result := Read (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
          if Result > 0 then
             Consumed := True;
          elsif Result = 0 then
@@ -101,10 +95,11 @@ package body Flyology.Wake_Sources is
       end if;
    end Consume_All;
 
-   function Descriptor (Item : Source) return C.int is (Item.Read_End);
+   function Descriptor (Item : Source) return C.int
+   is (Item.Read_End);
 
-   function Signal_Descriptor (Item : Source) return C.int is
-     (Item.Write_End);
+   function Signal_Descriptor (Item : Source) return C.int
+   is (Item.Write_End);
 
    procedure Release (Item : in out Source) is
       Ignored : C.int;
@@ -119,7 +114,8 @@ package body Flyology.Wake_Sources is
       end if;
    end Release;
 
-   overriding procedure Finalize (Item : in out Source) is
+   overriding
+   procedure Finalize (Item : in out Source) is
    begin
       Release (Item);
    end Finalize;

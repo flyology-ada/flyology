@@ -4,6 +4,7 @@
 with Interfaces;
 
 --  Root namespace for bounded, in-memory debugging utilities.
+
 package Flyology_Debug is
 
    --  Nanoseconds from a platform monotonic origin. Values are suitable for
@@ -23,7 +24,7 @@ package Flyology_Debug is
    --  @param Producer_Count Number of configured producer shards
    --  @return One
    function First_Producer (Producer_Count : Positive) return Positive
-     with Inline;
+   with Inline;
 
    --  Raised when a producer operation is attempted after terminal closure.
    Closed_Error : exception;
@@ -35,6 +36,5 @@ package Flyology_Debug is
    --  submitted message that cannot be retained.
    --  @enum Block_Producer Preserve every accepted message by waiting for a
    --  consumer to release retained capacity.
-   type Overflow_Policy is
-     (Overwrite_Oldest, Drop_Newest, Block_Producer);
+   type Overflow_Policy is (Overwrite_Oldest, Drop_Newest, Block_Producer);
 end Flyology_Debug;

@@ -16,6 +16,7 @@ with System.Multiprocessors;
 --  @formal Generation_Model Execution model of the generation owner task
 --  @formal Generation_CPU CPU aspect of the generation owner task
 --  @formal Poll_Interval Readiness and shutdown observation interval
+
 generic
    --  Application state kept alive by the enclosing supervisor Run scope.
    type Application_Context (<>) is limited private;
@@ -25,15 +26,12 @@ generic
    --  Construct a fresh limited service using generation-stable context.
    --  @param Context Context retained through service join
    --  @return Fresh service object by limited build-in-place return
-   with function Create
-     (Context : not null access Application_Context) return Service is <>;
+   with function Create (Context : not null access Application_Context) return Service is <>;
 
    --  Execute the service's existing synchronous structured scope.
    --  @param Item Fresh service retained through the call
    --  @param Context Application context retained through the call
-   with procedure Run_Service
-     (Item    : in out Service;
-      Context : aliased in out Application_Context) is <>;
+   with procedure Run_Service (Item : in out Service; Context : aliased in out Application_Context) is <>;
 
    --  Request idempotent nonblocking service shutdown. This operation runs
    --  concurrently with Run_Service and must provide its own synchronization.
@@ -50,12 +48,12 @@ generic
    --  Concrete execution model for the service-owner task.
    Generation_Model : Flyology.Execution_Model;
    --  CPU aspect applied to the service-owner task.
-   Generation_CPU : System.Multiprocessors.CPU_Range :=
-     System.Multiprocessors.Not_A_Specific_CPU;
+   Generation_CPU : System.Multiprocessors.CPU_Range := System.Multiprocessors.Not_A_Specific_CPU;
    --  Positive relative interval for readiness and stop observation.
    Poll_Interval : Duration := 0.001;
 
-package Flyology.Supervision.Adapters is
+package Flyology.Supervision.Adapters
+is
 
    --  Construct one fresh service, run it in a dependent task, publish
    --  readiness only after Ready returns True, and forward generation stop to

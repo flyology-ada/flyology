@@ -9,6 +9,7 @@ with TLS_Test_Provider;
 --  task abort delivered inside that transfer must leave either a connection
 --  that owns everything or a socket that still owns the descriptor, and it
 --  must never leak a provider session.
+
 procedure TLS_Take_Abort is
    package TLS renames Flyology.IO.TLS;
    package Testing renames Flyology.IO.TLS.Testing;
@@ -18,12 +19,10 @@ procedure TLS_Take_Abort is
    use type Interfaces.C.int;
 
    type Model_Array is array (Positive range <>) of Flyology.Execution_Model;
-   Models : constant Model_Array :=
-     [Flyology.Lightweight_Task, Flyology.Native_Task];
+   Models : constant Model_Array := [Flyology.Lightweight_Task, Flyology.Native_Task];
 
    function Open_FD_Count return Interfaces.C.int
-     with Import, Convention => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
 
    --  Triggering alternative for the asynchronous transfer of control that
    --  aborts Take. The entry stays queued until the observer task has seen
@@ -61,7 +60,8 @@ procedure TLS_Take_Abort is
          Seen := True;
       end Report;
 
-      function Reported return Boolean is (Seen);
+      function Reported return Boolean
+      is (Seen);
    end Completion;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -87,10 +87,7 @@ procedure TLS_Take_Abort is
       null;
    end Warm_Model;
 
-   procedure Run_One
-     (Point : Testing.Take_Barrier_Point;
-      Model : Flyology.Execution_Model)
-   is
+   procedure Run_One (Point : Testing.Take_Barrier_Point; Model : Flyology.Execution_Model) is
       Backend : Provider.Provider;
       Conn    : TLS.Connection;
       Socket  : Sockets.Socket_Type;
@@ -158,10 +155,7 @@ procedure TLS_Take_Abort is
       pragma Assert (State.Sessions_Created = State.Sessions_Finalized);
    end Run_One;
 
-   procedure Run_Checked
-     (Point : Testing.Take_Barrier_Point;
-      Model : Flyology.Execution_Model)
-   is
+   procedure Run_Checked (Point : Testing.Take_Barrier_Point; Model : Flyology.Execution_Model) is
       Baseline : Interfaces.C.int;
    begin
       Warm_Model (Model);

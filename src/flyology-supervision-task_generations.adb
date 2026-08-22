@@ -6,39 +6,32 @@ package body Flyology.Supervision.Task_Generations is
    use type Flyology.Task_Results.Observation_Status;
 
    function Exception_Summary
-     (Occurrence : Ada.Exceptions.Exception_Occurrence;
-      Task_Id    : Ada.Task_Identification.Task_Id)
+     (Occurrence : Ada.Exceptions.Exception_Occurrence; Task_Id : Ada.Task_Identification.Task_Id)
       return Termination_Summary
    is
-      Name : constant String :=
-        Ada.Exceptions.Exception_Name
-          (Ada.Exceptions.Exception_Identity (Occurrence));
-      Message : constant String :=
-        Ada.Exceptions.Exception_Message (Occurrence);
+      Name        : constant String :=
+        Ada.Exceptions.Exception_Name (Ada.Exceptions.Exception_Identity (Occurrence));
+      Message     : constant String := Ada.Exceptions.Exception_Message (Occurrence);
       Name_Length : constant Exception_Name_Length :=
-        Exception_Name_Length'Min
-          (Exception_Name_Length'Last, Name'Length);
-      Length  : constant Diagnostic_Length :=
-        Diagnostic_Length'Min
-          (Diagnostic_Length'Last, Message'Length);
-      Value   : Termination_Summary :=
-        (Kind           => Unhandled_Exception,
-         Exception_Id   => Ada.Exceptions.Exception_Identity (Occurrence),
-         Exception_Name_Length => Name_Length,
+        Exception_Name_Length'Min (Exception_Name_Length'Last, Name'Length);
+      Length      : constant Diagnostic_Length :=
+        Diagnostic_Length'Min (Diagnostic_Length'Last, Message'Length);
+      Value       : Termination_Summary :=
+        (Kind                     => Unhandled_Exception,
+         Exception_Id             => Ada.Exceptions.Exception_Identity (Occurrence),
+         Exception_Name_Length    => Name_Length,
          Exception_Name_Truncated => Name'Length > Name_Length,
-         Exception_Name => (others => ' '),
-         Task_Id        => Task_Id,
-         Message_Length => Length,
-         Message_Truncated => Message'Length > Length,
-         Message        => (others => ' '));
+         Exception_Name           => (others => ' '),
+         Task_Id                  => Task_Id,
+         Message_Length           => Length,
+         Message_Truncated        => Message'Length > Length,
+         Message                  => (others => ' '));
    begin
       if Name_Length > 0 then
-         Value.Exception_Name (1 .. Name_Length) :=
-           Name (Name'First .. Name'First + Name_Length - 1);
+         Value.Exception_Name (1 .. Name_Length) := Name (Name'First .. Name'First + Name_Length - 1);
       end if;
       if Length > 0 then
-         Value.Message (1 .. Length) :=
-           Message (Message'First .. Message'First + Length - 1);
+         Value.Message (1 .. Length) := Message (Message'First .. Message'First + Length - 1);
       end if;
       return Value;
    end Exception_Summary;
@@ -48,10 +41,8 @@ package body Flyology.Supervision.Task_Generations is
       Control : aliased in out Generation_Control;
       Result  : out Generation_Result)
    is
-      Subject  : Generation_Task :=
-        Create (Context'Access, Control'Access);
-      Identity : constant Ada.Task_Identification.Task_Id :=
-        Task_Identity (Subject);
+      Subject            : Generation_Task := Create (Context'Access, Control'Access);
+      Identity           : constant Ada.Task_Identification.Task_Id := Task_Identity (Subject);
       Reported           : Boolean := False;
       Summary            : Termination_Summary;
       Aborted            : Boolean := False;
@@ -86,8 +77,7 @@ package body Flyology.Supervision.Task_Generations is
       if Initialize_Failed then
          Summary := Initialize_Summary;
       elsif not Reported then
-         Summary := From_Task_Result
-           (Control, Identity, Automatic_Result);
+         Summary := From_Task_Result (Control, Identity, Automatic_Result);
       end if;
       if Summary.Task_Id = Ada.Task_Identification.Null_Task_Id then
          Summary.Task_Id := Identity;

@@ -12,10 +12,8 @@ package body System.Flyology.Contexts is
    package Faults renames System.Flyology.Faults;
    package Sizing renames System.Flyology.Stack_Policy;
    package SSE renames System.Storage_Elements;
-   package Context_Addresses is new System.Address_To_Access_Conversions
-     (Context);
-   package Snapshot_Addresses is new System.Address_To_Access_Conversions
-     (Stack_Pool_Snapshot);
+   package Context_Addresses is new System.Address_To_Access_Conversions (Context);
+   package Snapshot_Addresses is new System.Address_To_Access_Conversions (Stack_Pool_Snapshot);
 
    use type C.int;
    use type C.size_t;
@@ -25,12 +23,12 @@ package body System.Flyology.Contexts is
    use type SSE.Integer_Address;
    use System.Storage_Elements;
 
-   MAP_PRIVATE : constant := 16#0002#;
-   PROT_NONE   : constant := 0;
-   PROT_READ   : constant := 1;
-   PROT_WRITE  : constant := 2;
-   Arena_Slot_Limit : constant := 64;
-   Maximum_Arena_Bytes : constant C.size_t := 4 * 1_024 * 1_024;
+   MAP_PRIVATE               : constant := 16#0002#;
+   PROT_NONE                 : constant := 0;
+   PROT_READ                 : constant := 1;
+   PROT_WRITE                : constant := 2;
+   Arena_Slot_Limit          : constant := 64;
+   Maximum_Arena_Bytes       : constant C.size_t := 4 * 1_024 * 1_024;
    Minimum_Stack_Guard_Bytes : constant C.size_t := 64 * 1_024;
 
    function Map_Anonymous return C.int;
@@ -39,30 +37,22 @@ package body System.Flyology.Contexts is
    type Entry_Point is access procedure (Argument : System.Address);
    pragma Convention (C, Entry_Point);
 
-   function To_Entry is new Ada.Unchecked_Conversion
-     (System.Address, Entry_Point);
-   function Failed_Mapping return System.Address is
-     (SSE.To_Address (SSE.Integer_Address'Last));
+   function To_Entry is new Ada.Unchecked_Conversion (System.Address, Entry_Point);
+   function Failed_Mapping return System.Address
+   is (SSE.To_Address (SSE.Integer_Address'Last));
 
    function Mmap
-     (Address : System.Address;
-      Length  : C.size_t;
-      Prot    : C.int;
-      Flags   : C.int;
-      File    : C.int;
-      Offset  : C.long) return System.Address;
+     (Address : System.Address; Length : C.size_t; Prot : C.int; Flags : C.int; File : C.int; Offset : C.long)
+      return System.Address;
    pragma Import (C, Mmap, "mmap");
 
-   function Munmap
-     (Address : System.Address; Length : C.size_t) return C.int;
+   function Munmap (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Munmap, "munmap");
 
    function Get_Page_Size return C.int;
    pragma Import (C, Get_Page_Size, "getpagesize");
 
-   function Mprotect
-     (Address : System.Address; Length : C.size_t; Prot : C.int)
-      return C.int;
+   function Mprotect (Address : System.Address; Length : C.size_t; Prot : C.int) return C.int;
    pragma Import (C, Mprotect, "mprotect");
 
    function Pool_Lock return C.int;
@@ -71,44 +61,34 @@ package body System.Flyology.Contexts is
    function Pool_Unlock return C.int;
    pragma Import (C, Pool_Unlock, "flyology_stack_pool_unlock");
 
-   function Discard_Pages
-     (Address : System.Address; Length : C.size_t) return C.int;
+   function Discard_Pages (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Discard_Pages, "flyology_discard_pages");
 
    function Cold_Pages_Supported return C.int;
-   pragma Import
-     (C, Cold_Pages_Supported, "flyology_cold_pages_supported");
+   pragma Import (C, Cold_Pages_Supported, "flyology_cold_pages_supported");
 
-   function Cold_Pages
-     (Address : System.Address; Length : C.size_t) return C.int;
+   function Cold_Pages (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Cold_Pages, "flyology_cold_pages");
 
    function Pageout_Pages_Supported return C.int;
-   pragma Import
-     (C, Pageout_Pages_Supported, "flyology_pageout_pages_supported");
+   pragma Import (C, Pageout_Pages_Supported, "flyology_pageout_pages_supported");
 
-   function Pageout_Pages
-     (Address : System.Address; Length : C.size_t) return C.int;
+   function Pageout_Pages (Address : System.Address; Length : C.size_t) return C.int;
    pragma Import (C, Pageout_Pages, "flyology_pageout_pages");
 
    function In_Fork_Child return C.int;
    pragma Import (C, In_Fork_Child, "flyology_in_fork_child");
 
    procedure Initialize_Registers
-     (Registers  : System.Address;
-      Stack_Top  : System.Address;
-      Trampoline : System.Address);
-   pragma Import
-     (C, Initialize_Registers, "flyology_context_initialize_registers");
+     (Registers : System.Address; Stack_Top : System.Address; Trampoline : System.Address);
+   pragma Import (C, Initialize_Registers, "flyology_context_initialize_registers");
 
-   procedure Swap_Registers
-     (From, To : System.Address);
+   procedure Swap_Registers (From, To : System.Address);
    pragma Import (C, Swap_Registers, "flyology_context_swap_registers");
 
    procedure Free is new Ada.Unchecked_Deallocation (Context, Context_Access);
 
-   type Slot_Use_Array is
-     array (Natural range 0 .. Arena_Slot_Limit - 1) of Boolean;
+   type Slot_Use_Array is array (Natural range 0 .. Arena_Slot_Limit - 1) of Boolean;
    type Stack_Arena;
    type Stack_Arena_Access is access all Stack_Arena;
    type Stack_Arena is record
@@ -123,34 +103,26 @@ package body System.Flyology.Contexts is
       Next         : Stack_Arena_Access := null;
    end record;
 
-   function To_Arena is new Ada.Unchecked_Conversion
-     (System.Address, Stack_Arena_Access);
-   function To_Address is new Ada.Unchecked_Conversion
-     (Stack_Arena_Access, System.Address);
-   procedure Free_Arena is new Ada.Unchecked_Deallocation
-     (Stack_Arena, Stack_Arena_Access);
+   function To_Arena is new Ada.Unchecked_Conversion (System.Address, Stack_Arena_Access);
+   function To_Address is new Ada.Unchecked_Conversion (Stack_Arena_Access, System.Address);
+   procedure Free_Arena is new Ada.Unchecked_Deallocation (Stack_Arena, Stack_Arena_Access);
 
-   Arenas : Stack_Arena_Access := null;
-   Active_Arenas    : C.unsigned_long_long := 0;
-   Live_Stacks      : C.unsigned_long_long := 0;
+   Arenas            : Stack_Arena_Access := null;
+   Active_Arenas     : C.unsigned_long_long := 0;
+   Live_Stacks       : C.unsigned_long_long := 0;
    Live_Usable_Bytes : C.unsigned_long_long := 0;
-   Reserved_Bytes   : C.unsigned_long_long := 0;
-   Arena_Mappings   : C.unsigned_long_long := 0;
-   Arena_Unmappings : C.unsigned_long_long := 0;
-   Shared_Stacks    : C.unsigned_long_long := 0;
-   Discarded_Stacks : C.unsigned_long_long := 0;
+   Reserved_Bytes    : C.unsigned_long_long := 0;
+   Arena_Mappings    : C.unsigned_long_long := 0;
+   Arena_Unmappings  : C.unsigned_long_long := 0;
+   Shared_Stacks     : C.unsigned_long_long := 0;
+   Discarded_Stacks  : C.unsigned_long_long := 0;
 
    procedure Lock_Pool;
    procedure Unlock_Pool;
    function Acquire_Stack
-     (Usable_Size : C.size_t;
-      Stack       : out System.Address;
-      Arena       : out Stack_Arena_Access;
-      Slot        : out Natural) return Boolean;
-   procedure Release_Stack
-     (Arena : not null Stack_Arena_Access;
-      Slot  : Natural;
-      Stack : System.Address);
+     (Usable_Size : C.size_t; Stack : out System.Address; Arena : out Stack_Arena_Access; Slot : out Natural)
+      return Boolean;
+   procedure Release_Stack (Arena : not null Stack_Arena_Access; Slot : Natural; Stack : System.Address);
 
    Active_Context : Context_Access := null;
    pragma Thread_Local_Storage (Active_Context);
@@ -184,22 +156,17 @@ package body System.Flyology.Contexts is
          --  than in the resumed context. This distinction matters when a task
          --  resumes after a cross-group migration: the old Switch frame still
          --  names its old scheduler, but ASan reports the new loop pthread.
-         ASan.Finish_Switch
-           (Source_Address, Source_Bottom, Source_Size);
+         ASan.Finish_Switch (Source_Address, Source_Bottom, Source_Size);
          Source := Context_Addresses.To_Pointer (Source_Address);
          if Source = null then
-            raise Program_Error with
-              "Flyology ASan switch has no source context";
+            raise Program_Error with "Flyology ASan switch has no source context";
          end if;
          if Source_Bottom = System.Null_Address or else Source_Size = 0 then
-            raise Program_Error with
-              "Flyology ASan did not report the source stack";
+            raise Program_Error with "Flyology ASan did not report the source stack";
          end if;
          if Source.Owns_Mapping then
-            if Source.Stack /= Source_Bottom or else Source.Size /= Source_Size
-            then
-               raise Program_Error with
-                 "Flyology ASan reported inconsistent task stack bounds";
+            if Source.Stack /= Source_Bottom or else Source.Size /= Source_Size then
+               raise Program_Error with "Flyology ASan reported inconsistent task stack bounds";
             end if;
          else
             --  Capture learns a scheduler pthread's native stack on the first
@@ -225,27 +192,23 @@ package body System.Flyology.Contexts is
       end if;
    end Unlock_Pool;
 
-   function Round_Up
-     (Value, Alignment : C.size_t) return C.size_t
-   is
-     ((Value + Alignment - 1) / Alignment * Alignment);
+   function Round_Up (Value, Alignment : C.size_t) return C.size_t
+   is ((Value + Alignment - 1) / Alignment * Alignment);
 
-   function Guard_Bytes (Page_Size : C.size_t) return C.size_t is
-     (Round_Up (Minimum_Stack_Guard_Bytes, Page_Size));
+   function Guard_Bytes (Page_Size : C.size_t) return C.size_t
+   is (Round_Up (Minimum_Stack_Guard_Bytes, Page_Size));
 
    function Acquire_Stack
-     (Usable_Size : C.size_t;
-      Stack       : out System.Address;
-      Arena       : out Stack_Arena_Access;
-      Slot        : out Natural) return Boolean
+     (Usable_Size : C.size_t; Stack : out System.Address; Arena : out Stack_Arena_Access; Slot : out Natural)
+      return Boolean
    is
-      Page_Size : constant C.size_t := C.size_t (Get_Page_Size);
+      Page_Size  : constant C.size_t := C.size_t (Get_Page_Size);
       Guard_Size : constant C.size_t := Guard_Bytes (Page_Size);
-      Item      : Stack_Arena_Access;
-      Capacity  : Natural;
-      Result    : C.int;
-      Stride    : constant C.size_t := Usable_Size + Guard_Size;
-      Locked    : Boolean := False;
+      Item       : Stack_Arena_Access;
+      Capacity   : Natural;
+      Result     : C.int;
+      Stride     : constant C.size_t := Usable_Size + Guard_Size;
+      Locked     : Boolean := False;
    begin
       Stack := System.Null_Address;
       Arena := null;
@@ -272,16 +235,11 @@ package body System.Flyology.Contexts is
             for Index in 0 .. Item.Capacity - 1 loop
                if not Item.Used (Index) then
                   Stack :=
-                    Item.Mapping
-                    + SSE.Storage_Offset
-                        (Item.Guard_Size
-                         + C.size_t (Index) * Item.Stride);
+                    Item.Mapping + SSE.Storage_Offset (Item.Guard_Size + C.size_t (Index) * Item.Stride);
                   Result :=
-                    (if Faults.Enabled
-                       and then Faults.Fail (Faults.Stack_Protection)
+                    (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
                      then -1
-                     else Mprotect
-                       (Stack, Usable_Size, PROT_READ + PROT_WRITE));
+                     else Mprotect (Stack, Usable_Size, PROT_READ + PROT_WRITE));
                   if Result /= 0 then
                      Unlock_Pool;
                      Locked := False;
@@ -290,8 +248,7 @@ package body System.Flyology.Contexts is
                   Item.Used (Index) := True;
                   Item.Used_Count := Item.Used_Count + 1;
                   Live_Stacks := Live_Stacks + 1;
-                  Live_Usable_Bytes :=
-                    Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
+                  Live_Usable_Bytes := Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
                   Shared_Stacks := Shared_Stacks + 1;
                   Arena := Item;
                   Slot := Index;
@@ -302,8 +259,7 @@ package body System.Flyology.Contexts is
             end loop;
             Unlock_Pool;
             Locked := False;
-            raise Program_Error with
-              "Flyology stack arena has no advertised free slot";
+            raise Program_Error with "Flyology stack arena has no advertised free slot";
          end if;
          Item := Item.Next;
       end loop;
@@ -311,9 +267,7 @@ package body System.Flyology.Contexts is
       Capacity :=
         (if Stride >= Maximum_Arena_Bytes
          then 1
-         else Natural'Min
-           (Arena_Slot_Limit,
-            Natural (Maximum_Arena_Bytes / Stride)));
+         else Natural'Min (Arena_Slot_Limit, Natural (Maximum_Arena_Bytes / Stride)));
       Item := new Stack_Arena;
       Item.Usable_Size := Usable_Size;
       Item.Guard_Size := Guard_Size;
@@ -326,13 +280,8 @@ package body System.Flyology.Contexts is
          Locked := False;
          return False;
       end if;
-      Item.Mapping := Mmap
-        (System.Null_Address,
-         Item.Mapping_Size,
-         PROT_NONE,
-         MAP_PRIVATE + Map_Anonymous,
-         -1,
-         0);
+      Item.Mapping :=
+        Mmap (System.Null_Address, Item.Mapping_Size, PROT_NONE, MAP_PRIVATE + Map_Anonymous, -1, 0);
       if Item.Mapping = Failed_Mapping then
          Free_Arena (Item);
          Unlock_Pool;
@@ -351,8 +300,7 @@ package body System.Flyology.Contexts is
          Unlock_Pool;
          Locked := False;
          if Result /= 0 then
-            raise Program_Error with
-              "Flyology failed to release unusable stack arena";
+            raise Program_Error with "Flyology failed to release unusable stack arena";
          end if;
          return False;
       end if;
@@ -363,10 +311,8 @@ package body System.Flyology.Contexts is
       Arenas := Item;
       Active_Arenas := Active_Arenas + 1;
       Live_Stacks := Live_Stacks + 1;
-      Live_Usable_Bytes :=
-        Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
-      Reserved_Bytes :=
-        Reserved_Bytes + C.unsigned_long_long (Item.Mapping_Size);
+      Live_Usable_Bytes := Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
+      Reserved_Bytes := Reserved_Bytes + C.unsigned_long_long (Item.Mapping_Size);
       Arena_Mappings := Arena_Mappings + 1;
       Arena := Item;
       Slot := 0;
@@ -384,11 +330,7 @@ package body System.Flyology.Contexts is
          raise;
    end Acquire_Stack;
 
-   procedure Release_Stack
-     (Arena : not null Stack_Arena_Access;
-      Slot  : Natural;
-      Stack : System.Address)
-   is
+   procedure Release_Stack (Arena : not null Stack_Arena_Access; Slot : Natural; Stack : System.Address) is
       Position : Stack_Arena_Access;
       Previous : Stack_Arena_Access := null;
       Victim   : Stack_Arena_Access := Arena;
@@ -403,10 +345,7 @@ package body System.Flyology.Contexts is
          Locked := False;
          raise Program_Error with "Flyology invalid stack-pool release";
       end if;
-      Expected :=
-        Arena.Mapping
-        + SSE.Storage_Offset
-            (Arena.Guard_Size + C.size_t (Slot) * Arena.Stride);
+      Expected := Arena.Mapping + SSE.Storage_Offset (Arena.Guard_Size + C.size_t (Slot) * Arena.Stride);
       if Stack /= Expected then
          Unlock_Pool;
          Locked := False;
@@ -434,8 +373,7 @@ package body System.Flyology.Contexts is
       Arena.Used (Slot) := False;
       Arena.Used_Count := Arena.Used_Count - 1;
       Live_Stacks := Live_Stacks - 1;
-      Live_Usable_Bytes :=
-        Live_Usable_Bytes - C.unsigned_long_long (Arena.Usable_Size);
+      Live_Usable_Bytes := Live_Usable_Bytes - C.unsigned_long_long (Arena.Usable_Size);
       if Arena.Used_Count = 0 then
          Position := Arenas;
          while Position /= null and then Position /= Arena loop
@@ -459,8 +397,7 @@ package body System.Flyology.Contexts is
             Previous.Next := Arena.Next;
          end if;
          Active_Arenas := Active_Arenas - 1;
-         Reserved_Bytes :=
-           Reserved_Bytes - C.unsigned_long_long (Arena.Mapping_Size);
+         Reserved_Bytes := Reserved_Bytes - C.unsigned_long_long (Arena.Mapping_Size);
          Arena_Unmappings := Arena_Unmappings + 1;
          Free_Arena (Victim);
       end if;
@@ -482,10 +419,8 @@ package body System.Flyology.Contexts is
    end Capture;
 
    function Create
-     (Stack_Size : C.size_t;
-      Start      : System.Address;
-      Argument   : System.Address;
-      Return_To  : Context_Access) return Context_Access
+     (Stack_Size : C.size_t; Start : System.Address; Argument : System.Address; Return_To : Context_Access)
+      return Context_Access
    is
       Page_Size   : constant C.size_t := C.size_t (Get_Page_Size);
       Guard_Size  : constant C.size_t := Guard_Bytes (Page_Size);
@@ -521,10 +456,7 @@ package body System.Flyology.Contexts is
       Item.Pool_Slot := C.size_t (Slot);
       Top := SSE.To_Integer (Item.Stack) + SSE.Integer_Address (Item.Size);
       Top := Top and not SSE.Integer_Address (16#0F#);
-      Initialize_Registers
-        (Item.Registers'Address,
-         SSE.To_Address (Top),
-         Trampoline'Address);
+      Initialize_Registers (Item.Registers'Address, SSE.To_Address (Top), Trampoline'Address);
       return Item;
    end Create;
 
@@ -532,11 +464,9 @@ package body System.Flyology.Contexts is
    begin
       if ASan.Enabled then
          if To.Stack = System.Null_Address or else To.Size = 0 then
-            raise Program_Error with
-              "Flyology ASan destination stack is unknown";
+            raise Program_Error with "Flyology ASan destination stack is unknown";
          end if;
-         ASan.Start_Switch
-           (From.all'Address, To.Stack, To.Size);
+         ASan.Start_Switch (From.all'Address, To.Stack, To.Size);
       end if;
       Set_Active_Context (To);
       Swap_Registers (From.Registers'Address, To.Registers'Address);
@@ -568,48 +498,35 @@ package body System.Flyology.Contexts is
       Free (Item);
    end Destroy;
 
-   function Stack_Base (Item : Context_Access) return System.Address is
-     (if Item = null then System.Null_Address else Item.Stack);
+   function Stack_Base (Item : Context_Access) return System.Address
+   is (if Item = null then System.Null_Address else Item.Stack);
 
-   function Stack_Size (Item : Context_Access) return C.size_t is
-     (if Item = null then 0 else Item.Size);
+   function Stack_Size (Item : Context_Access) return C.size_t
+   is (if Item = null then 0 else Item.Size);
 
-   function Cold_Advice_Supported return Boolean is
-     (Cold_Pages_Supported /= 0);
+   function Cold_Advice_Supported return Boolean
+   is (Cold_Pages_Supported /= 0);
 
-   function Advise_Stack_Cold
-     (Item : not null Context_Access) return C.int
-   is
+   function Advise_Stack_Cold (Item : not null Context_Access) return C.int is
    begin
-      if not Item.Owns_Mapping
-        or else Item.Stack = System.Null_Address
-        or else Item.Size = 0
-      then
+      if not Item.Owns_Mapping or else Item.Stack = System.Null_Address or else Item.Size = 0 then
          return -1;
       end if;
       return Cold_Pages (Item.Stack, Item.Size);
    end Advise_Stack_Cold;
 
-   function Pageout_Advice_Supported return Boolean is
-     (Pageout_Pages_Supported /= 0);
+   function Pageout_Advice_Supported return Boolean
+   is (Pageout_Pages_Supported /= 0);
 
-   function Advise_Stack_Pageout
-     (Item : not null Context_Access) return C.int
-   is
+   function Advise_Stack_Pageout (Item : not null Context_Access) return C.int is
    begin
-      if not Item.Owns_Mapping
-        or else Item.Stack = System.Null_Address
-        or else Item.Size = 0
-      then
+      if not Item.Owns_Mapping or else Item.Stack = System.Null_Address or else Item.Size = 0 then
          return -1;
       end if;
       return Pageout_Pages (Item.Stack, Item.Size);
    end Advise_Stack_Pageout;
 
-   function Observe_Stack_Pool
-     (Snapshot      : System.Address;
-      Snapshot_Size : C.size_t) return C.int
-   is
+   function Observe_Stack_Pool (Snapshot : System.Address; Snapshot_Size : C.size_t) return C.int is
       Value  : Snapshot_Addresses.Object_Pointer;
       Locked : Boolean := False;
    begin
@@ -627,15 +544,15 @@ package body System.Flyology.Contexts is
       Lock_Pool;
       Locked := True;
       Value.all :=
-        (ABI_Version      => 1,
-         Active_Arenas    => Active_Arenas,
-         Live_Stacks      => Live_Stacks,
+        (ABI_Version       => 1,
+         Active_Arenas     => Active_Arenas,
+         Live_Stacks       => Live_Stacks,
          Live_Usable_Bytes => Live_Usable_Bytes,
-         Reserved_Bytes   => Reserved_Bytes,
-         Arena_Mappings   => Arena_Mappings,
-         Arena_Unmappings => Arena_Unmappings,
-         Shared_Stacks    => Shared_Stacks,
-         Discarded_Stacks => Discarded_Stacks);
+         Reserved_Bytes    => Reserved_Bytes,
+         Arena_Mappings    => Arena_Mappings,
+         Arena_Unmappings  => Arena_Unmappings,
+         Shared_Stacks     => Shared_Stacks,
+         Discarded_Stacks  => Discarded_Stacks);
       Unlock_Pool;
       Locked := False;
       return 1;

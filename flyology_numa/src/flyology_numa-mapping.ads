@@ -9,6 +9,7 @@ with System;
 --  owned a page at a time. Memory taken from the ordinary heap cannot be:
 --  it may begin partway into a page whose remainder belongs to something
 --  else, and placing that page would move memory this crate does not own.
+
 private package Flyology_NUMA.Mapping is
 
    --  Reserve Length bytes, rounded up to whole pages, readable and

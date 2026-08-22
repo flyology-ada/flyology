@@ -29,6 +29,27 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Use `rg`/`rg --files` for source discovery.
 - Use `apply_patch` for hand edits. Generated formatting and mechanical file
   moves/copies may use their purpose-built commands.
+- Keep handwritten Ada source to 110 columns. After editing Ada, run
+  `gnatformat -P <owning-project.gpr> <handwritten-source-files>`; each crate's
+  root project owns the formatter settings, including `Charset ("Ada")` set to
+  `utf-8`. When formatting without a project, pass `--charset utf-8` explicitly
+  so non-ASCII source text is not re-encoded. Change generators rather than
+  running GNATformat on generated Ada independently.
+- GNATformat skips Ada sources containing GNAT preprocessing directives. Format
+  such a source through directive-preserving temporary variants: select and
+  format the true and false branches separately, compare their nonconditional
+  skeletons, then merge both formatted branches beneath the original
+  `#if`/`#else`/`#end if;` lines. If a directive splits an expression or
+  statement and changes surrounding wrapping, reconcile that boundary
+  explicitly. Verify both preprocessing configurations after the merge. Never
+  delete the directives or format only the currently active branch.
+- Runtime units retain GNAT's `-gnatg` style profile, but every authoritative
+  compile command in `prepare-rts.sh` must follow it with `-gnatyM110` so the
+  compiler enforces the repository's 110-column limit instead of GNAT's
+  implicit 79-column runtime default.
+- Each crate's owning project must likewise place `-gnatyM110` after generated
+  or explicit Ada compiler switches so Alire's `-gnatym` style check uses the
+  same limit as GNATformat.
 - Keep changes focused. Do not fold an unrelated optimization or experiment
   into a correctness, documentation, or release change.
 - When the user requests parallel agents, give each independent change its own

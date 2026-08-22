@@ -24,6 +24,7 @@ with Interfaces.C;
 --  active on each standard stream. Different streams may progress
 --  concurrently. Serialize Close, finalization, and each explicit stream
 --  close against every operation that can use the affected descriptor.
+
 package Flyology.Subprocesses is
 
    use type Interfaces.C.int;
@@ -62,8 +63,7 @@ package Flyology.Subprocesses is
    --  environment is configured.
    --  @param Item Command to update
    --  @param Enabled True to use posix_spawnp; False to use posix_spawn
-   procedure Set_Path_Search
-     (Item : in out Command; Enabled : Boolean := True);
+   procedure Set_Path_Search (Item : in out Command; Enabled : Boolean := True);
 
    --  Set the child working directory. Darwin and glibc Linux implement this
    --  through posix_spawn file actions; an unavailable host extension causes
@@ -71,8 +71,7 @@ package Flyology.Subprocesses is
    --  @param Item Command to update
    --  @param Directory Directory entered before exec
    --  @exception Constraint_Error Directory is empty or contains NUL
-   procedure Set_Working_Directory
-     (Item : in out Command; Directory : String);
+   procedure Set_Working_Directory (Item : in out Command; Directory : String);
 
    --  Restore inherited working-directory behavior.
    --  @param Item Command to update
@@ -94,8 +93,7 @@ package Flyology.Subprocesses is
    --  @param Name Nonempty variable name without '=' or NUL
    --  @param Value Variable value without NUL
    --  @exception Constraint_Error Name or Value is invalid
-   procedure Set_Environment_Variable
-     (Item : in out Command; Name, Value : String);
+   procedure Set_Environment_Variable (Item : in out Command; Name, Value : String);
 
    --  Operating-system process identifier used for launch-time diagnostics.
    --  After the root is reaped, the host may reuse its value even while the
@@ -122,8 +120,8 @@ package Flyology.Subprocesses is
    --  Report whether Status is an ordinary zero exit.
    --  @param Status Reaped child result
    --  @return True only for Exited with code zero
-   function Successful (Status : Exit_Status) return Boolean is
-     (Status.Kind = Exited and then Status.Code = 0);
+   function Successful (Status : Exit_Status) return Boolean
+   is (Status.Kind = Exited and then Status.Code = 0);
 
    --  Signals exposed by the portable process-group API.
    --  @enum Interrupt Interrupt request, normally SIGINT
@@ -283,8 +281,7 @@ package Flyology.Subprocesses is
    --  @param Signal Signal to send
    --  @exception Process_Error kill(2) fails for a live group
    --  @exception Program_Error Child is closed
-   procedure Send_Signal
-     (Child : in out Process; Signal : Signal_Kind);
+   procedure Send_Signal (Child : in out Process; Signal : Signal_Kind);
 
    --  Send the hard termination signal to the owned process group without
    --  waiting. Reaping remains the owner's responsibility through Wait or
@@ -305,10 +302,7 @@ package Flyology.Subprocesses is
    --  @param Status Root process termination result
    --  @exception Process_Error Signaling or process observation fails
    --  @exception Program_Error Child is closed
-   procedure Stop
-     (Child : in out Process;
-      Grace : Duration;
-      Status : out Exit_Status);
+   procedure Stop (Child : in out Process; Grace : Duration; Status : out Exit_Status);
 
    --  End ownership. Close first closes stdin, hard-terminates a running
    --  group, reaps the root, closes output pipes, and joins the native reaper.
@@ -318,34 +312,32 @@ package Flyology.Subprocesses is
    procedure Close (Child : in out Process);
 
 private
-   package String_Vectors is new Ada.Containers.Indefinite_Vectors
-     (Index_Type => Positive, Element_Type => String);
+   package String_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => String);
 
    type Environment_Entry is record
       Name  : Ada.Strings.Unbounded.Unbounded_String;
       Value : Ada.Strings.Unbounded.Unbounded_String;
    end record;
 
-   package Environment_Vectors is new Ada.Containers.Indefinite_Vectors
-     (Index_Type => Positive, Element_Type => Environment_Entry);
+   package Environment_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => Environment_Entry);
 
    type Command is record
-      Executable        : Ada.Strings.Unbounded.Unbounded_String;
-      Arguments         : String_Vectors.Vector;
-      Environment       : Environment_Vectors.Vector;
+      Executable           : Ada.Strings.Unbounded.Unbounded_String;
+      Arguments            : String_Vectors.Vector;
+      Environment          : Environment_Vectors.Vector;
       Explicit_Environment : Boolean := False;
-      Working_Directory : Ada.Strings.Unbounded.Unbounded_String;
-      Has_Directory     : Boolean := False;
-      Search_Path       : Boolean := False;
+      Working_Directory    : Ada.Strings.Unbounded.Unbounded_String;
+      Has_Directory        : Boolean := False;
+      Search_Path          : Boolean := False;
    end record;
 
    protected type Exit_Control is
       procedure Prepare;
       procedure Release;
       procedure Complete (Raw_Status, Error_Code : Interfaces.C.int);
-      procedure Snapshot
-        (Done, Failed : out Boolean;
-         Raw_Status, Error_Code : out Interfaces.C.int);
+      procedure Snapshot (Done, Failed : out Boolean; Raw_Status, Error_Code : out Interfaces.C.int);
       function Completed return Boolean;
       function Wait_Descriptor return Flyology.IO.Descriptor;
    private
@@ -359,18 +351,19 @@ private
 
    task type Reaper_Task
      (Pid   : Interfaces.C.int;
-      State : Exit_Control_Access) is
+      State : Exit_Control_Access)
+   is
       pragma Task_Info (Flyology.Native_Task);
    end Reaper_Task;
    type Reaper_Access is access Reaper_Task;
 
    type Process is new Ada.Finalization.Limited_Controlled with record
-      Pid_Value : Interfaces.C.int := -1;
-      Input_FD  : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
-      Output_FD : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
-      Error_FD  : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+      Pid_Value  : Interfaces.C.int := -1;
+      Input_FD   : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+      Output_FD  : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+      Error_FD   : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
       Exit_State : aliased Exit_Control;
-      Reaper    : Reaper_Access := null;
+      Reaper     : Reaper_Access := null;
    end record;
 
    --  Internal launch seam used by the Bootstrap child package. Bootstrap
@@ -396,6 +389,7 @@ private
 
    --  Release process ownership without propagating cleanup failures.
    --  @param Child Process owner being finalized
-   overriding procedure Finalize (Child : in out Process);
+   overriding
+   procedure Finalize (Child : in out Process);
 
 end Flyology.Subprocesses;

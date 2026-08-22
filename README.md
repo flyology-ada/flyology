@@ -3323,6 +3323,19 @@ alr build
 This section is for contributors developing Flyology itself from a source
 checkout. Application projects should use the Alire dependency workflow above.
 
+Handwritten Ada source uses a 110-column limit. The `Format` package in each
+crate's root project file supplies the shared layout to GNATformat. Format the
+handwritten Ada files you changed with the owning project, for example:
+
+```sh
+gnatformat -P flyology.gpr src/flyology.adb [...]
+gnatformat -P flyology_bench/flyology_bench.gpr flyology_bench/src/example.adb [...]
+```
+
+The same project settings are available to GNATformat through the Ada Language
+Server. Do not format generated Ada independently; make layout changes in its
+generator and regenerate it.
+
 ```sh
 git clone https://github.com/flyology-ada/flyology.git
 cd flyology

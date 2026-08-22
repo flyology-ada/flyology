@@ -8,6 +8,7 @@ with System.Task_Info;
 --  Observe pairs that store with an acquire load. The pairing only holds when
 --  the runtime actually asks for release ordering, so this test inspects the
 --  memory order the bridge received rather than an incidental data race.
+
 procedure Task_Result_Publication_Smoke is
    package Results renames Flyology.Task_Results;
 
@@ -24,16 +25,13 @@ procedure Task_Result_Publication_Smoke is
    end Model_Total;
 
    procedure Check_Only_Release_Stores (Context : String) is
-      Release_Count : constant Natural :=
-        Fault_Control.Atomic_Store_Model_Count (Fault_Control.Release);
+      Release_Count : constant Natural := Fault_Control.Atomic_Store_Model_Count (Fault_Control.Release);
    begin
       if Release_Count = 0 then
-         raise Program_Error with
-           Context & ": publication used no release store";
+         raise Program_Error with Context & ": publication used no release store";
       end if;
       if Model_Total /= Release_Count then
-         raise Program_Error with
-           Context & ": atomic store used a memory order other than release";
+         raise Program_Error with Context & ": atomic store used a memory order other than release";
       end if;
    end Check_Only_Release_Stores;
 
@@ -59,23 +57,19 @@ procedure Task_Result_Publication_Smoke is
       begin
          Observation := Results.Wait (Item'Identity, Timeout => 5.0);
       end;
-      if Observation.Status /= Results.Terminal
-        or else Observation.Result.Cause /= Results.Normal_Completion
+      if Observation.Status /= Results.Terminal or else Observation.Result.Cause /= Results.Normal_Completion
       then
          raise Program_Error with Label & " lane was not published";
       end if;
       Check_Only_Release_Stores (Label & " lane");
    end Run_Lane;
 
-   procedure Run_Native is new Run_Lane
-     (Label => "native", Model => Flyology.Native_Task);
-   procedure Run_Lightweight is new Run_Lane
-     (Label => "lightweight", Model => Flyology.Lightweight_Task);
+   procedure Run_Native is new Run_Lane (Label => "native", Model => Flyology.Native_Task);
+   procedure Run_Lightweight is new Run_Lane (Label => "lightweight", Model => Flyology.Lightweight_Task);
 
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "task-result publication test needs a fault-enabled runtime";
+      raise Program_Error with "task-result publication test needs a fault-enabled runtime";
    end if;
 
    --  The native lane starts no event machinery, so the only atomic store the
@@ -86,6 +80,5 @@ begin
    Run_Lightweight;
    Check_Only_Release_Stores ("both lanes");
 
-   Ada.Text_IO.Put_Line
-     ("task result publication: terminal phase stores are release ordered");
+   Ada.Text_IO.Put_Line ("task result publication: terminal phase stores are release ordered");
 end Task_Result_Publication_Smoke;

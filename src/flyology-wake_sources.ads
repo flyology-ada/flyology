@@ -60,5 +60,6 @@ private
 
    --  Release Item without propagating close errors.
    --  @param Item Source being finalized
-   overriding procedure Finalize (Item : in out Source);
+   overriding
+   procedure Finalize (Item : in out Source);
 end Flyology.Wake_Sources;

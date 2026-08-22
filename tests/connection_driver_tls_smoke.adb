@@ -41,7 +41,8 @@ procedure Connection_Driver_TLS_Smoke is
          null;
       end Await_Finished;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result_Box;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -57,21 +58,21 @@ procedure Connection_Driver_TLS_Smoke is
    procedure Configure (Backend : in out Provider.Provider) is
    begin
       Provider.Set_Script
-        (Backend, Provider.Handshake_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
       Provider.Set_Script
-        (Backend, Provider.Receive_Operation,
+        (Backend,
+         Provider.Receive_Operation,
          [1 => (TLS.Want_Write, Provider.Preserve_Output, 0),
           2 => (TLS.Want_Read, Provider.Preserve_Output, 0),
           3 => (TLS.Complete, Provider.Advance_Output, 2)]);
       Provider.Set_Script
-        (Backend, Provider.Send_Operation,
+        (Backend,
+         Provider.Send_Operation,
          [1 => (TLS.Want_Read, Provider.Preserve_Output, 0),
           2 => (TLS.Want_Write, Provider.Preserve_Output, 0),
           3 => (TLS.Complete, Provider.Advance_Output, 2)]);
       Provider.Set_Script
-        (Backend, Provider.Shutdown_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Shutdown_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
    end Configure;
 
    procedure Run_Progress (Model : Flyology.Execution_Model) is
@@ -88,8 +89,7 @@ procedure Connection_Driver_TLS_Smoke is
       Configure (Backend);
       Sockets.Create_Socket_Pair (Socket, Peer);
       Connections.Take (Manager, Socket, Item);
-      Connection_TLS.Upgrade
-        (Item, Backend, TLS.Server, "", Timeout => 1.0);
+      Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
       --  The scripted provider does not consume the descriptor. Keep it
       --  readable so Want_Read waits can be exercised deterministically.
       Sockets.Send_All (Peer, [99]);
@@ -108,37 +108,30 @@ procedure Connection_Driver_TLS_Smoke is
             begin
                Drivers.Receive (IO, Data, Last, Step);
                pragma Assert (Step = Drivers.Need_Write);
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Write_Interest, 1.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Write_Interest, 1.0, Ready);
                pragma Assert (Ready = Drivers.Transport_Ready);
 
                Drivers.Receive (IO, Data, Last, Step);
                pragma Assert (Step = Drivers.Need_Read);
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Read_Interest, 1.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Read_Interest, 1.0, Ready);
                pragma Assert (Ready = Drivers.Transport_Ready);
 
                Drivers.Receive (IO, Data, Last, Step);
-               pragma Assert
-                 (Step = Drivers.Made_Progress
-                    and then Last = Data'Last
-                    and then Data = [42, 42]);
+               pragma
+                 Assert (Step = Drivers.Made_Progress and then Last = Data'Last and then Data = [42, 42]);
 
                Drivers.Send (IO, [1 => 51, 2 => 52], Last, Step);
                pragma Assert (Step = Drivers.Need_Read);
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Read_Interest, 1.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Read_Interest, 1.0, Ready);
                pragma Assert (Ready = Drivers.Transport_Ready);
 
                Drivers.Send (IO, [1 => 51, 2 => 52], Last, Step);
                pragma Assert (Step = Drivers.Need_Write);
-               Drivers.Wait
-                 (IO, Wakeup, Drivers.Write_Interest, 1.0, Ready);
+               Drivers.Wait (IO, Wakeup, Drivers.Write_Interest, 1.0, Ready);
                pragma Assert (Ready = Drivers.Transport_Ready);
 
                Drivers.Send (IO, [1 => 51, 2 => 52], Last, Step);
-               pragma Assert
-                 (Step = Drivers.Made_Progress and then Last = 2);
+               pragma Assert (Step = Drivers.Made_Progress and then Last = 2);
             end Pump;
          begin
             Drivers.Run (Item, Pump'Access, Timeout => 2.0);
@@ -154,21 +147,21 @@ procedure Connection_Driver_TLS_Smoke is
       pragma Assert (Result.Passed);
       pragma Assert (Connections.Is_Open (Item) and then Manager.Active = 1);
       Provider.Get_State_Telemetry (State);
-      pragma Assert
-        (State.Calls =
-           [Provider.Handshake_Operation => 1,
-            Provider.Receive_Operation => 3,
-            Provider.Send_Operation => 3,
-            Provider.Shutdown_Operation => 0]);
+      pragma
+        Assert
+          (State.Calls
+             = [Provider.Handshake_Operation => 1,
+                Provider.Receive_Operation   => 3,
+                Provider.Send_Operation      => 3,
+                Provider.Shutdown_Operation  => 0]);
       Connection_TLS.Shutdown (Item, Timeout => 1.0);
       Connections.Close (Item);
       pragma Assert (Manager.Active = 0);
       Close_If_Open (Peer);
       Provider.Get_State_Telemetry (State);
-      pragma Assert
-        (State.Sessions_Created = 1
-           and then State.Sessions_Finalized = 1
-           and then State.Sessions_Live = 0);
+      pragma
+        Assert
+          (State.Sessions_Created = 1 and then State.Sessions_Finalized = 1 and then State.Sessions_Live = 0);
    end Run_Progress;
 
    procedure Run_Invalid_Progress (Model : Flyology.Execution_Model) is
@@ -181,15 +174,12 @@ procedure Connection_Driver_TLS_Smoke is
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
-        (Backend, Provider.Handshake_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
       Provider.Set_Script
-        (Backend, Provider.Receive_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Receive_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       Connections.Take (Manager, Socket, Item);
-      Connection_TLS.Upgrade
-        (Item, Backend, TLS.Server, "", Timeout => 1.0);
+      Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
 
       declare
          task Worker is

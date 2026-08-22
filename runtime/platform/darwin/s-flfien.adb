@@ -25,9 +25,9 @@ package body System.Flyology.File_Engine is
    ENOENT       : constant C.int := 2;
    EIO          : constant C.int := 5;
 
-   function Send_ZC_Copy_Fallback return C.int is (0);
-   pragma Export
-     (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
+   function Send_ZC_Copy_Fallback return C.int
+   is (0);
+   pragma Export (C, Send_ZC_Copy_Fallback, "flyology_send_zc_copy_fallback");
 
    --  A hard EV_DELETE failure is not recoverable enough to permit immediate
    --  aiocb-address reuse. Keep terminal records stable until a stale event
@@ -56,97 +56,86 @@ package body System.Flyology.File_Engine is
       Notify_Function   : System.Address;
       Notify_Attributes : System.Address;
    end record
-     with Convention => C, Size => 256, Alignment => 8;
-   for Signal_Event use record
-      Notify            at 0  range 0 .. 31;
-      Signo             at 4  range 0 .. 31;
-      Value             at 8  range 0 .. 63;
-      Notify_Function   at 16 range 0 .. 63;
-      Notify_Attributes at 24 range 0 .. 63;
-   end record;
+   with Convention => C, Size => 256, Alignment => 8;
+   for Signal_Event use
+     record
+       Notify at 0 range 0 .. 31;
+       Signo at 4 range 0 .. 31;
+       Value at 8 range 0 .. 63;
+       Notify_Function at 16 range 0 .. 63;
+       Notify_Attributes at 24 range 0 .. 63;
+     end record;
 
    type AIO_Control_Block is record
-      Descriptor   : C.int;
-      Offset       : C.long_long;
-      Buffer       : System.Address;
-      Length       : C.size_t;
-      Priority     : C.int;
-      Signal       : Signal_Event;
-      List_Opcode  : C.int;
+      Descriptor  : C.int;
+      Offset      : C.long_long;
+      Buffer      : System.Address;
+      Length      : C.size_t;
+      Priority    : C.int;
+      Signal      : Signal_Event;
+      List_Opcode : C.int;
    end record
-     with Convention => C, Size => 640, Alignment => 8;
-   for AIO_Control_Block use record
-      Descriptor  at 0  range 0 .. 31;
-      Offset      at 8  range 0 .. 63;
-      Buffer      at 16 range 0 .. 63;
-      Length      at 24 range 0 .. 63;
-      Priority    at 32 range 0 .. 31;
-      Signal      at 40 range 0 .. 255;
-      List_Opcode at 72 range 0 .. 31;
-   end record;
+   with Convention => C, Size => 640, Alignment => 8;
+   for AIO_Control_Block use
+     record
+       Descriptor at 0 range 0 .. 31;
+       Offset at 8 range 0 .. 63;
+       Buffer at 16 range 0 .. 63;
+       Length at 24 range 0 .. 63;
+       Priority at 32 range 0 .. 31;
+       Signal at 40 range 0 .. 255;
+       List_Opcode at 72 range 0 .. 31;
+     end record;
 
    type AIO_Request;
    type AIO_Request_Access is access all AIO_Request;
 
    type AIO_Request is record
-      Control : aliased AIO_Control_Block;
-      Token   : System.Address;
-      Synthetic : Boolean;
-      Next_Free : AIO_Request_Access;
+      Control     : aliased AIO_Control_Block;
+      Token       : System.Address;
+      Synthetic   : Boolean;
+      Next_Free   : AIO_Request_Access;
       Next_Active : AIO_Request_Access;
    end record
-     with Size => 896, Alignment => 8;
-   for AIO_Request use record
-      Control   at 0  range 0 .. 639;
-      Token     at 80 range 0 .. 63;
-      Synthetic at 88 range 0 .. 7;
-      Next_Free at 96 range 0 .. 63;
-      Next_Active at 104 range 0 .. 63;
-   end record;
+   with Size => 896, Alignment => 8;
+   for AIO_Request use
+     record
+       Control at 0 range 0 .. 639;
+       Token at 80 range 0 .. 63;
+       Synthetic at 88 range 0 .. 7;
+       Next_Free at 96 range 0 .. 63;
+       Next_Active at 104 range 0 .. 63;
+     end record;
 
    type Engine_State is record
-      Kqueue_FD    : C.int := -1;
-      Free_Requests : AIO_Request_Access;
-      Active_Requests : AIO_Request_Access;
-      Active_Count    : Natural with Atomic;
+      Kqueue_FD        : C.int := -1;
+      Free_Requests    : AIO_Request_Access;
+      Active_Requests  : AIO_Request_Access;
+      Active_Count     : Natural with Atomic;
       Retired_Requests : AIO_Request_Access;
       Retired_Count    : Natural := 0;
    end record;
    type Engine_State_Access is access all Engine_State;
 
-   function To_State is new Ada.Unchecked_Conversion
-     (System.Address, Engine_State_Access);
-   function To_Address is new Ada.Unchecked_Conversion
-     (Engine_State_Access, System.Address);
-   function To_Request is new Ada.Unchecked_Conversion
-     (System.Address, AIO_Request_Access);
-   procedure Free_State is new Ada.Unchecked_Deallocation
-     (Engine_State, Engine_State_Access);
-   procedure Free_Request is new Ada.Unchecked_Deallocation
-     (AIO_Request, AIO_Request_Access);
+   function To_State is new Ada.Unchecked_Conversion (System.Address, Engine_State_Access);
+   function To_Address is new Ada.Unchecked_Conversion (Engine_State_Access, System.Address);
+   function To_Request is new Ada.Unchecked_Conversion (System.Address, AIO_Request_Access);
+   procedure Free_State is new Ada.Unchecked_Deallocation (Engine_State, Engine_State_Access);
+   procedure Free_Request is new Ada.Unchecked_Deallocation (AIO_Request, AIO_Request_Access);
 
    procedure C_Abort;
    pragma Import (C, C_Abort, "abort");
    pragma No_Return (C_Abort);
 
-   function Acquire_Request
-     (State : not null Engine_State_Access) return AIO_Request_Access;
+   function Acquire_Request (State : not null Engine_State_Access) return AIO_Request_Access;
 
-   procedure Recycle_Request
-     (State   : not null Engine_State_Access;
-      Request : in out AIO_Request_Access);
+   procedure Recycle_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
 
-   procedure Unlink_Active
-     (State   : not null Engine_State_Access;
-      Request : not null AIO_Request_Access);
+   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access);
 
-   procedure Retire_Request
-     (State   : not null Engine_State_Access;
-      Request : in out AIO_Request_Access);
+   procedure Retire_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
 
-   function Acquire_Request
-     (State : not null Engine_State_Access) return AIO_Request_Access
-   is
+   function Acquire_Request (State : not null Engine_State_Access) return AIO_Request_Access is
       Request : constant AIO_Request_Access := State.Free_Requests;
    begin
       if Request = null then
@@ -158,20 +147,14 @@ package body System.Flyology.File_Engine is
       return Request;
    end Acquire_Request;
 
-   procedure Recycle_Request
-     (State   : not null Engine_State_Access;
-      Request : in out AIO_Request_Access)
-   is
+   procedure Recycle_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access) is
    begin
       Request.Next_Free := State.Free_Requests;
       State.Free_Requests := Request;
       Request := null;
    end Recycle_Request;
 
-   procedure Unlink_Active
-     (State   : not null Engine_State_Access;
-      Request : not null AIO_Request_Access)
-   is
+   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access) is
       Position : AIO_Request_Access := State.Active_Requests;
       Previous : AIO_Request_Access;
    begin
@@ -189,10 +172,7 @@ package body System.Flyology.File_Engine is
       Request.Next_Active := null;
    end Unlink_Active;
 
-   procedure Retire_Request
-     (State   : not null Engine_State_Access;
-      Request : in out AIO_Request_Access)
-   is
+   procedure Retire_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access) is
    begin
       if State.Retired_Count = Max_Retired_Requests then
          --  Reusing Request would make a later stale event alias unrelated
@@ -211,8 +191,7 @@ package body System.Flyology.File_Engine is
    function AIO_Write (Control : access AIO_Control_Block) return C.int;
    pragma Import (C, AIO_Write, "aio_write");
 
-   function AIO_Cancel
-     (Descriptor : C.int; Control : access AIO_Control_Block) return C.int;
+   function AIO_Cancel (Descriptor : C.int; Control : access AIO_Control_Block) return C.int;
    pragma Import (C, AIO_Cancel, "aio_cancel");
 
    function AIO_Return (Control : access AIO_Control_Block) return C.long;
@@ -228,24 +207,16 @@ package body System.Flyology.File_Engine is
       Timeout      : System.Address) return C.int;
    pragma Import (C, Kevent, "kevent64");
 
-   procedure Note_Cancellation
-     (Backend     : C.int;
-      Disposition : C.int;
-      Terminal    : C.int);
-   pragma Import
-     (C, Note_Cancellation, "flyology_test_note_file_cancel");
+   procedure Note_Cancellation (Backend : C.int; Disposition : C.int; Terminal : C.int);
+   pragma Import (C, Note_Cancellation, "flyology_test_note_file_cancel");
 
-   procedure Note
-     (Disposition : Cancellation_Disposition; Terminal : Boolean);
+   procedure Note (Disposition : Cancellation_Disposition; Terminal : Boolean);
 
-   procedure Note
-     (Disposition : Cancellation_Disposition; Terminal : Boolean) is
+   procedure Note (Disposition : Cancellation_Disposition; Terminal : Boolean) is
    begin
       if Faults.Enabled then
          Note_Cancellation
-           (1,
-            C.int (Cancellation_Disposition'Pos (Disposition) + 1),
-            Boolean'Pos (Terminal));
+           (1, C.int (Cancellation_Disposition'Pos (Disposition) + 1), Boolean'Pos (Terminal));
       end if;
    end Note;
 
@@ -254,20 +225,16 @@ package body System.Flyology.File_Engine is
    AIO_CANCELED    : constant C.int := 16#2#;
    AIO_NOTCANCELED : constant C.int := 16#4#;
 
-   function Initialize
-     (Item      : in out Engine;
-      Poller_FD : C.int;
-      Wake_FD   : C.int) return Boolean
-   is
+   function Initialize (Item : in out Engine; Poller_FD : C.int; Wake_FD : C.int) return Boolean is
       State : Engine_State_Access;
    begin
       pragma Unreferenced (Wake_FD);
       State :=
         new Engine_State'
-          (Kqueue_FD     => Poller_FD,
-           Free_Requests => null,
-           Active_Requests => null,
-           Active_Count    => 0,
+          (Kqueue_FD        => Poller_FD,
+           Free_Requests    => null,
+           Active_Requests  => null,
+           Active_Count     => 0,
            Retired_Requests => null,
            Retired_Count    => 0);
       Item.State := To_Address (State);
@@ -278,13 +245,12 @@ package body System.Flyology.File_Engine is
    end Initialize;
 
    procedure Finalize (Item : in out Engine) is
-      State : Engine_State_Access := To_State (Item.State);
+      State   : Engine_State_Access := To_State (Item.State);
       Request : AIO_Request_Access;
    begin
       if State /= null then
          if State.Active_Requests /= null then
-            raise Program_Error with
-              "FLYOLOGY finalized with active Darwin AIO requests";
+            raise Program_Error with "FLYOLOGY finalized with active Darwin AIO requests";
          end if;
          while State.Free_Requests /= null loop
             Request := State.Free_Requests;
@@ -308,13 +274,12 @@ package body System.Flyology.File_Engine is
    end Supports_Send_ZC;
 
    function Submit_Send_ZC
-     (Item        : in out Engine;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
-   is
+     (Item       : in out Engine;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean is
    begin
       pragma Unreferenced (Item, Descriptor, Buffer, Length, Token);
       Error_Code := C.int (OSI.EINVAL);
@@ -322,14 +287,14 @@ package body System.Flyology.File_Engine is
    end Submit_Send_ZC;
 
    function Submit
-     (Item        : in out Engine;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : Boolean;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
+     (Item       : in out Engine;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Offset     : C.long_long;
+      For_Write  : Boolean;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean
    is
       State   : constant Engine_State_Access := To_State (Item.State);
       Request : AIO_Request_Access;
@@ -342,7 +307,7 @@ package body System.Flyology.File_Engine is
 
       Request := Acquire_Request (State);
       Request.all :=
-        (Control =>
+        (Control     =>
            (Descriptor  => Descriptor,
             Offset      => Offset,
             Buffer      => Buffer,
@@ -355,20 +320,16 @@ package body System.Flyology.File_Engine is
                Notify_Function   => System.Null_Address,
                Notify_Attributes => System.Null_Address),
             List_Opcode => 0),
-         Token     => Token,
-         Synthetic => False,
-         Next_Free => null,
+         Token       => Token,
+         Synthetic   => False,
+         Next_Free   => null,
          Next_Active => null);
-      if Faults.Enabled
-        and then Faults.Fail (Faults.File_Cancel_Synthetic)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Synthetic) then
          Request.Synthetic := True;
          Result := 0;
       else
          Result :=
-           (if For_Write
-            then AIO_Write (Request.Control'Access)
-            else AIO_Read (Request.Control'Access));
+           (if For_Write then AIO_Write (Request.Control'Access) else AIO_Read (Request.Control'Access));
       end if;
       if Result /= 0 then
          Error_Code := C.int (OSI.errno);
@@ -392,13 +353,12 @@ package body System.Flyology.File_Engine is
       Token          : System.Address;
       Value          : out Completion;
       Has_Completion : out Boolean;
-      Error_Code     : out C.int)
-      return Cancellation_Disposition
+      Error_Code     : out C.int) return Cancellation_Disposition
    is
-      State   : constant Engine_State_Access := To_State (Item.State);
-      Request : AIO_Request_Access;
-      Result  : C.int;
-      Returned : C.long;
+      State                : constant Engine_State_Access := To_State (Item.State);
+      Request              : AIO_Request_Access;
+      Result               : C.int;
+      Returned             : C.long;
       Registration_Removed : Boolean := True;
    begin
       Value := (others => <>);
@@ -410,10 +370,7 @@ package body System.Flyology.File_Engine is
       end if;
 
       Request := State.Active_Requests;
-      while Request /= null
-        and then
-          (Request.Token /= Token
-           or else Request.Control.Descriptor /= Descriptor)
+      while Request /= null and then (Request.Token /= Token or else Request.Control.Descriptor /= Descriptor)
       loop
          Request := Request.Next_Active;
       end loop;
@@ -422,18 +379,15 @@ package body System.Flyology.File_Engine is
          return Already_Completing;
       end if;
 
-      Result :=
-        (if Request.Synthetic
-         then AIO_CANCELED
-         else AIO_Cancel (Descriptor, Request.Control'Access));
+      Result := (if Request.Synthetic then AIO_CANCELED else AIO_Cancel (Descriptor, Request.Control'Access));
       case Result is
-         when AIO_CANCELED =>
+         when AIO_CANCELED    =>
             --  Darwin can omit SIGEV_KEVENT after an immediate cancellation.
             --  Delete any pending registration before this aiocb address can
             --  be reused, then perform the mandatory one-time reap. Only this
             --  terminal path permits the caller buffer to be released early.
             declare
-               Change : aliased Kevent_Record :=
+               Change       : aliased Kevent_Record :=
                  (Ident  => SSE.To_Integer (Request.Control'Address),
                   Filter => EVFILT_AIO,
                   Flags  => EV_DELETE,
@@ -441,35 +395,23 @@ package body System.Flyology.File_Engine is
                   Data   => 0,
                   Udata  => 0,
                   Ext    => (others => 0));
-               Deleted     : C.int;
+               Deleted      : C.int;
                Delete_Error : C.int := 0;
             begin
                loop
-                  if Faults.Enabled
-                    and then Faults.Fail (Faults.File_Cancel_Delete_EINTR)
-                  then
+                  if Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Delete_EINTR) then
                      Deleted := -1;
                      Delete_Error := C.int (OSI.EINTR);
-                  elsif Faults.Enabled
-                    and then Faults.Fail (Faults.File_Cancel_Delete_Failure)
-                  then
+                  elsif Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Delete_Failure) then
                      Deleted := -1;
                      Delete_Error := EIO;
                   else
                      Deleted :=
                        Kevent
-                         (State.Kqueue_FD,
-                          Change'Address,
-                          1,
-                          System.Null_Address,
-                          0,
-                          0,
-                          System.Null_Address);
-                     Delete_Error :=
-                       (if Deleted = 0 then 0 else C.int (OSI.errno));
+                         (State.Kqueue_FD, Change'Address, 1, System.Null_Address, 0, 0, System.Null_Address);
+                     Delete_Error := (if Deleted = 0 then 0 else C.int (OSI.errno));
                   end if;
-                  exit when Deleted = 0
-                    or else Delete_Error /= C.int (OSI.EINTR);
+                  exit when Deleted = 0 or else Delete_Error /= C.int (OSI.EINTR);
                end loop;
                --  AIO_CANCELED is already terminal. Failure to remove a
                --  stale registration is diagnostic only: returning here
@@ -480,15 +422,9 @@ package body System.Flyology.File_Engine is
                   Registration_Removed := False;
                end if;
             end;
-            Returned :=
-              (if Request.Synthetic
-               then 0
-               else AIO_Return (Request.Control'Access));
+            Returned := (if Request.Synthetic then 0 else AIO_Return (Request.Control'Access));
             pragma Unreferenced (Returned);
-            Value :=
-              (Token      => Request.Token,
-               Result     => 0,
-               Error_Code => 0);
+            Value := (Token => Request.Token, Result => 0, Error_Code => 0);
             Unlink_Active (State, Request);
             State.Active_Count := State.Active_Count - 1;
             if Registration_Removed then
@@ -504,13 +440,9 @@ package body System.Flyology.File_Engine is
             --  Deliver a one-shot marker through the real kqueue so the test
             --  exercises poller dispatch and quarantine consumption rather
             --  than calling Complete_Event directly.
-            if Faults.Enabled
-              and then not Registration_Removed
-              and then Request = null
-            then
+            if Faults.Enabled and then not Registration_Removed and then Request = null then
                declare
-                  Retired : constant AIO_Request_Access :=
-                    State.Retired_Requests;
+                  Retired : constant AIO_Request_Access := State.Retired_Requests;
                   Change  : aliased Kevent_Record :=
                     (Ident  => SSE.To_Integer (Retired.Control'Address),
                      Filter => EVFILT_USER,
@@ -519,21 +451,14 @@ package body System.Flyology.File_Engine is
                      Data   => 0,
                      Udata  => SSE.To_Integer (Retired.Control'Address),
                      Ext    => (others => 0));
-                  Queued : C.int;
+                  Queued  : C.int;
                begin
                   if Retired.Synthetic then
                      Queued :=
                        Kevent
-                         (State.Kqueue_FD,
-                          Change'Address,
-                          1,
-                          System.Null_Address,
-                          0,
-                          0,
-                          System.Null_Address);
+                         (State.Kqueue_FD, Change'Address, 1, System.Null_Address, 0, 0, System.Null_Address);
                      if Queued /= 0 then
-                        raise Program_Error with
-                          "synthetic Darwin stale event registration failed";
+                        raise Program_Error with "synthetic Darwin stale event registration failed";
                      end if;
                   end if;
                end;
@@ -541,13 +466,16 @@ package body System.Flyology.File_Engine is
             Has_Completion := True;
             Note (Cancellation_Submitted, True);
             return Cancellation_Submitted;
+
          when AIO_NOTCANCELED =>
             Note (Not_Cancelable, False);
             return Not_Cancelable;
-         when AIO_ALLDONE =>
+
+         when AIO_ALLDONE     =>
             Note (Already_Completing, False);
             return Already_Completing;
-         when others =>
+
+         when others          =>
             Error_Code := C.int (OSI.errno);
             Note (Cancellation_Failed, False);
             return Cancellation_Failed;
@@ -561,11 +489,11 @@ package body System.Flyology.File_Engine is
       Kernel_Error    : C.int;
       Value           : out Completion) return Event_Completion_Disposition
    is
-      State   : constant Engine_State_Access := To_State (Item.State);
-      Request : AIO_Request_Access := To_Request (Request_Address);
+      State    : constant Engine_State_Access := To_State (Item.State);
+      Request  : AIO_Request_Access := To_Request (Request_Address);
       Position : AIO_Request_Access;
       Previous : AIO_Request_Access;
-      Result  : C.long;
+      Result   : C.long;
    begin
       Value := (others => <>);
       if State = null or else Request = null then
@@ -595,8 +523,7 @@ package body System.Flyology.File_Engine is
          State.Retired_Count := State.Retired_Count - 1;
          if Faults.Enabled then
             declare
-               Counted : constant Boolean :=
-                 Faults.Fail (Faults.File_Cancel_Stale_Event);
+               Counted : constant Boolean := Faults.Fail (Faults.File_Cancel_Stale_Event);
             begin
                pragma Unreferenced (Counted);
             end;
@@ -614,13 +541,14 @@ package body System.Flyology.File_Engine is
       Value :=
         (Token      => Request.Token,
          Result     =>
-           (if Result >= 0 then C.long_long (Result)
-            elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
-            and then Kernel_Result >= 0
+           (if Result >= 0
+            then C.long_long (Result)
+            elsif C.int (OSI.errno) = C.int (OSI.EINVAL) and then Kernel_Result >= 0
             then Kernel_Result
             else 0),
          Error_Code =>
-           (if Result >= 0 then 0
+           (if Result >= 0
+            then 0
             elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
             then Kernel_Error
             else C.int (OSI.errno)));
@@ -636,11 +564,7 @@ package body System.Flyology.File_Engine is
       return State = null or else State.Active_Count = 0;
    end Is_Quiescent;
 
-   function Drain
-     (Item   : in out Engine;
-      Values : out Completion_Array;
-      Count  : out Natural) return Boolean
-   is
+   function Drain (Item : in out Engine; Values : out Completion_Array; Count : out Natural) return Boolean is
    begin
       pragma Unreferenced (Item);
       Values := (others => <>);

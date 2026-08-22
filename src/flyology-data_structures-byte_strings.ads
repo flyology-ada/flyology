@@ -14,7 +14,10 @@ private with Flyology.Data_Structures.Layouts;
 --  The application must exclude Attach, Create_Or_Attach, Detach, Initialize,
 --  Destroy, and backing-lifetime changes from every use of the same local
 --  View. Separate attached views may perform ordinary operations concurrently.
-package Flyology.Data_Structures.Byte_Strings with Preelaborate is
+
+package Flyology.Data_Structures.Byte_Strings
+  with Preelaborate
+is
 
    --  Eight-byte magic stored in every byte-string header.
    Magic : constant Interfaces.Unsigned_64 := 16#4644_5342_5354_3031#;
@@ -26,8 +29,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete stable layout identity for envelope instances and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached view.
    type View is limited private;
@@ -45,10 +47,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Location Nonzero eight-byte-aligned stored offset
    --  @param Maximum_Length Fixed payload capacity
    procedure Initialize
-     (Item           : out View;
-      Region         : Region_View;
-      Location       : Region_Offset;
-      Maximum_Length : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Maximum_Length : Positive);
 
    --  Atomically initialize a known-virgin zeroed extent or attach to a ready
    --  compatible string. Only the exact zero lifecycle sentinel is eligible
@@ -80,10 +79,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Maximum_Length Expected payload capacity
    --  @exception Layout_Error Immutable header or capacity is corrupt
    procedure Attach
-     (Item           : out View;
-      Region         : Region_View;
-      Location       : Region_Offset;
-      Maximum_Length : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Maximum_Length : Positive);
 
    --  Detach Item without modifying the string.
    --  @param Item View to detach
@@ -133,8 +129,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Item Internally synchronized attached view
    --  @param Data Replacement bytes
    --  @exception Constraint_Error Data exceeds Capacity
-   procedure Assign
-     (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
+   procedure Assign (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
    --  Replace the string after waiting for the shared guard.
    --  @param Item Internally synchronized attached view
@@ -142,18 +137,14 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error The guard remains owned through the deadline
    --  @exception Constraint_Error Data exceeds Capacity
-   procedure Assign
-     (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout);
+   procedure Assign (Item : in out View; Data : Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout);
 
    --  Append Data to the current string. Overlap between Data and the stored
    --  payload is supported.
    --  @param Item Internally synchronized attached view
    --  @param Data Bytes appended in order
    --  @exception Constraint_Error The resulting length exceeds Capacity
-   procedure Append
-     (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
+   procedure Append (Item : in out View; Data : Ada.Streams.Stream_Element_Array);
 
    --  Append Data after waiting for the shared guard.
    --  @param Item Internally synchronized attached view
@@ -161,17 +152,13 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error The guard remains owned through the deadline
    --  @exception Constraint_Error The resulting length exceeds Capacity
-   procedure Append
-     (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout);
+   procedure Append (Item : in out View; Data : Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout);
 
    --  Copy the current string into Data, whose length must equal Length.
    --  @param Item Internally synchronized attached view
    --  @param Data Exact-size destination
    --  @exception Constraint_Error Data has the wrong length
-   procedure Read
-     (Item : View; Data : out Ada.Streams.Stream_Element_Array);
+   procedure Read (Item : View; Data : out Ada.Streams.Stream_Element_Array);
 
    --  Copy the string after waiting for the shared guard.
    --  @param Item Internally synchronized attached view
@@ -179,10 +166,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error The guard remains owned through the deadline
    --  @exception Constraint_Error Data has the wrong length
-   procedure Read
-     (Item    : View;
-      Data    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout);
+   procedure Read (Item : View; Data : out Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout);
 
    --  Set the current length to zero without rewriting retained payload bytes.
    --  @param Item Internally synchronized attached view
@@ -198,8 +182,7 @@ package Flyology.Data_Structures.Byte_Strings with Preelaborate is
    --  @param Item Internally synchronized attached view
    procedure Destroy (Item : in out View);
 
-   pragma Inline
-     (Capacity, Length, Is_Poisoned, Assign, Append, Read, Clear);
+   pragma Inline (Capacity, Length, Is_Poisoned, Assign, Append, Read, Clear);
 
 private
    type View is limited record

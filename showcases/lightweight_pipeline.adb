@@ -26,9 +26,7 @@ procedure Lightweight_Pipeline is
       loop
          select
             accept Put (Value : Positive) do
-               Put_Line
-                 ("sink      value=" & Value'Image
-                  & " thread=" & Showcase_Support.Thread_Image);
+               Put_Line ("sink      value=" & Value'Image & " thread=" & Showcase_Support.Thread_Image);
             end Put;
          or
             accept Finish;
@@ -42,9 +40,7 @@ procedure Lightweight_Pipeline is
       loop
          select
             accept Put (Value : Positive) do
-               Put_Line
-                 ("transform value=" & Value'Image
-                  & " thread=" & Showcase_Support.Thread_Image);
+               Put_Line ("transform value=" & Value'Image & " thread=" & Showcase_Support.Thread_Image);
                Sink.Put (Value * Value);
             end Put;
          or
@@ -58,9 +54,7 @@ procedure Lightweight_Pipeline is
    task body Producer is
    begin
       for Value in 1 .. 5 loop
-         Put_Line
-           ("producer  value=" & Value'Image
-            & " thread=" & Showcase_Support.Thread_Image);
+         Put_Line ("producer  value=" & Value'Image & " thread=" & Showcase_Support.Thread_Image);
          Transform.Put (Value);
          delay 0.010;
       end loop;
@@ -68,7 +62,5 @@ procedure Lightweight_Pipeline is
    end Producer;
 
 begin
-   Put_Line
-     ("lightweight pipeline; environment thread="
-      & Showcase_Support.Thread_Image);
+   Put_Line ("lightweight pipeline; environment thread=" & Showcase_Support.Thread_Image);
 end Lightweight_Pipeline;

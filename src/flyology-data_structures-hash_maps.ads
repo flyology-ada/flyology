@@ -22,11 +22,10 @@ use type Interfaces.Unsigned_64;
 --  concurrently.
 --  @formal Key Immutable key adapter
 --  @formal Element Immutable mapped-value adapter
+
 generic
-   with package Key is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Key is new Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Eight-byte magic stored in every map header.
@@ -34,17 +33,17 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
    --  Schema identifier for the current FNV-1a/open-addressed layout.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_484D_4150_0004# xor Key.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32) xor
-     Interfaces.Rotate_Left (Element.Signature, 17) xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48);
+     16#0001_484D_4150_0004#
+     xor Key.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Key.Version), 32)
+     xor Interfaces.Rotate_Left (Element.Signature, 17)
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 48);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 4;
 
    --  Complete stable layout identity for envelope instances and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached map view.
    type View is limited private;
@@ -68,10 +67,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Location Nonzero eight-byte-aligned stored offset
    --  @param Capacity Power-of-two maximum entry count
    procedure Initialize
-     (Item       : out View;
-      Region     : Region_View;
-      Location   : Region_Offset;
-      Capacity   : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Atomically initialize a known-virgin zeroed extent or attach to a ready
    --  compatible map. Only the exact zero lifecycle sentinel is eligible for
@@ -87,11 +83,11 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Result Whether this caller initialized, attached, or observed an
    --     initialization in progress
    procedure Create_Or_Attach
-     (Item       : out View;
-      Region     : Region_View;
-      Location   : Region_Offset;
-      Capacity   : Positive;
-      Result     : out Open_Result);
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive;
+      Result   : out Open_Result);
 
    --  Attach to a map, acquiring its shared guard without waiting while
    --  validating expected geometry, entry states and count, fixed-key hashes,
@@ -104,11 +100,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @exception Layout_Error Header, geometry, or entries are corrupt
    --  @exception Busy_Error The map guard is active or abandoned
    --  @exception Poison_Error The map is poisoned
-   procedure Attach
-     (Item       : out View;
-      Region     : Region_View;
-      Location   : Region_Offset;
-      Capacity   : Positive);
+   procedure Attach (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Poison a ready or abandoned-locked map after independently establishing
    --  that no live owner can still mutate it. This recovery operation
@@ -158,11 +150,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Result Insert, replacement, or full-table outcome
    --  @exception Busy_Error Another operation owns the guard
    --  @exception Poison_Error The map is poisoned
-   procedure Put
-      (Item   : in out View;
-      Key_Data : Key.Source;
-      Value  : Element.Source;
-      Result : out Put_Result);
+   procedure Put (Item : in out View; Key_Data : Key.Source; Value : Element.Source; Result : out Put_Result);
 
    --  Insert or replace after waiting for the shared guard.
    --  @param Item Attached map view
@@ -172,11 +160,11 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Result Insert, replacement, or full-table outcome
    --  @exception Timeout_Error The guard remains owned through the deadline
    procedure Put
-      (Item    : in out View;
+     (Item     : in out View;
       Key_Data : Key.Source;
-      Value   : Element.Source;
-      Timeout : Wait_Timeout;
-      Result  : out Put_Result);
+      Value    : Element.Source;
+      Timeout  : Wait_Timeout;
+      Result   : out Put_Result);
 
    --  Look up Key and copy its value when present.
    --  @param Item Attached map view
@@ -185,11 +173,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Found True only when Key is present
    --  @exception Busy_Error Another operation owns the guard
    --  @exception Poison_Error The map is poisoned
-   procedure Get
-      (Item  : View;
-      Key_Data : Key.Source;
-      Value : out Element.Observed;
-      Found : out Boolean);
+   procedure Get (Item : View; Key_Data : Key.Source; Value : out Element.Observed; Found : out Boolean);
 
    --  Look up Key after waiting for the shared guard.
    --  @param Item Attached map view
@@ -199,11 +183,11 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Found True only when Key is present
    --  @exception Timeout_Error The guard remains owned through the deadline
    procedure Get
-      (Item    : View;
+     (Item     : View;
       Key_Data : Key.Source;
-      Value   : out Element.Observed;
-      Timeout : Wait_Timeout;
-      Found   : out Boolean);
+      Value    : out Element.Observed;
+      Timeout  : Wait_Timeout;
+      Found    : out Boolean);
 
    --  Remove Key when present, retaining a tombstone for probe continuity.
    --  @param Item Attached map view
@@ -211,10 +195,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Removed True only when an occupied entry was deleted
    --  @exception Busy_Error Another operation owns the guard
    --  @exception Poison_Error The map is poisoned
-   procedure Remove
-      (Item    : in out View;
-      Key_Data : Key.Source;
-      Removed : out Boolean);
+   procedure Remove (Item : in out View; Key_Data : Key.Source; Removed : out Boolean);
 
    --  Remove Key after waiting for the shared guard.
    --  @param Item Attached map view
@@ -223,10 +204,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  @param Removed True only when Key was present
    --  @exception Timeout_Error The guard remains owned through the deadline
    procedure Remove
-      (Item    : in out View;
-      Key_Data : Key.Source;
-      Timeout : Wait_Timeout;
-      Removed : out Boolean);
+     (Item : in out View; Key_Data : Key.Source; Timeout : Wait_Timeout; Removed : out Boolean);
 
    --  Reset every entry to empty and set Length to zero.
    --  @param Item Attached map view
@@ -246,14 +224,14 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
 
 private
    type View is limited record
-      Core           : Layouts.Local_View;
-      Capacity_Value : Interfaces.Unsigned_32 := 0;
-      Key_Value      : Interfaces.Unsigned_32 := 0;
-      Value_Value    : Interfaces.Unsigned_32 := 0;
-      Mask           : Interfaces.Unsigned_64 := 0;
-      Key_Offset     : Byte_Count := 0;
-      Value_Offset   : Byte_Count := 0;
-      Stride         : Byte_Count := 0;
+      Core            : Layouts.Local_View;
+      Capacity_Value  : Interfaces.Unsigned_32 := 0;
+      Key_Value       : Interfaces.Unsigned_32 := 0;
+      Value_Value     : Interfaces.Unsigned_32 := 0;
+      Mask            : Interfaces.Unsigned_64 := 0;
+      Key_Offset      : Byte_Count := 0;
+      Value_Offset    : Byte_Count := 0;
+      Stride          : Byte_Count := 0;
       Count_Address   : System.Address := System.Null_Address;
       Guard_Address   : System.Address := System.Null_Address;
       Entries_Address : System.Address := System.Null_Address;

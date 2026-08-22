@@ -1,5 +1,8 @@
 --  Controls whether the calling task permits best-effort stack reclamation.
-package Flyology.Dormancy with Preelaborate is
+
+package Flyology.Dormancy
+  with Preelaborate
+is
 
    --  Wake-latency contract for the calling task.
    --  @enum Prompt Do not proactively mark the task stack cold
@@ -19,9 +22,7 @@ package Flyology.Dormancy with Preelaborate is
    --  @param Minimum_Wait Minimum remaining timer delay before cold advice
    --  @exception Dormancy_Error Value is not Prompt in a native task or the
    --     interval is negative or too large for the runtime ABI
-   procedure Set_Policy
-     (Value        : Policy;
-      Minimum_Wait : Duration := 1.0);
+   procedure Set_Policy (Value : Policy; Minimum_Wait : Duration := 1.0);
 
    --  Return the calling task's policy. Native tasks report Prompt.
    --  @return Current dormancy policy

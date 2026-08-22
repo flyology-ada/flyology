@@ -10,8 +10,8 @@ procedure Connection_Lifecycle_Smoke is
    Manager : aliased Connections.Server (Capacity => 1);
    Token   : aliased Connections.Cancellation_Token;
 
-   Server_One, Peer_One : Flyology.IO.Sockets.Socket_Type;
-   Server_Two, Peer_Two : Flyology.IO.Sockets.Socket_Type;
+   Server_One, Peer_One     : Flyology.IO.Sockets.Socket_Type;
+   Server_Two, Peer_Two     : Flyology.IO.Sockets.Socket_Type;
    Server_Three, Peer_Three : Flyology.IO.Sockets.Socket_Type;
    Spare_Server, Spare_Peer : Flyology.IO.Sockets.Socket_Type;
 
@@ -31,9 +31,9 @@ procedure Connection_Lifecycle_Smoke is
       function Passed return Boolean;
    private
       First_In, Second_In, Second_Done : Boolean := False;
-      First_Released : Boolean := False;
-      Third_In, Third_Done : Boolean := False;
-      All_OK : Boolean := True;
+      First_Released                   : Boolean := False;
+      Third_In, Third_Done             : Boolean := False;
+      All_OK                           : Boolean := True;
    end State;
 
    protected body State is
@@ -69,22 +69,32 @@ procedure Connection_Lifecycle_Smoke is
          Third_Done := True;
       end Third_Finished;
 
-      entry Wait_First when First_In is begin null; end Wait_First;
+      entry Wait_First when First_In is
+      begin
+         null;
+      end Wait_First;
       entry Wait_First_Release when First_Released is
       begin
          null;
       end Wait_First_Release;
-      entry Wait_Second when Second_In is begin null; end Wait_Second;
+      entry Wait_Second when Second_In is
+      begin
+         null;
+      end Wait_Second;
       entry Wait_Second_Finished when Second_Done is
       begin
          null;
       end Wait_Second_Finished;
-      entry Wait_Third when Third_In is begin null; end Wait_Third;
+      entry Wait_Third when Third_In is
+      begin
+         null;
+      end Wait_Third;
       entry Wait_Third_Finished when Third_Done is
       begin
          null;
       end Wait_Third_Finished;
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end State;
 
 begin
@@ -113,17 +123,14 @@ begin
       end First;
 
       task body Second is
-         Owned    : Connections.Connection;
-         Incoming : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Owned         : Connections.Connection;
+         Incoming      : Ada.Streams.Stream_Element_Array (1 .. 1);
          Was_Cancelled : Boolean := False;
       begin
          Connections.Take (Manager, Server_Two, Owned);
          State.Second_Admitted;
          begin
-            Owned.Receive_Exactly
-              (Incoming,
-               Cancellation_Quantum => 0.010,
-               Token => Token'Access);
+            Owned.Receive_Exactly (Incoming, Cancellation_Quantum => 0.010, Token => Token'Access);
          exception
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
@@ -146,8 +153,7 @@ begin
             delay 0.001;
          end loop;
          if Manager.Waiting /= 1 then
-            raise Program_Error with
-              "second connection did not reach admission queue";
+            raise Program_Error with "second connection did not reach admission queue";
          end if;
          State.Release_First;
          select
@@ -195,15 +201,14 @@ begin
       end Third;
 
       task body Third is
-         Owned    : Connections.Connection;
-         Incoming : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Owned         : Connections.Connection;
+         Incoming      : Ada.Streams.Stream_Element_Array (1 .. 1);
          Was_Cancelled : Boolean := False;
       begin
          Connections.Take (Manager, Server_Three, Owned);
          State.Third_Admitted;
          begin
-            Owned.Receive_Exactly
-              (Incoming, Cancellation_Quantum => 0.010);
+            Owned.Receive_Exactly (Incoming, Cancellation_Quantum => 0.010);
          exception
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
@@ -247,7 +252,7 @@ begin
    end;
 
    declare
-      Owned : Connections.Connection;
+      Owned  : Connections.Connection;
       Closed : Boolean := False;
    begin
       begin
@@ -265,7 +270,7 @@ begin
 
    declare
       Accept_Manager : aliased Connections.Server (Capacity => 1);
-      Listener : Flyology.IO.Sockets.Socket_Type;
+      Listener       : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
          procedure Finished (Cancelled : Boolean);
@@ -288,15 +293,15 @@ begin
             null;
          end Wait;
 
-         function Passed return Boolean is (OK);
+         function Passed return Boolean
+         is (OK);
       end Result;
    begin
       Flyology.IO.Sockets.Create_Socket (Listener);
       Flyology.IO.Sockets.Bind_Socket
         (Listener,
          Flyology.IO.Sockets.Network_Endpoint
-           (Flyology.IO.Sockets.Loopback_IPv4,
-            Flyology.IO.Sockets.Any_Port));
+           (Flyology.IO.Sockets.Loopback_IPv4, Flyology.IO.Sockets.Any_Port));
       Flyology.IO.Sockets.Listen_Socket (Listener);
 
       declare
@@ -305,17 +310,13 @@ begin
          end Acceptor;
 
          task body Acceptor is
-            Owned : Connections.Connection;
-            Peer  : Flyology.IO.Sockets.Endpoint;
+            Owned         : Connections.Connection;
+            Peer          : Flyology.IO.Sockets.Endpoint;
             Was_Cancelled : Boolean := False;
          begin
             begin
                Connections.Accept_Connection
-                 (Accept_Manager,
-                  Listener,
-                  Owned,
-                  Peer,
-                  Cancellation_Quantum => 0.010);
+                 (Accept_Manager, Listener, Owned, Peer, Cancellation_Quantum => 0.010);
             exception
                when Connections.Operation_Cancelled =>
                   Was_Cancelled := True;
@@ -366,8 +367,8 @@ begin
    end;
 
    declare
-      Native_Manager : aliased Connections.Server (Capacity => 1);
-      Native_Token   : aliased Connections.Cancellation_Token;
+      Native_Manager             : aliased Connections.Server (Capacity => 1);
+      Native_Token               : aliased Connections.Cancellation_Token;
       Native_Server, Native_Peer : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
@@ -385,28 +386,28 @@ begin
             OK := Cancelled;
             Done := True;
          end Finished;
-         entry Wait when Done is begin null; end Wait;
-         function Passed return Boolean is (OK);
+         entry Wait when Done is
+         begin
+            null;
+         end Wait;
+         function Passed return Boolean
+         is (OK);
       end Result;
    begin
-      Flyology.IO.Sockets.Create_Socket_Pair
-        (Native_Server, Native_Peer);
+      Flyology.IO.Sockets.Create_Socket_Pair (Native_Server, Native_Peer);
       declare
          task Native_Worker is
             pragma Task_Info (Flyology.Native_Task);
          end Native_Worker;
 
          task body Native_Worker is
-            Owned : Connections.Connection;
-            Data  : Ada.Streams.Stream_Element_Array (1 .. 1);
+            Owned         : Connections.Connection;
+            Data          : Ada.Streams.Stream_Element_Array (1 .. 1);
             Was_Cancelled : Boolean := False;
          begin
             Connections.Take (Native_Manager, Native_Server, Owned);
             begin
-               Owned.Receive_Exactly
-                 (Data,
-                  Cancellation_Quantum => 10.0,
-                  Token => Native_Token'Access);
+               Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0, Token => Native_Token'Access);
             exception
                when Connections.Operation_Cancelled =>
                   Was_Cancelled := True;
@@ -452,20 +453,18 @@ begin
       use type Ada.Streams.Stream_Element_Array;
       use type Ada.Streams.Stream_Element_Offset;
 
-      Bound_Manager : aliased Connections.Server (Capacity => 1);
-      Other_Manager : aliased Connections.Server (Capacity => 1);
-      Bound         : Connections.Connection (Bound_Manager'Access);
-      Bound_Gate    : constant access Connections.Server :=
-        Bound_Manager'Access;
-      Owned, Peer   : Flyology.IO.Sockets.Socket_Type;
-      Listener      : Flyology.IO.Sockets.Socket_Type;
-      Address       : Flyology.IO.Sockets.Endpoint;
-      Accepted      : Flyology.IO.Sockets.Endpoint;
-      Expected      : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-        [1 => 16#5A#];
-      Received      : Ada.Streams.Stream_Element_Array (1 .. 1);
-      Sent          : Ada.Streams.Stream_Element_Offset;
-      Take_Refused  : Boolean := False;
+      Bound_Manager  : aliased Connections.Server (Capacity => 1);
+      Other_Manager  : aliased Connections.Server (Capacity => 1);
+      Bound          : Connections.Connection (Bound_Manager'Access);
+      Bound_Gate     : constant access Connections.Server := Bound_Manager'Access;
+      Owned, Peer    : Flyology.IO.Sockets.Socket_Type;
+      Listener       : Flyology.IO.Sockets.Socket_Type;
+      Address        : Flyology.IO.Sockets.Endpoint;
+      Accepted       : Flyology.IO.Sockets.Endpoint;
+      Expected       : constant Ada.Streams.Stream_Element_Array (1 .. 1) := [1 => 16#5A#];
+      Received       : Ada.Streams.Stream_Element_Array (1 .. 1);
+      Sent           : Ada.Streams.Stream_Element_Offset;
+      Take_Refused   : Boolean := False;
       Accept_Refused : Boolean := False;
    begin
       pragma Assert (Bound.Manager = Bound_Gate);
@@ -487,8 +486,7 @@ begin
       Flyology.IO.Sockets.Bind_Socket
         (Listener,
          Flyology.IO.Sockets.Network_Endpoint
-           (Flyology.IO.Sockets.Loopback_IPv4,
-            Flyology.IO.Sockets.Any_Port));
+           (Flyology.IO.Sockets.Loopback_IPv4, Flyology.IO.Sockets.Any_Port));
       Flyology.IO.Sockets.Listen_Socket (Listener, Length => 1);
       Address := Flyology.IO.Sockets.Get_Socket_Name (Listener);
       begin

@@ -19,8 +19,7 @@ procedure TLS_ALPN_Smoke is
    use type Test_Provider.Offer_Kind;
    use type ALPN.Protocol_List;
 
-   H2_Then_HTTP_1_1 : constant ALPN.Protocol_List :=
-     ALPN.Offer ("h2") & "http/1.1";
+   H2_Then_HTTP_1_1 : constant ALPN.Protocol_List := ALPN.Offer ("h2") & "http/1.1";
 
    procedure Run_Validation is
       Value    : ALPN.Protocol_List := ALPN.Empty_Protocol_List;
@@ -48,9 +47,7 @@ procedure TLS_ALPN_Smoke is
       begin
          Value := ALPN.Empty_Protocol_List;
          for Index in 1 .. 256 loop
-            ALPN.Append
-              (Value,
-               String'(1 .. 255 => Character'Val (Index mod 256)));
+            ALPN.Append (Value, String'(1 .. 255 => Character'Val (Index mod 256)));
          end loop;
       exception
          when Constraint_Error =>
@@ -60,9 +57,7 @@ procedure TLS_ALPN_Smoke is
    end Run_Validation;
 
    procedure Run_Selection
-     (Model     : Flyology.Execution_Model;
-      Selection : Test_Provider.Selection_Kind;
-      Expected  : String)
+     (Model : Flyology.Execution_Model; Selection : Test_Provider.Selection_Kind; Expected : String)
    is
       Backend : Test_Provider.Provider;
       Socket  : Sockets.Socket_Type;
@@ -73,8 +68,7 @@ procedure TLS_ALPN_Smoke is
       Test_Provider.Reset_Observations;
       Test_Provider.Set_Selection (Backend, Selection);
       Sockets.Create_Socket_Pair (Socket, Peer);
-      ALPN.Take
-        (Backend, Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Item);
+      ALPN.Take (Backend, Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Item);
       declare
          task Worker is
             pragma Task_Info (Model);
@@ -93,8 +87,7 @@ procedure TLS_ALPN_Smoke is
       end;
       pragma Assert (Passed);
       pragma Assert (ALPN.Selected_Protocol (Item) = Expected);
-      pragma Assert
-        (Test_Provider.Last_Offer = Test_Provider.H2_Then_HTTP_1_1);
+      pragma Assert (Test_Provider.Last_Offer = Test_Provider.H2_Then_HTTP_1_1);
       TLS.Close (Item);
       Sockets.Close_Socket (Peer);
    end Run_Selection;
@@ -109,8 +102,7 @@ procedure TLS_ALPN_Smoke is
       Test_Provider.Reset_Observations;
       Test_Provider.Set_Handshake_Status (Backend, TLS.Want_Read);
       Sockets.Create_Socket_Pair (Socket, Peer);
-      ALPN.Take
-        (Backend, Socket, TLS.Client, "localhost", ALPN.Offer ("h2"), Item);
+      ALPN.Take (Backend, Socket, TLS.Client, "localhost", ALPN.Offer ("h2"), Item);
       declare
          task Worker is
             pragma Task_Info (Model);
@@ -142,8 +134,7 @@ procedure TLS_ALPN_Smoke is
       Test_Provider.Reset_Observations;
       Test_Provider.Set_Handshake_Status (Backend, TLS.Want_Read);
       Sockets.Create_Socket_Pair (Socket, Peer);
-      ALPN.Take
-        (Backend, Socket, TLS.Client, "localhost", ALPN.Offer ("h2"), Item);
+      ALPN.Take (Backend, Socket, TLS.Client, "localhost", ALPN.Offer ("h2"), Item);
       declare
          task Worker is
             pragma Task_Info (Model);
@@ -192,9 +183,7 @@ procedure TLS_ALPN_Smoke is
 
          task body Worker is
          begin
-            Connection_TLS.Upgrade
-              (Item, Backend, TLS.Client, "localhost", H2_Then_HTTP_1_1,
-               Timeout => 1.0);
+            Connection_TLS.Upgrade (Item, Backend, TLS.Client, "localhost", H2_Then_HTTP_1_1, Timeout => 1.0);
             Passed := Connection_TLS.Selected_Protocol (Item) = "h2";
          exception
             when others =>
@@ -221,8 +210,7 @@ procedure TLS_ALPN_Smoke is
       Retained := Test_Provider.Retain (Backend);
       Sockets.Create_Socket_Pair (Socket, Peer);
       ALPN.Take
-        (ALPN.Provider'Class (Retained.all), Socket, TLS.Client, "localhost",
-         ALPN.Offer ("h2"), Item);
+        (ALPN.Provider'Class (Retained.all), Socket, TLS.Client, "localhost", ALPN.Offer ("h2"), Item);
       TLS.Release (Retained);
       TLS.Handshake (Item, Timeout => 1.0);
       pragma Assert (ALPN.Selected_Protocol (Item) = "h2");
@@ -232,18 +220,12 @@ procedure TLS_ALPN_Smoke is
 
 begin
    Run_Validation;
-   Run_Selection
-     (Flyology.Lightweight_Task, Test_Provider.No_Selection, "");
-   Run_Selection
-     (Flyology.Native_Task, Test_Provider.No_Selection, "");
-   Run_Selection
-     (Flyology.Lightweight_Task, Test_Provider.Select_H2, "h2");
-   Run_Selection
-     (Flyology.Native_Task, Test_Provider.Select_H2, "h2");
-   Run_Selection
-     (Flyology.Lightweight_Task, Test_Provider.Select_HTTP_1_1, "http/1.1");
-   Run_Selection
-     (Flyology.Native_Task, Test_Provider.Select_HTTP_1_1, "http/1.1");
+   Run_Selection (Flyology.Lightweight_Task, Test_Provider.No_Selection, "");
+   Run_Selection (Flyology.Native_Task, Test_Provider.No_Selection, "");
+   Run_Selection (Flyology.Lightweight_Task, Test_Provider.Select_H2, "h2");
+   Run_Selection (Flyology.Native_Task, Test_Provider.Select_H2, "h2");
+   Run_Selection (Flyology.Lightweight_Task, Test_Provider.Select_HTTP_1_1, "http/1.1");
+   Run_Selection (Flyology.Native_Task, Test_Provider.Select_HTTP_1_1, "http/1.1");
    Run_Timeout (Flyology.Lightweight_Task);
    Run_Timeout (Flyology.Native_Task);
    Run_Cancellation (Flyology.Lightweight_Task);

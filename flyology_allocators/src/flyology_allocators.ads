@@ -11,7 +11,10 @@ with System;
 --  closed instead of applying cached geometry to replacement bytes.
 --  If out-of-band corruption destroys the epoch itself, recovery Initialize
 --  treats the bytes as fresh; all earlier views must first be retired.
-package Flyology_Allocators with Preelaborate is
+
+package Flyology_Allocators
+  with Preelaborate
+is
 
    --  Fixed-width byte count used by stored extents and region views.
    type Byte_Count is new Interfaces.Unsigned_64;
@@ -63,8 +66,7 @@ package Flyology_Allocators with Preelaborate is
    --     Item attached to it without rewriting stored bytes
    --  @enum Initialization_In_Progress Another caller owns the virgin-state
    --     initialization claim; Item remains detached and no waiting occurs
-   type Open_Result is
-     (Initialized_New, Attached_Existing, Initialization_In_Progress);
+   type Open_Result is (Initialized_New, Attached_Existing, Initialization_In_Progress);
 
    --  Raised when an object or independently recoverable slot was explicitly
    --  poisoned after an interrupted or failed mutation. Poisoned bytes are
@@ -96,12 +98,12 @@ private
    --  @param Alignment Required native alignment
    --  @return Validated native object address
    function Checked_Address
-     (Base       : System.Address;
-      Length     : Byte_Count;
+     (Base        : System.Address;
+      Length      : Byte_Count;
       Is_Attached : Boolean;
-      Offset     : Region_Offset;
-      Extent     : Byte_Count;
-      Alignment  : Byte_Count) return System.Address;
+      Offset      : Region_Offset;
+      Extent      : Byte_Count;
+      Alignment   : Byte_Count) return System.Address;
    pragma Inline_Always (Checked_Address);
 
 end Flyology_Allocators;

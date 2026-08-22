@@ -11,41 +11,37 @@ with Flyology.Process_Generations.Messages;
 --  @formal Request_Stop Revoke admission and request structured shutdown
 --  @formal Promoted Enable work reserved for the active image
 --  @formal Compensate Reverse candidate effects after quiescence
+
 generic
    type Application_Context is limited private;
 
    --  Reconstruct desired local topology without admission authority.
-   with procedure Prepare
-     (Context : in out Application_Context;
-      Data    : Messages.Provisioning_Data);
+   with procedure Prepare (Context : in out Application_Context; Data : Messages.Provisioning_Data);
 
    --  Run the server until Request_Stop causes its structured scopes to join.
    --  The procedure executes in one native Agent-owned task.
-   with procedure Run_Server
-     (Context  : in out Application_Context;
-      Listener : in out Flyology.IO.Sockets.Socket_Type;
-      Role     : Candidate_Role);
+   with
+     procedure Run_Server
+       (Context  : in out Application_Context;
+        Listener : in out Flyology.IO.Sockets.Socket_Type;
+        Role     : Candidate_Role);
 
    --  True only when the exact provisioned topology is reconciled and every
    --  required structured server reports Accepting.
-   with function Ready
-     (Context : Application_Context;
-      Data    : Messages.Provisioning_Data) return Boolean;
+   with function Ready (Context : Application_Context; Data : Messages.Provisioning_Data) return Boolean;
 
    --  Must synchronously revoke new admission before returning, then request
    --  structured shutdown. It may be called more than once during cleanup.
    with procedure Request_Stop (Context : in out Application_Context);
 
    --  Enable Active_Only work and publish the promoted deployment epoch.
-   with procedure Promoted
-     (Context   : in out Application_Context;
-      Authority : Upgrade_Handle);
+   with procedure Promoted (Context : in out Application_Context; Authority : Upgrade_Handle);
 
    --  Called only after the candidate server task has terminated. It may be
    --  repeated after uncertain acknowledgment and must be idempotent.
-   with function Compensate
-     (Context   : in out Application_Context;
-      Authority : Upgrade_Handle) return Compensation_Result;
+   with
+     function Compensate
+       (Context : in out Application_Context; Authority : Upgrade_Handle) return Compensation_Result;
 package Flyology.Process_Generations.Agents is
    --  Bootstrap, protocol, application-hook, or server-lifecycle failure.
    Agent_Error : exception;

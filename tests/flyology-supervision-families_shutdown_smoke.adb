@@ -24,7 +24,8 @@ procedure Flyology.Supervision.Families_Shutdown_Smoke is
          Attempt := Values (Value);
       end Increment;
 
-      function Read (Value : Request) return Natural is (Values (Value));
+      function Read (Value : Request) return Natural
+      is (Values (Value));
    end Counts;
 
    type Context is limited record
@@ -56,28 +57,27 @@ procedure Flyology.Supervision.Families_Shutdown_Smoke is
    function Create
      (State   : not null access Context;
       Input   : not null access constant Request;
-      Control : not null access Generation_Control) return Subject_Task
-   is
+      Control : not null access Generation_Control) return Subject_Task is
    begin
       return Item : Subject_Task (State, Input, Control);
    end Create;
 
-   function Identity
-     (Item : in out Subject_Task) return Ada.Task_Identification.Task_Id is
-     (Item'Identity);
+   function Identity (Item : in out Subject_Task) return Ada.Task_Identification.Task_Id
+   is (Item'Identity);
 
    procedure Abort_Task (Item : in out Subject_Task) is
    begin
       abort Item;
    end Abort_Task;
 
-   package Generations is new Flyology.Supervision.Input_Task_Generations
-     (Input_Type          => Request,
-      Application_Context => Context,
-      Generation_Task     => Subject_Task,
-      Create              => Create,
-      Task_Identity       => Identity,
-      Abort_Task          => Abort_Task);
+   package Generations is new
+     Flyology.Supervision.Input_Task_Generations
+       (Input_Type          => Request,
+        Application_Context => Context,
+        Generation_Task     => Subject_Task,
+        Create              => Create,
+        Task_Identity       => Identity,
+        Abort_Task          => Abort_Task);
 
    procedure Run_Generation
      (State   : aliased in out Context;
@@ -109,18 +109,18 @@ procedure Flyology.Supervision.Families_Shutdown_Smoke is
       Has_Group         => False,
       Group             => 0);
 
-   package Families is new Flyology.Supervision.Families
-     (Request             => Request,
-      Application_Context => Context,
-      Run_One_Generation  => Run_Generation,
-      Policy              => Policy,
-      First_Child_Id      => 20_000_000_000,
-      Maximum_Children   => 2,
-      Event_Capacity     => 16);
+   package Families is new
+     Flyology.Supervision.Families
+       (Request             => Request,
+        Application_Context => Context,
+        Run_One_Generation  => Run_Generation,
+        Policy              => Policy,
+        First_Child_Id      => 20_000_000_000,
+        Maximum_Children    => 2,
+        Event_Capacity      => 16);
 
    procedure Wait_Open (Item : Families.Family) is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       loop
          exit when Families.Accepting (Item);
@@ -134,10 +134,10 @@ begin
    --  Shutdown must cancel an admitted recovery wait and must not construct a
    --  replacement generation after admission has closed.
    declare
-      State  : aliased Context;
-      Item   : aliased Families.Family;
-      Result : Supervisor_Result;
-      Handle : Child_Handle;
+      State     : aliased Context;
+      Item      : aliased Families.Family;
+      Result    : Supervisor_Result;
+      Handle    : Child_Handle;
       Timed_Out : Boolean := False;
 
       task Owner is
@@ -171,10 +171,9 @@ begin
          raise Program_Error with "shutdown slept through family backoff";
       end if;
       if State.Factory.Read (Fail_Once) /= 1 then
-         raise Program_Error with
-           "shutdown constructed" &
-           Natural'Image (State.Factory.Read (Fail_Once)) &
-           " family generations";
+         raise Program_Error
+           with
+             "shutdown constructed" & Natural'Image (State.Factory.Read (Fail_Once)) & " family generations";
       end if;
       pragma Assert (Result.Outcome = Shutdown_Completed);
    end;

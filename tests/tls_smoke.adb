@@ -31,37 +31,29 @@ procedure TLS_Smoke is
    use type Interfaces.C.unsigned;
    use type ALPN.Protocol_List;
 
-   Certificate : constant String :=
-     "tests/fixtures/tls/server-cert.pem";
-   Private_Key : constant String :=
-     "tests/fixtures/tls/server-key.pem";
-   Library_Directory : constant String :=
+   Certificate        : constant String := "tests/fixtures/tls/server-cert.pem";
+   Private_Key        : constant String := "tests/fixtures/tls/server-key.pem";
+   Library_Directory  : constant String :=
      (if Ada.Environment_Variables.Exists ("FLYOLOGY_TEST_OPENSSL_DIR")
       then Ada.Environment_Variables.Value ("FLYOLOGY_TEST_OPENSSL_DIR")
       else "");
    Mismatch_Directory : constant String :=
-     (if Ada.Environment_Variables.Exists
-           ("FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR")
-      then Ada.Environment_Variables.Value
-        ("FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR")
+     (if Ada.Environment_Variables.Exists ("FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR")
+      then Ada.Environment_Variables.Value ("FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR")
       else "");
 
    function Set_Abortive_Close (FD : Interfaces.C.int) return Interfaces.C.int;
-   pragma Import
-     (C, Set_Abortive_Close, "flyology_test_set_abortive_close");
+   pragma Import (C, Set_Abortive_Close, "flyology_test_set_abortive_close");
 
    function Signal_Wait_Retry_Passes return Interfaces.C.int;
-   pragma Import
-     (C, Signal_Wait_Retry_Passes, "flyology_test_sigtimedwait_retry");
+   pragma Import (C, Signal_Wait_Retry_Passes, "flyology_test_sigtimedwait_retry");
 
    function Live_OpenSSL_Modules return Interfaces.C.unsigned;
-   pragma Import
-     (C, Live_OpenSSL_Modules, "flyology_tls_openssl_live_modules");
+   pragma Import (C, Live_OpenSSL_Modules, "flyology_tls_openssl_live_modules");
 
-   Client_Backend : OpenSSL.OpenSSL_Provider;
-   Server_Backend : OpenSSL.OpenSSL_Provider;
-   H2_Then_HTTP_1_1 : constant ALPN.Protocol_List :=
-     ALPN.Offer ("h2") & "http/1.1";
+   Client_Backend   : OpenSSL.OpenSSL_Provider;
+   Server_Backend   : OpenSSL.OpenSSL_Provider;
+   H2_Then_HTTP_1_1 : constant ALPN.Protocol_List := ALPN.Offer ("h2") & "http/1.1";
 
    protected type Outcome is
       procedure Report (Passed : Boolean);
@@ -84,7 +76,8 @@ procedure TLS_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Outcome;
 
    procedure Run_Exchange (Model : Flyology.Execution_Model) is
@@ -100,9 +93,7 @@ procedure TLS_Smoke is
          Payload (Index) := Stream_Element (Index mod 251);
       end loop;
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
-      ALPN.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost",
-         H2_Then_HTTP_1_1, Client);
+      ALPN.Take (Client_Backend, Client_Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Client);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
       pragma Assert (not Sockets.Is_Open (Client_Socket));
       pragma Assert (not Sockets.Is_Open (Server_Socket));
@@ -132,8 +123,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Client_Task;
 
@@ -149,8 +139,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Server_Task;
       begin
@@ -162,19 +151,15 @@ procedure TLS_Smoke is
       TLS.Close (Server);
    end Run_Exchange;
 
-   procedure Run_Connection_Upgrade_Exchange
-     (Model : Flyology.Execution_Model)
-   is
+   procedure Run_Connection_Upgrade_Exchange (Model : Flyology.Execution_Model) is
       Manager       : aliased Connections.Server (Capacity => 1);
       Client_Socket : Sockets.Socket_Type;
       Server_Socket : Sockets.Socket_Type;
       Client        : TLS.Connection;
       Server        : Connections.Connection;
       Result        : Outcome;
-      SSL_Request   : constant Stream_Element_Array :=
-        [0, 0, 0, 8, 4, 210, 22, 47];
-      Accepted      : constant Stream_Element_Array :=
-        [1 => Stream_Element (Character'Pos ('S'))];
+      SSL_Request   : constant Stream_Element_Array := [0, 0, 0, 8, 4, 210, 22, 47];
+      Accepted      : constant Stream_Element_Array := [1 => Stream_Element (Character'Pos ('S'))];
       Payload       : constant Stream_Element_Array := [1, 3, 5, 7, 9];
       Reply         : constant Stream_Element_Array := [2, 4, 6, 8];
    begin
@@ -197,20 +182,12 @@ procedure TLS_Smoke is
             Received : Stream_Element_Array (Reply'Range);
             Passed   : Boolean := False;
          begin
-            Sockets.Send_All
-              (Client_Socket, SSL_Request, Timeout => 5.0);
-            Sockets.Receive_Exactly
-              (Client_Socket, Response, Timeout => 5.0);
+            Sockets.Send_All (Client_Socket, SSL_Request, Timeout => 5.0);
+            Sockets.Receive_Exactly (Client_Socket, Response, Timeout => 5.0);
             if Response /= Accepted then
-               raise Program_Error with
-                 "TLS upgrade acceptance response mismatch";
+               raise Program_Error with "TLS upgrade acceptance response mismatch";
             end if;
-            TLS.Take
-              (Client_Backend,
-               Client_Socket,
-               TLS.Client,
-               "localhost",
-               Client);
+            TLS.Take (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
             TLS.Handshake (Client, Timeout => 5.0);
             TLS.Send_All (Client, Payload, Timeout => 5.0);
             TLS.Receive_Exactly (Client, Received, Timeout => 5.0);
@@ -219,8 +196,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Client_Task;
 
@@ -234,12 +210,7 @@ procedure TLS_Smoke is
                raise Program_Error with "TLS upgrade request mismatch";
             end if;
             Server.Send_All (Accepted, Timeout => 5.0);
-            Connection_TLS.Upgrade
-              (Server,
-               Server_Backend,
-               TLS.Server,
-               "",
-               Timeout => 5.0);
+            Connection_TLS.Upgrade (Server, Server_Backend, TLS.Server, "", Timeout => 5.0);
             Server.Receive_Exactly (Received, Timeout => 5.0);
             Passed := Received = Payload;
             Server.Send_All (Reply, Timeout => 5.0);
@@ -247,8 +218,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Server_Task;
       begin
@@ -261,19 +231,15 @@ procedure TLS_Smoke is
       pragma Assert (Manager.Active = 0);
    end Run_Connection_Upgrade_Exchange;
 
-   procedure Run_Client_Connection_Upgrade_Exchange
-     (Model : Flyology.Execution_Model)
-   is
+   procedure Run_Client_Connection_Upgrade_Exchange (Model : Flyology.Execution_Model) is
       Manager       : aliased Connections.Server (Capacity => 1);
       Client_Socket : Sockets.Socket_Type;
       Server_Socket : Sockets.Socket_Type;
       Client        : Connections.Connection;
       Server        : TLS.Connection;
       Result        : Outcome;
-      SSL_Request   : constant Stream_Element_Array :=
-        [0, 0, 0, 8, 4, 210, 22, 47];
-      Accepted      : constant Stream_Element_Array :=
-        [1 => Stream_Element (Character'Pos ('S'))];
+      SSL_Request   : constant Stream_Element_Array := [0, 0, 0, 8, 4, 210, 22, 47];
+      Accepted      : constant Stream_Element_Array := [1 => Stream_Element (Character'Pos ('S'))];
       Payload       : constant Stream_Element_Array := [11, 13, 17, 19];
       Reply         : constant Stream_Element_Array := [23, 29, 31];
    begin
@@ -299,15 +265,9 @@ procedure TLS_Smoke is
             Client.Send_All (SSL_Request, Timeout => 5.0);
             Client.Receive_Exactly (Response, Timeout => 5.0);
             if Response /= Accepted then
-               raise Program_Error with
-                 "client TLS upgrade acceptance response mismatch";
+               raise Program_Error with "client TLS upgrade acceptance response mismatch";
             end if;
-            Connection_TLS.Upgrade
-              (Client,
-               Client_Backend,
-               TLS.Client,
-               "localhost",
-               Timeout => 5.0);
+            Connection_TLS.Upgrade (Client, Client_Backend, TLS.Client, "localhost", Timeout => 5.0);
             Client.Send_All (Payload, Timeout => 5.0);
             Client.Receive_Exactly (Received, Timeout => 5.0);
             Passed := Received = Reply and then Manager.Active = 1;
@@ -315,8 +275,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Client_Task;
 
@@ -325,14 +284,12 @@ procedure TLS_Smoke is
             Received : Stream_Element_Array (Payload'Range);
             Passed   : Boolean := False;
          begin
-            Sockets.Receive_Exactly
-              (Server_Socket, Request, Timeout => 5.0);
+            Sockets.Receive_Exactly (Server_Socket, Request, Timeout => 5.0);
             if Request /= SSL_Request then
                raise Program_Error with "client TLS upgrade request mismatch";
             end if;
             Sockets.Send_All (Server_Socket, Accepted, Timeout => 5.0);
-            TLS.Take
-              (Server_Backend, Server_Socket, TLS.Server, "", Server);
+            TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
             TLS.Handshake (Server, Timeout => 5.0);
             TLS.Receive_Exactly (Server, Received, Timeout => 5.0);
             Passed := Received = Payload;
@@ -341,8 +298,7 @@ procedure TLS_Smoke is
             Result.Report (Passed);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Result.Report (False);
          end Server_Task;
       begin
@@ -363,9 +319,7 @@ procedure TLS_Smoke is
       Result        : Outcome;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Silent_Peer);
-      ALPN.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost",
-         H2_Then_HTTP_1_1, Client);
+      ALPN.Take (Client_Backend, Client_Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Client);
       declare
          task Timer is
             pragma Task_Info (Model);
@@ -438,13 +392,12 @@ procedure TLS_Smoke is
          begin
             null;
          end Wait_Finished;
-         function Passed return Boolean is (Is_OK);
+         function Passed return Boolean
+         is (Is_OK);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Silent_Peer);
-      ALPN.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost",
-         H2_Then_HTTP_1_1, Client);
+      ALPN.Take (Client_Backend, Client_Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Client);
       declare
          task Waiter is
             pragma Task_Info (Model);
@@ -484,12 +437,10 @@ procedure TLS_Smoke is
       Result        : Outcome;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
-      pragma Assert
-        (Set_Abortive_Close
-           (Interfaces.C.int
-              (Flyology.IO.Sockets.Native_Descriptor (Server_Socket))) = 0);
-      TLS.Take
-        (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
+      pragma
+        Assert
+          (Set_Abortive_Close (Interfaces.C.int (Flyology.IO.Sockets.Native_Descriptor (Server_Socket))) = 0);
+      TLS.Take (Client_Backend, Client_Socket, TLS.Client, "localhost", Client);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
       declare
          task Client_Task is
@@ -541,8 +492,7 @@ procedure TLS_Smoke is
       Result        : Outcome;
    begin
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
-      TLS.Take
-        (Client_Backend, Client_Socket, TLS.Client, "not-localhost", Client);
+      TLS.Take (Client_Backend, Client_Socket, TLS.Client, "not-localhost", Client);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
       declare
          task Client_Task is
@@ -620,9 +570,7 @@ procedure TLS_Smoke is
 
    procedure Run_Provider_Result_Validation is
    begin
-      for Behavior in
-        TLS_Test_Provider.Invalid_Lower .. TLS_Test_Provider.Invalid_Upper
-      loop
+      for Behavior in TLS_Test_Provider.Invalid_Lower .. TLS_Test_Provider.Invalid_Upper loop
          declare
             Backend : TLS_Test_Provider.Provider;
             Socket  : Sockets.Socket_Type;
@@ -661,8 +609,7 @@ procedure TLS_Smoke is
          Failed  : Boolean := False;
       begin
          TLS_Test_Provider.Set_Receive_Behavior
-           (Backend,
-            TLS_Test_Provider.Complete_Without_Receive_Progress);
+           (Backend, TLS_Test_Provider.Complete_Without_Receive_Progress);
          Sockets.Create_Socket_Pair (Socket, Peer);
          TLS.Take (Backend, Socket, TLS.Server, "", Item);
          Sockets.Send_Socket (Peer, Ready, Sent);
@@ -685,8 +632,7 @@ procedure TLS_Smoke is
          Buffer  : constant Stream_Element_Array := [1];
          Failed  : Boolean := False;
       begin
-         TLS_Test_Provider.Set_Send_Behavior
-           (Backend, TLS_Test_Provider.Complete_Without_Send_Progress);
+         TLS_Test_Provider.Set_Send_Behavior (Backend, TLS_Test_Provider.Complete_Without_Send_Progress);
          Sockets.Create_Socket_Pair (Socket, Peer);
          TLS.Take (Backend, Socket, TLS.Server, "", Item);
          begin
@@ -710,8 +656,7 @@ procedure TLS_Smoke is
          Ready   : constant Stream_Element_Array := [1];
          Sent    : Stream_Element_Offset;
       begin
-         TLS_Test_Provider.Set_Receive_Behavior
-           (Backend, TLS_Test_Provider.Orderly_EOF);
+         TLS_Test_Provider.Set_Receive_Behavior (Backend, TLS_Test_Provider.Orderly_EOF);
          Sockets.Create_Socket_Pair (Socket, Peer);
          TLS.Take (Backend, Socket, TLS.Server, "", Item);
          Sockets.Send_Socket (Peer, Ready, Sent);
@@ -725,10 +670,7 @@ procedure TLS_Smoke is
    procedure Run_Unexpected_Peer_Close_Statuses is
       use type TLS_Test_Provider.Peer_Close_Point;
    begin
-      for Point in
-        TLS_Test_Provider.Handshake_Peer_Close ..
-        TLS_Test_Provider.Shutdown_Peer_Close
-      loop
+      for Point in TLS_Test_Provider.Handshake_Peer_Close .. TLS_Test_Provider.Shutdown_Peer_Close loop
          declare
             Backend  : TLS_Test_Provider.Provider;
             Socket   : Sockets.Socket_Type;
@@ -738,12 +680,9 @@ procedure TLS_Smoke is
             Rejected : Boolean := False;
             Expected : constant String :=
               (case Point is
-                  when TLS_Test_Provider.Handshake_Peer_Close =>
-                     "during handshake",
-                  when TLS_Test_Provider.Send_Peer_Close =>
-                     "before send completed",
-                  when TLS_Test_Provider.Shutdown_Peer_Close =>
-                     "before shutdown completed");
+                 when TLS_Test_Provider.Handshake_Peer_Close => "during handshake",
+                 when TLS_Test_Provider.Send_Peer_Close      => "before send completed",
+                 when TLS_Test_Provider.Shutdown_Peer_Close  => "before shutdown completed");
          begin
             TLS_Test_Provider.Set_Peer_Close (Backend, Point);
             Sockets.Create_Socket_Pair (Socket, Peer);
@@ -752,15 +691,17 @@ procedure TLS_Smoke is
                case Point is
                   when TLS_Test_Provider.Handshake_Peer_Close =>
                      TLS.Handshake (Item, Timeout => 1.0);
-                  when TLS_Test_Provider.Send_Peer_Close =>
+
+                  when TLS_Test_Provider.Send_Peer_Close      =>
                      TLS.Send_All (Item, Buffer, Timeout => 1.0);
-                  when TLS_Test_Provider.Shutdown_Peer_Close =>
+
+                  when TLS_Test_Provider.Shutdown_Peer_Close  =>
                      TLS.Shutdown (Item, Timeout => 1.0);
                end case;
             exception
                when Error : TLS.TLS_Error =>
-                  Rejected := Ada.Strings.Fixed.Index
-                    (Ada.Exceptions.Exception_Message (Error), Expected) > 0;
+                  Rejected :=
+                    Ada.Strings.Fixed.Index (Ada.Exceptions.Exception_Message (Error), Expected) > 0;
             end;
             pragma Assert (Rejected);
             TLS.Close (Item);
@@ -801,9 +742,7 @@ procedure TLS_Smoke is
          begin
             begin
                OpenSSL.Initialize_Client
-                 (Backend,
-                  Library_Directory =>
-                    "/flyology-test-path-that-does-not-contain-openssl");
+                 (Backend, Library_Directory => "/flyology-test-path-that-does-not-contain-openssl");
             exception
                when TLS.TLS_Error =>
                   Failed := True;
@@ -820,9 +759,7 @@ procedure TLS_Smoke is
       begin
          begin
             OpenSSL.Initialize_Client
-              (Backend,
-               CA_File           => "/flyology-test-missing-ca.pem",
-               Library_Directory => Library_Directory);
+              (Backend, CA_File => "/flyology-test-missing-ca.pem", Library_Directory => Library_Directory);
          exception
             when TLS.TLS_Error =>
                Failed := True;
@@ -833,16 +770,15 @@ procedure TLS_Smoke is
 
       if Mismatch_Directory'Length > 0 then
          declare
-            Backend : OpenSSL.OpenSSL_Provider;
+            Backend  : OpenSSL.OpenSSL_Provider;
             Rejected : Boolean := False;
          begin
             begin
-               OpenSSL.Initialize_Client
-                 (Backend, Library_Directory => Mismatch_Directory);
+               OpenSSL.Initialize_Client (Backend, Library_Directory => Mismatch_Directory);
             exception
                when Error : TLS.TLS_Error =>
-                  Rejected := Ada.Strings.Fixed.Index
-                    (Ada.Exceptions.Exception_Message (Error), "matched") > 0;
+                  Rejected :=
+                    Ada.Strings.Fixed.Index (Ada.Exceptions.Exception_Message (Error), "matched") > 0;
             end;
             pragma Assert (Rejected);
             pragma Assert (Live_OpenSSL_Modules = Baseline);
@@ -850,12 +786,11 @@ procedure TLS_Smoke is
       end if;
 
       declare
-         Backend : OpenSSL.OpenSSL_Provider;
+         Backend  : OpenSSL.OpenSSL_Provider;
          Rejected : Boolean := False;
       begin
          begin
-            OpenSSL.Initialize_Client
-              (Backend, CA_File => "bad" & Character'Val (0) & "path");
+            OpenSSL.Initialize_Client (Backend, CA_File => "bad" & Character'Val (0) & "path");
          exception
             when Program_Error =>
                Rejected := True;
@@ -910,10 +845,7 @@ procedure TLS_Smoke is
       Sockets.Close_Socket (Peer);
    end Run_Pre_Cancelled;
 
-   procedure Run_Queued_Control
-     (Model         : Flyology.Execution_Model;
-      Cancel_Queued : Boolean)
-   is
+   procedure Run_Queued_Control (Model : Flyology.Execution_Model; Cancel_Queued : Boolean) is
       Socket       : Sockets.Socket_Type;
       Peer         : Sockets.Socket_Type;
       Item         : TLS.Connection;
@@ -984,7 +916,8 @@ procedure TLS_Smoke is
          begin
             null;
          end Wait_Holder_Finished;
-         function Passed return Boolean is (OK);
+         function Passed return Boolean
+         is (OK);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Socket, Peer);
@@ -1021,8 +954,7 @@ procedure TLS_Smoke is
             begin
                TLS.Handshake
                  (Item,
-                  Timeout => (if Cancel_Queued then Flyology.IO.Infinite
-                              else 0.050),
+                  Timeout => (if Cancel_Queued then Flyology.IO.Infinite else 0.050),
                   Token   => Queued_Token'Access);
             exception
                when TLS.Operation_Cancelled =>
@@ -1088,7 +1020,8 @@ procedure TLS_Smoke is
          begin
             null;
          end Wait_Finished;
-         function Passed return Boolean is (Is_OK);
+         function Passed return Boolean
+         is (Is_OK);
       end Progress;
    begin
       Sockets.Create_Socket_Pair (Socket, Peer);
@@ -1172,7 +1105,8 @@ procedure TLS_Smoke is
          begin
             null;
          end Wait_Finished;
-         function Passed return Boolean is (Is_OK);
+         function Passed return Boolean
+         is (Is_OK);
       end Progress;
    begin
       TLS_Test_Provider.Set_Block_Handshake (Backend);
@@ -1255,9 +1189,9 @@ procedure TLS_Smoke is
    end Run_Queued_Close;
 
    procedure Run_Aborted_Close (Model : Flyology.Execution_Model) is
-      Backend    : TLS_Test_Provider.Provider;
-      Socket     : Sockets.Socket_Type;
-      Peer       : Sockets.Socket_Type;
+      Backend     : TLS_Test_Provider.Provider;
+      Socket      : Sockets.Socket_Type;
+      Peer        : Sockets.Socket_Type;
       Replacement : Sockets.Socket_Type;
       New_Peer    : Sockets.Socket_Type;
       Item        : TLS.Connection;
@@ -1276,7 +1210,8 @@ procedure TLS_Smoke is
             Active_OK := Passed;
             Active_Done := True;
          end Active_Finished;
-         function Passed return Boolean is (Active_Done and Active_OK);
+         function Passed return Boolean
+         is (Active_Done and Active_OK);
       end Progress;
    begin
       TLS_Test_Provider.Set_Block_Handshake (Backend);
@@ -1426,7 +1361,8 @@ procedure TLS_Smoke is
             null;
          end Wait_All;
 
-         function Passed return Boolean is (Is_OK);
+         function Passed return Boolean
+         is (Is_OK);
       end Progress;
    begin
       TLS_Test_Provider.Set_Block_Handshake (Backend);
@@ -1495,8 +1431,7 @@ procedure TLS_Smoke is
                when Flyology.IO.Timeout_Error =>
                   Timed_Out := Timed_Out + 1;
             end;
-            Progress.Empty_Finished
-              (Cancelled = 3 and then Timed_Out = 3);
+            Progress.Empty_Finished (Cancelled = 3 and then Timed_Out = 3);
          exception
             when others =>
                Progress.Empty_Finished (False);
@@ -1528,8 +1463,7 @@ procedure TLS_Smoke is
 
       Sockets.Create_Socket_Pair (Replacement, New_Peer);
       TLS.Take (Backend, Replacement, TLS.Client, "localhost", Item);
-      TLS_Testing.Attempt_Stale_Acquisition
-        (Item, Snapshot, Was_Replaced);
+      TLS_Testing.Attempt_Stale_Acquisition (Item, Snapshot, Was_Replaced);
       pragma Assert (Was_Replaced);
       TLS.Close (Item);
       Sockets.Close_Socket (Peer);
@@ -1537,9 +1471,7 @@ procedure TLS_Smoke is
    end Run_Generation_Reuse;
 
    procedure Run_ALPN_Negotiation
-     (Model            : Flyology.Execution_Model;
-      Server_Protocols : ALPN.Protocol_List;
-      Expected         : String)
+     (Model : Flyology.Execution_Model; Server_Protocols : ALPN.Protocol_List; Expected : String)
    is
       Client_Provider : OpenSSL.OpenSSL_Provider;
       Server_Provider : OpenSSL.OpenSSL_Provider;
@@ -1550,18 +1482,12 @@ procedure TLS_Smoke is
       Result          : Outcome;
    begin
       OpenSSL.Initialize_Client
-        (Client_Provider,
-         CA_File           => Certificate,
-         Library_Directory => Library_Directory);
+        (Client_Provider, CA_File => Certificate, Library_Directory => Library_Directory);
       OpenSSL.Initialize_Server
-        (Server_Provider, Certificate, Private_Key, Server_Protocols,
-         Library_Directory => Library_Directory);
+        (Server_Provider, Certificate, Private_Key, Server_Protocols, Library_Directory => Library_Directory);
       Sockets.Create_Socket_Pair (Client_Socket, Server_Socket);
-      ALPN.Take
-        (Client_Provider, Client_Socket, TLS.Client, "localhost",
-         H2_Then_HTTP_1_1, Client);
-      TLS.Take
-        (Server_Provider, Server_Socket, TLS.Server, "", Server);
+      ALPN.Take (Client_Provider, Client_Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Client);
+      TLS.Take (Server_Provider, Server_Socket, TLS.Server, "", Server);
 
       declare
          task Client_Task is
@@ -1603,19 +1529,17 @@ procedure TLS_Smoke is
       Baseline : constant Interfaces.C.unsigned := Live_OpenSSL_Modules;
    begin
       declare
-         Backend : OpenSSL.OpenSSL_Provider;
-         Socket  : Sockets.Socket_Type;
-         Peer    : Sockets.Socket_Type;
-         Item    : TLS.Connection;
+         Backend  : OpenSSL.OpenSSL_Provider;
+         Socket   : Sockets.Socket_Type;
+         Peer     : Sockets.Socket_Type;
+         Item     : TLS.Connection;
          Rejected : Boolean := False;
       begin
          OpenSSL.Initialize_Server
-           (Backend, Certificate, Private_Key,
-            Library_Directory => Library_Directory);
+           (Backend, Certificate, Private_Key, Library_Directory => Library_Directory);
          Sockets.Create_Socket_Pair (Socket, Peer);
          begin
-            ALPN.Take
-              (Backend, Socket, TLS.Server, "", ALPN.Offer ("h2"), Item);
+            ALPN.Take (Backend, Socket, TLS.Server, "", ALPN.Offer ("h2"), Item);
          exception
             when Program_Error =>
                Rejected := True;
@@ -1642,12 +1566,8 @@ procedure TLS_Smoke is
          Short_Lived : OpenSSL.OpenSSL_Provider;
       begin
          OpenSSL.Initialize_Client
-           (Short_Lived,
-            CA_File           => Certificate,
-            Library_Directory => Library_Directory);
-         ALPN.Take
-           (Short_Lived, Client_Socket, TLS.Client, "localhost",
-            H2_Then_HTTP_1_1, Client);
+           (Short_Lived, CA_File => Certificate, Library_Directory => Library_Directory);
+         ALPN.Take (Short_Lived, Client_Socket, TLS.Client, "localhost", H2_Then_HTTP_1_1, Client);
       end;
       pragma Assert (Live_OpenSSL_Modules = Baseline + 1);
       TLS.Take (Server_Backend, Server_Socket, TLS.Server, "", Server);
@@ -1693,15 +1613,9 @@ procedure TLS_Smoke is
 
 begin
    pragma Assert (Signal_Wait_Retry_Passes = 1);
-   OpenSSL.Initialize_Client
-     (Client_Backend,
-      CA_File           => Certificate,
-      Library_Directory => Library_Directory);
+   OpenSSL.Initialize_Client (Client_Backend, CA_File => Certificate, Library_Directory => Library_Directory);
    OpenSSL.Initialize_Server
-     (Server_Backend,
-      Certificate,
-      Private_Key,
-      Library_Directory => Library_Directory);
+     (Server_Backend, Certificate, Private_Key, Library_Directory => Library_Directory);
    pragma Assert (OpenSSL.Version (Client_Backend)'Length > 0);
 
    Run_Exchange (Flyology.Lightweight_Task);
@@ -1724,18 +1638,12 @@ begin
    Run_Empty_Control (Flyology.Lightweight_Task);
    Run_Empty_Control (Flyology.Native_Task);
    Run_Generation_Reuse;
-   Run_ALPN_Negotiation
-     (Flyology.Lightweight_Task, ALPN.Empty_Protocol_List, "");
-   Run_ALPN_Negotiation
-     (Flyology.Native_Task, ALPN.Empty_Protocol_List, "");
-   Run_ALPN_Negotiation
-     (Flyology.Lightweight_Task, H2_Then_HTTP_1_1, "h2");
-   Run_ALPN_Negotiation
-     (Flyology.Native_Task, H2_Then_HTTP_1_1, "h2");
-   Run_ALPN_Negotiation
-     (Flyology.Lightweight_Task, ALPN.Offer ("http/1.1"), "http/1.1");
-   Run_ALPN_Negotiation
-     (Flyology.Native_Task, ALPN.Offer ("http/1.1"), "http/1.1");
+   Run_ALPN_Negotiation (Flyology.Lightweight_Task, ALPN.Empty_Protocol_List, "");
+   Run_ALPN_Negotiation (Flyology.Native_Task, ALPN.Empty_Protocol_List, "");
+   Run_ALPN_Negotiation (Flyology.Lightweight_Task, H2_Then_HTTP_1_1, "h2");
+   Run_ALPN_Negotiation (Flyology.Native_Task, H2_Then_HTTP_1_1, "h2");
+   Run_ALPN_Negotiation (Flyology.Lightweight_Task, ALPN.Offer ("http/1.1"), "http/1.1");
+   Run_ALPN_Negotiation (Flyology.Native_Task, ALPN.Offer ("http/1.1"), "http/1.1");
    Run_ALPN_Invalid_OpenSSL;
    Run_Close_Finalization_Fault;
    Run_Loader_Error;

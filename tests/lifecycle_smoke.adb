@@ -22,7 +22,8 @@ procedure Lifecycle_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Results;
 
    task Native_Master is
@@ -57,7 +58,6 @@ procedure Lifecycle_Smoke is
 begin
    Results.Wait;
    if not Results.Passed then
-      raise Program_Error with
-        "lightweight child lifecycle failed under a native master";
+      raise Program_Error with "lightweight child lifecycle failed under a native master";
    end if;
 end Lifecycle_Smoke;

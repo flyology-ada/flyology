@@ -9,6 +9,7 @@ with System.Multiprocessors;
 --  @formal Execute Application task body
 --  @formal Task_Model Lightweight or native task designation
 --  @formal Task_CPU CPU aspect for the generation task
+
 generic
    type Input_Type is private;
    type Application_Context (<>) is limited private;
@@ -17,16 +18,17 @@ generic
    --  @param Context State kept alive by the enclosing supervisor scope
    --  @param Input Immutable typed input retained through task join
    --  @param Control Borrowed generation-local readiness and stop channel
-   with procedure Execute
-     (Context : in out Application_Context;
-      Input   : Input_Type;
-      Control : not null access Generation_Control);
+   with
+     procedure Execute
+       (Context : in out Application_Context;
+        Input   : Input_Type;
+        Control : not null access Generation_Control);
 
    Task_Model : Flyology.Execution_Model := Flyology.Project_Default;
-   Task_CPU   : System.Multiprocessors.CPU_Range :=
-     System.Multiprocessors.Not_A_Specific_CPU;
+   Task_CPU : System.Multiprocessors.CPU_Range := System.Multiprocessors.Not_A_Specific_CPU;
 
-package Flyology.Supervision.Input_Children is
+package Flyology.Supervision.Input_Children
+is
 
    --  Create, activate, observe, and join one typed-input generation. Normal
    --  return, escaping exceptions, and abnormal completion are classified

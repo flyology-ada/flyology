@@ -27,52 +27,41 @@ procedure Allocator_Refinement is
    use type Interfaces.Unsigned_64;
    use type Support.Canonical_Block_State;
 
-   package Buddy_Arenas is new FA.Arenas
-     (FA.Allocation_Algorithms.Buddy);
-   package Best_Fit_Arenas is new FA.Arenas
-     (FA.Allocation_Algorithms.Best_Fit);
-   package TLSF_Arenas is new FA.Arenas
-     (FA.Allocation_Algorithms.TLSF);
+   package Buddy_Arenas is new FA.Arenas (FA.Allocation_Algorithms.Buddy);
+   package Best_Fit_Arenas is new FA.Arenas (FA.Allocation_Algorithms.Best_Fit);
+   package TLSF_Arenas is new FA.Arenas (FA.Allocation_Algorithms.TLSF);
 
-   package Buddy_Testing renames
-     FA.Allocation_Algorithms.Buddy_Kernel.Testing;
-   package Best_Fit_Testing renames
-     FA.Allocation_Algorithms.Best_Fit_Kernel.Testing;
-   package TLSF_Testing renames
-     FA.Allocation_Algorithms.TLSF_Kernel.Testing;
+   package Buddy_Testing renames FA.Allocation_Algorithms.Buddy_Kernel.Testing;
+   package Best_Fit_Testing renames FA.Allocation_Algorithms.Best_Fit_Kernel.Testing;
+   package TLSF_Testing renames FA.Allocation_Algorithms.TLSF_Kernel.Testing;
 
    type Client_ID is (A, B, C, D);
    type Hint_Matrix is array (Client_ID) of Support.Hint_Array;
-   Client_Names : constant array (Client_ID) of Character :=
-     [A => 'a', B => 'b', C => 'c', D => 'd'];
+   Client_Names : constant array (Client_ID) of Character := [A => 'a', B => 'b', C => 'c', D => 'd'];
 
    Storage_Length : constant := 8_192;
-   subtype Storage_Range is
-     Ada.Streams.Stream_Element_Offset range 1 .. Storage_Length;
+   subtype Storage_Range is Ada.Streams.Stream_Element_Offset range 1 .. Storage_Length;
    type Storage_Array is array (Storage_Range) of Ada.Streams.Stream_Element;
 
-   function Image (Value : Natural) return String is
-     (Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
+   function Image (Value : Natural) return String
+   is (Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
 
-   function Image (Value : Interfaces.Unsigned_64) return String is
-     (Fixed.Trim
-        (Interfaces.Unsigned_64'Image (Value), Ada.Strings.Both));
+   function Image (Value : Interfaces.Unsigned_64) return String
+   is (Fixed.Trim (Interfaces.Unsigned_64'Image (Value), Ada.Strings.Both));
 
-   function Image (Value : Interfaces.Unsigned_32) return String is
-     (Fixed.Trim
-        (Interfaces.Unsigned_32'Image (Value), Ada.Strings.Both));
+   function Image (Value : Interfaces.Unsigned_32) return String
+   is (Fixed.Trim (Interfaces.Unsigned_32'Image (Value), Ada.Strings.Both));
 
-   function Signed_Image (Value : Integer) return String is
-     (Fixed.Trim (Integer'Image (Value), Ada.Strings.Both));
+   function Signed_Image (Value : Integer) return String
+   is (Fixed.Trim (Integer'Image (Value), Ada.Strings.Both));
 
-   procedure Append
-     (Target : in out Text.Unbounded_String; Value : String) is
+   procedure Append (Target : in out Text.Unbounded_String; Value : String) is
    begin
       Text.Append (Target, Value);
    end Append;
 
    procedure Sort (Value : in out Support.Snapshot) is
-      Block : Support.Block_Info;
+      Block      : Support.Block_Info;
       Index_Item : Support.Index_Info;
    begin
       for Right in 2 .. Value.Block_Count loop
@@ -80,9 +69,7 @@ procedure Allocator_Refinement is
          declare
             Left : Natural := Right;
          begin
-            while Left > 1
-              and then Value.Blocks (Left - 1).Start > Block.Start
-            loop
+            while Left > 1 and then Value.Blocks (Left - 1).Start > Block.Start loop
                Value.Blocks (Left) := Value.Blocks (Left - 1);
                Left := Left - 1;
             end loop;
@@ -94,9 +81,7 @@ procedure Allocator_Refinement is
          declare
             Left : Natural := Right;
          begin
-            while Left > 1
-              and then Value.Index (Left - 1).Start > Index_Item.Start
-            loop
+            while Left > 1 and then Value.Index (Left - 1).Start > Index_Item.Start loop
                Value.Index (Left) := Value.Index (Left - 1);
                Left := Left - 1;
             end loop;
@@ -117,10 +102,12 @@ procedure Allocator_Refinement is
          end if;
          Append
            (Result,
-            Image (Value.Blocks (Index).Start) & ":"
-            & Image (Value.Blocks (Index).Size) & ":"
-            & (if Value.Blocks (Index).State = Support.Free_Block
-               then "F" else "A") & ":"
+            Image (Value.Blocks (Index).Start)
+            & ":"
+            & Image (Value.Blocks (Index).Size)
+            & ":"
+            & (if Value.Blocks (Index).State = Support.Free_Block then "F" else "A")
+            & ":"
             & Image (Value.Blocks (Index).Generation));
       end loop;
       return Text.To_String (Result);
@@ -136,17 +123,12 @@ procedure Allocator_Refinement is
          if Index > 1 then
             Append (Result, ",");
          end if;
-         Append
-           (Result,
-            Image (Value.Index (Index).Start) & ":"
-            & Image (Value.Index (Index).Size));
+         Append (Result, Image (Value.Index (Index).Start) & ":" & Image (Value.Index (Index).Size));
       end loop;
       return Text.To_String (Result);
    end Index_Image;
 
-   function Classes_Image
-     (Algorithm : String; Value : Support.Snapshot) return String
-   is
+   function Classes_Image (Algorithm : String; Value : Support.Snapshot) return String is
       Result : Text.Unbounded_String;
    begin
       if Algorithm /= "TLSF" then
@@ -160,8 +142,10 @@ procedure Allocator_Refinement is
          end if;
          Append
            (Result,
-            Image (Value.Index (Index).Start) & ":"
-            & Image (Value.Index (Index).Size) & ":"
+            Image (Value.Index (Index).Start)
+            & ":"
+            & Image (Value.Index (Index).Size)
+            & ":"
             & Signed_Image (Value.Index (Index).Class_First)
             & ":"
             & Signed_Image (Value.Index (Index).Class_Second));
@@ -169,9 +153,7 @@ procedure Allocator_Refinement is
       return Text.To_String (Result);
    end Classes_Image;
 
-   function Maps_Image
-     (Algorithm : String; Value : Support.Snapshot) return String
-   is
+   function Maps_Image (Algorithm : String; Value : Support.Snapshot) return String is
       Result : Text.Unbounded_String;
    begin
       if Algorithm /= "TLSF" then
@@ -187,9 +169,7 @@ procedure Allocator_Refinement is
       return Text.To_String (Result);
    end Maps_Image;
 
-   function Hints_Image
-     (Value : Hint_Matrix) return String
-   is
+   function Hints_Image (Value : Hint_Matrix) return String is
       Result : Text.Unbounded_String;
    begin
       for Client in Client_ID loop
@@ -214,9 +194,7 @@ procedure Allocator_Refinement is
    type Start_Array is array (Client_ID) of Integer;
    type Generation_Array is array (Client_ID) of Interfaces.Unsigned_64;
 
-   function Handles_Image
-     (Starts : Start_Array; Generations : Generation_Array) return String
-   is
+   function Handles_Image (Starts : Start_Array; Generations : Generation_Array) return String is
       Result : Text.Unbounded_String;
    begin
       for Client in Client_ID loop
@@ -227,10 +205,7 @@ procedure Allocator_Refinement is
          if Starts (Client) < 0 then
             Append (Result, "-1:0");
          else
-            Append
-              (Result,
-               Image (Starts (Client)) & ":"
-               & Image (Generations (Client)));
+            Append (Result, Image (Starts (Client)) & ":" & Image (Generations (Client)));
          end if;
       end loop;
       return Text.To_String (Result);
@@ -249,28 +224,43 @@ procedure Allocator_Refinement is
    begin
       Sort (Value);
       Ada.Text_IO.Put_Line
-        ("@@REFINEMENT@@|" & Algorithm & "|" & Image (Step) & "|"
-         & Operation & "|" & Image (Request) & "|" & Result
-         & "|gen=" & Image (Value.Generation)
-         & "|blocks=" & Blocks_Image (Value)
-         & "|index=" & Index_Image (Value)
-         & "|classes=" & Classes_Image (Algorithm, Value)
-         & "|maps=" & Maps_Image (Algorithm, Value)
-         & "|hints=" & Hints_Image (Hints)
-         & "|handles=" & Handles_Image (Starts, Generations));
+        ("@@REFINEMENT@@|"
+         & Algorithm
+         & "|"
+         & Image (Step)
+         & "|"
+         & Operation
+         & "|"
+         & Image (Request)
+         & "|"
+         & Result
+         & "|gen="
+         & Image (Value.Generation)
+         & "|blocks="
+         & Blocks_Image (Value)
+         & "|index="
+         & Index_Image (Value)
+         & "|classes="
+         & Classes_Image (Algorithm, Value)
+         & "|maps="
+         & Maps_Image (Algorithm, Value)
+         & "|hints="
+         & Hints_Image (Hints)
+         & "|handles="
+         & Handles_Image (Starts, Generations));
    end Emit;
 
-   function Result_Image
-     (Value : FA.Allocation_Algorithms.Allocation_Result) return String is
-     (case Value is
-         when FA.Allocation_Algorithms.Allocated => "allocated",
-         when FA.Allocation_Algorithms.Exhausted => "exhausted",
+   function Result_Image (Value : FA.Allocation_Algorithms.Allocation_Result) return String
+   is (case Value is
+         when FA.Allocation_Algorithms.Allocated            => "allocated",
+         when FA.Allocation_Algorithms.Exhausted            => "exhausted",
          when FA.Allocation_Algorithms.Allocation_Contended => "contended");
 
    procedure Run_Buddy is
       type View_Array is array (Client_ID) of Buddy_Arenas.View;
       type Handle_Array is array (Client_ID) of Buddy_Arenas.Allocation_Handle;
-      Storage : aliased Storage_Array := [others => 0] with Alignment => 64;
+      Storage : aliased Storage_Array := [others => 0]
+      with Alignment => 64;
       Region  : FA.Regions.View;
       Views   : View_Array;
       Handles : Handle_Array := [others => Buddy_Arenas.Null_Allocation];
@@ -290,8 +280,7 @@ procedure Allocator_Refinement is
                Starts (Client) := -1;
                Gens (Client) := 0;
             else
-               Starts (Client) :=
-                 Buddy_Testing.Handle_Start (Views (Client), Handles (Client));
+               Starts (Client) := Buddy_Testing.Handle_Start (Views (Client), Handles (Client));
                Gens (Client) := Handles (Client).Generation;
             end if;
          end loop;
@@ -299,13 +288,19 @@ procedure Allocator_Refinement is
 
       procedure Allocate (Client : Client_ID; Size : Positive) is
       begin
-         Buddy_Arenas.Try_Allocate
-           (Views (Client), Size * 64, Handles (Client), Result);
+         Buddy_Arenas.Try_Allocate (Views (Client), Size * 64, Handles (Client), Result);
          Step := Step + 1;
          Capture;
          Emit
-           ("Buddy", Step, "allocate-" & String'(1 => Client_Names (Client)),
-            Size, Result_Image (Result), Value, Hints, Starts, Gens);
+           ("Buddy",
+            Step,
+            "allocate-" & String'(1 => Client_Names (Client)),
+            Size,
+            Result_Image (Result),
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Allocate;
 
       procedure Release (Client : Client_ID) is
@@ -315,19 +310,22 @@ procedure Allocator_Refinement is
          Step := Step + 1;
          Capture;
          Emit
-           ("Buddy", Step, "release-" & String'(1 => Client_Names (Client)),
-            0, "released", Value, Hints, Starts, Gens);
+           ("Buddy",
+            Step,
+            "release-" & String'(1 => Client_Names (Client)),
+            0,
+            "released",
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Release;
    begin
-      FA.Regions.Attach
-        (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
-      Buddy_Arenas.Initialize
-        (Views (A), Region, 64,
-         (Usable_Capacity => 512, Minimum_Block_Size => 64), 31);
+      FA.Regions.Attach (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
+      Buddy_Arenas.Initialize (Views (A), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 31);
       for Client in B .. D loop
          Buddy_Arenas.Attach
-           (Views (Client), Region, 64,
-            (Usable_Capacity => 512, Minimum_Block_Size => 64), 31);
+           (Views (Client), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 31);
       end loop;
       Capture;
       Emit ("Buddy", 0, "init", 0, "none", Value, Hints, Starts, Gens);
@@ -351,9 +349,9 @@ procedure Allocator_Refinement is
 
    procedure Run_Best_Fit is
       type View_Array is array (Client_ID) of Best_Fit_Arenas.View;
-      type Handle_Array is array (Client_ID) of
-        Best_Fit_Arenas.Allocation_Handle;
-      Storage : aliased Storage_Array := [others => 0] with Alignment => 64;
+      type Handle_Array is array (Client_ID) of Best_Fit_Arenas.Allocation_Handle;
+      Storage : aliased Storage_Array := [others => 0]
+      with Alignment => 64;
       Region  : FA.Regions.View;
       Views   : View_Array;
       Handles : Handle_Array := [others => Best_Fit_Arenas.Null_Allocation];
@@ -372,11 +370,10 @@ procedure Allocator_Refinement is
                Starts (Client) := -1;
                Gens (Client) := 0;
             else
-               Starts (Client) := Integer
-                 (Interfaces.Unsigned_32
-                    (Handles (Client).Token
-                     and Interfaces.Unsigned_64
-                       (Interfaces.Unsigned_32'Last)));
+               Starts (Client) :=
+                 Integer
+                   (Interfaces.Unsigned_32
+                      (Handles (Client).Token and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
                Gens (Client) := Handles (Client).Generation;
             end if;
          end loop;
@@ -384,14 +381,19 @@ procedure Allocator_Refinement is
 
       procedure Allocate (Client : Client_ID; Size : Positive) is
       begin
-         Best_Fit_Arenas.Try_Allocate
-           (Views (Client), (Size - 1) * 64, Handles (Client), Result);
+         Best_Fit_Arenas.Try_Allocate (Views (Client), (Size - 1) * 64, Handles (Client), Result);
          Step := Step + 1;
          Capture;
          Emit
-           ("BestFit", Step,
-            "allocate-" & String'(1 => Client_Names (Client)), Size,
-            Result_Image (Result), Value, Hints, Starts, Gens);
+           ("BestFit",
+            Step,
+            "allocate-" & String'(1 => Client_Names (Client)),
+            Size,
+            Result_Image (Result),
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Allocate;
 
       procedure Release (Client : Client_ID) is
@@ -401,20 +403,23 @@ procedure Allocator_Refinement is
          Step := Step + 1;
          Capture;
          Emit
-           ("BestFit", Step,
-            "release-" & String'(1 => Client_Names (Client)), 0,
-            "released", Value, Hints, Starts, Gens);
+           ("BestFit",
+            Step,
+            "release-" & String'(1 => Client_Names (Client)),
+            0,
+            "released",
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Release;
    begin
-      FA.Regions.Attach
-        (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
+      FA.Regions.Attach (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
       Best_Fit_Arenas.Initialize
-        (Views (A), Region, 64,
-         (Usable_Capacity => 512, Minimum_Block_Size => 64), 32);
+        (Views (A), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 32);
       for Client in B .. D loop
          Best_Fit_Arenas.Attach
-           (Views (Client), Region, 64,
-            (Usable_Capacity => 512, Minimum_Block_Size => 64), 32);
+           (Views (Client), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 32);
       end loop;
       Capture;
       Emit ("BestFit", 0, "init", 0, "none", Value, Hints, Starts, Gens);
@@ -441,7 +446,8 @@ procedure Allocator_Refinement is
    procedure Run_TLSF is
       type View_Array is array (Client_ID) of TLSF_Arenas.View;
       type Handle_Array is array (Client_ID) of TLSF_Arenas.Allocation_Handle;
-      Storage : aliased Storage_Array := [others => 0] with Alignment => 64;
+      Storage : aliased Storage_Array := [others => 0]
+      with Alignment => 64;
       Region  : FA.Regions.View;
       Views   : View_Array;
       Handles : Handle_Array := [others => TLSF_Arenas.Null_Allocation];
@@ -460,11 +466,10 @@ procedure Allocator_Refinement is
                Starts (Client) := -1;
                Gens (Client) := 0;
             else
-               Starts (Client) := Integer
-                 (Interfaces.Unsigned_32
-                    (Handles (Client).Token
-                     and Interfaces.Unsigned_64
-                       (Interfaces.Unsigned_32'Last)));
+               Starts (Client) :=
+                 Integer
+                   (Interfaces.Unsigned_32
+                      (Handles (Client).Token and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
                Gens (Client) := Handles (Client).Generation;
             end if;
          end loop;
@@ -472,13 +477,19 @@ procedure Allocator_Refinement is
 
       procedure Allocate (Client : Client_ID; Size : Positive) is
       begin
-         TLSF_Arenas.Try_Allocate
-           (Views (Client), (Size - 1) * 64, Handles (Client), Result);
+         TLSF_Arenas.Try_Allocate (Views (Client), (Size - 1) * 64, Handles (Client), Result);
          Step := Step + 1;
          Capture;
          Emit
-           ("TLSF", Step, "allocate-" & String'(1 => Client_Names (Client)),
-            Size, Result_Image (Result), Value, Hints, Starts, Gens);
+           ("TLSF",
+            Step,
+            "allocate-" & String'(1 => Client_Names (Client)),
+            Size,
+            Result_Image (Result),
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Allocate;
 
       procedure Release (Client : Client_ID) is
@@ -488,19 +499,22 @@ procedure Allocator_Refinement is
          Step := Step + 1;
          Capture;
          Emit
-           ("TLSF", Step, "release-" & String'(1 => Client_Names (Client)),
-            0, "released", Value, Hints, Starts, Gens);
+           ("TLSF",
+            Step,
+            "release-" & String'(1 => Client_Names (Client)),
+            0,
+            "released",
+            Value,
+            Hints,
+            Starts,
+            Gens);
       end Release;
    begin
-      FA.Regions.Attach
-        (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
-      TLSF_Arenas.Initialize
-        (Views (A), Region, 64,
-         (Usable_Capacity => 512, Minimum_Block_Size => 64), 33);
+      FA.Regions.Attach (Region, Storage (Storage'First)'Address, FA.Byte_Count (Storage'Length));
+      TLSF_Arenas.Initialize (Views (A), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 33);
       for Client in B .. D loop
          TLSF_Arenas.Attach
-           (Views (Client), Region, 64,
-            (Usable_Capacity => 512, Minimum_Block_Size => 64), 33);
+           (Views (Client), Region, 64, (Usable_Capacity => 512, Minimum_Block_Size => 64), 33);
       end loop;
       Capture;
       Emit ("TLSF", 0, "init", 0, "none", Value, Hints, Starts, Gens);
@@ -526,8 +540,7 @@ procedure Allocator_Refinement is
 
 begin
    if Ada.Command_Line.Argument_Count /= 1 then
-      raise Program_Error with
-        "usage: allocator_refinement Buddy|BestFit|TLSF";
+      raise Program_Error with "usage: allocator_refinement Buddy|BestFit|TLSF";
    elsif Ada.Command_Line.Argument (1) = "Buddy" then
       Run_Buddy;
    elsif Ada.Command_Line.Argument (1) = "BestFit" then

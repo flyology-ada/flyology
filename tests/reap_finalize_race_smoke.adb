@@ -8,10 +8,7 @@ procedure Reap_Finalize_Race_Smoke is
    use type C.int;
 
    function Arm_Final_Reap_Exit_Check return C.int;
-   pragma Import
-     (C,
-      Arm_Final_Reap_Exit_Check,
-      "flyology_test_arm_final_reap_exit_check");
+   pragma Import (C, Arm_Final_Reap_Exit_Check, "flyology_test_arm_final_reap_exit_check");
 
    task type Finisher is
       pragma Task_Info (Flyology.Lightweight_Task);
@@ -24,8 +21,7 @@ procedure Reap_Finalize_Race_Smoke is
 
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "final-reap race test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "final-reap race test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
    if Arm_Final_Reap_Exit_Check /= 0 then
       raise Program_Error with "cannot register final-reap exit check";
@@ -39,8 +35,8 @@ begin
    begin
       null;
    end;
-   --  Leaving the block makes the environment task wait on Finisher's master
-   --  and finalize its TCB. The wrapper wakes that master immediately before
-   --  the scheduler enters the injected final-reap window, so returning from
-   --  the main subprogram races finalization with the in-flight reaper.
+--  Leaving the block makes the environment task wait on Finisher's master
+--  and finalize its TCB. The wrapper wakes that master immediately before
+--  the scheduler enters the injected final-reap window, so returning from
+--  the main subprogram races finalization with the in-flight reaper.
 end Reap_Finalize_Race_Smoke;

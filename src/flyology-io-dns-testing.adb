@@ -38,8 +38,7 @@ package body Flyology.IO.DNS.Testing is
       Expected_Name : String;
       For_IPv6      : Boolean := False) is
    begin
-      Flyology.IO.DNS.Validate_Response_For_Testing
-        (Packet, Expected_ID, Expected_Name, For_IPv6);
+      Flyology.IO.DNS.Validate_Response_For_Testing (Packet, Expected_ID, Expected_Name, For_IPv6);
    end Validate_Response;
 
 end Flyology.IO.DNS.Testing;

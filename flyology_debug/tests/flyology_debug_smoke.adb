@@ -42,7 +42,8 @@ procedure Flyology_Debug_Smoke is
       return Flyology_Debug.Timestamp (Counting_Clock_Calls);
    end Counting_Clock;
 
-   function Concurrent_Clock return Flyology_Debug.Timestamp is (0);
+   function Concurrent_Clock return Flyology_Debug.Timestamp
+   is (0);
 
    Merge_Time : Flyology_Debug.Timestamp := 100;
 
@@ -61,67 +62,74 @@ procedure Flyology_Debug_Smoke is
       return (if Producer_Count = 1 then 1 else 2);
    end Select_Second;
 
-   function Select_Outside (Producer_Count : Positive) return Positive is
-     (Producer_Count + 1);
+   function Select_Outside (Producer_Count : Positive) return Positive
+   is (Producer_Count + 1);
 
-   package Wrapping is new Flyology_Debug.Tracers
-     (Message_Type => Message,
-      Capacity     => 3,
-      Overflow     => Flyology_Debug.Overwrite_Oldest);
+   package Wrapping is new
+     Flyology_Debug.Tracers
+       (Message_Type => Message,
+        Capacity     => 3,
+        Overflow     => Flyology_Debug.Overwrite_Oldest);
 
-   package Blocking is new Flyology_Debug.Tracers
-     (Message_Type => Integer,
-      Capacity     => 1,
-      Overflow     => Flyology_Debug.Block_Producer);
+   package Blocking is new
+     Flyology_Debug.Tracers
+       (Message_Type => Integer,
+        Capacity     => 1,
+        Overflow     => Flyology_Debug.Block_Producer);
 
-   package Dropping is new Flyology_Debug.Tracers
-     (Message_Type => Integer,
-      Capacity     => 2,
-      Overflow     => Flyology_Debug.Drop_Newest,
-      Now          => Fake_Clock);
+   package Dropping is new
+     Flyology_Debug.Tracers
+       (Message_Type => Integer,
+        Capacity     => 2,
+        Overflow     => Flyology_Debug.Drop_Newest,
+        Now          => Fake_Clock);
 
-   package Pausing is new Flyology_Debug.Tracers
-     (Message_Type => Integer,
-      Capacity     => 1,
-      Overflow     => Flyology_Debug.Block_Producer);
+   package Pausing is new
+     Flyology_Debug.Tracers
+       (Message_Type => Integer,
+        Capacity     => 1,
+        Overflow     => Flyology_Debug.Block_Producer);
 
-   package Polling is new Flyology_Debug.Tracers
-     (Message_Type => Integer,
-      Capacity     => 1,
-      Overflow     => Flyology_Debug.Block_Producer,
-      Now          => Counting_Clock);
+   package Polling is new
+     Flyology_Debug.Tracers
+       (Message_Type => Integer,
+        Capacity     => 1,
+        Overflow     => Flyology_Debug.Block_Producer,
+        Now          => Counting_Clock);
 
-   package Sharded is new Flyology_Debug.Tracers
-     (Message_Type   => Integer,
-      Capacity       => 32,
-      Overflow       => Flyology_Debug.Overwrite_Oldest,
-      Now            => Concurrent_Clock,
-      Producer_Count => 4);
+   package Sharded is new
+     Flyology_Debug.Tracers
+       (Message_Type   => Integer,
+        Capacity       => 32,
+        Overflow       => Flyology_Debug.Overwrite_Oldest,
+        Now            => Concurrent_Clock,
+        Producer_Count => 4);
 
-   package Merging is new Flyology_Debug.Tracers
-     (Message_Type    => Integer,
-      Capacity        => 4,
-      Now             => Merge_Clock,
-      Producer_Count  => 2,
-      Select_Producer => Select_Second);
+   package Merging is new
+     Flyology_Debug.Tracers
+       (Message_Type    => Integer,
+        Capacity        => 4,
+        Now             => Merge_Clock,
+        Producer_Count  => 2,
+        Select_Producer => Select_Second);
 
-   package Invalid_Selection is new Flyology_Debug.Tracers
-     (Message_Type    => Integer,
-      Capacity        => 1,
-      Now             => Merge_Clock,
-      Producer_Count  => 2,
-      Select_Producer => Select_Outside);
+   package Invalid_Selection is new
+     Flyology_Debug.Tracers
+       (Message_Type    => Integer,
+        Capacity        => 1,
+        Now             => Merge_Clock,
+        Producer_Count  => 2,
+        Select_Producer => Select_Outside);
 
-   package Reservations is new Flyology_Debug.Tracers
-     (Message_Type   => Integer,
-      Capacity       => 2,
-      Now            => Concurrent_Clock,
-      Producer_Count => 2);
+   package Reservations is new
+     Flyology_Debug.Tracers
+       (Message_Type   => Integer,
+        Capacity       => 2,
+        Now            => Concurrent_Clock,
+        Producer_Count => 2);
 
-   package Metrics is new Flyology_Debug.Gauges
-     (Gauge_Kind       => Gauge,
-      Gauge_Value_Type => Integer,
-      Now              => Fake_Clock);
+   package Metrics is new
+     Flyology_Debug.Gauges (Gauge_Kind => Gauge, Gauge_Value_Type => Integer, Now => Fake_Clock);
 
    Wrapped         : Wrapping.Batch;
    Retained_Copy   : Wrapping.Batch;
@@ -143,9 +151,7 @@ begin
    end;
 
    for Value in 1 .. 5 loop
-      Wrapping.Trace
-        ((Kind  => (if Value = 5 then Completed else Accepted),
-          Value => Value));
+      Wrapping.Trace ((Kind => (if Value = 5 then Completed else Accepted), Value => Value));
    end loop;
    Metrics.Set (Queue_Depth, 7);
    Metrics.Set (Queue_Depth, 4);
@@ -153,37 +159,29 @@ begin
    Wrapping.Take (Retained_Copy);
    Metrics.Read (Retained_Gauges);
 
-   Check
-     (Wrapping.Trace_Count (Retained_Copy) = 3, "wrapping count is wrong");
+   Check (Wrapping.Trace_Count (Retained_Copy) = 3, "wrapping count is wrong");
    Check
      (Wrapping.Message_Of (Wrapping.Trace_At (Retained_Copy, 1)).Value = 3,
       "wrapping did not discard the oldest message");
    Check
      (Wrapping.Message_Of (Wrapping.Trace_At (Retained_Copy, 3)).Value = 5,
       "wrapping did not retain the newest message");
+   Check (Wrapping.Overwrites (Retained_Copy) = 2, "overwrite count is wrong");
    Check
-     (Wrapping.Overwrites (Retained_Copy) = 2, "overwrite count is wrong");
-   Check
-     (Wrapping.Sequence_Of (Wrapping.Trace_At (Retained_Copy, 1)) = 3 and then
-      Wrapping.Sequence_Of (Wrapping.Trace_At (Retained_Copy, 3)) = 5,
+     (Wrapping.Sequence_Of (Wrapping.Trace_At (Retained_Copy, 1)) = 3
+      and then Wrapping.Sequence_Of (Wrapping.Trace_At (Retained_Copy, 3)) = 5,
       "admission sequence did not follow retained order");
    Check
-     (Wrapping.Timestamp_Of (Wrapping.Trace_At (Retained_Copy, 1)) <=
-      Wrapping.Timestamp_Of (Wrapping.Trace_At (Retained_Copy, 3)),
+     (Wrapping.Timestamp_Of (Wrapping.Trace_At (Retained_Copy, 1))
+      <= Wrapping.Timestamp_Of (Wrapping.Trace_At (Retained_Copy, 3)),
       "trace timestamps are not chronological");
+   Check (Metrics.Is_Set (Retained_Gauges, Queue_Depth), "updated gauge is not set");
+   Check (Metrics.Value_Of (Retained_Gauges, Queue_Depth) = 4, "gauge did not retain its latest value");
    Check
-     (Metrics.Is_Set (Retained_Gauges, Queue_Depth),
-      "updated gauge is not set");
-   Check
-     (Metrics.Value_Of (Retained_Gauges, Queue_Depth) = 4,
-      "gauge did not retain its latest value");
-   Check
-     (Metrics.Timestamp_Of (Retained_Gauges, Queue_Depth) = 1_010,
-      "gauge did not use the injected clock");
+     (Metrics.Timestamp_Of (Retained_Gauges, Queue_Depth) = 1_010, "gauge did not use the injected clock");
 
    declare
-      Stats         : constant Wrapping.Batch_Statistics :=
-        Wrapping.Statistics (Retained_Copy);
+      Stats         : constant Wrapping.Batch_Statistics := Wrapping.Statistics (Retained_Copy);
       Visited       : Natural := 0;
       Value_Total   : Integer := 0;
       First_Visited : Wrapping.Sequence_Number := 0;
@@ -192,8 +190,7 @@ begin
       procedure Observe
         (Sequence    : Wrapping.Sequence_Number;
          Captured_At : Flyology_Debug.Timestamp;
-         Payload     : not null access constant Message)
-      is
+         Payload     : not null access constant Message) is
       begin
          Check (Captured_At > 0, "borrowed visit returned an empty timestamp");
          Visited := Visited + 1;
@@ -205,24 +202,21 @@ begin
       end Observe;
    begin
       Check
-        (Stats.Retained = 3 and then
-         Stats.Overwritten = 2 and then
-         Stats.Dropped = 0 and then
-         Stats.Has_Traces and then
-         Stats.First_Sequence = 3 and then
-         Stats.Last_Sequence = 5,
+        (Stats.Retained = 3
+         and then Stats.Overwritten = 2
+         and then Stats.Dropped = 0
+         and then Stats.Has_Traces
+         and then Stats.First_Sequence = 3
+         and then Stats.Last_Sequence = 5,
          "wrapping batch statistics are wrong");
       Wrapping.Visit (Retained_Copy, Observe'Access);
       Check
-        (Visited = 3 and then Value_Total = 12 and then
-         First_Visited = 3 and then Last_Visited = 5,
+        (Visited = 3 and then Value_Total = 12 and then First_Visited = 3 and then Last_Visited = 5,
          "borrowed visit did not preserve retained order");
    end;
 
    Wrapping.Release (Retained_Copy);
-   Check
-     (not Wrapping.Is_Acquired (Retained_Copy),
-      "released trace batch still reports acquired");
+   Check (not Wrapping.Is_Acquired (Retained_Copy), "released trace batch still reports acquired");
    Wrapping.Take (Wrapped);
    Check (Wrapping.Trace_Count (Wrapped) = 0, "trace clear did not persist");
    Check (Wrapping.Overwrites (Wrapped) = 0, "clear kept overwrite count");
@@ -230,17 +224,14 @@ begin
 
    Metrics.Read (Gauges);
    Check
-     (Metrics.Is_Set (Gauges, Queue_Depth) and then
-      Metrics.Value_Of (Gauges, Queue_Depth) = 4,
+     (Metrics.Is_Set (Gauges, Queue_Depth) and then Metrics.Value_Of (Gauges, Queue_Depth) = 4,
       "gauge did not persist across trace collection");
    Metrics.Clear;
    Metrics.Read (Gauges);
+   Check (not Metrics.Is_Set (Gauges, Queue_Depth), "gauge clear did not persist");
    Check
-     (not Metrics.Is_Set (Gauges, Queue_Depth),
-      "gauge clear did not persist");
-   Check
-     (Metrics.Is_Set (Retained_Gauges, Queue_Depth) and then
-      Metrics.Value_Of (Retained_Gauges, Queue_Depth) = 4,
+     (Metrics.Is_Set (Retained_Gauges, Queue_Depth)
+      and then Metrics.Value_Of (Retained_Gauges, Queue_Depth) = 4,
       "a later read changed an earlier gauge snapshot");
 
    declare
@@ -307,8 +298,7 @@ begin
          Wrapping.Take (First);
          First_Count := Wrapping.Trace_Count (First);
          if First_Count = 1 then
-            First_Value :=
-              Wrapping.Message_Of (Wrapping.Trace_At (First, 1)).Value;
+            First_Value := Wrapping.Message_Of (Wrapping.Trace_At (First, 1)).Value;
          end if;
          Wrapping.Release (First);
          Completion.Mark_Done;
@@ -320,8 +310,7 @@ begin
          Wrapping.Take (Second);
          Second_Count := Wrapping.Trace_Count (Second);
          if Second_Count = 1 then
-            Second_Value :=
-              Wrapping.Message_Of (Wrapping.Trace_At (Second, 1)).Value;
+            Second_Value := Wrapping.Message_Of (Wrapping.Trace_At (Second, 1)).Value;
          end if;
          Wrapping.Release (Second);
          Completion.Mark_Done;
@@ -329,12 +318,9 @@ begin
    begin
       Completion.Release_Readers;
       Completion.Wait_All_Done;
+      Check (First_Count + Second_Count = 1, "concurrent collections duplicated or lost retained history");
       Check
-        (First_Count + Second_Count = 1,
-         "concurrent collections duplicated or lost retained history");
-      Check
-        ((First_Count = 1 and then First_Value = 30) or else
-         (Second_Count = 1 and then Second_Value = 30),
+        ((First_Count = 1 and then First_Value = 30) or else (Second_Count = 1 and then Second_Value = 30),
          "concurrent collections returned the wrong message");
    end;
 
@@ -379,8 +365,8 @@ begin
    Wrapping.Trace ((Kind => Accepted, Value => 41));
    Wrapping.Take (Wrapped);
    Check
-     (Wrapping.Trace_Count (Wrapped) = 1 and then
-      Wrapping.Message_Of (Wrapping.Trace_At (Wrapped, 1)).Value = 41,
+     (Wrapping.Trace_Count (Wrapped) = 1
+      and then Wrapping.Message_Of (Wrapping.Trace_At (Wrapped, 1)).Value = 41,
       "aborted consumer did not return its detached buffer");
    Wrapping.Release (Wrapped);
 
@@ -435,9 +421,7 @@ begin
          Coordination.Claim (Producer);
          Coordination.Await_Start;
          for Index in 1 .. Iterations loop
-            Sharded.Trace
-              (Producer * 1_000 + Index,
-               Producer);
+            Sharded.Trace (Producer * 1_000 + Index, Producer);
          end loop;
          Coordination.Finish;
       end Writer;
@@ -450,23 +434,16 @@ begin
 
       for Producer in Sharded.Producer_Id loop
          Sharded.Take (Held, Producer);
+         Check (Sharded.Producer_Of (Held) = Producer, "sharded batch reports the wrong producer");
+         Check (Sharded.Trace_Count (Held) = Iterations, "sharded producer lost retained messages");
          Check
-           (Sharded.Producer_Of (Held) = Producer,
-            "sharded batch reports the wrong producer");
-         Check
-           (Sharded.Trace_Count (Held) = Iterations,
-            "sharded producer lost retained messages");
-         Check
-           (Sharded.Sequence_Of (Sharded.Trace_At (Held, 1)) = 1 and then
-            Sharded.Sequence_Of (Sharded.Trace_At (Held, Iterations)) =
-              Interfaces.Unsigned_64 (Iterations),
+           (Sharded.Sequence_Of (Sharded.Trace_At (Held, 1)) = 1
+            and then Sharded.Sequence_Of (Sharded.Trace_At (Held, Iterations))
+                     = Interfaces.Unsigned_64 (Iterations),
             "sharded admission sequence is not producer local");
          Check
-           (Sharded.Message_Of (Sharded.Trace_At (Held, 1)) =
-              Producer * 1_000 + 1
-            and then
-            Sharded.Message_Of (Sharded.Trace_At (Held, Iterations)) =
-              Producer * 1_000 + Iterations,
+           (Sharded.Message_Of (Sharded.Trace_At (Held, 1)) = Producer * 1_000 + 1
+            and then Sharded.Message_Of (Sharded.Trace_At (Held, Iterations)) = Producer * 1_000 + Iterations,
             "sharded producer history crossed producer ids");
       end loop;
       Sharded.Release (Held);
@@ -475,14 +452,12 @@ begin
       Sharded.Trace (20_001, 2);
       Sharded.Clear (1);
       Sharded.Take (Held, 1);
-      Check
-        (Sharded.Trace_Count (Held) = 0,
-         "producer-specific clear retained its producer history");
+      Check (Sharded.Trace_Count (Held) = 0, "producer-specific clear retained its producer history");
       Sharded.Take (Held, 2);
       Check
-        (Sharded.Producer_Of (Held) = 2 and then
-         Sharded.Trace_Count (Held) = 1 and then
-         Sharded.Message_Of (Sharded.Trace_At (Held, 1)) = 20_001,
+        (Sharded.Producer_Of (Held) = 2
+         and then Sharded.Trace_Count (Held) = 1
+         and then Sharded.Message_Of (Sharded.Trace_At (Held, 1)) = 20_001,
          "producer-specific clear changed another producer");
       Sharded.Release (Held);
    end;
@@ -492,33 +467,26 @@ begin
    Merging.Trace (21);
    Merge_Time := 90;
    Merging.Trace (22);
-   Check
-     (Selection_Calls = 3,
-      "automatic selection ran for an explicit producer or wrong count");
+   Check (Selection_Calls = 3, "automatic selection ran for an explicit producer or wrong count");
    Merging.Disable;
    Merging.Trace (22);
    Merging.Try_Trace (22, Accepted_Now);
    Check
-     (not Accepted_Now and then Selection_Calls = 3,
-      "disabled tracing invoked automatic producer selection");
+     (not Accepted_Now and then Selection_Calls = 3, "disabled tracing invoked automatic producer selection");
    Merging.Enable;
    declare
       Merged    : Merging.Merged_Batch;
       Count     : Natural := 0;
       Values    : array (Positive range 1 .. 4) of Integer := (others => 0);
-      Producers : array (Positive range 1 .. 4) of Merging.Producer_Id :=
-        (others => 1);
-      Sequences : array (Positive range 1 .. 4) of
-        Merging.Sequence_Number := (others => 0);
-      Captures  : array (Positive range 1 .. 4) of
-        Flyology_Debug.Timestamp := (others => 0);
+      Producers : array (Positive range 1 .. 4) of Merging.Producer_Id := (others => 1);
+      Sequences : array (Positive range 1 .. 4) of Merging.Sequence_Number := (others => 0);
+      Captures  : array (Positive range 1 .. 4) of Flyology_Debug.Timestamp := (others => 0);
 
       procedure Observe
         (Producer    : Merging.Producer_Id;
          Sequence    : Merging.Sequence_Number;
          Captured_At : Flyology_Debug.Timestamp;
-         Payload     : not null access constant Integer)
-      is
+         Payload     : not null access constant Integer) is
       begin
          Check (Captured_At > 0, "merged visit lost its timestamp");
          Count := Count + 1;
@@ -530,24 +498,22 @@ begin
    begin
       Merging.Take_Merged (Merged);
       declare
-         Stats : constant Merging.Merged_Batch_Statistics :=
-           Merging.Statistics (Merged);
+         Stats : constant Merging.Merged_Batch_Statistics := Merging.Statistics (Merged);
       begin
          Check
-           (Stats.Retained = 4 and then Stats.Overwritten = 0 and then
-            Stats.Dropped = 0,
+           (Stats.Retained = 4 and then Stats.Overwritten = 0 and then Stats.Dropped = 0,
             "merged batch statistics are wrong");
       end;
       Merging.Visit_Merged (Merged, Observe'Access);
       Check
-        (Count = 4 and then Values = [20, 10, 21, 22] and then
-         Producers = [2, 1, 2, 2] and then Sequences = [1, 1, 2, 3]
+        (Count = 4
+         and then Values = [20, 10, 21, 22]
+         and then Producers = [2, 1, 2, 2]
+         and then Sequences = [1, 1, 2, 3]
          and then Captures = [100, 110, 120, 90],
          "merged visit did not preserve shard order or timestamp heads");
       Merging.Release (Merged);
-      Check
-        (not Merging.Is_Acquired (Merged),
-         "released merged batch still reports acquired");
+      Check (not Merging.Is_Acquired (Merged), "released merged batch still reports acquired");
    end;
 
    --  A merged consumer must wait for an all-producer reservation without
@@ -671,12 +637,8 @@ begin
          delay 0.001;
       end loop;
 
-      Check
-        (First_Done,
-         "merged acquisition retained a partial producer reservation");
-      Check
-        (not Reservations.Is_Acquired (Pending),
-         "aborted merged waiter left a surviving reservation");
+      Check (First_Done, "merged acquisition retained a partial producer reservation");
+      Check (not Reservations.Is_Acquired (Pending), "aborted merged waiter left a surviving reservation");
       Reservations.Take_Merged (Pending);
       Reservations.Release (Pending);
    end;
@@ -691,25 +653,23 @@ begin
    begin
       Dropping.Take (Dropped_Batch);
       declare
-         Stats : constant Dropping.Batch_Statistics :=
-           Dropping.Statistics (Dropped_Batch);
+         Stats : constant Dropping.Batch_Statistics := Dropping.Statistics (Dropped_Batch);
       begin
          Check
-           (Stats.Retained = 2 and then Stats.Overwritten = 0 and then
-            Stats.Dropped = 2 and then Stats.Has_Traces and then
-            Stats.First_Sequence = 1 and then Stats.Last_Sequence = 2,
+           (Stats.Retained = 2
+            and then Stats.Overwritten = 0
+            and then Stats.Dropped = 2
+            and then Stats.Has_Traces
+            and then Stats.First_Sequence = 1
+            and then Stats.Last_Sequence = 2,
             "drop-newest batch statistics are wrong");
          Check
            (Dropping.Message_Of (Dropping.Trace_At (Dropped_Batch, 1)) = 1
-            and then
-            Dropping.Message_Of (Dropping.Trace_At (Dropped_Batch, 2)) = 2,
+            and then Dropping.Message_Of (Dropping.Trace_At (Dropped_Batch, 2)) = 2,
             "drop-newest did not preserve retained history");
          Check
-           (Dropping.Timestamp_Of (Dropping.Trace_At (Dropped_Batch, 1)) =
-              1_030
-            and then
-            Dropping.Timestamp_Of (Dropping.Trace_At (Dropped_Batch, 2)) =
-              1_040,
+           (Dropping.Timestamp_Of (Dropping.Trace_At (Dropped_Batch, 1)) = 1_030
+            and then Dropping.Timestamp_Of (Dropping.Trace_At (Dropped_Batch, 2)) = 1_040,
             "tracer did not use the injected clock");
       end;
       Dropping.Release (Dropped_Batch);
@@ -758,7 +718,8 @@ begin
             null;
          end Wait_Done;
 
-         function Is_Done return Boolean is (Done);
+         function Is_Done return Boolean
+         is (Done);
       end Completion;
 
       task Writer;
@@ -771,23 +732,19 @@ begin
       end Writer;
    begin
       Completion.Wait_Started;
-      Check
-        (not Completion.Is_Done,
-         "pausing producer completed before disable");
+      Check (not Completion.Is_Done, "pausing producer completed before disable");
       Pausing.Disable;
       Completion.Wait_Done;
       Pausing.Take (Held);
       Check
-        (Pausing.Trace_Count (Held) = 1 and then
-         Pausing.Message_Of (Pausing.Trace_At (Held, 1)) = 10,
+        (Pausing.Trace_Count (Held) = 1 and then Pausing.Message_Of (Pausing.Trace_At (Held, 1)) = 10,
          "disable changed retained history or kept a blocked message");
       Pausing.Release (Held);
       Pausing.Enable;
       Pausing.Trace (12);
       Pausing.Take (Held);
       Check
-        (Pausing.Trace_Count (Held) = 1 and then
-         Pausing.Message_Of (Pausing.Trace_At (Held, 1)) = 12,
+        (Pausing.Trace_Count (Held) = 1 and then Pausing.Message_Of (Pausing.Trace_At (Held, 1)) = 12,
          "re-enabled tracer did not resume admission");
       Pausing.Release (Held);
    end;
@@ -798,20 +755,15 @@ begin
    begin
       Check (Counting_Clock_Calls = 0, "counting clock started nonzero");
       Polling.Trace (1);
-      Check
-        (Counting_Clock_Calls = 1,
-         "accepted trace did not call the injected clock exactly once");
+      Check (Counting_Clock_Calls = 1, "accepted trace did not call the injected clock exactly once");
       Polling.Try_Trace (2, Accepted_Now);
-      Check
-        (not Accepted_Now and then Counting_Clock_Calls = 1,
-         "full blocking Try_Trace called the clock");
+      Check (not Accepted_Now and then Counting_Clock_Calls = 1, "full blocking Try_Trace called the clock");
 
       Polling.Disable;
       Polling.Trace (3);
       Polling.Try_Trace (3, Accepted_Now);
       Check
-        (not Accepted_Now and then Counting_Clock_Calls = 1,
-         "disabled producer operation called the clock");
+        (not Accepted_Now and then Counting_Clock_Calls = 1, "disabled producer operation called the clock");
 
       Polling.Enable;
       Polling.Take (Held);
@@ -823,18 +775,14 @@ begin
 
       Polling.Close;
       Polling.Try_Trace (5, Accepted_Now);
-      Check
-        (not Accepted_Now and then Counting_Clock_Calls = 2,
-         "closed Try_Trace called the clock");
+      Check (not Accepted_Now and then Counting_Clock_Calls = 2, "closed Try_Trace called the clock");
       begin
          Polling.Trace (5);
       exception
          when Flyology_Debug.Closed_Error =>
             Rejected := True;
       end;
-      Check
-        (Rejected and then Counting_Clock_Calls = 2,
-         "closed Trace called the clock or failed to reject");
+      Check (Rejected and then Counting_Clock_Calls = 2, "closed Trace called the clock or failed to reject");
    end;
 
    Blocking.Try_Trace (10, Accepted_Now);
@@ -875,7 +823,8 @@ begin
             null;
          end Wait_Done;
 
-         function Is_Done return Boolean is (Done);
+         function Is_Done return Boolean
+         is (Done);
       end Completion;
 
       task Writer;
@@ -888,9 +837,7 @@ begin
       end Writer;
    begin
       Completion.Wait_Started;
-      Check
-        (not Completion.Is_Done,
-         "blocking producer completed before capacity was cleared");
+      Check (not Completion.Is_Done, "blocking producer completed before capacity was cleared");
 
       Blocking.Take (Blocked_Copy);
       Check
@@ -951,11 +898,14 @@ begin
             null;
          end Wait_All_Done;
 
-         function Done_Count return Natural is (Done);
+         function Done_Count return Natural
+         is (Done);
 
-         function Closed_Count return Natural is (Closed);
+         function Closed_Count return Natural
+         is (Closed);
 
-         function Unexpected_Count return Natural is (Unexpected);
+         function Unexpected_Count return Natural
+         is (Unexpected);
       end Completion;
 
       task type Closing_Writer;
@@ -975,21 +925,16 @@ begin
       Writers : array (1 .. 3) of Closing_Writer;
    begin
       Completion.Wait_All_Started;
-      Check
-        (Completion.Done_Count = 0,
-         "full tracer did not block every closing producer");
+      Check (Completion.Done_Count = 0, "full tracer did not block every closing producer");
 
       Blocking.Close;
       Completion.Wait_All_Done;
       Check (Blocking.Is_Closed, "closed tracer reports open");
       Check (not Blocking.Is_Enabled, "closed tracer reports enabled");
       Blocking.Enable;
+      Check (not Blocking.Is_Enabled, "enable reopened a terminally closed tracer");
       Check
-        (not Blocking.Is_Enabled,
-         "enable reopened a terminally closed tracer");
-      Check
-        (Completion.Closed_Count = 3 and then
-         Completion.Unexpected_Count = 0,
+        (Completion.Closed_Count = 3 and then Completion.Unexpected_Count = 0,
          "close did not reject every blocked producer");
 
       Blocking.Try_Trace (22, Accepted_Now);
@@ -1010,8 +955,8 @@ begin
       Blocking.Close;
       Blocking.Take (Blocked_Copy);
       Check
-        (Blocking.Trace_Count (Blocked_Copy) = 1 and then
-         Blocking.Message_Of (Blocking.Trace_At (Blocked_Copy, 1)) = 20,
+        (Blocking.Trace_Count (Blocked_Copy) = 1
+         and then Blocking.Message_Of (Blocking.Trace_At (Blocked_Copy, 1)) = 20,
          "close did not preserve retained history");
       Blocking.Release (Blocked_Copy);
    end;

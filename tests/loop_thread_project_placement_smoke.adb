@@ -9,8 +9,7 @@ procedure Loop_Thread_Project_Placement_Smoke is
    use type Groups.Placement_State;
 
    Project_Group : constant Groups.Group_Id := 6;
-   Before        : constant Groups.Placement_Status :=
-     Groups.Loop_Thread_Status (Project_Group);
+   Before        : constant Groups.Placement_Status := Groups.Loop_Thread_Status (Project_Group);
 
    protected Result is
       procedure Set (Passed : Boolean);
@@ -31,10 +30,12 @@ procedure Loop_Thread_Project_Placement_Smoke is
       begin
          null;
       end Wait;
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result;
 
-   task Project_Worker with CPU => 6 is
+   task Project_Worker
+     with CPU => 6 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Project_Worker;
 
@@ -42,10 +43,9 @@ procedure Loop_Thread_Project_Placement_Smoke is
    begin
       Result.Set
         (Groups.Current = Project_Group
-         and then
-           (if Before.Kind = Groups.Strict_CPU
-            then Groups.Current_Processor = Integer (Before.Value)
-            else Groups.Current_Processor = Groups.No_Processor));
+         and then (if Before.Kind = Groups.Strict_CPU
+                   then Groups.Current_Processor = Integer (Before.Value)
+                   else Groups.Current_Processor = Groups.No_Processor));
    exception
       when others =>
          Result.Set (False);
@@ -53,9 +53,7 @@ procedure Loop_Thread_Project_Placement_Smoke is
 
    After : Groups.Placement_Status;
 begin
-   if Before.State /= Groups.Pending_Startup
-     or else Before.Kind = Groups.No_Placement
-   then
+   if Before.State /= Groups.Pending_Startup or else Before.Kind = Groups.No_Placement then
       raise Program_Error with "project placement was not compiled into RTS";
    end if;
    Result.Wait;

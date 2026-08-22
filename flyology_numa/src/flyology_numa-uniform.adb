@@ -19,9 +19,7 @@ package body Flyology_NUMA.Uniform is
    -- Single_Domain_Facts --
    --------------------------
 
-   function Single_Domain_Facts
-     (Memory : Byte_Query := No_Bytes) return Machine_Facts
-   is
+   function Single_Domain_Facts (Memory : Byte_Query := No_Bytes) return Machine_Facts is
       Result    : Machine_Facts;
       Available : Natural;
    begin
@@ -34,8 +32,7 @@ package body Flyology_NUMA.Uniform is
       Bits.Include (Result.With_Memory, Only_Node);
 
       Result.Nodes (Only_Node).Memory := Memory;
-      Result.Nodes (Only_Node).Distances (Only_Node) :=
-        (Available => True, Value => Local_Distance);
+      Result.Nodes (Only_Node).Distances (Only_Node) := (Available => True, Value => Local_Distance);
 
       Available := Natural (System.Multiprocessors.Number_Of_CPUs);
 
@@ -45,10 +42,8 @@ package body Flyology_NUMA.Uniform is
       Result.Complete := Available <= Max_Processor + 1;
 
       for Index in 0 .. Natural'Min (Available - 1, Max_Processor) loop
-         Bits.Include (Result.Nodes (Only_Node).Processors,
-                       Processor_Id (Index));
-         Result.Owner (Processor_Id (Index)) :=
-           (Available => True, Node => Only_Node);
+         Bits.Include (Result.Nodes (Only_Node).Processors, Processor_Id (Index));
+         Result.Owner (Processor_Id (Index)) := (Available => True, Node => Only_Node);
       end loop;
 
       return Result;

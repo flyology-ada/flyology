@@ -10,8 +10,7 @@ procedure Process_Exit_Live_Task_Smoke is
    use type Lifecycle.Event_Runtime_State;
 
    function Arm_Exit_Check (State, Groups : C.int) return C.int;
-   pragma Import
-     (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
+   pragma Import (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
 
 begin
    if Lifecycle.State /= Lifecycle.Running

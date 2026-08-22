@@ -15,6 +15,7 @@ with System;
 --  can publish failure. Otherwise an independently authorized
 --  supervisor must establish owner death and participant quiescence before
 --  replacing the whole backing object.
+
 package Flyology.Shared_Memory.Segments is
 
    --  Raised when persisted segment identity, geometry, or state is corrupt.
@@ -32,10 +33,10 @@ package Flyology.Shared_Memory.Segments is
    --  @field Allocation_Alignment Power-of-two alignment for every named
    --     extent and for reuse eligibility
    type Configuration is record
-      Schema                 : Interfaces.Unsigned_64;
-      Registry_Capacity      : Positive;
-      Maximum_Name_Length    : Positive;
-      Allocation_Alignment   : Positive := 64;
+      Schema               : Interfaces.Unsigned_64;
+      Registry_Capacity    : Positive;
+      Maximum_Name_Length  : Positive;
+      Allocation_Alignment : Positive := 64;
    end record;
 
    --  Result of race-safe segment creation or attachment.
@@ -44,8 +45,7 @@ package Flyology.Shared_Memory.Segments is
    --  @enum Attached_Existing A ready compatible registry already existed
    --  @enum Initialization_In_Progress Another initializer owns the claim, or
    --     this mapping came from an opener and is not allowed to claim zero
-   type Segment_Open_Result is
-     (Initialized_New, Attached_Existing, Initialization_In_Progress);
+   type Segment_Open_Result is (Initialized_New, Attached_Existing, Initialization_In_Progress);
 
    --  Explicit declaration that the caller has stopped every participant
    --  from accessing the source registry and all nested objects. This value is
@@ -61,8 +61,7 @@ package Flyology.Shared_Memory.Segments is
    --  @enum Registry_Busy A registry operation still owns the source guard
    --  @enum Initialization_In_Progress A named extent still has an
    --     unpublished creator claim
-   type Replacement_Result is
-     (Replacement_Ready, Registry_Busy, Initialization_In_Progress);
+   type Replacement_Result is (Replacement_Ready, Registry_Busy, Initialization_In_Progress);
 
    --  Outcome of one nonblocking exact-name find-or-create attempt.
    --  @enum Created The caller owns the returned Creation_Claim and must
@@ -94,20 +93,14 @@ package Flyology.Shared_Memory.Segments is
    --  @enum Initialization_In_Progress The name exists but is unpublished
    --  @enum Initialization_Failed The name has a published failure
    --  @enum Registry_Busy The persisted guard was already owned
-   type Lookup_Result is
-     (Found,
-      Not_Found,
-      Initialization_In_Progress,
-      Initialization_Failed,
-      Registry_Busy);
+   type Lookup_Result is (Found, Not_Found, Initialization_In_Progress, Initialization_Failed, Registry_Busy);
 
    --  Outcome of explicit name removal.
    --  @enum Removed A ready or failed entry became reusable
    --  @enum Not_Found No active exact name exists
    --  @enum Initialization_In_Progress A live creation claim prevents removal
    --  @enum Registry_Busy The persisted guard was already owned
-   type Remove_Result is
-     (Removed, Not_Found, Initialization_In_Progress, Registry_Busy);
+   type Remove_Result is (Removed, Not_Found, Initialization_In_Progress, Registry_Busy);
 
    --  Current state of a generation-stamped named handle.
    --  @enum Null_Handle The canonical null handle was supplied
@@ -116,12 +109,10 @@ package Flyology.Shared_Memory.Segments is
    --  @enum Failed The handle names a published initialization failure
    --  @enum Removed The handle's slot was removed but not yet reused
    --  @enum Stale The slot generation no longer matches or is invalid
-   type Handle_State is
-     (Null_Handle, Initializing, Ready, Failed, Removed, Stale);
+   type Handle_State is (Null_Handle, Initializing, Ready, Failed, Removed, Stale);
 
    --  Application-defined nonzero initialization failure code.
-   subtype Failure_Code is Interfaces.Unsigned_32 range 1 ..
-     Interfaces.Unsigned_32'Last;
+   subtype Failure_Code is Interfaces.Unsigned_32 range 1 .. Interfaces.Unsigned_32'Last;
 
    --  Process-local segment view borrowing one Mapping. Detach it before the
    --  mapping is unmapped. Segment detachment does not change stored bytes.
@@ -142,8 +133,7 @@ package Flyology.Shared_Memory.Segments is
    --  @param Config Registry geometry to validate
    --  @return First allocatable byte offset
    --  @exception Constraint_Error Configuration is invalid or overflows
-   function Required_Registry_Storage
-     (Config : Configuration) return Byte_Length;
+   function Required_Registry_Storage (Config : Configuration) return Byte_Length;
 
    --  Race-safely initialize or attach the segment at mapping offset zero.
    --  Only mappings derived from an exclusively created backing object may
@@ -158,10 +148,7 @@ package Flyology.Shared_Memory.Segments is
    --  @exception Constraint_Error Config or mapping extent is invalid
    --  @exception Segment_Error Persisted state or configuration is corrupt
    procedure Create_Or_Attach
-     (Item   : in out View;
-      Source : Mapping;
-      Config : Configuration;
-      Result : out Segment_Open_Result);
+     (Item : in out View; Source : Mapping; Config : Configuration; Result : out Segment_Open_Result);
 
    --  Attempt to prepare a larger replacement segment while preserving every
    --  registry slot, exact name, extent offset, generation, allocation
@@ -223,9 +210,7 @@ package Flyology.Shared_Memory.Segments is
    --  @param Item Attached segment view
    --  @param Region Detached relocatable region view to attach
    --  @exception Segment_Error Item is detached or no longer ready
-   procedure Attach_Region
-     (Item   : View;
-      Region : in out Flyology.Data_Structures.Regions.View);
+   procedure Attach_Region (Item : View; Region : in out Flyology.Data_Structures.Regions.View);
 
    --  Attempt exact-name lookup or reserve a new aligned extent. Hashes only
    --  accelerate scanning: stored length and every name byte are compared, so
@@ -301,8 +286,7 @@ package Flyology.Shared_Memory.Segments is
    --  @param Failure Nonzero application failure code
    --  @exception Segment_Error Claim is invalid, stale, or no longer
    --     initializing
-   procedure Publish_Failure
-     (Item : View; Claim : in out Creation_Claim; Failure : Failure_Code);
+   procedure Publish_Failure (Item : View; Claim : in out Creation_Claim; Failure : Failure_Code);
 
    --  Resolve a ready generation-stamped handle to a persisted region offset
    --  and extent length. Removed, failed, initializing, or reused slots fail.
@@ -325,16 +309,14 @@ package Flyology.Shared_Memory.Segments is
    --  @param Handle Handle to inspect
    --  @return Current state or Stale
    --  @exception Segment_Error Persisted slot state is corrupt
-   function State_Of
-     (Item : View; Handle : Named_Handle) return Handle_State;
+   function State_Of (Item : View; Handle : Named_Handle) return Handle_State;
 
    --  Return a failed handle's application code.
    --  @param Item Attached segment containing Handle
    --  @param Handle Handle whose state must be Failed
    --  @return Published nonzero failure code
    --  @exception Segment_Error Handle is stale or not failed
-   function Failure_Of
-     (Item : View; Handle : Named_Handle) return Failure_Code;
+   function Failure_Of (Item : View; Handle : Named_Handle) return Failure_Code;
 
    --  Explicitly remove a ready or failed exact name. Initializing entries are
    --  never stolen. The slot and extent become candidates for later reuse;
@@ -346,8 +328,7 @@ package Flyology.Shared_Memory.Segments is
    --  @param Result Nonblocking removal outcome
    --  @exception Constraint_Error Name is invalid
    --  @exception Segment_Error Persisted registry state is corrupt
-   procedure Try_Remove
-     (Item : View; Name : String; Result : out Remove_Result);
+   procedure Try_Remove (Item : View; Name : String; Result : out Remove_Result);
 
 private
    type Named_Handle is record

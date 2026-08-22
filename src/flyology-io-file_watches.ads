@@ -12,11 +12,11 @@ with Interfaces.C;
 --     Watcher.Open;
 --     Id := Watcher.Add ("configuration");
 --     Watcher.Next (Change, Outcome, Timeout => 30.0);
+
 package Flyology.IO.File_Watches is
 
    --  Raised by Finish after a scoped watcher wait is cancelled.
-   Operation_Cancelled : exception renames
-     Flyology.Operations.Operation_Cancelled;
+   Operation_Cancelled : exception renames Flyology.Operations.Operation_Cancelled;
 
    --  Number of paths accepted by a default-discriminated watcher. Callers
    --  that need another bound select it on the Watcher object.
@@ -34,12 +34,7 @@ package Flyology.IO.File_Watches is
    --  @enum Identity_Changed The watched pathname may name a different object
    --  @enum Watch_Invalidated The registration must be removed and recreated
    --  @enum Events_Lost Kernel detail was lost; rebuild relevant cached state
-   type Change_Kind is
-     (Contents_Changed,
-      Metadata_Changed,
-      Identity_Changed,
-      Watch_Invalidated,
-      Events_Lost);
+   type Change_Kind is (Contents_Changed, Metadata_Changed, Identity_Changed, Watch_Invalidated, Events_Lost);
    --  Set of coalesced hints reported for one watch.
    type Change_Set is array (Change_Kind) of Boolean with Pack;
    --  Empty hint set.
@@ -84,12 +79,10 @@ package Flyology.IO.File_Watches is
    --  @param Timeout Relative deadline
    --  @param Operation Fresh, released, or consumed watcher operation
    procedure Next
-     (Item      : not null access Watcher'Class;
-      Timeout   : Duration := Infinite;
-      Operation : in out Next_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+     (Item : not null access Watcher'Class; Timeout : Duration := Infinite; Operation : in out Next_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume one terminal watcher operation and publish the familiar Next
    --  outputs. Timeout is a successful operation result with Timed_Out;
@@ -99,10 +92,7 @@ package Flyology.IO.File_Watches is
    --  @param Outcome Ready or Timed_Out
    --  @exception Device_Error Watcher state or event draining failed
    --  @exception Operation_Cancelled Operation was cancelled
-   procedure Finish
-     (Operation : in out Next_Operation;
-      Result    : out File_Event;
-      Outcome   : out Wait_Outcome);
+   procedure Finish (Operation : in out Next_Operation; Result : out File_Event; Outcome : out Wait_Outcome);
 
    --  Allocate the platform queue. Repeated calls while open are harmless.
    --  The metadata syscall executes directly on the calling lane.
@@ -174,12 +164,12 @@ private
       Next    : Watch_Record_Access := null;
    end record;
 
-   type Watcher (Capacity : Positive := Default_Capacity) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Watcher (Capacity : Positive := Default_Capacity) is new Ada.Finalization.Limited_Controlled
+   with record
       Native_Source : Interfaces.C.int := Interfaces.C.int (-1);
-      First   : Watch_Record_Access := null;
-      Count   : Natural := 0;
-      Next_Id : Watch_Id := 1;
+      First         : Watch_Record_Access := null;
+      Count         : Natural := 0;
+      Next_Id       : Watch_Id := 1;
    end record;
 
    type Next_Operation is new Flyology.Operations.Operation with record
@@ -192,16 +182,16 @@ private
    --  @exclude
    --  @param Item Watcher operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Next_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Next_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item Watcher operation to cancel
-   overriding procedure Request_Cancellation
-     (Item : in out Next_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Next_Operation);
 
    --  Release Item without propagating close errors.
    --  @param Item Watcher being finalized
-   overriding procedure Finalize (Item : in out Watcher);
+   overriding
+   procedure Finalize (Item : in out Watcher);
 end Flyology.IO.File_Watches;

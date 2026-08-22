@@ -8,6 +8,7 @@
 --  Linux host and a recorded description held in a test directory. That is
 --  what lets node numbering, processor attachment, distance rows, and
 --  control-group restriction be exercised on a host that has none of them.
+
 private package Flyology_NUMA.Sysfs is
 
    --  Where a Linux host keeps its memory-node description.

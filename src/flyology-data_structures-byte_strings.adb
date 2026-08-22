@@ -20,46 +20,37 @@ package body Flyology.Data_Structures.Byte_Strings is
    Unlocked      : constant Interfaces.Unsigned_32 := 0;
    Locked        : constant Interfaces.Unsigned_32 := 1;
 
-   function Required_Storage (Maximum_Length : Positive) return Byte_Count is
-     (Layouts.Checked_Add
-        (Layouts.Header_Size, Byte_Count (Maximum_Length)));
+   function Required_Storage (Maximum_Length : Positive) return Byte_Count
+   is (Layouts.Checked_Add (Layouts.Header_Size, Byte_Count (Maximum_Length)));
 
-   procedure Set_View
-     (Item : out View;
-      Core : Layouts.Local_View;
-      Maximum_Length : Interfaces.Unsigned_32) is
+   procedure Set_View (Item : out View; Core : Layouts.Local_View; Maximum_Length : Interfaces.Unsigned_32) is
    begin
       Item.Core := Core;
-      Item.Length_Address := Layouts.Address_At
-        (Core, Length_Offset, 8, 8);
+      Item.Length_Address := Layouts.Address_At (Core, Length_Offset, 8, 8);
       Item.Guard_Address := Layouts.Address_At (Core, Guard_Offset, 4, 4);
-      Item.Payload_Address := Layouts.Address_At
-        (Core, Layouts.Header_Size, Byte_Count (Maximum_Length), 1);
+      Item.Payload_Address := Layouts.Address_At (Core, Layouts.Header_Size, Byte_Count (Maximum_Length), 1);
       Item.Capacity_Value := Maximum_Length;
    end Set_View;
 
    procedure Finish_Initialize
-     (Item            : out View;
-      Core            : Layouts.Local_View;
-      Stored_Capacity : Interfaces.Unsigned_32) is
+     (Item : out View; Core : Layouts.Local_View; Stored_Capacity : Interfaces.Unsigned_32) is
    begin
       Set_View (Item, Core, Stored_Capacity);
       Layouts.Publish (Item.Core);
    end Finish_Initialize;
 
    procedure Initialize
-     (Item           : out View;
-      Region         : Region_View;
-      Location       : Region_Offset;
-      Maximum_Length : Positive)
+     (Item : out View; Region : Region_View; Location : Region_Offset; Maximum_Length : Positive)
    is
-      Core : Layouts.Local_View;
-      Stored_Capacity : constant Interfaces.Unsigned_32 :=
-        Interfaces.Unsigned_32 (Maximum_Length);
+      Core            : Layouts.Local_View;
+      Stored_Capacity : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Maximum_Length);
    begin
       Detach (Item);
       Layouts.Begin_Initialize
-        (Core, Region, Location, Identity,
+        (Core,
+         Region,
+         Location,
+         Identity,
          Required_Storage (Maximum_Length),
          (Capacity     => Stored_Capacity,
           Element_Size => 1,
@@ -86,27 +77,27 @@ package body Flyology.Data_Structures.Byte_Strings is
    is
       Core     : Layouts.Local_View;
       Claim    : Layouts.Initialization_Claim;
-      Capacity : constant Interfaces.Unsigned_32 :=
-        Interfaces.Unsigned_32 (Maximum_Length);
+      Capacity : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Maximum_Length);
    begin
       Detach (Item);
       Layouts.Try_Begin_Initialize
-        (Core, Claim, Region, Location, Identity,
+        (Core,
+         Claim,
+         Region,
+         Location,
+         Identity,
          Required_Storage (Maximum_Length),
-         (Capacity     => Capacity,
-          Element_Size => 1,
-          Alignment    => 1,
-          Auxiliary    => 0,
-          Word_1       => 0,
-          Word_2       => 0),
+         (Capacity => Capacity, Element_Size => 1, Alignment => 1, Auxiliary => 0, Word_1 => 0, Word_2 => 0),
          8);
       case Claim is
-         when Layouts.Claimed_Virgin =>
+         when Layouts.Claimed_Virgin    =>
             Finish_Initialize (Item, Core, Capacity);
             Result := Initialized_New;
-         when Layouts.Existing_Ready =>
+
+         when Layouts.Existing_Ready    =>
             Attach (Item, Region, Location, Maximum_Length);
             Result := Attached_Existing;
+
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
       end case;
@@ -119,13 +110,10 @@ package body Flyology.Data_Structures.Byte_Strings is
    end Create_Or_Attach;
 
    procedure Attach
-     (Item           : out View;
-      Region         : Region_View;
-      Location       : Region_Offset;
-      Maximum_Length : Positive)
+     (Item : out View; Region : Region_View; Location : Region_Offset; Maximum_Length : Positive)
    is
-      Core   : Layouts.Local_View;
-      Header : Layouts.Header_Values;
+      Core     : Layouts.Local_View;
+      Header   : Layouts.Header_Values;
       Expected : constant Byte_Count := Required_Storage (Maximum_Length);
    begin
       Detach (Item);
@@ -154,7 +142,8 @@ package body Flyology.Data_Structures.Byte_Strings is
       Item.Capacity_Value := 0;
    end Detach;
 
-   function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
+   function Is_Attached (Item : View) return Boolean
+   is (Item.Core.Attached);
 
    function Capacity (Item : View) return Natural is
    begin
@@ -168,13 +157,9 @@ package body Flyology.Data_Structures.Byte_Strings is
    procedure Acquire (Item : View) is
       Expected : Interfaces.Unsigned_32 := Unlocked;
    begin
-      if not Item.Core.Attached
-        or else Item.Guard_Address = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached byte-string view";
-      elsif not Atomic.Compare_Exchange_U32
-        (Item.Guard_Address, Expected, Locked)
-      then
+      elsif not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
          Layouts.Require_Ready (Item.Core);
          if Expected = Locked then
             raise Busy_Error with "byte string is busy";
@@ -196,20 +181,19 @@ package body Flyology.Data_Structures.Byte_Strings is
       Wait     : Waiting.Context := Waiting.Start (Timeout);
       Expected : Interfaces.Unsigned_32;
    begin
-      if not Item.Core.Attached
-        or else Item.Guard_Address = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached byte-string view";
       end if;
-      Outer : loop
+      Outer :
+      loop
          Expected := Unlocked;
-         exit Outer when Atomic.Compare_Exchange_U32
-           (Item.Guard_Address, Expected, Locked);
+         exit Outer when Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked);
          --  Once contention is established, observe with acquire loads between
          --  yields and issue another read-modify-write only after the guard
          --  appears free. This avoids repeated read-modify-write traffic
          --  against the owner's cache line.
-         Inner : loop
+         Inner :
+         loop
             Layouts.Require_Ready (Item.Core);
             if Expected /= Locked then
                raise Layout_Error with "byte-string guard is corrupt";
@@ -249,12 +233,10 @@ package body Flyology.Data_Structures.Byte_Strings is
    end Finish_Failure;
    pragma Inline_Always (Finish_Failure);
 
-   function Stored_Length_Unlocked
-     (Item : View) return Interfaces.Unsigned_64 is
+   function Stored_Length_Unlocked (Item : View) return Interfaces.Unsigned_64 is
       Result : Interfaces.Unsigned_64;
    begin
-      Result := Bytes.Read_U64
-        (Item.Length_Address);
+      Result := Bytes.Read_U64 (Item.Length_Address);
       if Result > Interfaces.Unsigned_64 (Item.Capacity_Value) then
          raise Layout_Error with "byte-string length is corrupt";
       end if;
@@ -292,20 +274,17 @@ package body Flyology.Data_Structures.Byte_Strings is
       return Result;
    end Length;
 
-   function Is_Poisoned (Item : View) return Boolean is
-     (Layouts.Is_Poisoned (Item.Core));
+   function Is_Poisoned (Item : View) return Boolean
+   is (Layouts.Is_Poisoned (Item.Core));
 
-   procedure Poison
-     (Region : Region_View; Location : Region_Offset) is
+   procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
       Layouts.Poison_At (Region, Location, Identity, 8);
    end Poison;
 
-   function Data_Address
-     (Item : View; Offset, Extent : Byte_Count) return System.Address is
+   function Data_Address (Item : View; Offset, Extent : Byte_Count) return System.Address is
    begin
-      if Offset > Byte_Count (Item.Capacity_Value)
-        or else Extent > Byte_Count (Item.Capacity_Value) - Offset
+      if Offset > Byte_Count (Item.Capacity_Value) or else Extent > Byte_Count (Item.Capacity_Value) - Offset
       then
          raise Layout_Error with "byte-string payload extent is corrupt";
       end if;
@@ -313,9 +292,7 @@ package body Flyology.Data_Structures.Byte_Strings is
    end Data_Address;
    pragma Inline_Always (Data_Address);
 
-   procedure Assign
-     (Item : in out View; Data : Ada.Streams.Stream_Element_Array)
-   is
+   procedure Assign (Item : in out View; Data : Ada.Streams.Stream_Element_Array) is
       Mutated : Boolean := False;
       Target  : System.Address := System.Null_Address;
    begin
@@ -327,12 +304,10 @@ package body Flyology.Data_Structures.Byte_Strings is
          if Data'Length > 0 then
             Target := Data_Address (Item, 0, Byte_Count (Data'Length));
             Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+            Bytes.Copy (Target, Data'Address, Interfaces.C.size_t (Data'Length));
          end if;
          Mutated := True;
-         Bytes.Write_U64
-           (Item.Length_Address, Interfaces.Unsigned_64 (Data'Length));
+         Bytes.Write_U64 (Item.Length_Address, Interfaces.Unsigned_64 (Data'Length));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -341,11 +316,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       Release (Item);
    end Assign;
 
-   procedure Assign
-     (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout)
-   is
+   procedure Assign (Item : in out View; Data : Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout) is
       Mutated : Boolean := False;
       Target  : System.Address := System.Null_Address;
    begin
@@ -357,12 +328,10 @@ package body Flyology.Data_Structures.Byte_Strings is
          if Data'Length > 0 then
             Target := Data_Address (Item, 0, Byte_Count (Data'Length));
             Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+            Bytes.Copy (Target, Data'Address, Interfaces.C.size_t (Data'Length));
          end if;
          Mutated := True;
-         Bytes.Write_U64
-           (Item.Length_Address, Interfaces.Unsigned_64 (Data'Length));
+         Bytes.Write_U64 (Item.Length_Address, Interfaces.Unsigned_64 (Data'Length));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -371,9 +340,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       Release (Item);
    end Assign;
 
-   procedure Append
-     (Item : in out View; Data : Ada.Streams.Stream_Element_Array)
-   is
+   procedure Append (Item : in out View; Data : Ada.Streams.Stream_Element_Array) is
       Old_Length : Interfaces.Unsigned_64;
       Added      : constant Byte_Count := Byte_Count (Data'Length);
       Mutated    : Boolean := False;
@@ -382,23 +349,16 @@ package body Flyology.Data_Structures.Byte_Strings is
       Acquire (Item);
       begin
          Old_Length := Stored_Length_Unlocked (Item);
-         if Added >
-           Byte_Count (Item.Capacity_Value) - Byte_Count (Old_Length)
-         then
-            raise Constraint_Error with
-              "byte-string append exceeds capacity";
+         if Added > Byte_Count (Item.Capacity_Value) - Byte_Count (Old_Length) then
+            raise Constraint_Error with "byte-string append exceeds capacity";
          end if;
          if Data'Length > 0 then
-            Target := Data_Address
-              (Item, Byte_Count (Old_Length), Added);
+            Target := Data_Address (Item, Byte_Count (Old_Length), Added);
             Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+            Bytes.Copy (Target, Data'Address, Interfaces.C.size_t (Data'Length));
          end if;
          Mutated := True;
-         Bytes.Write_U64
-           (Item.Length_Address,
-            Old_Length + Interfaces.Unsigned_64 (Data'Length));
+         Bytes.Write_U64 (Item.Length_Address, Old_Length + Interfaces.Unsigned_64 (Data'Length));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -407,11 +367,7 @@ package body Flyology.Data_Structures.Byte_Strings is
       Release (Item);
    end Append;
 
-   procedure Append
-     (Item    : in out View;
-      Data    : Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout)
-   is
+   procedure Append (Item : in out View; Data : Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout) is
       Old_Length : Interfaces.Unsigned_64;
       Added      : constant Byte_Count := Byte_Count (Data'Length);
       Mutated    : Boolean := False;
@@ -420,23 +376,16 @@ package body Flyology.Data_Structures.Byte_Strings is
       Acquire (Item, Timeout);
       begin
          Old_Length := Stored_Length_Unlocked (Item);
-         if Added >
-           Byte_Count (Item.Capacity_Value) - Byte_Count (Old_Length)
-         then
-            raise Constraint_Error with
-              "byte-string append exceeds capacity";
+         if Added > Byte_Count (Item.Capacity_Value) - Byte_Count (Old_Length) then
+            raise Constraint_Error with "byte-string append exceeds capacity";
          end if;
          if Data'Length > 0 then
-            Target := Data_Address
-              (Item, Byte_Count (Old_Length), Added);
+            Target := Data_Address (Item, Byte_Count (Old_Length), Added);
             Mutated := True;
-            Bytes.Copy
-              (Target, Data'Address, Interfaces.C.size_t (Data'Length));
+            Bytes.Copy (Target, Data'Address, Interfaces.C.size_t (Data'Length));
          end if;
          Mutated := True;
-         Bytes.Write_U64
-           (Item.Length_Address,
-            Old_Length + Interfaces.Unsigned_64 (Data'Length));
+         Bytes.Write_U64 (Item.Length_Address, Old_Length + Interfaces.Unsigned_64 (Data'Length));
       exception
          when others =>
             Finish_Failure (Item, Mutated);
@@ -445,22 +394,18 @@ package body Flyology.Data_Structures.Byte_Strings is
       Release (Item);
    end Append;
 
-   procedure Read
-     (Item : View; Data : out Ada.Streams.Stream_Element_Array)
-   is
+   procedure Read (Item : View; Data : out Ada.Streams.Stream_Element_Array) is
       Current : Interfaces.Unsigned_64;
    begin
       Acquire (Item);
       begin
          Current := Stored_Length_Unlocked (Item);
          if Byte_Count (Data'Length) /= Byte_Count (Current) then
-            raise Constraint_Error with
-              "byte-string destination length differs";
+            raise Constraint_Error with "byte-string destination length differs";
          end if;
          if Data'Length > 0 then
             Bytes.Copy
-              (Data'Address, Data_Address (Item, 0, Byte_Count (Current)),
-               Interfaces.C.size_t (Data'Length));
+              (Data'Address, Data_Address (Item, 0, Byte_Count (Current)), Interfaces.C.size_t (Data'Length));
          end if;
       exception
          when others =>
@@ -470,24 +415,18 @@ package body Flyology.Data_Structures.Byte_Strings is
       Release (Item);
    end Read;
 
-   procedure Read
-     (Item    : View;
-      Data    : out Ada.Streams.Stream_Element_Array;
-      Timeout : Wait_Timeout)
-   is
+   procedure Read (Item : View; Data : out Ada.Streams.Stream_Element_Array; Timeout : Wait_Timeout) is
       Current : Interfaces.Unsigned_64;
    begin
       Acquire (Item, Timeout);
       begin
          Current := Stored_Length_Unlocked (Item);
          if Byte_Count (Data'Length) /= Byte_Count (Current) then
-            raise Constraint_Error with
-              "byte-string destination length differs";
+            raise Constraint_Error with "byte-string destination length differs";
          end if;
          if Data'Length > 0 then
             Bytes.Copy
-              (Data'Address, Data_Address (Item, 0, Byte_Count (Current)),
-               Interfaces.C.size_t (Data'Length));
+              (Data'Address, Data_Address (Item, 0, Byte_Count (Current)), Interfaces.C.size_t (Data'Length));
          end if;
       exception
          when others =>

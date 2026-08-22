@@ -6,18 +6,14 @@ package body Flyology.Supervision.Service_Slots is
       procedure Next_Token (Value : out Publication_Token) is
       begin
          if Last_Token = Publication_Token'Last then
-            raise Program_Error with
-              "service publication identity space exhausted";
+            raise Program_Error with "service publication identity space exhausted";
          end if;
          Last_Token := Last_Token + 1;
          Value := Last_Token;
       end Next_Token;
 
       procedure Reserve
-        (Kind     : Service_Kind;
-         Value    : Child_Handle;
-         Token    : Publication_Token;
-         Accepted : out Boolean) is
+        (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token; Accepted : out Boolean) is
       begin
          Accepted := not Claimed (Kind);
          if Accepted then
@@ -27,30 +23,17 @@ package body Flyology.Supervision.Service_Slots is
          end if;
       end Reserve;
 
-      procedure Activate
-        (Kind  : Service_Kind;
-         Value : Child_Handle;
-         Token : Publication_Token) is
+      procedure Activate (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token) is
       begin
-         if not Claimed (Kind)
-           or else Handles (Kind) /= Value
-           or else Tokens (Kind) /= Token
-         then
-            raise Program_Error with
-              "service publication reservation was lost";
+         if not Claimed (Kind) or else Handles (Kind) /= Value or else Tokens (Kind) /= Token then
+            raise Program_Error with "service publication reservation was lost";
          end if;
          Published (Kind) := True;
       end Activate;
 
-      procedure Revoke
-        (Kind  : Service_Kind;
-         Value : Child_Handle;
-         Token : Publication_Token) is
+      procedure Revoke (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token) is
       begin
-         if Claimed (Kind)
-           and then Handles (Kind) = Value
-           and then Tokens (Kind) = Token
-         then
+         if Claimed (Kind) and then Handles (Kind) = Value and then Tokens (Kind) = Token then
             Published (Kind) := False;
             Claimed (Kind) := False;
             Tokens (Kind) := 0;
@@ -60,31 +43,25 @@ package body Flyology.Supervision.Service_Slots is
       function Acquire (Kind : Service_Kind) return Service_Observation is
       begin
          if Published (Kind) then
-            return
-              (Status => Available,
-               Lease  => (Kind => Kind, Value => Handles (Kind)));
+            return (Status => Available, Lease => (Kind => Kind, Value => Handles (Kind)));
          end if;
          return (Status => Unavailable);
       end Acquire;
 
-      function Current (Lease : Service_Lease) return Boolean is
-        (Published (Lease.Kind)
-         and then Handles (Lease.Kind) = Lease.Value);
+      function Current (Lease : Service_Lease) return Boolean
+      is (Published (Lease.Kind) and then Handles (Lease.Kind) = Lease.Value);
    end Directory_State;
 
    procedure Publish_Ready
-     (Item    : in out Publication;
-      Service : Service_Kind;
-      Control : in out Generation_Control)
+     (Item : in out Publication; Service : Service_Kind; Control : in out Generation_Control)
    is
       Accepted : Boolean;
-      Value : constant Child_Handle := Handle (Control);
+      Value    : constant Child_Handle := Handle (Control);
    begin
       if Item.Owned then
          raise Program_Error with "service publication is already active";
       elsif Child (Value) /= Logical_Id (Service) then
-         raise Program_Error with
-           "service publication handle names another child";
+         raise Program_Error with "service publication handle names another child";
       end if;
 
       Item.From.State.Next_Token (Item.Token);
@@ -116,25 +93,23 @@ package body Flyology.Supervision.Service_Slots is
       end if;
    end Withdraw;
 
-   function Active (Item : Publication) return Boolean is (Item.Owned);
+   function Active (Item : Publication) return Boolean
+   is (Item.Owned);
 
-   function Acquire
-     (From    : Directory;
-      Service : Service_Kind) return Service_Observation is
-     (From.State.Acquire (Service));
+   function Acquire (From : Directory; Service : Service_Kind) return Service_Observation
+   is (From.State.Acquire (Service));
 
-   function Current
-     (From  : Directory;
-      Lease : Service_Lease) return Boolean is
-     (From.State.Current (Lease));
+   function Current (From : Directory; Lease : Service_Lease) return Boolean
+   is (From.State.Current (Lease));
 
-   function Service (Lease : Service_Lease) return Service_Kind is
-     (Lease.Kind);
+   function Service (Lease : Service_Lease) return Service_Kind
+   is (Lease.Kind);
 
-   function Handle (Lease : Service_Lease) return Child_Handle is
-     (Lease.Value);
+   function Handle (Lease : Service_Lease) return Child_Handle
+   is (Lease.Value);
 
-   overriding procedure Finalize (Item : in out Publication) is
+   overriding
+   procedure Finalize (Item : in out Publication) is
    begin
       Withdraw (Item);
    exception
@@ -146,8 +121,7 @@ begin
    for Left in Service_Kind loop
       for Right in Service_Kind loop
          if Left /= Right and then Logical_Id (Left) = Logical_Id (Right) then
-            raise Configuration_Error with
-              "service logical ids must be unique";
+            raise Configuration_Error with "service logical ids must be unique";
          end if;
       end loop;
    end loop;

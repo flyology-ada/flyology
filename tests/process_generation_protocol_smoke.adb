@@ -17,34 +17,29 @@ procedure Process_Generation_Protocol_Smoke is
       Sequence  => 13,
       Length    => 3,
       Payload   => (0 => 16#AA#, 1 => 16#BB#, 2 => 16#CC#, others => 0));
-   Wire : Protocol.Octet_Array
-     (0 .. Protocol.Encoded_Length (Original) - 1);
-   Copy   : Protocol.Frame;
-   Status : Protocol.Decode_Status;
-   Length : Protocol.Payload_Length;
+   Wire     : Protocol.Octet_Array (0 .. Protocol.Encoded_Length (Original) - 1);
+   Copy     : Protocol.Frame;
+   Status   : Protocol.Decode_Status;
+   Length   : Protocol.Payload_Length;
 begin
    Protocol.Encode (Original, Wire);
-   Protocol.Inspect_Header
-     (Wire (Wire'First .. Wire'First + Protocol.Header_Length - 1),
-      Length, Status);
+   Protocol.Inspect_Header (Wire (Wire'First .. Wire'First + Protocol.Header_Length - 1), Length, Status);
    pragma Assert (Status = Protocol.Decoded and then Length = 3);
    Protocol.Decode (Wire, Copy, Status);
    pragma Assert (Status = Protocol.Decoded);
    pragma Assert (Copy.Kind = Original.Kind);
-   pragma Assert
-     (Generations.Same_Upgrade (Copy.Authority, Original.Authority));
+   pragma Assert (Generations.Same_Upgrade (Copy.Authority, Original.Authority));
    pragma Assert (Copy.Sequence = Original.Sequence);
    pragma Assert (Copy.Length = 3);
-   pragma Assert
-     (Copy.Payload (0) = 16#AA# and then
-      Copy.Payload (1) = 16#BB# and then
-      Copy.Payload (2) = 16#CC# and then
-      Copy.Payload (3) = 0);
+   pragma
+     Assert
+       (Copy.Payload (0) = 16#AA#
+          and then Copy.Payload (1) = 16#BB#
+          and then Copy.Payload (2) = 16#CC#
+          and then Copy.Payload (3) = 0);
 
    declare
-      Short : constant Protocol.Octet_Array
-        (0 .. Protocol.Header_Length - 2) :=
-        (others => 0);
+      Short : constant Protocol.Octet_Array (0 .. Protocol.Header_Length - 2) := (others => 0);
    begin
       Protocol.Inspect_Header (Short, Length, Status);
       pragma Assert (Status = Protocol.Wrong_Length and then Length = 0);

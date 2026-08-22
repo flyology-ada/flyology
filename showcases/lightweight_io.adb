@@ -18,13 +18,11 @@ procedure Lightweight_IO is
    File_Path    : constant String := "/tmp/flyology-lightweight-io-showcase.dat";
 
    function Bytes (Text : String) return Stream_Element_Array is
-      Result : Stream_Element_Array
-        (1 .. Stream_Element_Offset (Text'Length));
+      Result : Stream_Element_Array (1 .. Stream_Element_Offset (Text'Length));
    begin
       for Index in Text'Range loop
-         Result
-           (Stream_Element_Offset (Index - Text'First + 1)) :=
-             Stream_Element (Character'Pos (Text (Index)));
+         Result (Stream_Element_Offset (Index - Text'First + 1)) :=
+           Stream_Element (Character'Pos (Text (Index)));
       end loop;
       return Result;
    end Bytes;
@@ -33,8 +31,7 @@ procedure Lightweight_IO is
       Result : String (1 .. Integer (Data'Length));
    begin
       for Index in Data'Range loop
-         Result (Integer (Index - Data'First + 1)) :=
-           Character'Val (Data (Index));
+         Result (Integer (Index - Data'First + 1)) := Character'Val (Data (Index));
       end loop;
       return Result;
    end Text;
@@ -47,9 +44,9 @@ procedure Lightweight_IO is
       entry Wait;
       function Passed return Boolean;
    private
-      Server_OK : Boolean := False;
-      Client_OK : Boolean := False;
-      File_OK   : Boolean := False;
+      Server_OK       : Boolean := False;
+      Client_OK       : Boolean := False;
+      File_OK         : Boolean := False;
       Server_Reported : Boolean := False;
       Client_Reported : Boolean := False;
       File_Reported   : Boolean := False;
@@ -80,18 +77,13 @@ procedure Lightweight_IO is
          Ticks := Ticks + 1;
       end Tick;
 
-      entry Wait
-        when Server_Reported
-          and Client_Reported
-          and File_Reported
-          and Ticks = 5
-      is
+      entry Wait when Server_Reported and Client_Reported and File_Reported and Ticks = 5 is
       begin
          null;
       end Wait;
 
-      function Passed return Boolean is
-        (Server_OK and Client_OK and File_OK and Ticks = 5);
+      function Passed return Boolean
+      is (Server_OK and Client_OK and File_OK and Ticks = 5);
    end Results;
 
    Server         : Flyology.IO.Sockets.Socket_Type;
@@ -104,20 +96,17 @@ begin
 
    Flyology.IO.Sockets.Create_Socket (Server);
    Flyology.IO.Sockets.Set_Socket_Option
-     (Server,
-      (Name => Flyology.IO.Sockets.Reuse_Address, Enabled => True));
+     (Server, (Name => Flyology.IO.Sockets.Reuse_Address, Enabled => True));
    Flyology.IO.Sockets.Bind_Socket
      (Server,
-      Flyology.IO.Sockets.Network_Endpoint
-        (Flyology.IO.Sockets.Loopback_IPv4,
-         Flyology.IO.Sockets.Any_Port));
+      Flyology.IO.Sockets.Network_Endpoint (Flyology.IO.Sockets.Loopback_IPv4, Flyology.IO.Sockets.Any_Port));
    Flyology.IO.Sockets.Listen_Socket (Server);
    Server_Address := Flyology.IO.Sockets.Get_Socket_Name (Server);
    Put_Line
      ("listening on descriptor"
-      & Flyology.IO.Descriptor'Image
-          (Flyology.IO.Sockets.Native_Descriptor (Server))
-      & " at " & Flyology.IO.Sockets.Image (Server_Address));
+      & Flyology.IO.Descriptor'Image (Flyology.IO.Sockets.Native_Descriptor (Server))
+      & " at "
+      & Flyology.IO.Sockets.Image (Server_Address));
 
    declare
       task Socket_Server is
@@ -149,34 +138,29 @@ begin
       begin
          Put_Line ("lightweight socket server waiting for connection");
          Stage := 1;
-         Flyology.IO.Sockets.Accept_Connection
-           (Server, Peer, Address, Timeout => 2.0);
+         Flyology.IO.Sockets.Accept_Connection (Server, Peer, Address, Timeout => 2.0);
          Stage := 2;
-         Flyology.IO.Sockets.Receive_Exactly
-           (Peer, Request, Timeout => 2.0);
+         Flyology.IO.Sockets.Receive_Exactly (Peer, Request, Timeout => 2.0);
          Stage := 3;
-         Flyology.IO.Sockets.Send_All
-           (Peer, Bytes (Reply_Text), Timeout => 2.0);
+         Flyology.IO.Sockets.Send_All (Peer, Bytes (Reply_Text), Timeout => 2.0);
          Results.Server_Done (Text (Request) = Request_Text);
-         Put_Line
-           ("lightweight socket server resumed on thread="
-            & Showcase_Support.Thread_Image);
+         Put_Line ("lightweight socket server resumed on thread=" & Showcase_Support.Thread_Image);
          Flyology.IO.Sockets.Close_Socket (Peer);
       exception
          when Occurrence : others =>
             Put_Line
-              ("socket server failed at stage" & Stage'Image & ": "
+              ("socket server failed at stage"
+               & Stage'Image
+               & ": "
                & Ada.Exceptions.Exception_Information (Occurrence));
             begin
                Put_Line
                  ("listening descriptor remains "
-                  & Flyology.IO.Sockets.Image
-                      (Flyology.IO.Sockets.Get_Socket_Name (Server)));
+                  & Flyology.IO.Sockets.Image (Flyology.IO.Sockets.Get_Socket_Name (Server)));
             exception
                when Nested : others =>
                   Put_Line
-                    ("listening descriptor check failed: "
-                     & Ada.Exceptions.Exception_Information (Nested));
+                    ("listening descriptor check failed: " & Ada.Exceptions.Exception_Information (Nested));
             end;
             Results.Server_Done (False);
       end Socket_Server;
@@ -191,24 +175,16 @@ begin
          Flyology.IO.Sockets.Create_Socket (Socket);
          Put_Line
            ("native socket client connecting with descriptor"
-            & Flyology.IO.Descriptor'Image
-                (Flyology.IO.Sockets.Native_Descriptor (Socket)));
-         Flyology.IO.Sockets.Connect
-           (Socket, Server_Address, Timeout => 2.0);
-         Flyology.IO.Sockets.Send_All
-           (Socket, Bytes (Request_Text), Timeout => 2.0);
-         Flyology.IO.Sockets.Receive_Exactly
-           (Socket, Reply, Timeout => 2.0);
+            & Flyology.IO.Descriptor'Image (Flyology.IO.Sockets.Native_Descriptor (Socket)));
+         Flyology.IO.Sockets.Connect (Socket, Server_Address, Timeout => 2.0);
+         Flyology.IO.Sockets.Send_All (Socket, Bytes (Request_Text), Timeout => 2.0);
+         Flyology.IO.Sockets.Receive_Exactly (Socket, Reply, Timeout => 2.0);
          Results.Client_Done (Text (Reply) = Reply_Text);
-         Put_Line
-           ("native socket client completed on thread="
-            & Showcase_Support.Thread_Image);
+         Put_Line ("native socket client completed on thread=" & Showcase_Support.Thread_Image);
          Flyology.IO.Sockets.Close_Socket (Socket);
       exception
          when Occurrence : others =>
-            Put_Line
-              ("socket client failed: "
-               & Ada.Exceptions.Exception_Information (Occurrence));
+            Put_Line ("socket client failed: " & Ada.Exceptions.Exception_Information (Occurrence));
             Results.Client_Done (False);
       end Native_Client;
 
@@ -217,20 +193,15 @@ begin
          for Tick in 1 .. 5 loop
             Flyology.IO.Timers.Sleep_For (0.010);
             Results.Tick;
-            Put_Line
-              ("lightweight timer tick" & Tick'Image & " on thread="
-               & Showcase_Support.Thread_Image);
+            Put_Line ("lightweight timer tick" & Tick'Image & " on thread=" & Showcase_Support.Thread_Image);
          end loop;
       exception
          when Occurrence : others =>
-            Put_Line
-              ("ticker failed: "
-               & Ada.Exceptions.Exception_Information (Occurrence));
+            Put_Line ("ticker failed: " & Ada.Exceptions.Exception_Information (Occurrence));
       end Ticker;
 
       task body Native_File_Reader is
-         File : Flyology.IO.Files.File_Descriptor :=
-           Flyology.IO.Files.Invalid_File;
+         File : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
          Data : Stream_Element_Array := Bytes (File_Text);
          Last : Stream_Element_Offset;
       begin
@@ -241,45 +212,32 @@ begin
          Put_Line ("native file reader opened file");
          Flyology.IO.Files.Read_At (File, 0, Data, Last);
          Flyology.IO.Files.Close (File);
-         Results.File_Done
-           (Last = Data'Last and then Text (Data) = File_Text);
-         Put_Line
-           ("native file reader completed on thread="
-            & Showcase_Support.Thread_Image);
+         Results.File_Done (Last = Data'Last and then Text (Data) = File_Text);
+         Put_Line ("native file reader completed on thread=" & Showcase_Support.Thread_Image);
       exception
          when Occurrence : others =>
-            Put_Line
-              ("file reader failed: "
-               & Ada.Exceptions.Exception_Information (Occurrence));
+            Put_Line ("file reader failed: " & Ada.Exceptions.Exception_Information (Occurrence));
             Results.File_Done (False);
       end Native_File_Reader;
 
       task body File_Writer is
-         File : Flyology.IO.Files.File_Descriptor :=
-           Flyology.IO.Files.Invalid_File;
+         File : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
          Data : constant Stream_Element_Array := Bytes (File_Text);
          Last : Stream_Element_Offset;
       begin
          File :=
            Flyology.IO.Files.Open
-             (File_Path,
-              Mode     => Flyology.IO.Files.Write_Only,
-              Create   => True,
-              Truncate => True);
+             (File_Path, Mode => Flyology.IO.Files.Write_Only, Create => True, Truncate => True);
          Flyology.IO.Files.Write_At (File, 0, Data, Last);
          Flyology.IO.Files.Close (File);
          if Last /= Data'Last then
             raise Program_Error with "short showcase file write";
          end if;
-         Put_Line
-           ("lightweight file writer resumed on thread="
-            & Showcase_Support.Thread_Image);
+         Put_Line ("lightweight file writer resumed on thread=" & Showcase_Support.Thread_Image);
          Native_File_Reader.Start;
       exception
          when Occurrence : others =>
-            Put_Line
-              ("file writer failed: "
-               & Ada.Exceptions.Exception_Information (Occurrence));
+            Put_Line ("file writer failed: " & Ada.Exceptions.Exception_Information (Occurrence));
             Results.File_Done (False);
       end File_Writer;
    begin
@@ -292,6 +250,5 @@ begin
    if not Results.Passed then
       raise Program_Error with "lightweight I/O showcase failed";
    end if;
-   Put_Line
-     ("timers, files, and sockets passed without hidden I/O workers");
+   Put_Line ("timers, files, and sockets passed without hidden I/O workers");
 end Lightweight_IO;

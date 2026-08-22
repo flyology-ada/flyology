@@ -14,10 +14,10 @@ procedure Process_Bootstrap_Smoke is
 
    use type Ada.Streams.Stream_Element_Array;
 
-   Fixture : constant String := Ada.Directories.Compose
-     (Ada.Directories.Containing_Directory
-        (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
-      "subprocess_fixture");
+   Fixture : constant String :=
+     Ada.Directories.Compose
+       (Ada.Directories.Containing_Directory (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
+        "subprocess_fixture");
 
    Command      : Subprocesses.Command := Subprocesses.To_Command (Fixture);
    Child        : Subprocesses.Process;
@@ -32,11 +32,8 @@ procedure Process_Bootstrap_Smoke is
 begin
    Subprocesses.Append_Argument (Command, "bootstrap");
    Sockets.Create_Socket (Listener);
-   Sockets.Set_Socket_Option
-     (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
-   Sockets.Bind_Socket
-     (Listener,
-      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+   Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+   Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
    Sockets.Listen_Socket (Listener, Length => 4);
    Address := Sockets.Get_Socket_Name (Listener);
 

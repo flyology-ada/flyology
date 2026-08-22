@@ -30,23 +30,18 @@ procedure Dormant_Stack_Pressure is
    pragma Import (C, Current_RSS, "flyology_current_rss_bytes");
 
    function Apply_Memory_Pressure (Bytes : C.long_long) return C.int;
-   pragma Import
-     (C, Apply_Memory_Pressure, "flyology_apply_memory_pressure");
+   pragma Import (C, Apply_Memory_Pressure, "flyology_apply_memory_pressure");
 
-   function MiB (Bytes : C.long_long) return Long_Float is
-     (Long_Float (Bytes) / (1_024.0 * 1_024.0));
+   function MiB (Bytes : C.long_long) return Long_Float
+   is (Long_Float (Bytes) / (1_024.0 * 1_024.0));
 
    procedure Usage is
    begin
-      Put_Line ("usage: dormant_stack_pressure prompt|reclaimable|pageout"
-                & " TASKS PRESSURE_MIB");
+      Put_Line ("usage: dormant_stack_pressure prompt|reclaimable|pageout" & " TASKS PRESSURE_MIB");
    end Usage;
 
    procedure Run
-     (Selected_Policy : Dormancy.Policy;
-      Policy_Name     : String;
-      Task_Count      : Positive;
-      Pressure_MiB    : Positive)
+     (Selected_Policy : Dormancy.Policy; Policy_Name : String; Task_Count : Positive; Pressure_MiB : Positive)
    is
       protected Progress is
          procedure Ready;
@@ -55,9 +50,7 @@ procedure Dormant_Stack_Pressure is
          procedure Start_Timer_Waits (Target : Time);
          procedure Parked;
          entry Wait_Until_Parked;
-         procedure Finished
-           (Lateness : Duration;
-            Checksum : Interfaces.Unsigned_64);
+         procedure Finished (Lateness : Duration; Checksum : Interfaces.Unsigned_64);
          entry Wait_Until_Finished;
          function Maximum_Lateness return Duration;
          function Combined_Checksum return Interfaces.Unsigned_64;
@@ -103,10 +96,7 @@ procedure Dormant_Stack_Pressure is
             null;
          end Wait_Until_Parked;
 
-         procedure Finished
-           (Lateness : Duration;
-            Checksum : Interfaces.Unsigned_64)
-         is
+         procedure Finished (Lateness : Duration; Checksum : Interfaces.Unsigned_64) is
          begin
             Finished_Count := Finished_Count + 1;
             Maximum_Delay := Duration'Max (Maximum_Delay, Lateness);
@@ -118,10 +108,11 @@ procedure Dormant_Stack_Pressure is
             null;
          end Wait_Until_Finished;
 
-         function Maximum_Lateness return Duration is (Maximum_Delay);
+         function Maximum_Lateness return Duration
+         is (Maximum_Delay);
 
-         function Combined_Checksum return Interfaces.Unsigned_64 is
-           (Total_Checksum);
+         function Combined_Checksum return Interfaces.Unsigned_64
+         is (Total_Checksum);
       end Progress;
 
       task type Worker (Index : Positive) with CPU => 1 is
@@ -130,33 +121,24 @@ procedure Dormant_Stack_Pressure is
       end Worker;
 
       task body Worker is
-         type Payload_Array is
-           array (Positive range 1 .. Payload_Bytes) of Interfaces.Unsigned_8;
-         Payload  : Payload_Array with Volatile;
+         type Payload_Array is array (Positive range 1 .. Payload_Bytes) of Interfaces.Unsigned_8;
+         Payload  : Payload_Array
+         with Volatile;
          Target   : Time;
          Checksum : Interfaces.Unsigned_64 := 0;
       begin
-         for Offset in
-           1 .. (Payload_Bytes + Page_Bytes - 1) / Page_Bytes
-         loop
-            Payload ((Offset - 1) * Page_Bytes + 1) :=
-              Interfaces.Unsigned_8 ((Index + Offset) mod 251 + 1);
+         for Offset in 1 .. (Payload_Bytes + Page_Bytes - 1) / Page_Bytes loop
+            Payload ((Offset - 1) * Page_Bytes + 1) := Interfaces.Unsigned_8 ((Index + Offset) mod 251 + 1);
          end loop;
          Progress.Ready;
          Progress.Await_Wake_Time (Target);
          Dormancy.Set_Policy (Selected_Policy, Minimum_Wait => 0.0);
          Progress.Parked;
          delay until Target;
-         for Offset in
-           1 .. (Payload_Bytes + Page_Bytes - 1) / Page_Bytes
-         loop
-            Checksum := Checksum
-              + Interfaces.Unsigned_64
-                  (Payload ((Offset - 1) * Page_Bytes + 1));
+         for Offset in 1 .. (Payload_Bytes + Page_Bytes - 1) / Page_Bytes loop
+            Checksum := Checksum + Interfaces.Unsigned_64 (Payload ((Offset - 1) * Page_Bytes + 1));
          end loop;
-         Progress.Finished
-           (Lateness => To_Duration (Clock - Target),
-            Checksum => Checksum);
+         Progress.Finished (Lateness => To_Duration (Clock - Target), Checksum => Checksum);
       end Worker;
 
       type Worker_Access is access Worker;
@@ -167,8 +149,7 @@ procedure Dormant_Stack_Pressure is
       After_RSS        : C.long_long;
       Sample           : Observation.Group_Snapshot;
       Observed_Waiters : Boolean := False;
-      Pressure_Bytes   : constant C.long_long :=
-        C.long_long (Pressure_MiB) * 1_024 * 1_024;
+      Pressure_Bytes   : constant C.long_long := C.long_long (Pressure_MiB) * 1_024 * 1_024;
    begin
       for Index in Workers'Range loop
          Workers (Index) := new Worker (Index);
@@ -178,23 +159,16 @@ procedure Dormant_Stack_Pressure is
       Progress.Wait_Until_Parked;
 
       for Attempt in 1 .. 2_000 loop
-         Observed_Waiters := Observation.Snapshot (1, Sample)
-           and then Sample.Dormancy_Candidates =
-             Observation.Counter (Task_Count)
-           and then
-             (Selected_Policy = Dormancy.Prompt
-              or else
-                (Selected_Policy = Dormancy.Reclaimable
-                 and then
-                   (not Dormancy.Cold_Advice_Supported
-                    or else Sample.Cold_Stacks =
-                      Observation.Counter (Task_Count)))
-              or else
-                (Selected_Policy = Dormancy.Page_Out
-                 and then
-                   (not Dormancy.Pageout_Advice_Supported
-                    or else Sample.Cold_Stacks =
-                      Observation.Counter (Task_Count))));
+         Observed_Waiters :=
+           Observation.Snapshot (1, Sample)
+           and then Sample.Dormancy_Candidates = Observation.Counter (Task_Count)
+           and then (Selected_Policy = Dormancy.Prompt
+                     or else (Selected_Policy = Dormancy.Reclaimable
+                              and then (not Dormancy.Cold_Advice_Supported
+                                        or else Sample.Cold_Stacks = Observation.Counter (Task_Count)))
+                     or else (Selected_Policy = Dormancy.Page_Out
+                              and then (not Dormancy.Pageout_Advice_Supported
+                                        or else Sample.Cold_Stacks = Observation.Counter (Task_Count))));
          exit when Observed_Waiters;
          delay 0.001;
       end loop;
@@ -213,19 +187,29 @@ procedure Dormant_Stack_Pressure is
       end if;
 
       Put_Line
-        ("policy=" & Policy_Name
+        ("policy="
+         & Policy_Name
          & " cold_supported="
          & Boolean'Image (Dormancy.Cold_Advice_Supported)
          & " pageout_supported="
          & Boolean'Image (Dormancy.Pageout_Advice_Supported)
-         & " tasks=" & Task_Count'Image
-         & " payload=" & Natural'Image (Payload_Bytes / 1_024) & " KiB"
-         & " pressure=" & Pressure_MiB'Image & " MiB");
+         & " tasks="
+         & Task_Count'Image
+         & " payload="
+         & Natural'Image (Payload_Bytes / 1_024)
+         & " KiB"
+         & " pressure="
+         & Pressure_MiB'Image
+         & " MiB");
       Put_Line
-         ("  timer_wait: candidates=" & Sample.Dormancy_Candidates'Image
-         & " cold=" & Sample.Cold_Stacks'Image
-         & " cold_accepted=" & Sample.Cold_Advice_Accepted'Image
-         & " pageout_accepted=" & Sample.Pageout_Advice_Accepted'Image);
+        ("  timer_wait: candidates="
+         & Sample.Dormancy_Candidates'Image
+         & " cold="
+         & Sample.Cold_Stacks'Image
+         & " cold_accepted="
+         & Sample.Cold_Advice_Accepted'Image
+         & " pageout_accepted="
+         & Sample.Pageout_Advice_Accepted'Image);
       Put_Line
         ("  rss: before_pressure="
          & Showcase_Support.Fixed_Image (MiB (Before_RSS))
@@ -236,9 +220,9 @@ procedure Dormant_Stack_Pressure is
          & " MiB");
       Put_Line
         ("  wake: maximum_lateness="
-         & Showcase_Support.Fixed_Image
-             (Long_Float (Progress.Maximum_Lateness) * 1_000.0, 3)
-         & " ms checksum=" & Progress.Combined_Checksum'Image);
+         & Showcase_Support.Fixed_Image (Long_Float (Progress.Maximum_Lateness) * 1_000.0, 3)
+         & " ms checksum="
+         & Progress.Combined_Checksum'Image);
    end Run;
 
 begin
@@ -250,10 +234,8 @@ begin
 
    declare
       Policy_Name  : constant String := Ada.Command_Line.Argument (1);
-      Task_Count   : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (2));
-      Pressure_MiB : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (3));
+      Task_Count   : constant Positive := Positive'Value (Ada.Command_Line.Argument (2));
+      Pressure_MiB : constant Positive := Positive'Value (Ada.Command_Line.Argument (3));
    begin
       if Policy_Name = "prompt" then
          Run (Dormancy.Prompt, Policy_Name, Task_Count, Pressure_MiB);

@@ -6,17 +6,18 @@ package body System.Flyology.Faults is
       return False;
    end Fail;
 
-   function Pause_Final_Reaper return Boolean is (True);
+   function Pause_Final_Reaper return Boolean
+   is (True);
 
    procedure Release_Final_Reaper is null;
 
-   function Pause_Create_Registration return Boolean is (True);
+   function Pause_Create_Registration return Boolean
+   is (True);
 
-   procedure Note_Automatic_Placement_Claim
-     (Group : Interfaces.C.int)
-   is null;
+   procedure Note_Automatic_Placement_Claim (Group : Interfaces.C.int) is null;
 
-   function Pause_Automatic_Placement return Boolean is (True);
+   function Pause_Automatic_Placement return Boolean
+   is (True);
 
    procedure Note_Create_Registering is null;
 

@@ -4,8 +4,7 @@
 --  Example: `Disposition := Classify (Timeout);`
 
 private package Flyology.File_Timeout_Policy
-  with Preelaborate,
-       SPARK_Mode
+  with Preelaborate, SPARK_Mode
 is
 
    --  How a timed positional read dispatches. Read_Immediately runs one
@@ -18,10 +17,11 @@ is
    --  a negative Timeout is the same untimed read without a deadline. Only a
    --  positive Timeout arms one.
    function Classify (Timeout : Duration) return Read_Disposition
-   with Inline,
-        Contract_Cases =>
-          (Timeout > 0.0  => Classify'Result = Read_Within_Deadline,
-           Timeout = 0.0  => Classify'Result = Read_Immediately,
-           Timeout < 0.0  => Classify'Result = Read_Immediately);
+   with
+     Inline,
+     Contract_Cases =>
+       (Timeout > 0.0 => Classify'Result = Read_Within_Deadline,
+        Timeout = 0.0 => Classify'Result = Read_Immediately,
+        Timeout < 0.0 => Classify'Result = Read_Immediately);
 
 end Flyology.File_Timeout_Policy;

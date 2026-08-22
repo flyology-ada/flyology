@@ -12,24 +12,16 @@ procedure Wake_Source_State_Model is
    use type C.int;
 
    function Open_FD_Count return C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
 
    function FD_Is_Open (FD : C.int) return C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_test_fd_is_open";
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_open";
 
    function FD_Is_Nonblocking (FD : C.int) return C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_test_fd_is_nonblocking";
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_nonblocking";
 
    function FD_Is_Close_On_Exec (FD : C.int) return C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_test_fd_is_close_on_exec";
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_close_on_exec";
 
    procedure Require (Condition : Boolean; Message : String) is
    begin
@@ -38,10 +30,7 @@ procedure Wake_Source_State_Model is
       end if;
    end Require;
 
-   procedure Expect_Consume_Error
-     (Item    : in out Wake_Sources.Source;
-      Context : String)
-   is
+   procedure Expect_Consume_Error (Item : in out Wake_Sources.Source; Context : String) is
       Raised : Boolean := False;
    begin
       begin
@@ -53,41 +42,29 @@ procedure Wake_Source_State_Model is
       Require (Raised, Context & " did not reject Consume");
    end Expect_Consume_Error;
 
-   procedure Check_Descriptor
-     (FD      : Flyology.IO.Descriptor;
-      Context : String)
-   is
+   procedure Check_Descriptor (FD : Flyology.IO.Descriptor; Context : String) is
    begin
       Require (FD >= 0, Context & " returned a negative descriptor");
       Require (FD_Is_Open (FD) = 1, Context & " descriptor is not open");
-      Require
-        (FD_Is_Nonblocking (FD) = 1,
-         Context & " descriptor is not nonblocking");
-      Require
-        (FD_Is_Close_On_Exec (FD) = 1,
-         Context & " descriptor is not close-on-exec");
+      Require (FD_Is_Nonblocking (FD) = 1, Context & " descriptor is not nonblocking");
+      Require (FD_Is_Close_On_Exec (FD) = 1, Context & " descriptor is not close-on-exec");
    end Check_Descriptor;
 
    procedure Exercise_Lifecycle is
-      Item       : Wake_Sources.Source;
-      First_FD   : Flyology.IO.Descriptor;
-      Second_FD  : Flyology.IO.Descriptor;
+      Item      : Wake_Sources.Source;
+      First_FD  : Flyology.IO.Descriptor;
+      Second_FD : Flyology.IO.Descriptor;
    begin
-      Require
-        (Wake_Sources.Descriptor (Item) = Flyology.IO.Invalid_Descriptor,
-         "a new source is not absent");
+      Require (Wake_Sources.Descriptor (Item) = Flyology.IO.Invalid_Descriptor, "a new source is not absent");
       Expect_Consume_Error (Item, "an absent source");
 
       Wake_Sources.Ensure (Item);
       First_FD := Wake_Sources.Descriptor (Item);
       Check_Descriptor (First_FD, "Ensure");
       Wake_Sources.Ensure (Item);
+      Require (Wake_Sources.Descriptor (Item) = First_FD, "Ensure replaced a live descriptor generation");
       Require
-        (Wake_Sources.Descriptor (Item) = First_FD,
-         "Ensure replaced a live descriptor generation");
-      Require
-        (not Flyology.IO.Wait (First_FD, Flyology.IO.For_Read, 0.0),
-         "a newly ensured source is readable");
+        (not Flyology.IO.Wait (First_FD, Flyology.IO.For_Read, 0.0), "a newly ensured source is readable");
 
       Wake_Sources.Signal (Item);
       Require
@@ -95,8 +72,7 @@ procedure Wake_Source_State_Model is
          "one signal did not make the source readable");
       Wake_Sources.Consume (Item);
       Require
-        (not Flyology.IO.Wait (First_FD, Flyology.IO.For_Read, 0.0),
-         "one Consume did not remove one signal");
+        (not Flyology.IO.Wait (First_FD, Flyology.IO.For_Read, 0.0), "one Consume did not remove one signal");
       Expect_Consume_Error (Item, "an empty source");
 
       Wake_Sources.Signal (Item);
@@ -140,9 +116,7 @@ procedure Wake_Source_State_Model is
         (not Flyology.IO.Wait (Second_FD, Flyology.IO.For_Read, 0.0),
          "a replacement generation inherited readiness");
       Wake_Sources.Release (Item);
-      Require
-        (FD_Is_Open (Second_FD) = 0,
-         "the replacement generation remained open after Release");
+      Require (FD_Is_Open (Second_FD) = 0, "the replacement generation remained open after Release");
    end Exercise_Lifecycle;
 
    procedure Exercise_Implicit_Ensure is
@@ -152,9 +126,7 @@ procedure Wake_Source_State_Model is
       Wake_Sources.Signal (Item);
       FD := Wake_Sources.Descriptor (Item);
       Check_Descriptor (FD, "Signal on an absent source");
-      Require
-        (Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0),
-         "Signal did not ensure a ready source");
+      Require (Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0), "Signal did not ensure a ready source");
       Wake_Sources.Consume (Item);
    end Exercise_Implicit_Ensure;
 
@@ -167,16 +139,10 @@ procedure Wake_Source_State_Model is
       begin
          Wake_Sources.Ensure (Item);
          Finalized_FD := Wake_Sources.Descriptor (Item);
-         Require
-           (FD_Is_Open (Finalized_FD) = 1,
-            "controlled source was not open in scope");
+         Require (FD_Is_Open (Finalized_FD) = 1, "controlled source was not open in scope");
       end;
-      Require
-        (FD_Is_Open (Finalized_FD) = 0,
-         "controlled finalization left the read end open");
-      Require
-        (Open_FD_Count = Baseline,
-         "controlled finalization did not release both descriptor ends");
+      Require (FD_Is_Open (Finalized_FD) = 0, "controlled finalization left the read end open");
+      Require (Open_FD_Count = Baseline, "controlled finalization did not release both descriptor ends");
    end Exercise_Finalization;
 
    procedure Exercise_FD_Conservation is
@@ -196,19 +162,14 @@ procedure Wake_Source_State_Model is
                Wake_Sources.Release (Item);
             end if;
          end;
-         Require
-           (Open_FD_Count = Baseline,
-            "wake-source cycle changed the process descriptor count");
+         Require (Open_FD_Count = Baseline, "wake-source cycle changed the process descriptor count");
       end loop;
    end Exercise_FD_Conservation;
 
    Native_Passed      : Boolean := False;
    Lightweight_Passed : Boolean := False;
 
-   procedure Check_Lane
-     (Model  : Flyology.Execution_Model;
-      Passed : out Boolean)
-   is
+   procedure Check_Lane (Model : Flyology.Execution_Model; Passed : out Boolean) is
       protected Completion is
          procedure Finish (Passed : Boolean);
          entry Wait (Passed : out Boolean);
@@ -244,8 +205,7 @@ procedure Wake_Source_State_Model is
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
-              (Ada.Text_IO.Standard_Error,
-               Ada.Exceptions.Exception_Information (Occurrence));
+              (Ada.Text_IO.Standard_Error, Ada.Exceptions.Exception_Information (Occurrence));
             Completion.Finish (False);
       end Runner;
    begin
@@ -255,6 +215,5 @@ begin
    Check_Lane (Flyology.Native_Task, Native_Passed);
    Require (Native_Passed, "native wake-source state model failed");
    Check_Lane (Flyology.Lightweight_Task, Lightweight_Passed);
-   Require
-     (Lightweight_Passed, "lightweight wake-source state model failed");
+   Require (Lightweight_Passed, "lightweight wake-source state model failed");
 end Wake_Source_State_Model;

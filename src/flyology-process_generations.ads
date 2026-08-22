@@ -5,22 +5,20 @@ with Interfaces;
 --  tree, tasks, connections, and process-local handles. These types identify
 --  rollout authority and observations; they do not make process-local values
 --  transferable.
+
 package Flyology.Process_Generations
   with Preelaborate
 is
    --  Nonzero stable identity of one coordinator lifetime.
-   type Coordinator_Id is new Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   type Coordinator_Id is new Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Nonzero transaction identity allocated by one coordinator. Values do
    --  not wrap; exhaustion requires a fresh coordinator identity.
-   type Upgrade_Id is new Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   type Upgrade_Id is new Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Nonzero identity of one executable process generation. Values do not
    --  wrap within a coordinator lifetime.
-   type Image_Generation is new Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   type Image_Generation is new Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Exact authority for one candidate transaction.
    --  @field Coordinator Coordinator that allocated the transaction
@@ -36,8 +34,8 @@ is
    --  @param Left First authority
    --  @param Right Second authority
    --  @return True only when every authority component matches
-   function Same_Upgrade (Left, Right : Upgrade_Handle) return Boolean is
-     (Left = Right);
+   function Same_Upgrade (Left, Right : Upgrade_Handle) return Boolean
+   is (Left = Right);
 
    --  Candidate role supplied to application topology reconstruction.
    --  @enum Canary_Safe May perform work concurrently with the previous image

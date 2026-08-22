@@ -16,14 +16,12 @@ procedure Recording_Smoke is
    package Reporters renames Flyology_Bench.Recording.Reporters;
    use type Recording.Sample_Outcome;
 
-   Recorder : Recording.Recorder
-     (Maximum_Benchmarks => 2,
-      Retained_Samples   => 64);
-   Fast : Recording.Benchmark;
-   Slow : Recording.Benchmark;
-   Fast_Result : Recording.Recorded_Measurement;
-   Slow_Result : Recording.Recorded_Measurement;
-   Compared : Recording.Recorded_Comparison;
+   Recorder         : Recording.Recorder (Maximum_Benchmarks => 2, Retained_Samples => 64);
+   Fast             : Recording.Benchmark;
+   Slow             : Recording.Benchmark;
+   Fast_Result      : Recording.Recorded_Measurement;
+   Slow_Result      : Recording.Recorded_Measurement;
+   Compared         : Recording.Recorded_Comparison;
    No_Wall_Compared : Recording.Recorded_Comparison;
    Partial_Compared : Recording.Recorded_Comparison;
 
@@ -34,27 +32,23 @@ procedure Recording_Smoke is
       end if;
    end Check;
 begin
-   Recording.Register
-     (Recorder, "fast" & Character'Val (9) & "request", Fast);
+   Recording.Register (Recorder, "fast" & Character'Val (9) & "request", Fast);
    Recording.Register (Recorder, "slow request", Slow);
    Recording.Start
      (Recorder,
       (--  Hardware axes exercise persistent per-thread recorder groups on
        --  Linux and retain explicit unavailable statuses elsewhere.
-       Metrics => Flyology_Bench.Process_Resource_Metrics
-         or Flyology_Bench.Linux_Hardware_Metrics,
+       Metrics                  =>
+         Flyology_Bench.Process_Resource_Metrics or Flyology_Bench.Linux_Hardware_Metrics,
        Confidence_Level_Percent => 90.0,
-       Bootstrap_Resamples => 200,
-       others  => <>));
+       Bootstrap_Resamples      => 200,
+       others                   => <>));
 
    --  A rejected second start must not replace the active configuration or
    --  lose its native performance-counter session.
    begin
       Recording.Start
-        (Recorder,
-         (Metrics =>
-            (Flyology_Bench.Process_RSS => True, others => False),
-          others => <>));
+        (Recorder, (Metrics => (Flyology_Bench.Process_RSS => True, others => False), others => <>));
       raise Program_Error with "second recorder start was accepted";
    exception
       when Recording.Recording_Already_Started =>
@@ -70,11 +64,10 @@ begin
       Slow_Rounds : constant := 20 * Fast_Rounds;
       task type Worker (Identity : Positive);
       task body Worker is
-         Which  : constant Recording.Benchmark :=
-           (if Identity mod 2 = 0 then Fast else Slow);
-         Rounds : constant Positive :=
-           (if Identity mod 2 = 0 then Fast_Rounds else Slow_Rounds);
-         Accumulator : Interfaces.Unsigned_64 := 1 with Volatile;
+         Which       : constant Recording.Benchmark := (if Identity mod 2 = 0 then Fast else Slow);
+         Rounds      : constant Positive := (if Identity mod 2 = 0 then Fast_Rounds else Slow_Rounds);
+         Accumulator : Interfaces.Unsigned_64 := 1
+         with Volatile;
       begin
          for Index in 1 .. 20 loop
             declare
@@ -82,13 +75,9 @@ begin
             begin
                Recording.Begin_Sample (Recorder, Which, Sample);
                for Round in 1 .. Rounds loop
-                  Accumulator := Interfaces.Rotate_Left
-                    (Accumulator xor Interfaces.Unsigned_64 (Round), 3);
+                  Accumulator := Interfaces.Rotate_Left (Accumulator xor Interfaces.Unsigned_64 (Round), 3);
                end loop;
-               Recording.Finish
-                 (Sample,
-                  (if Index = 20 then Recording.Failure
-                   else Recording.Success));
+               Recording.Finish (Sample, (if Index = 20 then Recording.Failure else Recording.Success));
             end;
          end loop;
       end Worker;
@@ -113,20 +102,15 @@ begin
       and then Recording.Bootstrap_Resamples (Fast_Result) = 200,
       "recorded snapshot lost its statistical settings");
    Check (Recording.In_Flight (Fast_Result) = 0, "finished spans remain active");
-   Check
-     (Recording.Metric_Samples (Fast_Result, Flyology_Bench.Wall_Time) = 40,
-      "wall samples missing");
-   Check
-     (Recording.Outcomes (Fast_Result, Recording.Failure) = 2,
-      "failure outcomes missing");
+   Check (Recording.Metric_Samples (Fast_Result, Flyology_Bench.Wall_Time) = 40, "wall samples missing");
+   Check (Recording.Outcomes (Fast_Result, Recording.Failure) = 2, "failure outcomes missing");
    declare
       Seen     : array (Positive range 1 .. 40) of Boolean := (others => False);
       Failures : Natural := 0;
    begin
       for Index in 1 .. Recording.Retained (Fast_Result) loop
          declare
-            Observation : constant Natural :=
-              Recording.Observation_Id (Fast_Result, Index);
+            Observation : constant Natural := Recording.Observation_Id (Fast_Result, Index);
          begin
             Check
               (Observation in Seen'Range and then not Seen (Observation),
@@ -136,64 +120,53 @@ begin
                Failures := Failures + 1;
             end if;
             Check
-              (Recording.Sample_Metric_Status
-                 (Fast_Result, Index, Flyology_Bench.Wall_Time)
-                 = Flyology_Bench.Metric_Collected,
+              (Recording.Sample_Metric_Status (Fast_Result, Index, Flyology_Bench.Wall_Time)
+               = Flyology_Bench.Metric_Collected,
                "aligned wall status missing");
             Check
-              (Recording.Sample_Metric_Value
-                 (Fast_Result, Index, Flyology_Bench.Wall_Time) > 0.0,
+              (Recording.Sample_Metric_Value (Fast_Result, Index, Flyology_Bench.Wall_Time) > 0.0,
                "aligned wall value missing");
          end;
       end loop;
       Check (Failures = 2, "retained outcomes lost their span identity");
    end;
    if Ada.Environment_Variables.Exists ("FLYOLOGY_BENCH_REQUIRE_PERF")
-     and then Ada.Environment_Variables.Value
-       ("FLYOLOGY_BENCH_REQUIRE_PERF") = "1"
+     and then Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_REQUIRE_PERF") = "1"
    then
       Check
-        (Recording.Metric_Samples
-           (Fast_Result, Flyology_Bench.CPU_Cycles) > 0,
+        (Recording.Metric_Samples (Fast_Result, Flyology_Bench.CPU_Cycles) > 0,
          "recorder persistent CPU cycles are unavailable");
       Check
-        (Recording.Metric_Samples
-           (Fast_Result, Flyology_Bench.Instructions) > 0,
+        (Recording.Metric_Samples (Fast_Result, Flyology_Bench.Instructions) > 0,
          "recorder persistent instructions are unavailable");
    end if;
    declare
       Fast_Median : constant Long_Float :=
-        Recording.Metric_Statistics
-          (Fast_Result, Flyology_Bench.Wall_Time).Median;
+        Recording.Metric_Statistics (Fast_Result, Flyology_Bench.Wall_Time).Median;
       Slow_Median : constant Long_Float :=
-        Recording.Metric_Statistics
-          (Slow_Result, Flyology_Bench.Wall_Time).Median;
+        Recording.Metric_Statistics (Slow_Result, Flyology_Bench.Wall_Time).Median;
    begin
       Check
         (Slow_Median > Fast_Median,
          "recorded distributions are not distinct: fast median"
-         & Long_Float'Image (Fast_Median) & " ns, slow median"
-         & Long_Float'Image (Slow_Median) & " ns");
+         & Long_Float'Image (Fast_Median)
+         & " ns, slow median"
+         & Long_Float'Image (Slow_Median)
+         & " ns");
    end;
 
    Recording.Compare_Independent
-     (Fast_Result, Slow_Result, Compared,
-      Confidence_Level_Percent => 80.0,
-      Bootstrap_Resamples => 150);
+     (Fast_Result, Slow_Result, Compared, Confidence_Level_Percent => 80.0, Bootstrap_Resamples => 150);
    Check
      (Recording.Confidence_Level_Percent (Compared) = 80.0
       and then Recording.Bootstrap_Resamples (Compared) = 150,
       "independent comparison lost its statistical settings");
-   Check
-     (Recording.Relative_Change_Percent (Compared) > 0.0,
-      "independent comparison direction");
+   Check (Recording.Relative_Change_Percent (Compared) > 0.0, "independent comparison direction");
 
    --  Exercise bounded retention, abandoned spans, and the rule that work
    --  already in flight may finish after the recorder stops accepting work.
    declare
-      Bounded : Recording.Recorder
-        (Maximum_Benchmarks => 1,
-         Retained_Samples   => 10);
+      Bounded : Recording.Recorder (Maximum_Benchmarks => 1, Retained_Samples => 10);
       Item    : Recording.Benchmark;
       Result  : Recording.Recorded_Measurement;
    begin
@@ -234,20 +207,16 @@ begin
    --  A migrated span must remain in its observation row while the aggregate
    --  axis status reports that only a subset is comparable.
    declare
-      Partial : Recording.Recorder
-        (Maximum_Benchmarks => 1,
-         Retained_Samples   => 10);
-      Item   : Recording.Benchmark;
-      Result : Recording.Recorded_Measurement;
+      Partial : Recording.Recorder (Maximum_Benchmarks => 1, Retained_Samples => 10);
+      Item    : Recording.Benchmark;
+      Result  : Recording.Recorded_Measurement;
    begin
       Recording.Register (Partial, "partial thread scope", Item);
       Recording.Start
         (Partial,
          (Metrics =>
-            (Flyology_Bench.Wall_Time      => True,
-             Flyology_Bench.Thread_CPU_Time => True,
-             others => False),
-          others => <>));
+            (Flyology_Bench.Wall_Time => True, Flyology_Bench.Thread_CPU_Time => True, others => False),
+          others  => <>));
       declare
          Sample : Recording.Span;
       begin
@@ -291,44 +260,35 @@ begin
       Recording.Snapshot (Partial, Item, Result);
       Check
         (Recording.Metric_Status (Result, Flyology_Bench.Thread_CPU_Time)
-           = Flyology_Bench.Metric_Partially_Collected,
+         = Flyology_Bench.Metric_Partially_Collected,
          "partial thread metric was reported as complete");
       Check
-        (Recording.Metric_Samples (Result, Flyology_Bench.Thread_CPU_Time) = 1,
-         "partial thread valid count");
+        (Recording.Metric_Samples (Result, Flyology_Bench.Thread_CPU_Time) = 1, "partial thread valid count");
       Check
-        (Recording.Unavailable_Metric_Samples
-           (Result, Flyology_Bench.Thread_CPU_Time) = 1,
+        (Recording.Unavailable_Metric_Samples (Result, Flyology_Bench.Thread_CPU_Time) = 1,
          "partial thread unavailable count");
       Check
-        (Recording.Scope_Changed_Samples
-           (Result, Flyology_Bench.Thread_CPU_Time) = 1,
+        (Recording.Scope_Changed_Samples (Result, Flyology_Bench.Thread_CPU_Time) = 1,
          "partial thread scope-change count");
       Recording.Compare_Independent (Result, Result, Partial_Compared);
       Check
-        (not Recording.Compare_Metric
-           (Partial_Compared, Flyology_Bench.Thread_CPU_Time).Available,
+        (not Recording.Compare_Metric (Partial_Compared, Flyology_Bench.Thread_CPU_Time).Available,
          "partial metric entered an independent comparison");
    end;
 
    --  Independent comparison may be useful for a resource axis without wall
    --  time. Top-level latency fields must remain explicitly unavailable.
    declare
-      Resources : Recording.Recorder
-        (Maximum_Benchmarks => 2,
-         Retained_Samples   => 16);
-      type Benchmark_Pair is array (Positive range 1 .. 2) of
-        Recording.Benchmark;
-      Reference, Contender : Recording.Benchmark;
+      Resources                          :
+        Recording.Recorder (Maximum_Benchmarks => 2, Retained_Samples => 16);
+      type Benchmark_Pair is array (Positive range 1 .. 2) of Recording.Benchmark;
+      Reference, Contender               : Recording.Benchmark;
       Reference_Result, Contender_Result : Recording.Recorded_Measurement;
    begin
       Recording.Register (Resources, "CPU reference", Reference);
       Recording.Register (Resources, "CPU contender", Contender);
       Recording.Start
-        (Resources,
-         (Metrics =>
-            (Flyology_Bench.Process_CPU_Time => True, others => False),
-          others => <>));
+        (Resources, (Metrics => (Flyology_Bench.Process_CPU_Time => True, others => False), others => <>));
       for Index in 1 .. 10 loop
          for Item of Benchmark_Pair'(Reference, Contender) loop
             declare
@@ -343,22 +303,18 @@ begin
       Recording.Stop (Resources);
       Recording.Snapshot (Resources, Reference, Reference_Result);
       Recording.Snapshot (Resources, Contender, Contender_Result);
-      Recording.Compare_Independent
-        (Reference_Result, Contender_Result, No_Wall_Compared);
+      Recording.Compare_Independent (Reference_Result, Contender_Result, No_Wall_Compared);
       Check
         (not Recording.Wall_Comparison_Available (No_Wall_Compared),
          "CPU-only comparison fabricated wall data");
       Check
-        (Recording.Compare_Metric
-           (No_Wall_Compared, Flyology_Bench.Process_CPU_Time).Available,
+        (Recording.Compare_Metric (No_Wall_Compared, Flyology_Bench.Process_CPU_Time).Available,
          "CPU-only metric comparison is unavailable");
       begin
          declare
-            Unexpected : constant Long_Float :=
-              Recording.Speedup (No_Wall_Compared);
+            Unexpected : constant Long_Float := Recording.Speedup (No_Wall_Compared);
          begin
-            raise Program_Error with
-              "missing wall comparison returned" & Long_Float'Image (Unexpected);
+            raise Program_Error with "missing wall comparison returned" & Long_Float'Image (Unexpected);
          end;
       exception
          when Constraint_Error =>
@@ -369,27 +325,24 @@ begin
    --  Concurrent recorders own separate PMU sessions, and sequentially
    --  created workers must not inherit stale per-thread counter descriptors.
    declare
-      First_Recorder : Recording.Recorder
-        (Maximum_Benchmarks => 1, Retained_Samples => 16);
-      Second_Recorder : Recording.Recorder
-        (Maximum_Benchmarks => 1, Retained_Samples => 16);
-      First_Item, Second_Item : Recording.Benchmark;
+      First_Recorder              : Recording.Recorder (Maximum_Benchmarks => 1, Retained_Samples => 16);
+      Second_Recorder             : Recording.Recorder (Maximum_Benchmarks => 1, Retained_Samples => 16);
+      First_Item, Second_Item     : Recording.Benchmark;
       First_Result, Second_Result : Recording.Recorded_Measurement;
-      Accumulator : Interfaces.Unsigned_64 := 1 with Volatile;
+      Accumulator                 : Interfaces.Unsigned_64 := 1
+      with Volatile;
       task type Worker;
       task body Worker is
          First_Sample, Second_Sample : Recording.Span;
       begin
          Recording.Begin_Sample (First_Recorder, First_Item, First_Sample);
          for Index in 1 .. 20_000 loop
-            Accumulator := Interfaces.Rotate_Left
-              (Accumulator xor Interfaces.Unsigned_64 (Index), 3);
+            Accumulator := Interfaces.Rotate_Left (Accumulator xor Interfaces.Unsigned_64 (Index), 3);
          end loop;
          Recording.Finish (First_Sample);
          Recording.Begin_Sample (Second_Recorder, Second_Item, Second_Sample);
          for Index in 1 .. 20_000 loop
-            Accumulator := Interfaces.Rotate_Left
-              (Accumulator xor Interfaces.Unsigned_64 (Index), 5);
+            Accumulator := Interfaces.Rotate_Left (Accumulator xor Interfaces.Unsigned_64 (Index), 5);
          end loop;
          Recording.Finish (Second_Sample);
       end Worker;
@@ -398,14 +351,10 @@ begin
       Recording.Register (Second_Recorder, "second PMU session", Second_Item);
       Recording.Start
         (First_Recorder,
-         (Metrics => Flyology_Bench.Time_Metrics
-            or Flyology_Bench.Linux_Hardware_Metrics,
-          others => <>));
+         (Metrics => Flyology_Bench.Time_Metrics or Flyology_Bench.Linux_Hardware_Metrics, others => <>));
       Recording.Start
         (Second_Recorder,
-         (Metrics => Flyology_Bench.Time_Metrics
-            or Flyology_Bench.Linux_Hardware_Metrics,
-          others => <>));
+         (Metrics => Flyology_Bench.Time_Metrics or Flyology_Bench.Linux_Hardware_Metrics, others => <>));
       for Index in 1 .. 12 loop
          declare
             Current : Worker;
@@ -418,18 +367,15 @@ begin
       Recording.Snapshot (First_Recorder, First_Item, First_Result);
       Recording.Snapshot (Second_Recorder, Second_Item, Second_Result);
       if Ada.Environment_Variables.Exists ("FLYOLOGY_BENCH_REQUIRE_PERF")
-        and then Ada.Environment_Variables.Value
-          ("FLYOLOGY_BENCH_REQUIRE_PERF") = "1"
+        and then Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_REQUIRE_PERF") = "1"
       then
          Check
-           (Recording.Metric_Status
-              (First_Result, Flyology_Bench.CPU_Cycles)
-              = Flyology_Bench.Metric_Collected,
+           (Recording.Metric_Status (First_Result, Flyology_Bench.CPU_Cycles)
+            = Flyology_Bench.Metric_Collected,
             "first concurrent PMU session lost worker samples");
          Check
-           (Recording.Metric_Status
-              (Second_Result, Flyology_Bench.CPU_Cycles)
-              = Flyology_Bench.Metric_Collected,
+           (Recording.Metric_Status (Second_Result, Flyology_Bench.CPU_Cycles)
+            = Flyology_Bench.Metric_Collected,
             "second concurrent PMU session lost worker samples");
       end if;
    end;

@@ -22,22 +22,16 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    subtype Block_Ref is Interfaces.Unsigned_32;
    Null_Block : constant Block_Ref := Block_Ref'Last;
 
-   function Make_Token
-     (Arena_Epoch : Interfaces.Unsigned_32;
-      Block       : Block_Ref) return Interfaces.Unsigned_64 is
-     (Interfaces.Shift_Left (Interfaces.Unsigned_64 (Arena_Epoch), 32)
-      or Interfaces.Unsigned_64 (Block));
+   function Make_Token (Arena_Epoch : Interfaces.Unsigned_32; Block : Block_Ref) return Interfaces.Unsigned_64
+   is (Interfaces.Shift_Left (Interfaces.Unsigned_64 (Arena_Epoch), 32) or Interfaces.Unsigned_64 (Block));
    pragma Inline_Always (Make_Token);
 
-   function Token_Epoch
-     (Value : Allocation_Handle) return Interfaces.Unsigned_32 is
-     (Interfaces.Unsigned_32 (Interfaces.Shift_Right (Value.Token, 32)));
+   function Token_Epoch (Value : Allocation_Handle) return Interfaces.Unsigned_32
+   is (Interfaces.Unsigned_32 (Interfaces.Shift_Right (Value.Token, 32)));
    pragma Inline_Always (Token_Epoch);
 
-   function Token_Block (Value : Allocation_Handle) return Block_Ref is
-     (Block_Ref
-        (Value.Token
-         and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
+   function Token_Block (Value : Allocation_Handle) return Block_Ref
+   is (Block_Ref (Value.Token and Interfaces.Unsigned_64 (Interfaces.Unsigned_32'Last)));
    pragma Inline_Always (Token_Block);
 
    Index_Offset      : constant Byte_Count := Layouts.Header_Size;
@@ -49,16 +43,16 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    Guard_Offset   : constant Byte_Count := 44;
    Counter_Offset : constant Byte_Count := 56;
 
-   Block_Size_Offset       : constant Byte_Count := 0;
-   Previous_Size_Offset    : constant Byte_Count := 4;
-   Generation_Offset       : constant Byte_Count := 8;
-   Block_State_Offset      : constant Byte_Count := 16;
-   Left_Offset             : constant Byte_Count := 20;
-   Right_Offset            : constant Byte_Count := 24;
-   Parent_Offset           : constant Byte_Count := 28;
-   Height_Offset           : constant Byte_Count := 32;
-   Block_Reserved_Offset   : constant Byte_Count := 36;
-   Block_Metadata_Minimum  : constant Byte_Count := 40;
+   Block_Size_Offset      : constant Byte_Count := 0;
+   Previous_Size_Offset   : constant Byte_Count := 4;
+   Generation_Offset      : constant Byte_Count := 8;
+   Block_State_Offset     : constant Byte_Count := 16;
+   Left_Offset            : constant Byte_Count := 20;
+   Right_Offset           : constant Byte_Count := 24;
+   Parent_Offset          : constant Byte_Count := 28;
+   Height_Offset          : constant Byte_Count := 32;
+   Block_Reserved_Offset  : constant Byte_Count := 36;
+   Block_Metadata_Minimum : constant Byte_Count := 40;
 
    Free_State      : constant Interfaces.Unsigned_32 := 1;
    Allocated_State : constant Interfaces.Unsigned_32 := 2;
@@ -75,14 +69,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Extent     : Byte_Count;
    end record;
 
-   function Geometry
-     (Usable_Capacity    : Positive;
-      Minimum_Block_Size : Positive) return Geometry_Values
-   is
-      Usable  : constant Byte_Count := Byte_Count (Usable_Capacity);
-      Minimum : constant Byte_Count := Byte_Count (Minimum_Block_Size);
-      Prefix  : Byte_Count;
-      Units   : Byte_Count;
+   function Geometry (Usable_Capacity : Positive; Minimum_Block_Size : Positive) return Geometry_Values is
+      Usable     : constant Byte_Count := Byte_Count (Usable_Capacity);
+      Minimum    : constant Byte_Count := Byte_Count (Minimum_Block_Size);
+      Prefix     : Byte_Count;
+      Units      : Byte_Count;
       Data_Start : Byte_Count;
    begin
       if Minimum < Byte_Count (Minimum_Block_Limit)
@@ -107,8 +98,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       if Units = 0 or else Units >= Byte_Count (Null_Block) then
          raise Constraint_Error with "arena block index exceeds stored width";
       end if;
-      Data_Start := Layouts.Align_Up
-        (Layouts.Checked_Add (Index_Offset, Index_Size), Minimum);
+      Data_Start := Layouts.Align_Up (Layouts.Checked_Add (Index_Offset, Index_Size), Minimum);
       return
         (Usable     => Interfaces.Unsigned_32 (Usable),
          Minimum    => Interfaces.Unsigned_32 (Minimum),
@@ -118,38 +108,27 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Extent     => Layouts.Checked_Add (Data_Start, Usable));
    end Geometry;
 
-   function Required_Storage
-     (Configuration : Best_Fit_Kernel.Configuration) return Byte_Count is
-     (Geometry
-        (Configuration.Usable_Capacity,
-         Configuration.Minimum_Block_Size).Extent);
+   function Required_Storage (Configuration : Best_Fit_Kernel.Configuration) return Byte_Count
+   is (Geometry (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size).Extent);
 
    function Index_Address
-     (Item      : View;
-      Relative  : Byte_Count;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count) return System.Address is
+     (Item : View; Relative : Byte_Count; Extent : Byte_Count; Alignment : Byte_Count) return System.Address
+   is
       Local : Byte_Count;
    begin
-      if not Item.Core.Attached
-        or else Item.Index_Base = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Index_Base = System.Null_Address then
          raise Region_Error with "detached arena view";
       elsif Relative < Index_Offset then
          raise Layout_Error with "arena index offset is corrupt";
       end if;
       Local := Relative - Index_Offset;
-      if Extent = 0
-        or else Local > Index_Size
-        or else Extent > Index_Size - Local
-      then
+      if Extent = 0 or else Local > Index_Size or else Extent > Index_Size - Local then
          raise Layout_Error with "arena index extent is corrupt";
       elsif Alignment = 0
         or else (Alignment and (Alignment - 1)) /= 0
-        or else
-          (Addressing.To_Integer (Item.Index_Base)
-           + Addressing.Integer_Address (Local))
-            mod Addressing.Integer_Address (Alignment) /= 0
+        or else (Addressing.To_Integer (Item.Index_Base) + Addressing.Integer_Address (Local))
+                mod Addressing.Integer_Address (Alignment)
+                /= 0
       then
          raise Region_Error with "arena index field is misaligned";
       end if;
@@ -157,18 +136,13 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Index_Address;
    pragma Inline_Always (Index_Address);
 
-   function Block_Field_Address
-     (Item     : View;
-      Block    : Block_Ref;
-      Relative : Byte_Count) return System.Address is
+   function Block_Field_Address (Item : View; Block : Block_Ref; Relative : Byte_Count) return System.Address
+   is
    begin
-      if Block = Null_Block
-        or else Block > Item.Last_Block_Value
-      then
+      if Block = Null_Block or else Block > Item.Last_Block_Value then
          raise Layout_Error with "arena block reference is out of range";
       end if;
-      if not Item.Core.Attached or else Item.Data_Base = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Data_Base = System.Null_Address then
          raise Region_Error with "detached arena view";
       end if;
       declare
@@ -177,69 +151,52 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          --  extent and its minimum-block alignment. The range check on Block
          --  therefore proves this addition remains inside that extent without
          --  repeating generic slice and alignment validation for every field.
-         Local : constant Byte_Count :=
-           Byte_Count (Block) * Byte_Count (Item.Minimum_Value) + Relative;
-         Address : constant System.Address := Item.Data_Base
-           + Addressing.Storage_Offset (Local);
+         Local   : constant Byte_Count := Byte_Count (Block) * Byte_Count (Item.Minimum_Value) + Relative;
+         Address : constant System.Address := Item.Data_Base + Addressing.Storage_Offset (Local);
       begin
          return Address;
       end;
    end Block_Field_Address;
    pragma Inline_Always (Block_Field_Address);
 
-   function Read_Field
-     (Item : View; Block : Block_Ref; Relative : Byte_Count)
-      return Interfaces.Unsigned_32 is
-     (Bytes.Read_U32 (Block_Field_Address (Item, Block, Relative)));
+   function Read_Field (Item : View; Block : Block_Ref; Relative : Byte_Count) return Interfaces.Unsigned_32
+   is (Bytes.Read_U32 (Block_Field_Address (Item, Block, Relative)));
    pragma Inline_Always (Read_Field);
 
    procedure Write_Field
-     (Item : View; Block : Block_Ref; Relative : Byte_Count;
-      Value : Interfaces.Unsigned_32) is
+     (Item : View; Block : Block_Ref; Relative : Byte_Count; Value : Interfaces.Unsigned_32) is
    begin
       Bytes.Write_U32 (Block_Field_Address (Item, Block, Relative), Value);
    end Write_Field;
    pragma Inline_Always (Write_Field);
 
-   function Block_Size (Item : View; Block : Block_Ref)
-      return Interfaces.Unsigned_32 is
-     (Read_Field (Item, Block, Block_Size_Offset));
-   function Previous_Size (Item : View; Block : Block_Ref)
-      return Interfaces.Unsigned_32 is
-     (Read_Field (Item, Block, Previous_Size_Offset));
-   function Block_State (Item : View; Block : Block_Ref)
-      return Interfaces.Unsigned_32 is
-     (Atomic.Load_Acquire_U32
-        (Block_Field_Address (Item, Block, Block_State_Offset)));
-   function Left_Of (Item : View; Block : Block_Ref) return Block_Ref is
-     (Read_Field (Item, Block, Left_Offset));
-   function Right_Of (Item : View; Block : Block_Ref) return Block_Ref is
-     (Read_Field (Item, Block, Right_Offset));
-   function Parent_Of (Item : View; Block : Block_Ref) return Block_Ref is
-     (Read_Field (Item, Block, Parent_Offset));
-   function Height_Of (Item : View; Block : Block_Ref)
-      return Interfaces.Unsigned_32 is
-     (if Block = Null_Block then 0
-      else Read_Field (Item, Block, Height_Offset));
-   pragma Inline_Always
-     (Block_Size, Previous_Size, Block_State, Left_Of, Right_Of, Parent_Of,
-      Height_Of);
+   function Block_Size (Item : View; Block : Block_Ref) return Interfaces.Unsigned_32
+   is (Read_Field (Item, Block, Block_Size_Offset));
+   function Previous_Size (Item : View; Block : Block_Ref) return Interfaces.Unsigned_32
+   is (Read_Field (Item, Block, Previous_Size_Offset));
+   function Block_State (Item : View; Block : Block_Ref) return Interfaces.Unsigned_32
+   is (Atomic.Load_Acquire_U32 (Block_Field_Address (Item, Block, Block_State_Offset)));
+   function Left_Of (Item : View; Block : Block_Ref) return Block_Ref
+   is (Read_Field (Item, Block, Left_Offset));
+   function Right_Of (Item : View; Block : Block_Ref) return Block_Ref
+   is (Read_Field (Item, Block, Right_Offset));
+   function Parent_Of (Item : View; Block : Block_Ref) return Block_Ref
+   is (Read_Field (Item, Block, Parent_Offset));
+   function Height_Of (Item : View; Block : Block_Ref) return Interfaces.Unsigned_32
+   is (if Block = Null_Block then 0 else Read_Field (Item, Block, Height_Offset));
+   pragma Inline_Always (Block_Size, Previous_Size, Block_State, Left_Of, Right_Of, Parent_Of, Height_Of);
 
-   procedure Set_Block_Size
-     (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
+   procedure Set_Block_Size (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
    begin
       Write_Field (Item, Block, Block_Size_Offset, Value);
    end Set_Block_Size;
-   procedure Set_Previous_Size
-     (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
+   procedure Set_Previous_Size (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
    begin
       Write_Field (Item, Block, Previous_Size_Offset, Value);
    end Set_Previous_Size;
-   procedure Set_State
-     (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
+   procedure Set_State (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
    begin
-      Atomic.Store_Release_U32
-        (Block_Field_Address (Item, Block, Block_State_Offset), Value);
+      Atomic.Store_Release_U32 (Block_Field_Address (Item, Block, Block_State_Offset), Value);
    end Set_State;
    procedure Set_Left (Item : View; Block, Value : Block_Ref) is
    begin
@@ -253,73 +210,63 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    begin
       Write_Field (Item, Block, Parent_Offset, Value);
    end Set_Parent;
-   procedure Set_Height
-     (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
+   procedure Set_Height (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_32) is
    begin
       Write_Field (Item, Block, Height_Offset, Value);
    end Set_Height;
-   pragma Inline_Always
-     (Set_Block_Size, Set_Previous_Size, Set_State, Set_Left, Set_Right,
-      Set_Parent, Set_Height);
+   pragma
+     Inline_Always
+       (Set_Block_Size, Set_Previous_Size, Set_State, Set_Left, Set_Right, Set_Parent, Set_Height);
 
-   function Root (Item : View) return Block_Ref is
-     (Bytes.Read_U32 (Item.Root_Address));
+   function Root (Item : View) return Block_Ref
+   is (Bytes.Read_U32 (Item.Root_Address));
    procedure Set_Root (Item : View; Value : Block_Ref) is
    begin
       Bytes.Write_U32 (Item.Root_Address, Value);
    end Set_Root;
-   function Live_Count (Item : View) return Interfaces.Unsigned_64 is
-     (Bytes.Read_U64 (Item.Live_Count_Address));
-   procedure Set_Live_Count
-     (Item : View; Value : Interfaces.Unsigned_64) is
+   function Live_Count (Item : View) return Interfaces.Unsigned_64
+   is (Bytes.Read_U64 (Item.Live_Count_Address));
+   procedure Set_Live_Count (Item : View; Value : Interfaces.Unsigned_64) is
    begin
       Bytes.Write_U64 (Item.Live_Count_Address, Value);
    end Set_Live_Count;
    pragma Inline_Always (Root, Set_Root, Live_Count, Set_Live_Count);
 
-   function Generation (Item : View; Block : Block_Ref)
-      return Interfaces.Unsigned_64 is
-     (Bytes.Read_U64 (Block_Field_Address (Item, Block, Generation_Offset)));
-   procedure Set_Generation
-     (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_64) is
+   function Generation (Item : View; Block : Block_Ref) return Interfaces.Unsigned_64
+   is (Bytes.Read_U64 (Block_Field_Address (Item, Block, Generation_Offset)));
+   procedure Set_Generation (Item : View; Block : Block_Ref; Value : Interfaces.Unsigned_64) is
    begin
-      Bytes.Write_U64
-        (Block_Field_Address (Item, Block, Generation_Offset), Value);
+      Bytes.Write_U64 (Block_Field_Address (Item, Block, Generation_Offset), Value);
    end Set_Generation;
    pragma Inline_Always (Generation, Set_Generation);
 
    procedure Set_View
-     (Item : out View; Core : Layouts.Local_View; Values : Geometry_Values;
+     (Item        : out View;
+      Core        : Layouts.Local_View;
+      Values      : Geometry_Values;
       Instance_ID : Interfaces.Unsigned_64)
    is
-      Data_Size : constant Byte_Count := Byte_Count (Values.Usable);
+      Data_Size       : constant Byte_Count := Byte_Count (Values.Usable);
       Data_Base_Value : Addressing.Integer_Address;
    begin
       Item.Core := Core;
       Item.Guard_Address := Layouts.Address_At (Core, Guard_Offset, 4, 4);
       Item.Counter_Address := Layouts.Address_At (Core, Counter_Offset, 8, 8);
-      Item.Index_Base := Layouts.Address_At
-        (Core, Index_Offset, Index_Size, 8);
-      Item.Data_Base := Layouts.Address_At
-        (Core, Values.Data_Start, Data_Size,
-         Byte_Count (Values.Minimum));
+      Item.Index_Base := Layouts.Address_At (Core, Index_Offset, Index_Size, 8);
+      Item.Data_Base := Layouts.Address_At (Core, Values.Data_Start, Data_Size, Byte_Count (Values.Minimum));
       if Data_Size - 1 > Byte_Count (Addressing.Storage_Offset'Last) then
          raise Region_Error with "arena data span is not native";
       end if;
       Data_Base_Value := Addressing.To_Integer (Item.Data_Base);
-      if Data_Size - 1 >
-        Byte_Count (Addressing.Integer_Address'Last - Data_Base_Value)
-      then
+      if Data_Size - 1 > Byte_Count (Addressing.Integer_Address'Last - Data_Base_Value) then
          raise Region_Error with "arena data span address overflows";
       end if;
       Item.Root_Address := Layouts.Address_At (Core, Root_Offset, 4, 4);
-      Item.Live_Count_Address := Layouts.Address_At
-        (Core, Live_Count_Offset, 8, 8);
+      Item.Live_Count_Address := Layouts.Address_At (Core, Live_Count_Offset, 8, 8);
       Item.Usable_Value := Values.Usable;
       Item.Minimum_Value := Values.Minimum;
       Item.Prefix_Value := Values.Prefix;
-      Item.Last_Block_Value :=
-        (Values.Usable - Values.Prefix) / Values.Minimum;
+      Item.Last_Block_Value := (Values.Usable - Values.Prefix) / Values.Minimum;
       Item.Data_Offset := Values.Data_Start;
       Item.Instance_Value := Instance_ID;
    end Set_View;
@@ -342,12 +289,12 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Detach;
 
    procedure Initialize_Block
-     (Item          : View;
-      Block         : Block_Ref;
-      Size          : Interfaces.Unsigned_32;
-      Previous      : Interfaces.Unsigned_32;
-      State         : Interfaces.Unsigned_32;
-      Generation_ID : Interfaces.Unsigned_64 := 0;
+     (Item                     : View;
+      Block                    : Block_Ref;
+      Size                     : Interfaces.Unsigned_32;
+      Previous                 : Interfaces.Unsigned_32;
+      State                    : Interfaces.Unsigned_32;
+      Generation_ID            : Interfaces.Unsigned_64 := 0;
       Initialize_Tree_Metadata : Boolean := True) is
    begin
       Set_Block_Size (Item, Block, Size);
@@ -364,7 +311,9 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Initialize_Block;
 
    procedure Finish_Initialize
-     (Item : out View; Core : Layouts.Local_View; Values : Geometry_Values;
+     (Item        : out View;
+      Core        : Layouts.Local_View;
+      Values      : Geometry_Values;
       Instance_ID : Interfaces.Unsigned_64) is
    begin
       Set_View (Item, Core, Values, Instance_ID);
@@ -389,14 +338,17 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Configuration : Best_Fit_Kernel.Configuration;
       Instance_ID   : Interfaces.Unsigned_64)
    is
-      Values : constant Geometry_Values := Geometry
-        (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
-      Core : Layouts.Local_View;
+      Values : constant Geometry_Values :=
+        Geometry (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
+      Core   : Layouts.Local_View;
    begin
       Check_Instance (Instance_ID);
       Detach (Item);
       Layouts.Begin_Initialize
-        (Core, Region, Location, Values.Extent,
+        (Core,
+         Region,
+         Location,
+         Values.Extent,
          (Capacity     => Values.Usable,
           Element_Size => Values.Minimum,
           Alignment    => Values.Minimum,
@@ -421,15 +373,19 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Instance_ID   : Interfaces.Unsigned_64;
       Result        : out Open_Result)
    is
-      Values : constant Geometry_Values := Geometry
-        (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
-      Core  : Layouts.Local_View;
-      Claim : Layouts.Initialization_Claim;
+      Values : constant Geometry_Values :=
+        Geometry (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
+      Core   : Layouts.Local_View;
+      Claim  : Layouts.Initialization_Claim;
    begin
       Check_Instance (Instance_ID);
       Detach (Item);
       Layouts.Try_Begin_Initialize
-        (Core, Claim, Region, Location, Values.Extent,
+        (Core,
+         Claim,
+         Region,
+         Location,
+         Values.Extent,
          (Capacity     => Values.Usable,
           Element_Size => Values.Minimum,
           Alignment    => Values.Minimum,
@@ -438,12 +394,14 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
           Word_2       => 0),
          Byte_Count (Values.Minimum));
       case Claim is
-         when Layouts.Claimed_Virgin =>
+         when Layouts.Claimed_Virgin    =>
             Finish_Initialize (Item, Core, Values, Instance_ID);
             Result := Initialized_New;
-         when Layouts.Existing_Ready =>
+
+         when Layouts.Existing_Ready    =>
             Attach (Item, Region, Location, Configuration, Instance_ID);
             Result := Attached_Existing;
+
          when Layouts.Claim_In_Progress =>
             Result := Initialization_In_Progress;
       end case;
@@ -459,14 +417,12 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Left_Size  : constant Interfaces.Unsigned_32 := Block_Size (Item, Left);
       Right_Size : constant Interfaces.Unsigned_32 := Block_Size (Item, Right);
    begin
-      return Left_Size < Right_Size
-        or else (Left_Size = Right_Size and then Left < Right);
+      return Left_Size < Right_Size or else (Left_Size = Right_Size and then Left < Right);
    end Key_Less;
    pragma Inline_Always (Key_Less);
 
-   function Valid_Block_Ref (Item : View; Block : Block_Ref) return Boolean is
-     (Block /= Null_Block
-      and then Block < Item.Usable_Value / Item.Minimum_Value);
+   function Valid_Block_Ref (Item : View; Block : Block_Ref) return Boolean
+   is (Block /= Null_Block and then Block < Item.Usable_Value / Item.Minimum_Value);
    pragma Inline_Always (Valid_Block_Ref);
 
    --  An AVL tree over the at most 2**32 - 1 addressable blocks cannot exceed
@@ -476,59 +432,48 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    Maximum_Tree_Depth : constant Interfaces.Unsigned_32 := 64;
 
    procedure Validate_Index (Item : View) is
-      Free_Blocks : Interfaces.Unsigned_32 := 0;
-      Physical_Free : Interfaces.Unsigned_32 := 0;
-      Used_Blocks : Interfaces.Unsigned_64 := 0;
-      Cursor      : Block_Ref := 0;
-      Previous    : Interfaces.Unsigned_32 := 0;
-      Covered     : Interfaces.Unsigned_64 := 0;
-      Maximum_Blocks : constant Interfaces.Unsigned_32 :=
-        Item.Usable_Value / Item.Minimum_Value;
+      Free_Blocks    : Interfaces.Unsigned_32 := 0;
+      Physical_Free  : Interfaces.Unsigned_32 := 0;
+      Used_Blocks    : Interfaces.Unsigned_64 := 0;
+      Cursor         : Block_Ref := 0;
+      Previous       : Interfaces.Unsigned_32 := 0;
+      Covered        : Interfaces.Unsigned_64 := 0;
+      Maximum_Blocks : constant Interfaces.Unsigned_32 := Item.Usable_Value / Item.Minimum_Value;
 
       function Validate_Tree
-        (Block : Block_Ref; Expected_Parent : Block_Ref;
-         Lower, Upper : Block_Ref; Depth : Interfaces.Unsigned_32)
-         return Interfaces.Unsigned_32
+        (Block           : Block_Ref;
+         Expected_Parent : Block_Ref;
+         Lower, Upper    : Block_Ref;
+         Depth           : Interfaces.Unsigned_32) return Interfaces.Unsigned_32
       is
-         Left, Right : Block_Ref;
+         Left, Right                              : Block_Ref;
          Left_Height, Right_Height, Stored_Height : Interfaces.Unsigned_32;
-         Difference : Interfaces.Integer_64;
+         Difference                               : Interfaces.Integer_64;
       begin
          if Block = Null_Block then
             return 0;
-         elsif Depth > Maximum_Tree_Depth
-           or else not Valid_Block_Ref (Item, Block)
-         then
-            raise Layout_Error with
-              "arena free tree is cyclic or out of range";
+         elsif Depth > Maximum_Tree_Depth or else not Valid_Block_Ref (Item, Block) then
+            raise Layout_Error with "arena free tree is cyclic or out of range";
          elsif Block_State (Item, Block) /= Free_State
            or else Parent_Of (Item, Block) /= Expected_Parent
-           or else
-             (Lower /= Null_Block
-              and then not Key_Less (Item, Lower, Block))
-           or else
-             (Upper /= Null_Block
-              and then not Key_Less (Item, Block, Upper))
+           or else (Lower /= Null_Block and then not Key_Less (Item, Lower, Block))
+           or else (Upper /= Null_Block and then not Key_Less (Item, Block, Upper))
          then
             raise Layout_Error with "arena free tree ordering is corrupt";
          end if;
          Free_Blocks := Free_Blocks + 1;
          if Free_Blocks > Maximum_Blocks then
-            raise Layout_Error with
-              "arena free tree is cyclic or contains duplicates";
+            raise Layout_Error with "arena free tree is cyclic or contains duplicates";
          end if;
          Left := Left_Of (Item, Block);
          Right := Right_Of (Item, Block);
-         Left_Height := Validate_Tree
-           (Left, Block, Lower, Block, Depth + 1);
-         Right_Height := Validate_Tree
-           (Right, Block, Block, Upper, Depth + 1);
-         Difference := Interfaces.Integer_64 (Left_Height)
-           - Interfaces.Integer_64 (Right_Height);
+         Left_Height := Validate_Tree (Left, Block, Lower, Block, Depth + 1);
+         Right_Height := Validate_Tree (Right, Block, Block, Upper, Depth + 1);
+         Difference := Interfaces.Integer_64 (Left_Height) - Interfaces.Integer_64 (Right_Height);
          Stored_Height := Height_Of (Item, Block);
-         if Difference < -1 or else Difference > 1
-           or else Stored_Height /=
-             Interfaces.Unsigned_32'Max (Left_Height, Right_Height) + 1
+         if Difference < -1
+           or else Difference > 1
+           or else Stored_Height /= Interfaces.Unsigned_32'Max (Left_Height, Right_Height) + 1
          then
             raise Layout_Error with "arena free tree balance is corrupt";
          end if;
@@ -545,24 +490,19 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
             raise Layout_Error with "arena physical block chain is truncated";
          end if;
          declare
-            Size : constant Interfaces.Unsigned_32 :=
-              Block_Size (Item, Cursor);
-            State : constant Interfaces.Unsigned_32 :=
-              Block_State (Item, Cursor);
-            Gen : constant Interfaces.Unsigned_64 := Generation (Item, Cursor);
-            Counter : constant Interfaces.Unsigned_64 :=
-              Bytes.Read_U64 (Item.Counter_Address);
+            Size    : constant Interfaces.Unsigned_32 := Block_Size (Item, Cursor);
+            State   : constant Interfaces.Unsigned_32 := Block_State (Item, Cursor);
+            Gen     : constant Interfaces.Unsigned_64 := Generation (Item, Cursor);
+            Counter : constant Interfaces.Unsigned_64 := Bytes.Read_U64 (Item.Counter_Address);
          begin
             if Size < Item.Prefix_Value + Item.Minimum_Value
               or else Size mod Item.Minimum_Value /= 0
               or else Previous_Size (Item, Cursor) /= Previous
-              or else Interfaces.Unsigned_64 (Size) >
-                Interfaces.Unsigned_64 (Item.Usable_Value) - Covered
+              or else Interfaces.Unsigned_64 (Size) > Interfaces.Unsigned_64 (Item.Usable_Value) - Covered
               or else Read_Field (Item, Cursor, Block_Reserved_Offset) /= 0
               or else Gen > Counter
             then
-               raise Layout_Error with
-                 "arena physical block metadata is corrupt";
+               raise Layout_Error with "arena physical block metadata is corrupt";
             elsif State = Free_State then
                Physical_Free := Physical_Free + 1;
             elsif State = Allocated_State then
@@ -573,8 +513,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
                  or else Parent_Of (Item, Cursor) /= Null_Block
                  or else Height_Of (Item, Cursor) /= 0
                then
-                  raise Layout_Error with
-                    "arena allocated block metadata is corrupt";
+                  raise Layout_Error with "arena allocated block metadata is corrupt";
                end if;
             else
                raise Layout_Error with "arena block state is corrupt";
@@ -586,15 +525,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
             end if;
          end;
       end loop;
-      if Covered /= Interfaces.Unsigned_64 (Item.Usable_Value)
-        or else Used_Blocks /= Live_Count (Item)
-      then
+      if Covered /= Interfaces.Unsigned_64 (Item.Usable_Value) or else Used_Blocks /= Live_Count (Item) then
          raise Layout_Error with "arena physical block accounting is corrupt";
       end if;
       Tree_Root := Root (Item);
-      if Tree_Root /= Null_Block
-        and then Parent_Of (Item, Tree_Root) /= Null_Block
-      then
+      if Tree_Root /= Null_Block and then Parent_Of (Item, Tree_Root) /= Null_Block then
          raise Layout_Error with "arena free tree root has a parent";
       end if;
       declare
@@ -619,15 +554,14 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Configuration : Best_Fit_Kernel.Configuration;
       Instance_ID   : Interfaces.Unsigned_64)
    is
-      Values : constant Geometry_Values := Geometry
-        (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
+      Values : constant Geometry_Values :=
+        Geometry (Configuration.Usable_Capacity, Configuration.Minimum_Block_Size);
       Core   : Layouts.Local_View;
       Header : Layouts.Header_Values;
    begin
       Check_Instance (Instance_ID);
       Detach (Item);
-      Layouts.Attach
-        (Core, Header, Region, Location, Byte_Count (Values.Minimum));
+      Layouts.Attach (Core, Header, Region, Location, Byte_Count (Values.Minimum));
       if Header.Capacity /= Values.Usable
         or else Header.Element_Size /= Values.Minimum
         or else Header.Alignment /= Values.Minimum
@@ -654,7 +588,8 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          raise;
    end Attach;
 
-   function Is_Attached (Item : View) return Boolean is (Item.Core.Attached);
+   function Is_Attached (Item : View) return Boolean
+   is (Item.Core.Attached);
 
    function Current_Metadata (Item : View) return Metadata is
    begin
@@ -667,8 +602,8 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Extent             => Item.Core.Extent);
    end Current_Metadata;
 
-   function Is_Poisoned (Item : View) return Boolean is
-     (Layouts.Is_Poisoned (Item.Core));
+   function Is_Poisoned (Item : View) return Boolean
+   is (Layouts.Is_Poisoned (Item.Core));
 
    procedure Poison (Region : Region_View; Location : Region_Offset) is
    begin
@@ -678,13 +613,9 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    procedure Acquire (Item : View) is
       Expected : Interfaces.Unsigned_32 := Unlocked;
    begin
-      if not Item.Core.Attached
-        or else Item.Guard_Address = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached arena view";
-      elsif not Atomic.Compare_Exchange_U32
-        (Item.Guard_Address, Expected, Locked)
-      then
+      elsif not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
          Layouts.Require_Ready (Item.Core);
          if Expected = Locked then
             raise Busy_Error with "arena metadata is busy";
@@ -706,16 +637,15 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Wait     : Waiting.Context := Waiting.Start (Timeout);
       Expected : Interfaces.Unsigned_32;
    begin
-      if not Item.Core.Attached
-        or else Item.Guard_Address = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached arena view";
       end if;
-      Outer : loop
+      Outer :
+      loop
          Expected := Unlocked;
-         exit Outer when Atomic.Compare_Exchange_U32
-           (Item.Guard_Address, Expected, Locked);
-         Inner : loop
+         exit Outer when Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked);
+         Inner :
+         loop
             Layouts.Require_Ready (Item.Core);
             if Expected /= Locked then
                raise Layout_Error with "arena metadata guard is corrupt";
@@ -757,19 +687,18 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    procedure Update_Height (Item : View; Block : Block_Ref) is
    begin
       Set_Height
-        (Item, Block,
+        (Item,
+         Block,
          Interfaces.Unsigned_32'Max
-           (Height_Of (Item, Left_Of (Item, Block)),
-            Height_Of (Item, Right_Of (Item, Block))) + 1);
+           (Height_Of (Item, Left_Of (Item, Block)), Height_Of (Item, Right_Of (Item, Block)))
+         + 1);
    end Update_Height;
 
-   function Balance (Item : View; Block : Block_Ref)
-      return Interfaces.Integer_64 is
-     (Interfaces.Integer_64 (Height_Of (Item, Left_Of (Item, Block)))
-      - Interfaces.Integer_64 (Height_Of (Item, Right_Of (Item, Block))));
+   function Balance (Item : View; Block : Block_Ref) return Interfaces.Integer_64
+   is (Interfaces.Integer_64 (Height_Of (Item, Left_Of (Item, Block)))
+       - Interfaces.Integer_64 (Height_Of (Item, Right_Of (Item, Block))));
 
-   procedure Replace_Child
-     (Item : View; Parent, Previous, Replacement : Block_Ref) is
+   procedure Replace_Child (Item : View; Parent, Previous, Replacement : Block_Ref) is
    begin
       if Parent = Null_Block then
          Set_Root (Item, Replacement);
@@ -786,7 +715,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Replace_Child;
 
    function Rotate_Left (Item : View; Block : Block_Ref) return Block_Ref is
-      Pivot : constant Block_Ref := Right_Of (Item, Block);
+      Pivot  : constant Block_Ref := Right_Of (Item, Block);
       Parent : constant Block_Ref := Parent_Of (Item, Block);
       Middle : Block_Ref;
    begin
@@ -807,7 +736,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Rotate_Left;
 
    function Rotate_Right (Item : View; Block : Block_Ref) return Block_Ref is
-      Pivot : constant Block_Ref := Left_Of (Item, Block);
+      Pivot  : constant Block_Ref := Left_Of (Item, Block);
       Parent : constant Block_Ref := Parent_Of (Item, Block);
       Middle : Block_Ref;
    begin
@@ -828,29 +757,23 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Rotate_Right;
 
    procedure Rebalance_Up (Item : View; Start : Block_Ref) is
-      Block : Block_Ref := Start;
+      Block    : Block_Ref := Start;
       New_Root : Block_Ref;
    begin
       while Block /= Null_Block loop
          declare
-            Left : constant Block_Ref := Left_Of (Item, Block);
-            Right : constant Block_Ref := Right_Of (Item, Block);
-            Left_Height : constant Interfaces.Unsigned_32 :=
-              Height_Of (Item, Left);
-            Right_Height : constant Interfaces.Unsigned_32 :=
-              Height_Of (Item, Right);
-            Difference : constant Interfaces.Integer_64 :=
-              Interfaces.Integer_64 (Left_Height)
-              - Interfaces.Integer_64 (Right_Height);
+            Left         : constant Block_Ref := Left_Of (Item, Block);
+            Right        : constant Block_Ref := Right_Of (Item, Block);
+            Left_Height  : constant Interfaces.Unsigned_32 := Height_Of (Item, Left);
+            Right_Height : constant Interfaces.Unsigned_32 := Height_Of (Item, Right);
+            Difference   : constant Interfaces.Integer_64 :=
+              Interfaces.Integer_64 (Left_Height) - Interfaces.Integer_64 (Right_Height);
          begin
-            Set_Height
-              (Item, Block,
-               Interfaces.Unsigned_32'Max (Left_Height, Right_Height) + 1);
+            Set_Height (Item, Block, Interfaces.Unsigned_32'Max (Left_Height, Right_Height) + 1);
             if Difference > 1 then
                if Balance (Item, Left) < 0 then
                   declare
-                     Child_Root : constant Block_Ref :=
-                       Rotate_Left (Item, Left);
+                     Child_Root : constant Block_Ref := Rotate_Left (Item, Left);
                      pragma Unreferenced (Child_Root);
                   begin
                      null;
@@ -860,8 +783,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
             elsif Difference < -1 then
                if Balance (Item, Right) > 0 then
                   declare
-                     Child_Root : constant Block_Ref :=
-                       Rotate_Right (Item, Right);
+                     Child_Root : constant Block_Ref := Rotate_Right (Item, Right);
                      pragma Unreferenced (Child_Root);
                   begin
                      null;
@@ -893,13 +815,12 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Parent := Cursor;
          Cursor :=
            (if Size < Block_Size (Item, Cursor)
-                or else
-                  (Size = Block_Size (Item, Cursor) and then Block < Cursor)
-            then Left_Of (Item, Cursor) else Right_Of (Item, Cursor));
+              or else (Size = Block_Size (Item, Cursor) and then Block < Cursor)
+            then Left_Of (Item, Cursor)
+            else Right_Of (Item, Cursor));
       end loop;
       Set_Parent (Item, Block, Parent);
-      if Size < Block_Size (Item, Parent)
-        or else (Size = Block_Size (Item, Parent) and then Block < Parent)
+      if Size < Block_Size (Item, Parent) or else (Size = Block_Size (Item, Parent) and then Block < Parent)
       then
          Set_Left (Item, Parent, Block);
       else
@@ -920,11 +841,10 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       return Cursor;
    end Tree_Minimum;
 
-   procedure Tree_Remove
-     (Item : View; Block : Block_Ref; Clear_Metadata : Boolean := True) is
-      Left  : constant Block_Ref := Left_Of (Item, Block);
-      Right : constant Block_Ref := Right_Of (Item, Block);
-      Start : Block_Ref;
+   procedure Tree_Remove (Item : View; Block : Block_Ref; Clear_Metadata : Boolean := True) is
+      Left                                         : constant Block_Ref := Left_Of (Item, Block);
+      Right                                        : constant Block_Ref := Right_Of (Item, Block);
+      Start                                        : Block_Ref;
       Successor, Successor_Parent, Successor_Right : Block_Ref;
    begin
       if Left = Null_Block then
@@ -938,16 +858,14 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Successor_Parent := Parent_Of (Item, Successor);
          Successor_Right := Right_Of (Item, Successor);
          if Successor_Parent /= Block then
-            Replace_Child
-              (Item, Successor_Parent, Successor, Successor_Right);
+            Replace_Child (Item, Successor_Parent, Successor, Successor_Right);
             Set_Right (Item, Successor, Right);
             Set_Parent (Item, Right, Successor);
             Start := Successor_Parent;
          else
             Start := Successor;
          end if;
-         Replace_Child
-           (Item, Parent_Of (Item, Block), Block, Successor);
+         Replace_Child (Item, Parent_Of (Item, Block), Block, Successor);
          Set_Left (Item, Successor, Left);
          Set_Parent (Item, Left, Successor);
          Update_Height (Item, Successor);
@@ -961,9 +879,8 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Rebalance_Up (Item, Start);
    end Tree_Remove;
 
-   function Find_Best_Fit
-     (Item : View; Required : Interfaces.Unsigned_32) return Block_Ref is
-      Cursor : Block_Ref := Root (Item);
+   function Find_Best_Fit (Item : View; Required : Interfaces.Unsigned_32) return Block_Ref is
+      Cursor    : Block_Ref := Root (Item);
       Candidate : Block_Ref := Null_Block;
    begin
       while Cursor /= Null_Block loop
@@ -980,8 +897,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    function Next_Block (Item : View; Block : Block_Ref) return Block_Ref;
 
    function Combined_Block_Size
-     (Item : View; Left, Right : Interfaces.Unsigned_32)
-      return Interfaces.Unsigned_32
+     (Item : View; Left, Right : Interfaces.Unsigned_32) return Interfaces.Unsigned_32
    is
       Total : constant Interfaces.Unsigned_64 :=
         Interfaces.Unsigned_64 (Left) + Interfaces.Unsigned_64 (Right);
@@ -995,8 +911,8 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
 
    function Coalesce_All_Free_Runs (Item : View) return Boolean is
       Block, Next, Following : Block_Ref;
-      Size : Interfaces.Unsigned_32;
-      Changed : Boolean := False;
+      Size                   : Interfaces.Unsigned_32;
+      Changed                : Boolean := False;
    begin
       --  Lazy release permits adjacent free blocks. Validate both the physical
       --  chain and the AVL index before mutating either representation; this
@@ -1014,10 +930,8 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
             loop
                Following := Next_Block (Item, Next);
                Tree_Remove (Item, Next, Clear_Metadata => False);
-               Size := Combined_Block_Size
-                 (Item, Size, Block_Size (Item, Next));
-               exit when Following = Null_Block
-                 or else Block_State (Item, Following) /= Free_State;
+               Size := Combined_Block_Size (Item, Size, Block_Size (Item, Next));
+               exit when Following = Null_Block or else Block_State (Item, Following) /= Free_State;
                Next := Following;
             end loop;
             Set_Block_Size (Item, Block, Size);
@@ -1032,35 +946,27 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       return Changed;
    end Coalesce_All_Free_Runs;
 
-   function Rounded_Block_Size
-     (Item : View; Requested : Byte_Count) return Interfaces.Unsigned_32 is
-      Payload : constant Byte_Count := Layouts.Align_Up
-        (Requested, Byte_Count (Item.Minimum_Value));
-      Total : constant Byte_Count := Layouts.Checked_Add
-        (Byte_Count (Item.Prefix_Value), Payload);
+   function Rounded_Block_Size (Item : View; Requested : Byte_Count) return Interfaces.Unsigned_32 is
+      Payload : constant Byte_Count := Layouts.Align_Up (Requested, Byte_Count (Item.Minimum_Value));
+      Total   : constant Byte_Count := Layouts.Checked_Add (Byte_Count (Item.Prefix_Value), Payload);
    begin
       if Total > Byte_Count (Interfaces.Unsigned_32'Last) then
-         raise Constraint_Error with
-           "arena allocation size exceeds stored width";
+         raise Constraint_Error with "arena allocation size exceeds stored width";
       end if;
       return Interfaces.Unsigned_32 (Total);
    end Rounded_Block_Size;
 
    function Allocate_Unlocked
-     (Item : View; Requested_Size : Byte_Count;
-      Value : out Allocation_Handle) return Boolean
+     (Item : View; Requested_Size : Byte_Count; Value : out Allocation_Handle) return Boolean
    is
-      Required : Interfaces.Unsigned_32;
+      Required                    : Interfaces.Unsigned_32;
       Block, Following, Remainder : Block_Ref;
-      Size, Remainder_Size : Interfaces.Unsigned_32;
-      Counter : Interfaces.Unsigned_64 :=
-        Bytes.Read_U64 (Item.Counter_Address);
-      Count : Interfaces.Unsigned_64;
+      Size, Remainder_Size        : Interfaces.Unsigned_32;
+      Counter                     : Interfaces.Unsigned_64 := Bytes.Read_U64 (Item.Counter_Address);
+      Count                       : Interfaces.Unsigned_64;
    begin
       Value := Null_Allocation;
-      if Requested_Size >
-        Byte_Count (Item.Usable_Value - Item.Prefix_Value)
-      then
+      if Requested_Size > Byte_Count (Item.Usable_Value - Item.Prefix_Value) then
          return False;
       end if;
       Required := Rounded_Block_Size (Item, Requested_Size);
@@ -1085,8 +991,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
          Remainder_Size := Size - Required;
          Remainder := Block + Required / Item.Minimum_Value;
          Initialize_Block
-           (Item, Remainder, Remainder_Size, Required, Free_State,
-            Initialize_Tree_Metadata => False);
+           (Item, Remainder, Remainder_Size, Required, Free_State, Initialize_Tree_Metadata => False);
          Following := Remainder + Remainder_Size / Item.Minimum_Value;
          if Following < Item.Usable_Value / Item.Minimum_Value then
             Set_Previous_Size (Item, Following, Remainder_Size);
@@ -1100,15 +1005,15 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Set_Generation (Item, Block, Counter);
       Set_State (Item, Block, Allocated_State);
       Set_Live_Count (Item, Count + 1);
-      Value :=
-        (Token      => Make_Token (Item.Core.Epoch_Value, Block),
-         Generation => Counter);
+      Value := (Token => Make_Token (Item.Core.Epoch_Value, Block), Generation => Counter);
       return True;
    end Allocate_Unlocked;
 
    procedure Try_Allocate
-     (Item : in out View; Requested_Size : Positive;
-      Value : out Allocation_Handle; Result : out Allocation_Result)
+     (Item           : in out View;
+      Requested_Size : Positive;
+      Value          : out Allocation_Handle;
+      Result         : out Allocation_Result)
    is
       Mutated : Boolean := False;
    begin
@@ -1136,8 +1041,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Try_Allocate;
 
    procedure Try_Allocate
-     (Item : in out View; Requested_Size : Positive; Timeout : Wait_Timeout;
-      Value : out Allocation_Handle; Result : out Allocation_Result)
+     (Item           : in out View;
+      Requested_Size : Positive;
+      Timeout        : Wait_Timeout;
+      Value          : out Allocation_Handle;
+      Result         : out Allocation_Result)
    is
       Mutated : Boolean := False;
    begin
@@ -1163,9 +1071,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Offset   : Byte_Count;
    end record;
 
-   function Validate_Handle
-     (Item : View; Value : Allocation_Handle) return Block_Description
-   is
+   function Validate_Handle (Item : View; Value : Allocation_Handle) return Block_Description is
       Block : constant Block_Ref := Token_Block (Value);
       Size  : Interfaces.Unsigned_32;
    begin
@@ -1183,34 +1089,29 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Size := Block_Size (Item, Block);
       if Size < Item.Prefix_Value + Item.Minimum_Value
         or else Size mod Item.Minimum_Value /= 0
-        or else Interfaces.Unsigned_64 (Block) *
-          Interfaces.Unsigned_64 (Item.Minimum_Value)
-          + Interfaces.Unsigned_64 (Size) >
-            Interfaces.Unsigned_64 (Item.Usable_Value)
+        or else Interfaces.Unsigned_64 (Block)
+                * Interfaces.Unsigned_64 (Item.Minimum_Value)
+                + Interfaces.Unsigned_64 (Size)
+                > Interfaces.Unsigned_64 (Item.Usable_Value)
       then
          raise Layout_Error with "arena allocation block extent is corrupt";
       end if;
       return
         (Capacity => Byte_Count (Size - Item.Prefix_Value),
-         Offset   => Layouts.Checked_Add
-           (Layouts.Checked_Multiply
-              (Byte_Count (Block), Byte_Count (Item.Minimum_Value)),
-            Byte_Count (Item.Prefix_Value)));
+         Offset   =>
+           Layouts.Checked_Add
+             (Layouts.Checked_Multiply (Byte_Count (Block), Byte_Count (Item.Minimum_Value)),
+              Byte_Count (Item.Prefix_Value)));
    end Validate_Handle;
 
    function Next_Block (Item : View; Block : Block_Ref) return Block_Ref is
       Candidate : constant Interfaces.Unsigned_64 :=
         Interfaces.Unsigned_64 (Block)
-        + Interfaces.Unsigned_64 (Block_Size (Item, Block) /
-            Item.Minimum_Value);
+        + Interfaces.Unsigned_64 (Block_Size (Item, Block) / Item.Minimum_Value);
    begin
-      if Candidate = Interfaces.Unsigned_64
-        (Item.Usable_Value / Item.Minimum_Value)
-      then
+      if Candidate = Interfaces.Unsigned_64 (Item.Usable_Value / Item.Minimum_Value) then
          return Null_Block;
-      elsif Candidate > Interfaces.Unsigned_64
-        (Item.Usable_Value / Item.Minimum_Value)
-      then
+      elsif Candidate > Interfaces.Unsigned_64 (Item.Usable_Value / Item.Minimum_Value) then
          raise Layout_Error with "arena next block is out of range";
       end if;
       return Block_Ref (Candidate);
@@ -1234,8 +1135,7 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Acquire (Item);
       begin
          declare
-            Ignored : constant Block_Description :=
-              Validate_Handle (Item, Value);
+            Ignored : constant Block_Description := Validate_Handle (Item, Value);
             pragma Unreferenced (Ignored);
          begin
             Mutated := True;
@@ -1249,15 +1149,13 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Release_Guard (Item);
    end Release;
 
-   procedure Release
-     (Item : in out View; Value : Allocation_Handle; Timeout : Wait_Timeout) is
+   procedure Release (Item : in out View; Value : Allocation_Handle; Timeout : Wait_Timeout) is
       Mutated : Boolean := False;
    begin
       Acquire (Item, Timeout);
       begin
          declare
-            Ignored : constant Block_Description :=
-              Validate_Handle (Item, Value);
+            Ignored : constant Block_Description := Validate_Handle (Item, Value);
             pragma Unreferenced (Ignored);
          begin
             Mutated := True;
@@ -1271,53 +1169,44 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       Release_Guard (Item);
    end Release;
 
-   function Block_Capacity
-     (Item : View; Value : Allocation_Handle) return Byte_Count is
-     (Validate_Handle (Item, Value).Capacity);
+   function Block_Capacity (Item : View; Value : Allocation_Handle) return Byte_Count
+   is (Validate_Handle (Item, Value).Capacity);
 
-   procedure Attach_Allocation
-     (Region : in out Region_View; Item : View; Value : Allocation_Handle)
-   is
+   procedure Attach_Allocation (Region : in out Region_View; Item : View; Value : Allocation_Handle) is
       Description : Block_Description;
    begin
       Region.Base := System.Null_Address;
       Region.Length_Value := 0;
       Region.Attached := False;
       Description := Validate_Handle (Item, Value);
-      Region.Base := Layouts.Address_At
-        (Item.Core, Layouts.Checked_Add (Item.Data_Offset, Description.Offset),
-         Description.Capacity, 1);
+      Region.Base :=
+        Layouts.Address_At
+          (Item.Core, Layouts.Checked_Add (Item.Data_Offset, Description.Offset), Description.Capacity, 1);
       Region.Length_Value := Description.Capacity;
       Region.Attached := True;
    end Attach_Allocation;
 
    function Payload_Address
-     (Item : View; Description : Block_Description;
-      Offset, Extent : Byte_Count; Alignment : Byte_Count := 1)
+     (Item : View; Description : Block_Description; Offset, Extent : Byte_Count; Alignment : Byte_Count := 1)
       return System.Address
    is
       Relative : Byte_Count;
    begin
-      if Offset > Description.Capacity
-        or else Extent > Description.Capacity - Offset
-      then
+      if Offset > Description.Capacity or else Extent > Description.Capacity - Offset then
          raise Constraint_Error with "arena allocation slice is out of bounds";
       elsif Extent = 0 then
          raise Constraint_Error with "zero-sized arena slice has no address";
       end if;
       Relative := Layouts.Checked_Add (Description.Offset, Offset);
-      if not Item.Core.Attached or else Item.Data_Base = System.Null_Address
-      then
+      if not Item.Core.Attached or else Item.Data_Base = System.Null_Address then
          raise Region_Error with "detached arena view";
       end if;
       declare
-         Address : constant System.Address := Item.Data_Base
-           + Addressing.Storage_Offset (Relative);
+         Address : constant System.Address := Item.Data_Base + Addressing.Storage_Offset (Relative);
       begin
          if Alignment = 0
            or else (Alignment and (Alignment - 1)) /= 0
-           or else Addressing.To_Integer (Address)
-             mod Addressing.Integer_Address (Alignment) /= 0
+           or else Addressing.To_Integer (Address) mod Addressing.Integer_Address (Alignment) /= 0
          then
             raise Region_Error with "arena payload slice is misaligned";
          end if;
@@ -1326,14 +1215,15 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
    end Payload_Address;
 
    procedure Copy
-     (Item : View; Source : Allocation_Handle; Source_Offset : Byte_Count;
-      Target : Allocation_Handle; Target_Offset, Length : Byte_Count)
+     (Item                  : View;
+      Source                : Allocation_Handle;
+      Source_Offset         : Byte_Count;
+      Target                : Allocation_Handle;
+      Target_Offset, Length : Byte_Count)
    is
-      Source_Description : constant Block_Description :=
-        Validate_Handle (Item, Source);
-      Target_Description : constant Block_Description :=
-        Validate_Handle (Item, Target);
-      Native_Length : Interfaces.C.size_t;
+      Source_Description : constant Block_Description := Validate_Handle (Item, Source);
+      Target_Description : constant Block_Description := Validate_Handle (Item, Target);
+      Native_Length      : Interfaces.C.size_t;
    begin
       if Source_Offset > Source_Description.Capacity
         or else Length > Source_Description.Capacity - Source_Offset
@@ -1344,14 +1234,11 @@ package body Flyology_Allocators.Allocation_Algorithms.Best_Fit_Kernel is
       elsif Length /= 0 then
          Native_Length := Interfaces.C.size_t (Length);
          if Byte_Count (Native_Length) /= Length then
-            raise Constraint_Error with
-              "arena copy is not natively representable";
+            raise Constraint_Error with "arena copy is not natively representable";
          end if;
          Bytes.Copy
-           (Payload_Address
-              (Item, Target_Description, Target_Offset, Length),
-            Payload_Address
-              (Item, Source_Description, Source_Offset, Length),
+           (Payload_Address (Item, Target_Description, Target_Offset, Length),
+            Payload_Address (Item, Source_Description, Source_Offset, Length),
             Native_Length);
       end if;
    end Copy;

@@ -1,80 +1,64 @@
 --  Internal, proved state decisions for connection admission and lease
 --  serialization. Resource ownership and wake-source operations remain in the
 --  protected controller that consumes these decisions.
+
 private package Flyology.Connection_Policy
-  with Preelaborate,
-       SPARK_Mode
+  with Preelaborate, SPARK_Mode
 is
-   type Acquire_Action is
-     (Cancel_Lease, Wait_For_Lease, Acquire_Lease);
+   type Acquire_Action is (Cancel_Lease, Wait_For_Lease, Acquire_Lease);
 
    function Classify_Acquire
-     (Generation_Matches : Boolean;
-      Resources_Open     : Boolean;
-      Closing            : Boolean;
-      Active             : Boolean) return Acquire_Action
-   with Post =>
-     (if not Generation_Matches or else not Resources_Open or else Closing
-      then Classify_Acquire'Result = Cancel_Lease
-      elsif Active then Classify_Acquire'Result = Wait_For_Lease
-      else Classify_Acquire'Result = Acquire_Lease);
+     (Generation_Matches : Boolean; Resources_Open : Boolean; Closing : Boolean; Active : Boolean)
+      return Acquire_Action
+   with
+     Post =>
+       (if not Generation_Matches or else not Resources_Open or else Closing
+        then Classify_Acquire'Result = Cancel_Lease
+        elsif Active
+        then Classify_Acquire'Result = Wait_For_Lease
+        else Classify_Acquire'Result = Acquire_Lease);
 
    function Started_After_Register (Started : Natural) return Positive
-   with Pre  => Started < Natural'Last,
-        Post => Started_After_Register'Result = Started + 1;
+   with Pre => Started < Natural'Last, Post => Started_After_Register'Result = Started + 1;
 
    function Started_After_Release (Started : Positive) return Natural
    with Post => Started_After_Release'Result = Started - 1;
 
    function Should_Wake_Next
-     (Active    : Boolean;
-      Closing   : Boolean;
-      Started   : Natural;
-      Signalled : Boolean) return Boolean
-   with Post =>
-     Should_Wake_Next'Result =
-       (not Active and then not Closing and then Started > 0
-        and then not Signalled);
+     (Active : Boolean; Closing : Boolean; Started : Natural; Signalled : Boolean) return Boolean
+   with
+     Post =>
+       Should_Wake_Next'Result
+       = (not Active and then not Closing and then Started > 0 and then not Signalled);
 
-   function Close_Leader
-     (Descriptor_Open : Boolean;
-      Closing         : Boolean) return Boolean
-   with Post =>
-     Close_Leader'Result = (Descriptor_Open and then not Closing);
+   function Close_Leader (Descriptor_Open : Boolean; Closing : Boolean) return Boolean
+   with Post => Close_Leader'Result = (Descriptor_Open and then not Closing);
 
-   function Close_Wake_Required
-     (Leader  : Boolean;
-      Started : Natural) return Boolean
+   function Close_Wake_Required (Leader : Boolean; Started : Natural) return Boolean
    with Post => Close_Wake_Required'Result = (Leader and then Started > 0);
 
    --  Terminal report a Close caller owes its caller once the abort-deferred
    --  close guard has run. A non-leader either waits for the leader or finds
    --  the connection already closed; a leader reports the first cleanup
    --  failure ahead of a provider finalization failure.
-   type Close_Report is
-     (Close_Finished,
-      Await_Leader,
-      Raise_Cleanup_Failure,
-      Raise_Provider_Error);
+   type Close_Report is (Close_Finished, Await_Leader, Raise_Cleanup_Failure, Raise_Provider_Error);
 
    function Classify_Close
-     (Leader          : Boolean;
-      Descriptor_Open : Boolean;
-      Cleanup_Failed  : Boolean;
-      Provider_Failed : Boolean) return Close_Report
-   with Post =>
-     (if not Leader
-      then Classify_Close'Result =
-        (if Descriptor_Open then Await_Leader else Close_Finished)
-      elsif Cleanup_Failed then Classify_Close'Result = Raise_Cleanup_Failure
-      elsif Provider_Failed then Classify_Close'Result = Raise_Provider_Error
-      else Classify_Close'Result = Close_Finished);
+     (Leader : Boolean; Descriptor_Open : Boolean; Cleanup_Failed : Boolean; Provider_Failed : Boolean)
+      return Close_Report
+   with
+     Post =>
+       (if not Leader
+        then Classify_Close'Result = (if Descriptor_Open then Await_Leader else Close_Finished)
+        elsif Cleanup_Failed
+        then Classify_Close'Result = Raise_Cleanup_Failure
+        elsif Provider_Failed
+        then Classify_Close'Result = Raise_Provider_Error
+        else Classify_Close'Result = Close_Finished);
 
    --  A connection bound to an admission controller may only be admitted
    --  through that controller; an unbound connection accepts any.
-   function Binding_Accepted
-     (Bound   : Boolean;
-      Matches : Boolean) return Boolean
+   function Binding_Accepted (Bound : Boolean; Matches : Boolean) return Boolean
    with Post => Binding_Accepted'Result = (not Bound or else Matches);
 
    function Finish_Close_Allowed
@@ -83,20 +67,20 @@ is
       Started            : Natural;
       Generation_Matches : Boolean;
       Resources_Released : Boolean) return Boolean
-   with Post =>
-     Finish_Close_Allowed'Result =
-       (Closing and then not Active and then Started = 0
-        and then Generation_Matches and then Resources_Released);
+   with
+     Post =>
+       Finish_Close_Allowed'Result
+       = (Closing
+          and then not Active
+          and then Started = 0
+          and then Generation_Matches
+          and then Resources_Released);
 
-   function Is_Open
-     (Descriptor_Open : Boolean;
-      Closing         : Boolean) return Boolean
+   function Is_Open (Descriptor_Open : Boolean; Closing : Boolean) return Boolean
    with Post => Is_Open'Result = (Descriptor_Open and then not Closing);
 
-   function Waiting_Operations
-     (Started : Natural;
-      Active  : Boolean) return Natural
-   with Pre  => not Active or else Started > 0,
-        Post => Waiting_Operations'Result =
-          (if Active then Started - 1 else Started);
+   function Waiting_Operations (Started : Natural; Active : Boolean) return Natural
+   with
+     Pre  => not Active or else Started > 0,
+     Post => Waiting_Operations'Result = (if Active then Started - 1 else Started);
 end Flyology.Connection_Policy;

@@ -48,8 +48,7 @@ package body Create_Race_Support is
    pragma Import (C, C_Start_Racer, "flyology_test_start_create_racer");
 
    function C_Arm_Exit_Check (Query : Result_Query) return C.int;
-   pragma Import
-     (C, C_Arm_Exit_Check, "flyology_test_arm_create_race_exit_check");
+   pragma Import (C, C_Arm_Exit_Check, "flyology_test_arm_create_race_exit_check");
 
    function C_Creator_Parked return C.int;
    pragma Import (C, C_Creator_Parked, "flyology_test_create_race_parked");
@@ -71,18 +70,19 @@ package body Create_Race_Support is
            Group      => Target_Group);
    end Racing_Create;
 
-   function Racing_Result return C.int is (Outcome);
+   function Racing_Result return C.int
+   is (Outcome);
 
    procedure Record_Target_Group is
    begin
       Target_Group := System.Flyology.Scheduler.Current_Group;
    end Record_Target_Group;
 
-   function Arm_Exit_Check return Boolean is
-     (C_Arm_Exit_Check (Racing_Result'Access) = 0);
+   function Arm_Exit_Check return Boolean
+   is (C_Arm_Exit_Check (Racing_Result'Access) = 0);
 
-   function Start_Racer return Boolean is
-     (C_Start_Racer (Racing_Create'Access) = 0);
+   function Start_Racer return Boolean
+   is (C_Start_Racer (Racing_Create'Access) = 0);
 
    function Start_Automatic_Racer return Boolean is
    begin
@@ -92,8 +92,10 @@ package body Create_Race_Support is
       return C_Start_Racer (Racing_Create'Access) = 0;
    end Start_Automatic_Racer;
 
-   function Racer_Group return Integer is (Integer (Observed_Group));
+   function Racer_Group return Integer
+   is (Integer (Observed_Group));
 
-   function Creator_Parked return Boolean is (C_Creator_Parked /= 0);
+   function Creator_Parked return Boolean
+   is (C_Creator_Parked /= 0);
 
 end Create_Race_Support;

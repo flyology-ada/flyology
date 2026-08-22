@@ -29,26 +29,25 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       procedure Note_Stop_Forwarding_Failure;
       function Owner_Count return Natural;
       function Reconciliation_Count (Input : Link_Request) return Natural;
-      function Persistent_Creation_Count
-        (Input : Link_Request) return Natural;
+      function Persistent_Creation_Count (Input : Link_Request) return Natural;
       function Link_Start_Count (Input : Link_Request) return Natural;
       function Link_Is_Active (Input : Link_Request) return Boolean;
       function Old_Handle_Was_Rejected return Boolean;
       function Stop_Forwarding_Failed return Boolean;
    private
-      Failure_Pending : Boolean := False;
-      Owners : Natural := 0;
-      Last_Owner : Generation := Generation'First;
-      Desired : Link_Flag_Array := (others => True);
-      Reconciliations : Link_Count_Array := (others => 0);
-      Persisted : Link_Flag_Array := (others => False);
+      Failure_Pending      : Boolean := False;
+      Owners               : Natural := 0;
+      Last_Owner           : Generation := Generation'First;
+      Desired              : Link_Flag_Array := (others => True);
+      Reconciliations      : Link_Count_Array := (others => 0);
+      Persisted            : Link_Flag_Array := (others => False);
       Persistent_Creations : Link_Count_Array := (others => 0);
-      Active_Links : Link_Flag_Array := (others => False);
-      Link_Starts : Link_Count_Array := (others => 0);
-      Saved_Handle : Child_Handle;
-      Has_Saved_Handle : Boolean := False;
-      Old_Handle_Rejected : Boolean := False;
-      Forwarding_Failed : Boolean := False;
+      Active_Links         : Link_Flag_Array := (others => False);
+      Link_Starts          : Link_Count_Array := (others => 0);
+      Saved_Handle         : Child_Handle;
+      Has_Saved_Handle     : Boolean := False;
+      Old_Handle_Rejected  : Boolean := False;
+      Forwarding_Failed    : Boolean := False;
    end Test_State;
 
    protected body Test_State is
@@ -66,8 +65,7 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       procedure Begin_Owner (Value : Generation) is
       begin
          if Owners > 0 and then Value <= Last_Owner then
-            raise Program_Error with
-              "nested family owner generation did not advance";
+            raise Program_Error with "nested family owner generation did not advance";
          end if;
          Owners := Owners + 1;
          Last_Owner := Value;
@@ -81,16 +79,14 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
          Reconciliations (Input) := Reconciliations (Input) + 1;
          if not Persisted (Input) then
             Persisted (Input) := True;
-            Persistent_Creations (Input) :=
-              Persistent_Creations (Input) + 1;
+            Persistent_Creations (Input) := Persistent_Creations (Input) + 1;
          end if;
       end Reconcile;
 
       procedure Begin_Link (Input : Link_Request) is
       begin
          if Active_Links (Input) then
-            raise Program_Error with
-              "replacement link overlapped the prior family incarnation";
+            raise Program_Error with "replacement link overlapped the prior family incarnation";
          end if;
          Active_Links (Input) := True;
          Link_Starts (Input) := Link_Starts (Input) + 1;
@@ -131,26 +127,26 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
          Forwarding_Failed := True;
       end Note_Stop_Forwarding_Failure;
 
-      function Owner_Count return Natural is (Owners);
+      function Owner_Count return Natural
+      is (Owners);
 
-      function Reconciliation_Count (Input : Link_Request) return Natural is
-        (Reconciliations (Input));
+      function Reconciliation_Count (Input : Link_Request) return Natural
+      is (Reconciliations (Input));
 
-      function Persistent_Creation_Count
-        (Input : Link_Request) return Natural is
-        (Persistent_Creations (Input));
+      function Persistent_Creation_Count (Input : Link_Request) return Natural
+      is (Persistent_Creations (Input));
 
-      function Link_Start_Count (Input : Link_Request) return Natural is
-        (Link_Starts (Input));
+      function Link_Start_Count (Input : Link_Request) return Natural
+      is (Link_Starts (Input));
 
-      function Link_Is_Active (Input : Link_Request) return Boolean is
-        (Active_Links (Input));
+      function Link_Is_Active (Input : Link_Request) return Boolean
+      is (Active_Links (Input));
 
-      function Old_Handle_Was_Rejected return Boolean is
-        (Old_Handle_Rejected);
+      function Old_Handle_Was_Rejected return Boolean
+      is (Old_Handle_Rejected);
 
-      function Stop_Forwarding_Failed return Boolean is
-        (Forwarding_Failed);
+      function Stop_Forwarding_Failed return Boolean
+      is (Forwarding_Failed);
    end Test_State;
 
    type Family_Context is limited record
@@ -162,9 +158,7 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
    end record;
 
    procedure Execute_Link
-     (State   : in out Family_Context;
-      Input   : Link_Request;
-      Control : not null access Generation_Control)
+     (State : in out Family_Context; Input : Link_Request; Control : not null access Generation_Control)
    is
       Released : Boolean := False;
 
@@ -191,11 +185,12 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
          raise;
    end Execute_Link;
 
-   package Link_Child is new Flyology.Supervision.Input_Children
-     (Input_Type          => Link_Request,
-      Application_Context => Family_Context,
-      Execute             => Execute_Link,
-      Task_Model          => Flyology.Native_Task);
+   package Link_Child is new
+     Flyology.Supervision.Input_Children
+       (Input_Type          => Link_Request,
+        Application_Context => Family_Context,
+        Execute             => Execute_Link,
+        Task_Model          => Flyology.Native_Task);
 
    procedure Run_Link_Generation
      (State   : aliased in out Family_Context;
@@ -217,13 +212,14 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       Has_Group         => False,
       Group             => 0);
 
-   package Link_Families is new Flyology.Supervision.Families
-     (Request             => Link_Request,
-      Application_Context => Family_Context,
-      Run_One_Generation  => Run_Link_Generation,
-      Policy              => Link_Policy,
-      First_Child_Id      => 12_000_000_000,
-      Maximum_Children   => Link_Request'Last);
+   package Link_Families is new
+     Flyology.Supervision.Families
+       (Request             => Link_Request,
+        Application_Context => Family_Context,
+        Run_One_Generation  => Run_Link_Generation,
+        Policy              => Link_Policy,
+        First_Child_Id      => 12_000_000_000,
+        Maximum_Children    => Link_Request'Last);
 
    protected type Nested_Completion is
       procedure Finish (Value : Supervisor_Result);
@@ -232,7 +228,7 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       function Succeeded return Boolean;
       function Outcome return Supervisor_Outcome;
    private
-      Is_Done : Boolean := False;
+      Is_Done        : Boolean := False;
       Was_Successful : Boolean := False;
       Stored_Outcome : Supervisor_Outcome := Shutdown_Completed;
    end Nested_Completion;
@@ -251,17 +247,17 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
          Was_Successful := False;
       end Fail;
 
-      function Done return Boolean is (Is_Done);
-      function Succeeded return Boolean is (Was_Successful);
-      function Outcome return Supervisor_Outcome is (Stored_Outcome);
+      function Done return Boolean
+      is (Is_Done);
+      function Succeeded return Boolean
+      is (Was_Successful);
+      function Outcome return Supervisor_Outcome
+      is (Stored_Outcome);
    end Nested_Completion;
 
-   procedure Execute_Prerequisite
-     (State   : in out Context;
-      Control : not null access Generation_Control)
-   is
+   procedure Execute_Prerequisite (State : in out Context; Control : not null access Generation_Control) is
       Requested : Boolean;
-      Value : constant Generation := Current_Generation (Handle (Control.all));
+      Value     : constant Generation := Current_Generation (Handle (Control.all));
    begin
       Mark_Ready (Control.all);
       loop
@@ -278,38 +274,32 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       end loop;
    end Execute_Prerequisite;
 
-   procedure Execute_Family_Owner
-     (State   : in out Context;
-      Control : not null access Generation_Control)
-   is
-      Owner_Generation : constant Generation :=
-        Current_Generation (Handle (Control.all));
-      Item : aliased Link_Families.Family;
-      Completion : Nested_Completion;
+   procedure Execute_Family_Owner (State : in out Context; Control : not null access Generation_Control) is
+      Owner_Generation : constant Generation := Current_Generation (Handle (Control.all));
+      Item             : aliased Link_Families.Family;
+      Completion       : Nested_Completion;
 
       task Runner;
 
       task body Runner is
          Result : Supervisor_Result;
       begin
-         Link_Families.Run_Nested
-           (Item, State.Family_State, Control.all, Result);
+         Link_Families.Run_Nested (Item, State.Family_State, Control.all, Result);
          Completion.Finish (Result);
       exception
          when others =>
             Completion.Fail;
       end Runner;
 
-      Handles : array (Link_Request) of Child_Handle;
-      Deadline : Ada.Real_Time.Time;
+      Handles              : array (Link_Request) of Child_Handle;
+      Deadline             : Ada.Real_Time.Time;
       Forwarding_Timed_Out : Boolean := False;
    begin
       State.Family_State.State.Begin_Owner (Owner_Generation);
       Deadline := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
       while not Link_Families.Accepting (Item) loop
          if Completion.Done then
-            raise Program_Error with
-              "nested family returned before admission opened";
+            raise Program_Error with "nested family returned before admission opened";
          elsif Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "nested family admission did not open";
          end if;
@@ -322,25 +312,20 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       end loop;
 
       if Owner_Generation = Generation'First then
-         State.Family_State.State.Remember_First_Handle
-           (Handles (Link_Request'First));
+         State.Family_State.State.Remember_First_Handle (Handles (Link_Request'First));
       else
          declare
-            Old : constant Child_Handle :=
-              State.Family_State.State.First_Handle;
+            Old : constant Child_Handle := State.Family_State.State.First_Handle;
          begin
             if Same_Controller (Old, Handles (Link_Request'First)) then
-               raise Program_Error with
-                 "reconstructed family reused its controller identity";
+               raise Program_Error with "reconstructed family reused its controller identity";
             end if;
             begin
                declare
-                  Ignored : constant Child_Snapshot :=
-                    Link_Families.Current (Item, Old);
+                  Ignored : constant Child_Snapshot := Link_Families.Current (Item, Old);
                begin
                   pragma Unreferenced (Ignored);
-                  raise Program_Error with
-                    "old family handle controlled the new incarnation";
+                  raise Program_Error with "old family handle controlled the new incarnation";
                end;
             exception
                when Link_Families.Stale_Handle =>
@@ -353,8 +338,7 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       for Input in Link_Request loop
          while not Link_Families.Current (Item, Handles (Input)).Ready loop
             if Completion.Done then
-               raise Program_Error with
-                 "nested family returned before desired links were ready";
+               raise Program_Error with "nested family returned before desired links were ready";
             elsif Ada.Real_Time.Clock >= Deadline then
                raise Program_Error with "desired link did not become ready";
             end if;
@@ -365,8 +349,7 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
 
       while not Stop_Requested (Control.all) loop
          if Completion.Done then
-            raise Program_Error with
-              "nested family returned while its owner remained live";
+            raise Program_Error with "nested family returned while its owner remained live";
          end if;
          delay 0.001;
       end loop;
@@ -386,11 +369,8 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       end loop;
 
       if Forwarding_Timed_Out then
-         raise Program_Error with
-           "Run_Nested did not forward its parent stop";
-      elsif not Completion.Succeeded
-        or else Completion.Outcome /= Shutdown_Completed
-      then
+         raise Program_Error with "Run_Nested did not forward its parent stop";
+      elsif not Completion.Succeeded or else Completion.Outcome /= Shutdown_Completed then
          raise Program_Error with "nested family shutdown failed";
       end if;
    exception
@@ -402,52 +382,49 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
          raise;
    end Execute_Family_Owner;
 
-   package Prerequisite_Child is new Flyology.Supervision.Children
-     (Application_Context => Context,
-      Execute             => Execute_Prerequisite,
-      Task_Model          => Flyology.Native_Task);
+   package Prerequisite_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Context,
+        Execute             => Execute_Prerequisite,
+        Task_Model          => Flyology.Native_Task);
 
-   package Family_Owner_Child is new Flyology.Supervision.Children
-     (Application_Context => Context,
-      Execute             => Execute_Family_Owner,
-      Task_Model          => Flyology.Native_Task);
+   package Family_Owner_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Context,
+        Execute             => Execute_Family_Owner,
+        Task_Model          => Flyology.Native_Task);
 
    type Outer_Child is (Prerequisite, Family_Owner);
 
-   function Outer_Id (Child : Outer_Child) return Child_Id is
-     (Child_Id (13_000_000_000 + Outer_Child'Pos (Child)));
+   function Outer_Id (Child : Outer_Child) return Child_Id
+   is (Child_Id (13_000_000_000 + Outer_Child'Pos (Child)));
 
-   function Outer_Specification
-     (Child : Outer_Child) return Child_Specification is
-     ((Restart           =>
-         (if Child = Prerequisite then On_Failure else Never),
-       Impact            =>
-         (if Child = Prerequisite then Restart_Dependents else Escalate),
-       Recovery          =>
-         (Burst_Attempts    => 2,
-          Window            => Ada.Real_Time.Seconds (1),
-          Total_Attempts    => 2,
-          Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
-          Maximum_Backoff   => Ada.Real_Time.Milliseconds (1),
-          Stability_Reset   => Ada.Real_Time.Seconds (1),
-          Recovery_Deadline => Ada.Real_Time.Seconds (3)),
-       Stopping          =>
-         (Grace             => Ada.Real_Time.Seconds (2),
-          Request_Abort     => False,
-          Abort_Observation => Ada.Real_Time.Seconds (1)),
-       Readiness_Timeout => Ada.Real_Time.Seconds (2),
-       Restart_Safe      => True,
-       Task_Model        => Flyology.Native_Task,
-       Has_Group         => False,
-       Group             => 0));
+   function Outer_Specification (Child : Outer_Child) return Child_Specification
+   is ((Restart           => (if Child = Prerequisite then On_Failure else Never),
+        Impact            => (if Child = Prerequisite then Restart_Dependents else Escalate),
+        Recovery          =>
+          (Burst_Attempts    => 2,
+           Window            => Ada.Real_Time.Seconds (1),
+           Total_Attempts    => 2,
+           Initial_Backoff   => Ada.Real_Time.Milliseconds (1),
+           Maximum_Backoff   => Ada.Real_Time.Milliseconds (1),
+           Stability_Reset   => Ada.Real_Time.Seconds (1),
+           Recovery_Deadline => Ada.Real_Time.Seconds (3)),
+        Stopping          =>
+          (Grace             => Ada.Real_Time.Seconds (2),
+           Request_Abort     => False,
+           Abort_Observation => Ada.Real_Time.Seconds (1)),
+        Readiness_Timeout => Ada.Real_Time.Seconds (2),
+        Restart_Safe      => True,
+        Task_Model        => Flyology.Native_Task,
+        Has_Group         => False,
+        Group             => 0));
 
-   function Depends_On
-     (Child, Required : Outer_Child) return Boolean is
-     (Child = Family_Owner and then Required = Prerequisite);
+   function Depends_On (Child, Required : Outer_Child) return Boolean
+   is (Child = Family_Owner and then Required = Prerequisite);
 
-   function Same_Cohort
-     (Trigger, Member : Outer_Child) return Boolean is
-     (Trigger = Member);
+   function Same_Cohort (Trigger, Member : Outer_Child) return Boolean
+   is (Trigger = Member);
 
    procedure Run_Outer_Generation
      (State   : aliased in out Context;
@@ -458,22 +435,24 @@ procedure Flyology.Supervision.Nested_Family_Restart_Smoke is
       case Child is
          when Prerequisite =>
             Prerequisite_Child.Run (State, Control, Result);
+
          when Family_Owner =>
             Family_Owner_Child.Run (State, Control, Result);
       end case;
    end Run_Outer_Generation;
 
-   package Outer_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind          => Outer_Child,
-      Application_Context => Context,
-      Logical_Id          => Outer_Id,
-      Specification       => Outer_Specification,
-      Depends_On          => Depends_On,
-      Cohort_Member       => Same_Cohort,
-      Run_One_Generation  => Run_Outer_Generation);
+   package Outer_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Outer_Child,
+        Application_Context => Context,
+        Logical_Id          => Outer_Id,
+        Specification       => Outer_Specification,
+        Depends_On          => Depends_On,
+        Cohort_Member       => Same_Cohort,
+        Run_One_Generation  => Run_Outer_Generation);
 
-   State : aliased Context;
-   Item : aliased Outer_Supervisors.Supervisor;
+   State  : aliased Context;
+   Item   : aliased Outer_Supervisors.Supervisor;
    Result : Supervisor_Result;
 
    task Owner is
@@ -508,13 +487,10 @@ begin
       exit when
         Outer_Supervisors.Current (Item, Prerequisite).Ready
         and then Outer_Supervisors.Current (Item, Family_Owner).Ready
-        and then
-          Outer_Supervisors.Current (Item, Prerequisite).Generation = 2
-        and then
-          Outer_Supervisors.Current (Item, Family_Owner).Generation = 2;
+        and then Outer_Supervisors.Current (Item, Prerequisite).Generation = 2
+        and then Outer_Supervisors.Current (Item, Family_Owner).Generation = 2;
       if Ada.Real_Time.Clock >= Deadline then
-         raise Program_Error with
-           "nested family owner was not reconstructed";
+         raise Program_Error with "nested family owner was not reconstructed";
       end if;
       delay 0.001;
    end loop;
@@ -523,10 +499,8 @@ begin
    pragma Assert (State.Family_State.State.Old_Handle_Was_Rejected);
    pragma Assert (not State.Family_State.State.Stop_Forwarding_Failed);
    for Input in Link_Request loop
-      pragma Assert
-        (State.Family_State.State.Reconciliation_Count (Input) = 2);
-      pragma Assert
-        (State.Family_State.State.Persistent_Creation_Count (Input) = 1);
+      pragma Assert (State.Family_State.State.Reconciliation_Count (Input) = 2);
+      pragma Assert (State.Family_State.State.Persistent_Creation_Count (Input) = 1);
       pragma Assert (State.Family_State.State.Link_Start_Count (Input) = 2);
       pragma Assert (State.Family_State.State.Link_Is_Active (Input));
    end loop;

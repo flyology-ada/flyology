@@ -12,15 +12,10 @@ is
 
    --  CPU aspect values that name a shared execution group. The reserved
    --  value is excluded, so no CPU aspect names the first shared group.
-   subtype Group_Selector is
-     Natural range Reserved_CPU + 1 .. Last_Shared_Group;
+   subtype Group_Selector is Natural range Reserved_CPU + 1 .. Last_Shared_Group;
 
    --  Return the shared execution group named by a CPU aspect value.
    function Group_For_CPU (CPU : Group_Selector) return Natural
-   with
-     Global => null,
-     Post   =>
-       Group_For_CPU'Result = CPU
-       and then Group_For_CPU'Result /= Reserved_CPU;
+   with Global => null, Post => Group_For_CPU'Result = CPU and then Group_For_CPU'Result /= Reserved_CPU;
 
 end Flyology.Placement_Policy;

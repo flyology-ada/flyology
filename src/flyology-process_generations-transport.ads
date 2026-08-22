@@ -6,20 +6,21 @@ with Interfaces;
 --  Lockstep framed control transport for one exact upgrade authority. One
 --  send or receive may be active at a time. This deliberate serialization
 --  keeps partial-frame failure, close, and poisoning ownership unambiguous.
+
 package Flyology.Process_Generations.Transport is
    package Protocol renames Flyology.Process_Generations.Protocol;
    package Sockets renames Flyology.IO.Sockets;
 
    --  Frame structure or message ordering is invalid.
-   Protocol_Error  : exception;
+   Protocol_Error   : exception;
    --  A peer sequence is stale, skipped, or exhausted.
-   Sequence_Error  : exception;
+   Sequence_Error   : exception;
    --  A second operation attempted to use the serialized channel.
-   Channel_Busy    : exception;
+   Channel_Busy     : exception;
    --  The frame authority does not match the adopted transaction.
    Validation_Error : exception;
    --  Socket I/O or timeout prevented a complete operation.
-   Transport_Error : exception;
+   Transport_Error  : exception;
 
    --  Sole owner of an authority-bound framed control stream.
    type Control_Channel is limited private;
@@ -30,9 +31,7 @@ package Flyology.Process_Generations.Transport is
    --  @param Socket Connected stream socket whose ownership is transferred
    --  @param Authority Exact transaction required on every frame
    procedure Adopt
-     (Item      : in out Control_Channel;
-      Socket    : in out Sockets.Socket_Type;
-      Authority : Upgrade_Handle)
+     (Item : in out Control_Channel; Socket : in out Sockets.Socket_Type; Authority : Upgrade_Handle)
    with Post => not Sockets.Is_Open (Socket);
 
    --  Close the stream and consume its channel ownership.
@@ -88,20 +87,15 @@ package Flyology.Process_Generations.Transport is
    --  @param Frame Received frame
    --  @param Timeout Total operation timeout
    procedure Receive
-     (Item    : in out Control_Channel;
-      Frame   : out Protocol.Frame;
-      Timeout : Duration := Flyology.IO.Infinite);
+     (Item : in out Control_Channel; Frame : out Protocol.Frame; Timeout : Duration := Flyology.IO.Infinite);
 
 private
    type Direction is (Sending, Receiving);
    type Channel_State is (Closed, Ready, Busy, Poisoned, Exhausted);
-   type Begin_Result is
-     (Acquired, Was_Closed, Was_Busy, Was_Poisoned, Was_Exhausted);
+   type Begin_Result is (Acquired, Was_Closed, Was_Busy, Was_Poisoned, Was_Exhausted);
 
    protected type Channel_Controller is
-      procedure Adopt
-        (Authority : Upgrade_Handle;
-         Accepted  : out Boolean);
+      procedure Adopt (Authority : Upgrade_Handle; Accepted : out Boolean);
       procedure Begin_Operation
         (Way       : Direction;
          Authority : out Upgrade_Handle;
@@ -113,11 +107,10 @@ private
       function Open return Boolean;
       function Failed return Boolean;
    private
-      State : Channel_State := Closed;
-      Authority_Value : Upgrade_Handle :=
-        (Coordinator => 1, Upgrade => 1, Candidate => 1);
-      Next_Send    : Interfaces.Unsigned_64 := 1;
-      Next_Receive : Interfaces.Unsigned_64 := 1;
+      State           : Channel_State := Closed;
+      Authority_Value : Upgrade_Handle := (Coordinator => 1, Upgrade => 1, Candidate => 1);
+      Next_Send       : Interfaces.Unsigned_64 := 1;
+      Next_Receive    : Interfaces.Unsigned_64 := 1;
    end Channel_Controller;
 
    type Control_Channel is limited record

@@ -18,54 +18,36 @@ procedure Subprocess_Fixture is
    use type C.int;
    use type C.long;
 
-   function Read
-     (Descriptor : C.int;
-      Buffer     : System.Address;
-      Length     : C.size_t) return C.long;
+   function Read (Descriptor : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Read, "read");
 
-   function Write
-     (Descriptor : C.int;
-      Buffer     : System.Address;
-      Length     : C.size_t) return C.long;
+   function Write (Descriptor : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
 
    function Install_Term_Handler return C.int;
-   pragma Import
-     (C, Install_Term_Handler,
-      "flyology_test_subprocess_install_term_handler");
+   pragma Import (C, Install_Term_Handler, "flyology_test_subprocess_install_term_handler");
 
    function Term_Requested return C.int;
-   pragma Import
-     (C, Term_Requested, "flyology_test_subprocess_term_requested");
+   pragma Import (C, Term_Requested, "flyology_test_subprocess_term_requested");
 
    function Ignore_Term return C.int;
-   pragma Import
-     (C, Ignore_Term, "flyology_test_subprocess_ignore_term");
+   pragma Import (C, Ignore_Term, "flyology_test_subprocess_ignore_term");
 
    function Fork_Descendant return C.int;
-   pragma Import
-     (C, Fork_Descendant, "flyology_test_subprocess_fork_descendant");
+   pragma Import (C, Fork_Descendant, "flyology_test_subprocess_fork_descendant");
 
    function Fork_Output_Writer return C.int;
-   pragma Import
-     (C, Fork_Output_Writer,
-      "flyology_test_subprocess_fork_output_writer");
+   pragma Import (C, Fork_Output_Writer, "flyology_test_subprocess_fork_output_writer");
 
    function Fork_Escaped_Pipe_Holder return C.int;
-   pragma Import
-     (C, Fork_Escaped_Pipe_Holder,
-      "flyology_test_subprocess_fork_escaped_pipe_holder");
+   pragma Import (C, Fork_Escaped_Pipe_Holder, "flyology_test_subprocess_fork_escaped_pipe_holder");
 
    procedure Write_All (Descriptor : C.int; Text : String) is
       Offset : Natural := 0;
       Result : C.long;
    begin
       while Offset < Text'Length loop
-         Result := Write
-           (Descriptor,
-            Text (Text'First + Offset)'Address,
-            C.size_t (Text'Length - Offset));
+         Result := Write (Descriptor, Text (Text'First + Offset)'Address, C.size_t (Text'Length - Offset));
          if Result <= 0 then
             Ada.Command_Line.Set_Exit_Status (91);
             return;
@@ -75,8 +57,7 @@ procedure Subprocess_Fixture is
    end Write_All;
 
    Mode : constant String :=
-     (if Ada.Command_Line.Argument_Count = 0
-      then "none" else Ada.Command_Line.Argument (1));
+     (if Ada.Command_Line.Argument_Count = 0 then "none" else Ada.Command_Line.Argument (1));
 begin
    if Mode = "bootstrap" then
       declare
@@ -95,8 +76,7 @@ begin
             return;
          end if;
          Handoffs.Receive_Listener (Capabilities, Listener);
-         Sockets.Accept_Connection
-           (Listener, Accepted, Peer, Timeout => 2.0);
+         Sockets.Accept_Connection (Listener, Accepted, Peer, Timeout => 2.0);
          Sockets.Receive_Exactly (Accepted, Request, Timeout => 2.0);
          if Request /= [1 => 16#58#] then
             Ada.Command_Line.Set_Exit_Status (100);
@@ -188,10 +168,7 @@ begin
    elsif Mode = "cwd" then
       Write_All (1, Ada.Directories.Current_Directory);
    elsif Mode = "env" then
-      Write_All
-        (1,
-         Ada.Environment_Variables.Value
-           ("FLYOLOGY_CHILD_VALUE", "missing"));
+      Write_All (1, Ada.Environment_Variables.Value ("FLYOLOGY_CHILD_VALUE", "missing"));
    elsif Mode = "descendant" then
       declare
          Descendant : constant C.int := Fork_Descendant;

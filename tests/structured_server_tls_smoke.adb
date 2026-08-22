@@ -17,27 +17,18 @@ procedure Structured_Server_TLS_Smoke is
 
    use Ada.Streams;
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint)
-   is
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option
-        (Listener,
-         Sockets.Socket_Level,
-         (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 8);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
 
    generic
       Model : Flyology.Execution_Model;
-      CPU   : System.Multiprocessors.CPU_Range;
+      CPU : System.Multiprocessors.CPU_Range;
    procedure Run_Lane;
 
    procedure Run_Lane is
@@ -78,60 +69,44 @@ procedure Structured_Server_TLS_Smoke is
          Data    : Stream_Element_Array (1 .. 1);
          pragma Unreferenced (Peer);
       begin
-         Connection.Receive_Exactly
-           (Request, Timeout => 1.0, Token => Cancellation);
+         Connection.Receive_Exactly (Request, Timeout => 1.0, Token => Cancellation);
          case State.Mode is
-            when Negotiated_TLS =>
+            when Negotiated_TLS  =>
                pragma Assert (Request = [1]);
-               Connection.Send_All
-                 ([1 => Character'Pos ('S')],
-                  Timeout => 1.0,
-                  Token => Cancellation);
+               Connection.Send_All ([1 => Character'Pos ('S')], Timeout => 1.0, Token => Cancellation);
                Connection_TLS.Upgrade
-                 (Connection,
-                  State.Backend,
-                  TLS.Server,
-                  "",
-                  Timeout => 1.0,
-                  Token => Cancellation);
-               Connection.Receive_Exactly
-                 (Data, Timeout => 1.0, Token => Cancellation);
+                 (Connection, State.Backend, TLS.Server, "", Timeout => 1.0, Token => Cancellation);
+               Connection.Receive_Exactly (Data, Timeout => 1.0, Token => Cancellation);
                pragma Assert (Data = [42]);
-               Connection.Send_All
-                 ([1 => 7], Timeout => 1.0, Token => Cancellation);
+               Connection.Send_All ([1 => 7], Timeout => 1.0, Token => Cancellation);
                State.State.Finished;
-            when Plain_Fallback =>
+
+            when Plain_Fallback  =>
                pragma Assert (Request = [0]);
-               Connection.Send_All
-                 ([1 => Character'Pos ('N')],
-                  Timeout => 1.0,
-                  Token => Cancellation);
-               Connection.Receive_Exactly
-                 (Data, Timeout => 1.0, Token => Cancellation);
-               Connection.Send_All
-                 (Data, Timeout => 1.0, Token => Cancellation);
+               Connection.Send_All ([1 => Character'Pos ('N')], Timeout => 1.0, Token => Cancellation);
+               Connection.Receive_Exactly (Data, Timeout => 1.0, Token => Cancellation);
+               Connection.Send_All (Data, Timeout => 1.0, Token => Cancellation);
                State.State.Finished;
+
             when Blocked_Upgrade =>
                pragma Assert (Request = [1]);
-               Connection.Send_All
-                 ([1 => Character'Pos ('S')],
-                  Timeout => 1.0,
-                  Token => Cancellation);
+               Connection.Send_All ([1 => Character'Pos ('S')], Timeout => 1.0, Token => Cancellation);
                Connection_TLS.Upgrade
                  (Connection,
                   State.Backend,
                   TLS.Server,
                   "",
                   Timeout => Flyology.IO.Infinite,
-                  Token => Cancellation);
+                  Token   => Cancellation);
          end case;
       end Handle;
 
-      package Structured is new Flyology.IO.Structured_Servers
-        (Handler_Context => Context,
-         Handle          => Handle,
-         Handler_Model   => Model,
-         Handler_CPU     => CPU);
+      package Structured is new
+        Flyology.IO.Structured_Servers
+          (Handler_Context => Context,
+           Handle          => Handle,
+           Handler_Model   => Model,
+           Handler_CPU     => CPU);
 
       procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
       begin
@@ -144,14 +119,15 @@ procedure Structured_Server_TLS_Smoke is
       end Close_If_Open;
 
       procedure Run_Success (Mode : Handler_Mode) is
-         Item       : aliased Structured.Server (Capacity => 1);
-         State      : aliased Context := (Mode => Mode, others => <>);
-         Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Endpoint;
-         Client     : Sockets.Socket_Type;
-         Server_OK  : Boolean := False with Atomic;
-         Response   : Stream_Element_Array (1 .. 1);
-         Snapshot   : Structured.Snapshot;
+         Item      : aliased Structured.Server (Capacity => 1);
+         State     : aliased Context := (Mode => Mode, others => <>);
+         Listener  : Sockets.Socket_Type;
+         Address   : Sockets.Endpoint;
+         Client    : Sockets.Socket_Type;
+         Server_OK : Boolean := False
+         with Atomic;
+         Response  : Stream_Element_Array (1 .. 1);
+         Snapshot  : Structured.Snapshot;
       begin
          Provider.Reset_State_Telemetry;
          if Mode = Negotiated_TLS then
@@ -160,13 +136,9 @@ procedure Structured_Server_TLS_Smoke is
                Provider.Handshake_Operation,
                [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
             Provider.Set_Script
-              (State.Backend,
-               Provider.Receive_Operation,
-               [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
+              (State.Backend, Provider.Receive_Operation, [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
             Provider.Set_Script
-              (State.Backend,
-               Provider.Send_Operation,
-               [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
+              (State.Backend, Provider.Send_Operation, [1 => (TLS.Complete, Provider.Advance_Output, 1)]);
          end if;
          Open_Listener (Listener, Address);
 
@@ -177,8 +149,7 @@ procedure Structured_Server_TLS_Smoke is
 
             task body Server_Task is
             begin
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.5);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.5);
                Server_OK := True;
             exception
                when others =>
@@ -189,19 +160,16 @@ procedure Structured_Server_TLS_Smoke is
             Sockets.Connect (Client, Address, Timeout => 1.0);
             if Mode = Negotiated_TLS then
                Sockets.Send_All (Client, [1 => 1], Timeout => 1.0);
-               Sockets.Receive_Exactly
-                 (Client, Response, Timeout => 1.0);
+               Sockets.Receive_Exactly (Client, Response, Timeout => 1.0);
                pragma Assert (Response = [Character'Pos ('S')]);
                --  The scripted provider supplies post-upgrade application
                --  data after observing readiness from this byte.
                Sockets.Send_All (Client, [1 => 9], Timeout => 1.0);
             else
                Sockets.Send_All (Client, [0, 9], Timeout => 1.0);
-               Sockets.Receive_Exactly
-                 (Client, Response, Timeout => 1.0);
+               Sockets.Receive_Exactly (Client, Response, Timeout => 1.0);
                pragma Assert (Response = [Character'Pos ('N')]);
-               Sockets.Receive_Exactly
-                 (Client, Response, Timeout => 1.0);
+               Sockets.Receive_Exactly (Client, Response, Timeout => 1.0);
                pragma Assert (Response = [9]);
             end if;
             State.State.Wait_Finished;
@@ -236,21 +204,19 @@ procedure Structured_Server_TLS_Smoke is
       end Run_Success;
 
       procedure Run_Forced_Cancellation is
-         Item       : aliased Structured.Server (Capacity => 1);
-         State      : aliased Context :=
-           (Mode => Blocked_Upgrade, others => <>);
-         Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Endpoint;
-         Client     : Sockets.Socket_Type;
-         Server_OK  : Boolean := False with Atomic;
-         Response   : Stream_Element_Array (1 .. 1);
-         Snapshot   : Structured.Snapshot;
+         Item      : aliased Structured.Server (Capacity => 1);
+         State     : aliased Context := (Mode => Blocked_Upgrade, others => <>);
+         Listener  : Sockets.Socket_Type;
+         Address   : Sockets.Endpoint;
+         Client    : Sockets.Socket_Type;
+         Server_OK : Boolean := False
+         with Atomic;
+         Response  : Stream_Element_Array (1 .. 1);
+         Snapshot  : Structured.Snapshot;
       begin
          Provider.Reset_State_Telemetry;
          Provider.Set_Script
-           (State.Backend,
-            Provider.Handshake_Operation,
-            [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+           (State.Backend, Provider.Handshake_Operation, [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
          Open_Listener (Listener, Address);
 
          declare
@@ -260,8 +226,7 @@ procedure Structured_Server_TLS_Smoke is
 
             task body Server_Task is
             begin
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.020);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.020);
                Server_OK := True;
             exception
                when others =>
@@ -300,12 +265,9 @@ procedure Structured_Server_TLS_Smoke is
       Run_Forced_Cancellation;
    end Run_Lane;
 
-   procedure Run_Lightweight is new Run_Lane
-     (Model => Flyology.Lightweight_Task,
-      CPU   => 6);
-   procedure Run_Native is new Run_Lane
-     (Model => Flyology.Native_Task,
-      CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Run_Lightweight is new Run_Lane (Model => Flyology.Lightweight_Task, CPU => 6);
+   procedure Run_Native is new
+     Run_Lane (Model => Flyology.Native_Task, CPU => System.Multiprocessors.Not_A_Specific_CPU);
 
 begin
    Run_Lightweight;

@@ -21,7 +21,7 @@ package body Flyology.Wall_Clock_Native is
       Seconds     : C.long;
       Nanoseconds : C.long;
    end record
-     with Convention => C;
+   with Convention => C;
 
    type Kevent_Record is record
       Ident  : SSE.Integer_Address;
@@ -31,35 +31,28 @@ package body Flyology.Wall_Clock_Native is
       Data   : C.long;
       Udata  : System.Address;
    end record
-     with Convention => C;
+   with Convention => C;
 
    function Clock_Realtime return C.int;
-   pragma Import
-     (C, Clock_Realtime, "flyology_wall_clock_clock_realtime");
+   pragma Import (C, Clock_Realtime, "flyology_wall_clock_clock_realtime");
    function Notify_Key return System.Address;
    pragma Import (C, Notify_Key, "flyology_wall_clock_notify_key");
    function Notify_Status_OK return C.unsigned;
-   pragma Import
-     (C, Notify_Status_OK, "flyology_wall_clock_notify_status_ok");
+   pragma Import (C, Notify_Status_OK, "flyology_wall_clock_notify_status_ok");
    function EVFILT_READ return C.short;
    pragma Import (C, EVFILT_READ, "flyology_wall_clock_evfilt_read");
    function EVFILT_TIMER return C.short;
    pragma Import (C, EVFILT_TIMER, "flyology_wall_clock_evfilt_timer");
    function EV_ADD_ENABLE return C.unsigned_short;
-   pragma Import
-     (C, EV_ADD_ENABLE, "flyology_wall_clock_ev_add_enable");
+   pragma Import (C, EV_ADD_ENABLE, "flyology_wall_clock_ev_add_enable");
    function EV_ADD_ENABLE_ONESHOT return C.unsigned_short;
-   pragma Import
-     (C,
-      EV_ADD_ENABLE_ONESHOT,
-      "flyology_wall_clock_ev_add_enable_oneshot");
+   pragma Import (C, EV_ADD_ENABLE_ONESHOT, "flyology_wall_clock_ev_add_enable_oneshot");
    function EV_ERROR return C.unsigned_short;
    pragma Import (C, EV_ERROR, "flyology_wall_clock_ev_error");
    function NOTE_NSECONDS return C.unsigned;
    pragma Import (C, NOTE_NSECONDS, "flyology_wall_clock_note_nseconds");
    function Native_Kevent_Size return Interfaces.Unsigned_64;
-   pragma Import
-     (C, Native_Kevent_Size, "flyology_wall_clock_kevent_size");
+   pragma Import (C, Native_Kevent_Size, "flyology_wall_clock_kevent_size");
 
    function Kqueue return C.int;
    pragma Import (C, Kqueue, "kqueue");
@@ -72,31 +65,25 @@ package body Flyology.Wall_Clock_Native is
       Timeout      : System.Address) return C.int;
    pragma Import (C, Kevent, "kevent");
    function Notify_Register_File_Descriptor
-     (Name  : System.Address;
-      FD    : access C.int;
-      Flags : C.int;
-      Token : access C.int) return C.unsigned;
-   pragma Import
-     (C, Notify_Register_File_Descriptor, "notify_register_file_descriptor");
+     (Name : System.Address; FD : access C.int; Flags : C.int; Token : access C.int) return C.unsigned;
+   pragma Import (C, Notify_Register_File_Descriptor, "notify_register_file_descriptor");
    function Notify_Cancel (Token : C.int) return C.unsigned;
    pragma Import (C, Notify_Cancel, "notify_cancel");
-   function Clock_Gettime
-     (Clock : C.int; Value : access Timespec) return C.int;
+   function Clock_Gettime (Clock : C.int; Value : access Timespec) return C.int;
    pragma Import (C, Clock_Gettime, "clock_gettime");
-   function Read
-     (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
+   function Read (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
    pragma Import (C, Read, "read");
    function Close_FD (FD : C.int) return C.int;
    pragma Import (C, Close_FD, "close");
 
-   function To_Policy (Value : Timespec) return Policy.Timestamp is
-     (Seconds     => Interfaces.Integer_64 (Value.Seconds),
-      Nanoseconds => Policy.Nanosecond_Part (Value.Nanoseconds));
+   function To_Policy (Value : Timespec) return Policy.Timestamp
+   is (Seconds     => Interfaces.Integer_64 (Value.Seconds),
+       Nanoseconds => Policy.Nanosecond_Part (Value.Nanoseconds));
 
    function Open (State : in out Wait_State) return Boolean is
-      Change : aliased Kevent_Record;
-      Status : C.unsigned;
-      Ignored : C.unsigned;
+      Change    : aliased Kevent_Record;
+      Status    : C.unsigned;
+      Ignored   : C.unsigned;
       Change_FD : aliased C.int := -1;
       Token     : aliased C.int := -1;
    begin
@@ -109,8 +96,7 @@ package body Flyology.Wall_Clock_Native is
          return False;
       end if;
 
-      Status := Notify_Register_File_Descriptor
-        (Notify_Key, Change_FD'Access, 0, Token'Access);
+      Status := Notify_Register_File_Descriptor (Notify_Key, Change_FD'Access, 0, Token'Access);
       State.Change_FD := Change_FD;
       State.Token := Token;
       if Status /= Notify_Status_OK then
@@ -126,14 +112,7 @@ package body Flyology.Wall_Clock_Native is
          Fflags => 0,
          Data   => 0,
          Udata  => System.Null_Address);
-      if Kevent
-        (State.Wait_FD,
-         Change'Address,
-         1,
-         System.Null_Address,
-         0,
-         System.Null_Address) < 0
-      then
+      if Kevent (State.Wait_FD, Change'Address, 1, System.Null_Address, 0, System.Null_Address) < 0 then
          Ignored := Notify_Cancel (State.Token);
          State.Change_FD := -1;
          State.Token := -1;
@@ -142,9 +121,7 @@ package body Flyology.Wall_Clock_Native is
    end Open;
 
    function Arm
-     (State                     : in out Wait_State;
-      Target                    : Policy.Timestamp;
-      Maximum_Slice_Nanoseconds : Interfaces.Integer_64)
+     (State : in out Wait_State; Target : Policy.Timestamp; Maximum_Slice_Nanoseconds : Interfaces.Integer_64)
       return Arm_Outcome
    is
       Now_Native : aliased Timespec;
@@ -188,10 +165,9 @@ package body Flyology.Wall_Clock_Native is
       Deadline := Policy.Earlier (Target, Probe.Value);
 
       declare
-         Difference : constant Policy.Difference_Result :=
-           Policy.Difference_Nanoseconds (Deadline, Now);
-         Timeout : Interfaces.Integer_64;
-         Change  : aliased Kevent_Record;
+         Difference : constant Policy.Difference_Result := Policy.Difference_Nanoseconds (Deadline, Now);
+         Timeout    : Interfaces.Integer_64;
+         Change     : aliased Kevent_Record;
       begin
          if not Difference.Fits then
             return Arm_Failed;
@@ -208,13 +184,7 @@ package body Flyology.Wall_Clock_Native is
             Data   => C.long (Timeout),
             Udata  => System.Null_Address);
          return
-           (if Kevent
-              (State.Wait_FD,
-               Change'Address,
-               1,
-               System.Null_Address,
-               0,
-               System.Null_Address) < 0
+           (if Kevent (State.Wait_FD, Change'Address, 1, System.Null_Address, 0, System.Null_Address) < 0
             then Arm_Failed
             else Armed);
       end;
@@ -233,20 +203,12 @@ package body Flyology.Wall_Clock_Native is
             Error_Code := C.int (System.OS_Constants.EINTR);
          else
 #end if;
-            Result := Kevent
-              (State.Wait_FD,
-               System.Null_Address,
-               0,
-               Event'Address,
-               1,
-               Zero'Address);
-            Error_Code :=
-              (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
+            Result := Kevent (State.Wait_FD, System.Null_Address, 0, Event'Address, 1, Zero'Address);
+            Error_Code := (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
          end if;
 #end if;
-         exit when Result >= 0
-           or else Error_Code /= C.int (System.OS_Constants.EINTR);
+         exit when Result >= 0 or else Error_Code /= C.int (System.OS_Constants.EINTR);
       end loop;
 
       if Result /= 1 then
@@ -255,21 +217,15 @@ package body Flyology.Wall_Clock_Native is
          return Consume_Failed;
       elsif Event.Filter = EVFILT_TIMER then
          return Timer_Ready;
-      elsif Event.Filter = EVFILT_READ
-        and then Event.Ident = SSE.Integer_Address (State.Change_FD)
-      then
+      elsif Event.Filter = EVFILT_READ and then Event.Ident = SSE.Integer_Address (State.Change_FD) then
          declare
             Delivered_Token : aliased C.int;
             Bytes           : C.long;
          begin
             loop
-               Bytes := Read
-                 (State.Change_FD,
-                  Delivered_Token'Address,
-                  C.size_t (C.int'Size / System.Storage_Unit));
-               exit when Bytes >= 0
-                 or else C.int (GNAT.OS_Lib.Errno) /=
-                   C.int (System.OS_Constants.EINTR);
+               Bytes :=
+                 Read (State.Change_FD, Delivered_Token'Address, C.size_t (C.int'Size / System.Storage_Unit));
+               exit when Bytes >= 0 or else C.int (GNAT.OS_Lib.Errno) /= C.int (System.OS_Constants.EINTR);
             end loop;
             return
               (if Bytes = C.long (C.int'Size / System.Storage_Unit)
@@ -294,5 +250,6 @@ package body Flyology.Wall_Clock_Native is
       State := (Wait_FD => -1, Change_FD => -1, Token => -1);
    end Close;
 
-   function Uses_Relative_Timer return Boolean is (True);
+   function Uses_Relative_Timer return Boolean
+   is (True);
 end Flyology.Wall_Clock_Native;

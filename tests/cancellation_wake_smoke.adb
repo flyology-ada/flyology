@@ -13,8 +13,7 @@ procedure Cancellation_Wake_Smoke is
    use type Interfaces.Unsigned_64;
 
    Scale : constant Positive := 64;
-   type Socket_Array is array
-     (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+   type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
 
    procedure Run_Token_Wake is
       Manager : aliased Connections.Server (Capacity => Scale);
@@ -52,19 +51,21 @@ procedure Cancellation_Wake_Smoke is
          begin
             null;
          end All_Finished;
-         function Passed return Boolean is (All_OK);
+         function Passed return Boolean
+         is (All_OK);
       end Progress;
 
       task type Worker
-        (Index : Positive; Model : Flyology.Execution_Model)
+        (Index : Positive;
+         Model : Flyology.Execution_Model)
       is
          pragma Task_Info (Model);
          pragma Storage_Size (64 * 1_024);
       end Worker;
 
       task body Worker is
-         Owned : Connections.Connection;
-         Data  : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Owned         : Connections.Connection;
+         Data          : Ada.Streams.Stream_Element_Array (1 .. 1);
          Was_Cancelled : Boolean := False;
       begin
          Connections.Take (Manager, Servers (Index), Owned);
@@ -72,8 +73,7 @@ procedure Cancellation_Wake_Smoke is
          begin
             --  A ten-second legacy quantum makes this an explicit regression
             --  test: scheduler-driven cancellation must not wait for it.
-            Owned.Receive_Exactly
-              (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
+            Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
          exception
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
@@ -86,19 +86,17 @@ procedure Cancellation_Wake_Smoke is
       end Worker;
 
       type Worker_Access is access Worker;
-      Workers : array (Servers'Range) of Worker_Access;
+      Workers       : array (Servers'Range) of Worker_Access;
       pragma Unreferenced (Workers);
-      Cancelled_At : Ada.Real_Time.Time;
-      Sample : Flyology.Observability.Group_Snapshot;
+      Cancelled_At  : Ada.Real_Time.Time;
+      Sample        : Flyology.Observability.Group_Snapshot;
       Park_Deadline : Ada.Real_Time.Time;
    begin
       for Index in Servers'Range loop
-         Flyology.IO.Sockets.Create_Socket_Pair
-           (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
       end loop;
       for Index in Servers'Range loop
-         Workers (Index) :=
-           new Worker (Index, Flyology.Lightweight_Task);
+         Workers (Index) := new Worker (Index, Flyology.Lightweight_Task);
       end loop;
       Progress.All_Started;
       Park_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
@@ -106,20 +104,17 @@ procedure Cancellation_Wake_Smoke is
          pragma Assert (Flyology.Observability.Snapshot (0, Sample));
          exit when
            Sample.Interrupt_Waits = Flyology.Observability.Counter (Scale)
-           and then
-             Sample.Descriptor_Waits = Flyology.Observability.Counter (Scale);
+           and then Sample.Descriptor_Waits = Flyology.Observability.Counter (Scale);
          if Ada.Real_Time.Clock >= Park_Deadline then
             Token.Request;
-            raise Program_Error with
-              "lightweight cancellable connections did not reach the poller";
+            raise Program_Error with "lightweight cancellable connections did not reach the poller";
          end if;
          delay 0.001;
       end loop;
       Cancelled_At := Ada.Real_Time.Clock;
       Token.Request;
       Progress.All_Finished;
-      pragma Assert
-        (Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Cancelled_At) < 1.0);
+      pragma Assert (Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Cancelled_At) < 1.0);
       pragma Assert (Progress.Passed);
       pragma Assert (Manager.Active = 0);
       for Peer of Peers loop
@@ -128,20 +123,19 @@ procedure Cancellation_Wake_Smoke is
    end Run_Token_Wake;
 
    procedure Run_Immediate_And_Timeout is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Token   : aliased Connections.Cancellation_Token;
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Token        : aliased Connections.Cancellation_Token;
       Server, Peer : Flyology.IO.Sockets.Socket_Type;
-      Owned   : Connections.Connection;
-      Data    : Ada.Streams.Stream_Element_Array (1 .. 1);
-      Cancelled : Boolean := False;
-      Timed_Out : Boolean := False;
+      Owned        : Connections.Connection;
+      Data         : Ada.Streams.Stream_Element_Array (1 .. 1);
+      Cancelled    : Boolean := False;
+      Timed_Out    : Boolean := False;
    begin
       Flyology.IO.Sockets.Create_Socket_Pair (Server, Peer);
       Connections.Take (Manager, Server, Owned);
       Token.Request;
       begin
-         Owned.Receive_Exactly
-           (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
+         Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
       exception
          when Connections.Operation_Cancelled =>
             Cancelled := True;
@@ -157,8 +151,7 @@ procedure Cancellation_Wake_Smoke is
       begin
          Connections.Take (Timeout_Manager, Server, Timeout_Owned);
          begin
-            Timeout_Owned.Receive_Exactly
-              (Data, Timeout => 0.030, Cancellation_Quantum => 10.0);
+            Timeout_Owned.Receive_Exactly (Data, Timeout => 0.030, Cancellation_Quantum => 10.0);
          exception
             when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
@@ -169,7 +162,7 @@ procedure Cancellation_Wake_Smoke is
    end Run_Immediate_And_Timeout;
 
    procedure Run_Shutdown_Wake is
-      Manager : aliased Connections.Server (Capacity => 1);
+      Manager      : aliased Connections.Server (Capacity => 1);
       Server, Peer : Flyology.IO.Sockets.Socket_Type;
 
       protected Result is
@@ -180,8 +173,8 @@ procedure Cancellation_Wake_Smoke is
          function Passed return Boolean;
       private
          Is_Started : Boolean := False;
-         Done : Boolean := False;
-         OK   : Boolean := False;
+         Done       : Boolean := False;
+         OK         : Boolean := False;
       end Result;
       protected body Result is
          procedure Started is
@@ -193,9 +186,16 @@ procedure Cancellation_Wake_Smoke is
             OK := Cancelled;
             Done := True;
          end Finished;
-         entry Wait_Started when Is_Started is begin null; end Wait_Started;
-         entry Wait when Done is begin null; end Wait;
-         function Passed return Boolean is (OK);
+         entry Wait_Started when Is_Started is
+         begin
+            null;
+         end Wait_Started;
+         entry Wait when Done is
+         begin
+            null;
+         end Wait;
+         function Passed return Boolean
+         is (OK);
       end Result;
    begin
       Flyology.IO.Sockets.Create_Socket_Pair (Server, Peer);
@@ -204,15 +204,14 @@ procedure Cancellation_Wake_Smoke is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Worker;
          task body Worker is
-            Owned : Connections.Connection;
-            Data  : Ada.Streams.Stream_Element_Array (1 .. 1);
+            Owned         : Connections.Connection;
+            Data          : Ada.Streams.Stream_Element_Array (1 .. 1);
             Was_Cancelled : Boolean := False;
          begin
             Connections.Take (Manager, Server, Owned);
             Result.Started;
             begin
-               Owned.Receive_Exactly
-                 (Data, Cancellation_Quantum => 10.0);
+               Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0);
             exception
                when Connections.Operation_Cancelled =>
                   Was_Cancelled := True;

@@ -13,6 +13,7 @@ with Flyology_Bench.Workers;
 --  generic Measure or Compare instantiation, so indirect dispatch surrounds
 --  the measurement and never replaces the statically bound timed operation.
 --  @formal Maximum_Cases Maximum registrations and selection predicates.
+
 generic
    Maximum_Cases : Positive;
 package Flyology_Bench.Suites is
@@ -29,8 +30,7 @@ package Flyology_Bench.Suites is
    --  @enum Ordinary_Measurement One Measurement result.
    --  @enum Paired_Comparison One order-balanced Comparison result.
    --  @enum Multi_Way_Comparison One comparison of two to sixteen cases.
-   type Result_Kind is
-     (Ordinary_Measurement, Paired_Comparison, Multi_Way_Comparison);
+   type Result_Kind is (Ordinary_Measurement, Paired_Comparison, Multi_Way_Comparison);
 
    --  Requested top-level runner action.
    --  @enum Run_Selected Execute the selected callbacks.
@@ -63,11 +63,7 @@ package Flyology_Bench.Suites is
    --  @enum Requested_Metric_Unavailable A required built-in axis was absent.
    --  @enum Regression_Rejected A baseline gate rejected at least one result.
    type Final_Status is
-     (Succeeded,
-      No_Matching_Cases,
-      Benchmark_Failed,
-      Requested_Metric_Unavailable,
-      Regression_Rejected);
+     (Succeeded, No_Matching_Cases, Benchmark_Failed, Requested_Metric_Unavailable, Regression_Rejected);
 
    --  Programmatically inspectable bounded aggregate. Completed counts
    --  callbacks that returned normally, including dry runs and inconclusive
@@ -104,16 +100,12 @@ package Flyology_Bench.Suites is
    --  Callback around an already-instantiated Measure procedure.
    --  @param Config Effective shared collection policy.
    --  @param Result Completed ordinary measurement.
-   type Measurement_Callback is access procedure
-     (Config : Configuration;
-      Result : out Measurement);
+   type Measurement_Callback is access procedure (Config : Configuration; Result : out Measurement);
 
    --  Callback around an already-instantiated Compare procedure.
    --  @param Config Effective shared collection policy.
    --  @param Result Completed paired comparison.
-   type Comparison_Callback is access procedure
-     (Config : Configuration;
-      Result : out Comparison);
+   type Comparison_Callback is access procedure (Config : Configuration; Result : out Comparison);
 
    --  Explicit bounded suite registry.
    type Suite is tagged limited private;
@@ -184,18 +176,12 @@ package Flyology_Bench.Suites is
       --  Same enumeration used by Compare_Many.
       type Case_Id is (<>);
       --  Wrapper around the existing Compare_Many instance.
-      with procedure Run
-        (Config : Configuration;
-         Result : out Multi_Comparison);
+      with procedure Run (Config : Configuration; Result : out Multi_Comparison);
    package Multi_Way_Registration is
       --  Register the bound multi-way callback and reporters. Target is the
       --  registry to extend; Name and optional Group form its identity; Tags
       --  is the optional comma-separated selection set.
-      procedure Register
-        (Target : in out Suite;
-         Name   : String;
-         Group  : String := "";
-         Tags   : String := "");
+      procedure Register (Target : in out Suite; Name : String; Group : String := ""; Tags : String := "");
    end Multi_Way_Registration;
 
    --  Return the number of registrations.
@@ -228,10 +214,7 @@ package Flyology_Bench.Suites is
    --  @param Result Exact callback result.
    --  @exception Constraint_Error If Full_Name is absent or multi-way.
    procedure Execute_One
-     (Target    : Suite;
-      Full_Name : String;
-      Config    : Configuration;
-      Result    : out Registered_Result);
+     (Target : Suite; Full_Name : String; Config : Configuration; Result : out Registered_Result);
 
    --  Invoke exactly one multi-way registration without inflating every
    --  ordinary/paired Registered_Result to Multi_Comparison's storage size.
@@ -241,10 +224,7 @@ package Flyology_Bench.Suites is
    --  @param Result Exact multi-way result.
    --  @exception Constraint_Error If Full_Name is absent or not multi-way.
    procedure Execute_One_Multi
-     (Target    : Suite;
-      Full_Name : String;
-      Config    : Configuration;
-      Result    : out Multi_Comparison);
+     (Target : Suite; Full_Name : String; Config : Configuration; Result : out Multi_Comparison);
 
    --  Execute one validated worker request through the same exact suite
    --  registry used by parent-side selection. The request kind and identity
@@ -269,20 +249,17 @@ package Flyology_Bench.Suites is
    --  @param Result Exact execution result.
    --  @return Stored Measurement.
    --  @exception Constraint_Error If Kind is not Ordinary_Measurement.
-   function Measurement_Value
-     (Result : Registered_Result) return Measurement;
+   function Measurement_Value (Result : Registered_Result) return Measurement;
 
    --  Return a paired result.
    --  @param Result Exact execution result.
    --  @return Stored Comparison.
    --  @exception Constraint_Error If Kind is not Paired_Comparison.
-   function Comparison_Value
-     (Result : Registered_Result) return Comparison;
+   function Comparison_Value (Result : Registered_Result) return Comparison;
 
    --  String array used by the testable parser. A null array represents no
    --  arguments.
-   type Argument_List is
-     array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
+   type Argument_List is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
 
    --  Parsed selection, configuration overrides, and output policy.
    type Runner_Options is private;
@@ -297,16 +274,12 @@ package Flyology_Bench.Suites is
    --  @exception Option_Error On an unknown, malformed, out-of-range, or
    --  conflicting option.
    function Parse
-     (Arguments   : Argument_List;
-      Base_Config : Configuration := Default_Configuration)
-      return Runner_Options;
+     (Arguments : Argument_List; Base_Config : Configuration := Default_Configuration) return Runner_Options;
 
    --  Parse Ada.Command_Line arguments. This wrapper does no execution.
    --  @param Base_Config Configuration retained where no override is present.
    --  @return Parsed selection, execution, configuration, and output policy.
-   function Parse_Command_Line
-     (Base_Config : Configuration := Default_Configuration)
-      return Runner_Options;
+   function Parse_Command_Line (Base_Config : Configuration := Default_Configuration) return Runner_Options;
 
    --  Return the selected top-level action.
    --  @param Options Parsed runner policy.
@@ -316,8 +289,7 @@ package Flyology_Bench.Suites is
    --  Return the effective shared benchmark configuration.
    --  @param Options Parsed runner policy.
    --  @return Base configuration with explicit CLI overrides.
-   function Effective_Configuration
-     (Options : Runner_Options) return Configuration;
+   function Effective_Configuration (Options : Runner_Options) return Configuration;
 
    --  Return the requested output format.
    --  @param Options Parsed runner policy.
@@ -342,10 +314,7 @@ package Flyology_Bench.Suites is
    --  @param Options Parsed selection policy.
    --  @param Index One-based registration index.
    --  @return Whether every inclusion and exclusion predicate accepts it.
-   function Is_Selected
-     (Target  : Suite;
-      Options : Runner_Options;
-      Index   : Case_Index) return Boolean;
+   function Is_Selected (Target : Suite; Options : Runner_Options; Index : Case_Index) return Boolean;
 
    --  List selected full identities without invoking callbacks. Registration
    --  order is retained unless --order=name was selected.
@@ -383,44 +352,43 @@ package Flyology_Bench.Suites is
 
    --  Print stable command-line help without parsing global state.
    --  @param Output Destination help stream.
-   procedure Put_Help
-     (Output : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   procedure Put_Help (Output : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
 
 private
    use Ada.Strings.Unbounded;
 
    type Descriptor (Result : Result_Kind := Ordinary_Measurement) is record
-      Name       : Unbounded_String;
-      Group      : Unbounded_String;
-      Tags       : Unbounded_String;
-      Full       : Unbounded_String;
+      Name  : Unbounded_String;
+      Group : Unbounded_String;
+      Tags  : Unbounded_String;
+      Full  : Unbounded_String;
       case Result is
          when Ordinary_Measurement =>
-            Measurement_Run : Measurement_Callback;
-            Gate_Enabled    : Boolean := False;
-            Gate_Path       : Unbounded_String;
+            Measurement_Run  : Measurement_Callback;
+            Gate_Enabled     : Boolean := False;
+            Gate_Path        : Unbounded_String;
             Gate_Fingerprint : Unbounded_String;
-            Gate_Policy     : Flyology_Bench.Baselines.Gate_Policy :=
+            Gate_Policy      : Flyology_Bench.Baselines.Gate_Policy :=
               Flyology_Bench.Baselines.Fail_Closed_Gate_Policy;
+
          when Paired_Comparison =>
             Reference_Name : Unbounded_String;
             Contender_Name : Unbounded_String;
             Comparison_Run : Comparison_Callback;
+
          when Multi_Way_Comparison =>
-            Multi_Run : access procedure
-              (Config : Configuration;
-               Result : out Multi_Comparison);
-            Multi_Console : access procedure
-              (Result : Multi_Comparison;
-               File   : Ada.Text_IO.File_Type);
-            Multi_CSV : access procedure
-              (Result  : Multi_Comparison;
-               File    : Ada.Text_IO.File_Type;
-               Context : Flyology_Bench.Reporters.Machine_Context);
-            Multi_JSON : access procedure
-              (Result  : Multi_Comparison;
-               File    : Ada.Text_IO.File_Type;
-               Context : Flyology_Bench.Reporters.Machine_Context);
+            Multi_Run     : access procedure (Config : Configuration; Result : out Multi_Comparison);
+            Multi_Console : access procedure (Result : Multi_Comparison; File : Ada.Text_IO.File_Type);
+            Multi_CSV     :
+              access procedure
+                (Result  : Multi_Comparison;
+                 File    : Ada.Text_IO.File_Type;
+                 Context : Flyology_Bench.Reporters.Machine_Context);
+            Multi_JSON    :
+              access procedure
+                (Result  : Multi_Comparison;
+                 File    : Ada.Text_IO.File_Type;
+                 Context : Flyology_Bench.Reporters.Machine_Context);
       end case;
    end record;
 
@@ -433,13 +401,14 @@ private
 
    type String_Array is array (Case_Index) of Unbounded_String;
 
-   type Registered_Result (Result : Result_Kind := Ordinary_Measurement) is
-   record
+   type Registered_Result (Result : Result_Kind := Ordinary_Measurement) is record
       case Result is
          when Ordinary_Measurement =>
             Measured : Measurement;
+
          when Paired_Comparison =>
             Compared : Comparison;
+
          when Multi_Way_Comparison =>
             null;
       end case;

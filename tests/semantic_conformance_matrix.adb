@@ -12,70 +12,55 @@ procedure Semantic_Conformance_Matrix is
 
    use type RT.Time;
 
-   package Native_Native is new Semantic_Conformance_Cases
-     (Server_Model => Flyology.Native_Task,
-      Caller_Model => Flyology.Native_Task);
-   package Native_Lightweight is new Semantic_Conformance_Cases
-     (Server_Model => Flyology.Native_Task,
-      Caller_Model => Flyology.Lightweight_Task);
-   package Lightweight_Native is new Semantic_Conformance_Cases
-     (Server_Model => Flyology.Lightweight_Task,
-      Caller_Model => Flyology.Native_Task);
-   package Lightweight_Lightweight is new Semantic_Conformance_Cases
-     (Server_Model => Flyology.Lightweight_Task,
-      Caller_Model => Flyology.Lightweight_Task);
+   package Native_Native is new
+     Semantic_Conformance_Cases (Server_Model => Flyology.Native_Task, Caller_Model => Flyology.Native_Task);
+   package Native_Lightweight is new
+     Semantic_Conformance_Cases
+       (Server_Model => Flyology.Native_Task,
+        Caller_Model => Flyology.Lightweight_Task);
+   package Lightweight_Native is new
+     Semantic_Conformance_Cases
+       (Server_Model => Flyology.Lightweight_Task,
+        Caller_Model => Flyology.Native_Task);
+   package Lightweight_Lightweight is new
+     Semantic_Conformance_Cases
+       (Server_Model => Flyology.Lightweight_Task,
+        Caller_Model => Flyology.Lightweight_Task);
 
-   procedure Check
-     (Name    : String;
-      Results : Native_Native.Results)
-   is
+   procedure Check (Name : String; Results : Native_Native.Results) is
    begin
       for Item in Results'Range loop
          if not Results (Item) then
-            raise Program_Error with
-              Name & " failed " & Native_Native.Check_Id'Image (Item);
+            raise Program_Error with Name & " failed " & Native_Native.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
 
    --  The overloads retain each generic instance's distinct array type while
    --  keeping the diagnostics uniform.
-   procedure Check
-     (Name    : String;
-      Results : Native_Lightweight.Results)
-   is
+   procedure Check (Name : String; Results : Native_Lightweight.Results) is
    begin
       for Item in Results'Range loop
          if not Results (Item) then
-            raise Program_Error with
-              Name & " failed " & Native_Lightweight.Check_Id'Image (Item);
+            raise Program_Error with Name & " failed " & Native_Lightweight.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
 
-   procedure Check
-     (Name    : String;
-      Results : Lightweight_Native.Results)
-   is
+   procedure Check (Name : String; Results : Lightweight_Native.Results) is
    begin
       for Item in Results'Range loop
          if not Results (Item) then
-            raise Program_Error with
-              Name & " failed " & Lightweight_Native.Check_Id'Image (Item);
+            raise Program_Error with Name & " failed " & Lightweight_Native.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
 
-   procedure Check
-     (Name    : String;
-      Results : Lightweight_Lightweight.Results)
-   is
+   procedure Check (Name : String; Results : Lightweight_Lightweight.Results) is
    begin
       for Item in Results'Range loop
          if not Results (Item) then
-            raise Program_Error with
-              Name & " failed "
-              & Lightweight_Lightweight.Check_Id'Image (Item);
+            raise Program_Error with Name & " failed " & Lightweight_Lightweight.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
@@ -107,9 +92,11 @@ procedure Semantic_Conformance_Matrix is
             Is_Open := True;
          end Open;
 
-         function Waiting return Natural is (Pass'Count);
+         function Waiting return Natural
+         is (Pass'Count);
 
-         function Order return Order_Array is (Seen);
+         function Order return Order_Array
+         is (Seen);
       end Gate;
 
       procedure Await_Queued (Expected : Natural) is
@@ -132,9 +119,7 @@ procedure Semantic_Conformance_Matrix is
       end Start_Control;
 
       protected body Start_Control is
-         entry Wait (for Id in Positive range 1 .. 3)
-           when Released (Id)
-         is
+         entry Wait(for Id in Positive range 1 .. 3) when Released (Id) is
          begin
             null;
          end Wait;
@@ -170,12 +155,14 @@ procedure Semantic_Conformance_Matrix is
          pragma Task_Info (Flyology.Native_Task);
       end Native_Client;
 
-      task Lightweight_One with CPU => 1 is
+      task Lightweight_One
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
          entry Exchange (Value : Natural; Result : out Natural);
       end Lightweight_One;
 
-      task Lightweight_Two with CPU => 2 is
+      task Lightweight_Two
+        with CPU => 2 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Lightweight_Two;
 
@@ -226,6 +213,5 @@ begin
    Check ("lightweight/lightweight", Lightweight_Lightweight.Run);
    Check_Cross_Group_Conformance;
    Ada.Text_IO.Put_Line
-     ("semantic conformance matrix: 16 lane-pair checks and 2 cross-group "
-      & "checks passed");
+     ("semantic conformance matrix: 16 lane-pair checks and 2 cross-group " & "checks passed");
 end Semantic_Conformance_Matrix;

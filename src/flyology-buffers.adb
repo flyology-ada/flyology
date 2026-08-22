@@ -3,8 +3,7 @@ with Ada.Unchecked_Deallocation;
 package body Flyology.Buffers is
    use type Interfaces.Unsigned_64;
 
-   procedure Free is new Ada.Unchecked_Deallocation
-     (Ada.Streams.Stream_Element_Array, Storage_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Ada.Streams.Stream_Element_Array, Storage_Access);
 
    protected body Pool_State is
       procedure Allocate (Slot : out Natural; Version : out Generation) is
@@ -36,11 +35,7 @@ package body Flyology.Buffers is
          Allocate (Slot, Version);
       end Acquire;
 
-      procedure Try_Acquire
-        (Slot     : out Natural;
-         Version  : out Generation;
-         Acquired : out Boolean)
-      is
+      procedure Try_Acquire (Slot : out Natural; Version : out Generation; Acquired : out Boolean) is
       begin
          if Free_Count = 0 and then Next_Unused > Slot_Count then
             Slot := No_Slot;
@@ -54,10 +49,7 @@ package body Flyology.Buffers is
 
       procedure Release (Slot : Positive; Version : Generation) is
       begin
-         if Slot > Slot_Count
-           or else not In_Use (Slot)
-           or else Versions (Slot) /= Version
-         then
+         if Slot > Slot_Count or else not In_Use (Slot) or else Versions (Slot) /= Version then
             raise Program_Error with "invalid or stale buffer ownership";
          end if;
          In_Use (Slot) := False;
@@ -66,44 +58,41 @@ package body Flyology.Buffers is
          Free_Slots (Free_Count) := Slot;
       end Release;
 
-      function Current return Pool_Snapshot is
-        (Available   => Free_Count + Slot_Count - Next_Unused + 1,
-         Outstanding => Used_Count);
+      function Current return Pool_Snapshot
+      is (Available => Free_Count + Slot_Count - Next_Unused + 1, Outstanding => Used_Count);
    end Pool_State;
 
    type Attach_Guard
      (Target : not null access Unique_Buffer;
-      Token  : not null access Buffer_Token) is
-     new Ada.Finalization.Limited_Controlled with null record;
+      Token  : not null access Buffer_Token)
+   is new Ada.Finalization.Limited_Controlled with null record;
 
-   overriding procedure Finalize (Item : in out Attach_Guard) is
+   overriding
+   procedure Finalize (Item : in out Attach_Guard) is
    begin
-      if Item.Token.Slot /= No_Slot
-        and then not Owns (Item.Target.all, Item.Token.all)
-      then
+      if Item.Token.Slot /= No_Slot and then not Owns (Item.Target.all, Item.Token.all) then
          Release_Token (Item.Target.Owner, Item.Token.all);
       end if;
    end Finalize;
 
-   type Release_Guard
-     (Owner : not null access Pool) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Release_Guard (Owner : not null access Pool) is new Ada.Finalization.Limited_Controlled with record
       Token : Buffer_Token := No_Token;
    end record;
 
-   overriding procedure Finalize (Item : in out Release_Guard) is
+   overriding
+   procedure Finalize (Item : in out Release_Guard) is
    begin
       Release_Token (Item.Owner, Item.Token);
    end Finalize;
 
-   function Has_Buffer (Item : Unique_Buffer) return Boolean is
-     (Item.Token.Slot /= No_Slot);
+   function Has_Buffer (Item : Unique_Buffer) return Boolean
+   is (Item.Token.Slot /= No_Slot);
 
-   function Length (Item : Unique_Buffer) return Natural is
-     (Item.Token.Length);
+   function Length (Item : Unique_Buffer) return Natural
+   is (Item.Token.Length);
 
-   function Buffer_Capacity (Item : Unique_Buffer) return Positive is
-     (Item.Owner.Block_Size);
+   function Buffer_Capacity (Item : Unique_Buffer) return Positive
+   is (Item.Owner.Block_Size);
 
    procedure Acquire (Item : in out Unique_Buffer) is
       Token : aliased Buffer_Token := No_Token;
@@ -117,33 +106,25 @@ package body Flyology.Buffers is
       Attach (Item, Token);
    end Acquire;
 
-   procedure Try_Acquire
-     (Item     : in out Unique_Buffer;
-      Acquired : out Boolean)
-   is
-      Token   : aliased Buffer_Token := No_Token;
-      Guard   : Attach_Guard (Item'Unchecked_Access, Token'Access);
+   procedure Try_Acquire (Item : in out Unique_Buffer; Acquired : out Boolean) is
+      Token : aliased Buffer_Token := No_Token;
+      Guard : Attach_Guard (Item'Unchecked_Access, Token'Access);
       pragma Unreferenced (Guard);
    begin
       if Has_Buffer (Item) then
          raise Program_Error with "acquire into an occupied buffer";
       end if;
-      Item.Owner.State.Try_Acquire
-        (Token.Slot, Token.Version, Acquired);
+      Item.Owner.State.Try_Acquire (Token.Slot, Token.Version, Acquired);
       if Acquired then
          Attach (Item, Token);
       end if;
    end Try_Acquire;
 
-   procedure Acquire_For
-     (Item    : in out Unique_Buffer;
-      Timeout : Duration)
-   is
+   procedure Acquire_For (Item : in out Unique_Buffer; Timeout : Duration) is
       Acquired_Token : aliased Buffer_Token := No_Token;
-      Guard : Attach_Guard
-        (Item'Unchecked_Access, Acquired_Token'Access);
+      Guard          : Attach_Guard (Item'Unchecked_Access, Acquired_Token'Access);
       pragma Unreferenced (Guard);
-      Acquired : Boolean;
+      Acquired       : Boolean;
    begin
       if Has_Buffer (Item) then
          raise Program_Error with "acquire into an occupied buffer";
@@ -156,8 +137,7 @@ package body Flyology.Buffers is
          end if;
       else
          select
-            Item.Owner.State.Acquire
-              (Acquired_Token.Slot, Acquired_Token.Version);
+            Item.Owner.State.Acquire (Acquired_Token.Slot, Acquired_Token.Version);
             Attach (Item, Acquired_Token);
          or
             delay Timeout;
@@ -174,10 +154,7 @@ package body Flyology.Buffers is
       end if;
    end Release;
 
-   procedure Move
-     (Source : in out Unique_Buffer;
-      Target : in out Unique_Buffer)
-   is
+   procedure Move (Source : in out Unique_Buffer; Target : in out Unique_Buffer) is
       Token : aliased Buffer_Token := No_Token;
       Guard : Attach_Guard (Source'Unchecked_Access, Token'Access);
       pragma Unreferenced (Guard);
@@ -193,9 +170,7 @@ package body Flyology.Buffers is
       Attach (Target, Token);
    end Move;
 
-   procedure Set_Tag
-     (Item  : in out Unique_Buffer;
-      Value : Interfaces.Unsigned_64) is
+   procedure Set_Tag (Item : in out Unique_Buffer; Value : Interfaces.Unsigned_64) is
    begin
       if not Has_Buffer (Item) then
          raise Program_Error with "tag update on a vacant buffer";
@@ -203,26 +178,21 @@ package body Flyology.Buffers is
       Item.Token.Tag := Value;
    end Set_Tag;
 
-   function Tag (Item : Unique_Buffer) return Interfaces.Unsigned_64 is
-     (Item.Token.Tag);
+   function Tag (Item : Unique_Buffer) return Interfaces.Unsigned_64
+   is (Item.Token.Tag);
 
-   function First_Offset (Item : Unique_Buffer) return Storage_Offset is
-     (Storage_Offset (Item.Token.Slot - 1)
-      * Storage_Offset (Item.Owner.Block_Size) + 1);
+   function First_Offset (Item : Unique_Buffer) return Storage_Offset
+   is (Storage_Offset (Item.Token.Slot - 1) * Storage_Offset (Item.Owner.Block_Size) + 1);
 
    procedure With_Readable_Data
-     (Item    : Unique_Buffer;
-      Process : not null access procedure
-        (Data : Ada.Streams.Stream_Element_Array))
-   is
+     (Item : Unique_Buffer; Process : not null access procedure (Data : Ada.Streams.Stream_Element_Array)) is
    begin
       if not Has_Buffer (Item) then
          raise Program_Error with "read borrow from a vacant buffer";
       end if;
       declare
          First : constant Storage_Offset := First_Offset (Item);
-         Last  : constant Storage_Offset :=
-           First + Storage_Offset (Item.Token.Length) - 1;
+         Last  : constant Storage_Offset := First + Storage_Offset (Item.Token.Length) - 1;
       begin
          Process.all (Item.Owner.Data.all (First .. Last));
       end;
@@ -230,9 +200,8 @@ package body Flyology.Buffers is
 
    procedure With_Writable_Data
      (Item    : in out Unique_Buffer;
-      Process : not null access procedure
-        (Data   : in out Ada.Streams.Stream_Element_Array;
-         Length : in out Natural))
+      Process :
+        not null access procedure (Data : in out Ada.Streams.Stream_Element_Array; Length : in out Natural))
    is
       New_Length : Natural;
    begin
@@ -242,8 +211,7 @@ package body Flyology.Buffers is
       New_Length := Item.Token.Length;
       declare
          First : constant Storage_Offset := First_Offset (Item);
-         Last  : constant Storage_Offset :=
-           First + Storage_Offset (Item.Owner.Block_Size) - 1;
+         Last  : constant Storage_Offset := First + Storage_Offset (Item.Owner.Block_Size) - 1;
       begin
          Process.all (Item.Owner.Data.all (First .. Last), New_Length);
       end;
@@ -253,14 +221,8 @@ package body Flyology.Buffers is
       Item.Token.Length := New_Length;
    end With_Writable_Data;
 
-   procedure Copy_From
-     (Item : in out Unique_Buffer;
-      Data : Ada.Streams.Stream_Element_Array)
-   is
-      procedure Copy
-        (Target : in out Ada.Streams.Stream_Element_Array;
-         Count  : in out Natural)
-      is
+   procedure Copy_From (Item : in out Unique_Buffer; Data : Ada.Streams.Stream_Element_Array) is
+      procedure Copy (Target : in out Ada.Streams.Stream_Element_Array; Count : in out Natural) is
          Cursor : Ada.Streams.Stream_Element_Offset := Target'First;
       begin
          if Data'Length > Target'Length then
@@ -276,17 +238,18 @@ package body Flyology.Buffers is
       With_Writable_Data (Item, Copy'Access);
    end Copy_From;
 
-   function Current (Item : Pool) return Pool_Snapshot is
-     (Item.State.Current);
+   function Current (Item : Pool) return Pool_Snapshot
+   is (Item.State.Current);
 
-   overriding procedure Initialize (Item : in out Pool) is
-      Last : constant Storage_Offset :=
-        Storage_Offset (Item.Block_Size) * Storage_Offset (Item.Capacity);
+   overriding
+   procedure Initialize (Item : in out Pool) is
+      Last : constant Storage_Offset := Storage_Offset (Item.Block_Size) * Storage_Offset (Item.Capacity);
    begin
       Item.Data := new Ada.Streams.Stream_Element_Array (1 .. Last);
    end Initialize;
 
-   overriding procedure Finalize (Item : in out Pool) is
+   overriding
+   procedure Finalize (Item : in out Pool) is
    begin
       if Item.State.Current.Outstanding /= 0 then
          raise Program_Error with "buffer pool finalized with live buffers";
@@ -294,16 +257,12 @@ package body Flyology.Buffers is
       Free (Item.Data);
    end Finalize;
 
-   function Owns
-     (Item  : Unique_Buffer;
-      Token : Buffer_Token) return Boolean is
-     (Token.Slot /= No_Slot
-      and then Item.Token.Slot = Token.Slot
-      and then Item.Token.Version = Token.Version);
+   function Owns (Item : Unique_Buffer; Token : Buffer_Token) return Boolean
+   is (Token.Slot /= No_Slot
+       and then Item.Token.Slot = Token.Slot
+       and then Item.Token.Version = Token.Version);
 
-   procedure Detach
-     (Item  : in out Unique_Buffer;
-      Token : out Buffer_Token) is
+   procedure Detach (Item : in out Unique_Buffer; Token : out Buffer_Token) is
    begin
       if not Has_Buffer (Item) then
          raise Program_Error with "detach from a vacant buffer";
@@ -312,9 +271,7 @@ package body Flyology.Buffers is
       Item.Token := No_Token;
    end Detach;
 
-   procedure Attach
-     (Item  : in out Unique_Buffer;
-      Token : in out Buffer_Token) is
+   procedure Attach (Item : in out Unique_Buffer; Token : in out Buffer_Token) is
    begin
       if Has_Buffer (Item) then
          raise Program_Error with "attach to an occupied buffer";
@@ -328,9 +285,7 @@ package body Flyology.Buffers is
       Token := No_Token;
    end Attach;
 
-   procedure Release_Token
-     (Owner : not null access Pool;
-      Token : in out Buffer_Token) is
+   procedure Release_Token (Owner : not null access Pool; Token : in out Buffer_Token) is
    begin
       if Token.Slot /= No_Slot then
          Owner.State.Release (Positive (Token.Slot), Token.Version);
@@ -338,11 +293,11 @@ package body Flyology.Buffers is
       end if;
    end Release_Token;
 
-   overriding procedure Finalize (Item : in out Unique_Buffer) is
+   overriding
+   procedure Finalize (Item : in out Unique_Buffer) is
    begin
       if Has_Buffer (Item) then
-         Item.Owner.State.Release
-           (Positive (Item.Token.Slot), Item.Token.Version);
+         Item.Owner.State.Release (Positive (Item.Token.Slot), Item.Token.Version);
          Item.Token := No_Token;
       end if;
    end Finalize;

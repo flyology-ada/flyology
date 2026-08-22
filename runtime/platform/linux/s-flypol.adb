@@ -36,10 +36,9 @@ package body System.Flyology.Poller is
       Events     : C.unsigned;
       Descriptor : C.int;
    end record
-     with Convention => C, Size => 64, Alignment => 4;
+   with Convention => C, Size => 64, Alignment => 4;
 
-   type Epoll_Event_Array is array (Positive range <>) of Epoll_Event
-     with Convention => C;
+   type Epoll_Event_Array is array (Positive range <>) of Epoll_Event with Convention => C;
 
    type Watch_Record;
    type Watch_Access is access all Watch_Record;
@@ -50,39 +49,27 @@ package body System.Flyology.Poller is
       Next       : Watch_Access;
    end record;
 
-   function Watch_To_Address is new Ada.Unchecked_Conversion
-     (Watch_Access, System.Address);
-   function Address_To_Watch is new Ada.Unchecked_Conversion
-     (System.Address, Watch_Access);
-   procedure Free_Watch is new Ada.Unchecked_Deallocation
-     (Watch_Record, Watch_Access);
+   function Watch_To_Address is new Ada.Unchecked_Conversion (Watch_Access, System.Address);
+   function Address_To_Watch is new Ada.Unchecked_Conversion (System.Address, Watch_Access);
+   procedure Free_Watch is new Ada.Unchecked_Deallocation (Watch_Record, Watch_Access);
 
    function Epoll_Create1 (Flags : C.int) return C.int;
    pragma Import (C, Epoll_Create1, "epoll_create1");
 
-   function Epoll_Ctl
-     (Epoll_FD : C.int;
-      Operation : C.int;
-      FD         : C.int;
-      Events     : C.unsigned) return C.int;
+   function Epoll_Ctl (Epoll_FD : C.int; Operation : C.int; FD : C.int; Events : C.unsigned) return C.int;
    pragma Import (C, Epoll_Ctl, "flyology_linux_epoll_ctl");
 
    function Epoll_Wait
-     (Epoll_FD  : C.int;
-      Events    : System.Address;
-      Max_Events : C.int;
-      Timeout_MS : C.int) return C.int;
+     (Epoll_FD : C.int; Events : System.Address; Max_Events : C.int; Timeout_MS : C.int) return C.int;
    pragma Import (C, Epoll_Wait, "flyology_linux_epoll_wait");
 
    function Eventfd (Initial_Value : C.unsigned; Flags : C.int) return C.int;
    pragma Import (C, Eventfd, "eventfd");
 
-   function Read
-     (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
+   function Read (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
    pragma Import (C, Read, "read");
 
-   function Write
-     (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
+   function Write (FD : C.int; Buffer : System.Address; Count : C.size_t) return C.long;
    pragma Import (C, Write, "write");
 
    function Close (Descriptor : C.int) return C.int;
@@ -90,34 +77,30 @@ package body System.Flyology.Poller is
 
    procedure Set_Head (Item : in out Poller; Value : Watch_Access);
 
-   function Find
-     (Item : Poller; Descriptor : C.int) return Watch_Access;
+   function Find (Item : Poller; Descriptor : C.int) return Watch_Access;
 
    function Mask_For (Watch_Item : Watch_Access) return C.unsigned;
 
-   procedure Remove
-     (Item : in out Poller; Watch_Item : not null Watch_Access);
+   procedure Remove (Item : in out Poller; Watch_Item : not null Watch_Access);
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int;
 
    function Drain_File_Events
-     (Item   : in out Poller;
-      Events : in out Poll_Event_Array;
-      Count  : in out Natural;
-      Limit  : Natural;
+     (Item       : in out Poller;
+      Events     : in out Poll_Event_Array;
+      Count      : in out Natural;
+      Limit      : Natural;
       May_Remain : out Boolean) return Boolean;
 
-   function Head (Item : Poller) return Watch_Access is
-     (Address_To_Watch (Item.State));
+   function Head (Item : Poller) return Watch_Access
+   is (Address_To_Watch (Item.State));
 
    procedure Set_Head (Item : in out Poller; Value : Watch_Access) is
    begin
       Item.State := Watch_To_Address (Value);
    end Set_Head;
 
-   function Find
-     (Item : Poller; Descriptor : C.int) return Watch_Access
-   is
+   function Find (Item : Poller; Descriptor : C.int) return Watch_Access is
       Position : Watch_Access := Head (Item);
    begin
       while Position /= null and then Position.Descriptor /= Descriptor loop
@@ -138,12 +121,10 @@ package body System.Flyology.Poller is
       return Result;
    end Mask_For;
 
-   function Has (Mask, Flag : C.unsigned) return Boolean is
-     ((Mask and Flag) /= 0);
+   function Has (Mask, Flag : C.unsigned) return Boolean
+   is ((Mask and Flag) /= 0);
 
-   procedure Remove
-     (Item : in out Poller; Watch_Item : not null Watch_Access)
-   is
+   procedure Remove (Item : in out Poller; Watch_Item : not null Watch_Access) is
       Position : Watch_Access := Head (Item);
       Previous : Watch_Access;
       Victim   : Watch_Access := Watch_Item;
@@ -175,39 +156,30 @@ package body System.Flyology.Poller is
       end if;
 
       Limit := Time_ABI.To_Timespec (Timeout);
-      Value :=
-        C.long_long (Limit.tv_sec) * 1_000
-        + (C.long_long (Limit.tv_nsec) + 999_999) / 1_000_000;
+      Value := C.long_long (Limit.tv_sec) * 1_000 + (C.long_long (Limit.tv_nsec) + 999_999) / 1_000_000;
       return C.int (Value);
    end Timeout_Milliseconds;
 
    function Drain_File_Events
-     (Item   : in out Poller;
-      Events : in out Poll_Event_Array;
-      Count  : in out Natural;
-      Limit  : Natural;
+     (Item       : in out Poller;
+      Events     : in out Poll_Event_Array;
+      Count      : in out Natural;
+      Limit      : Natural;
       May_Remain : out Boolean) return Boolean
    is
-      Available   : constant Natural :=
-        Natural'Min (Events'Length - Count, Limit);
-      Completions : File_Engines.Completion_Array
-        (1 .. Natural'Max (1, Available));
+      Available   : constant Natural := Natural'Min (Events'Length - Count, Limit);
+      Completions : File_Engines.Completion_Array (1 .. Natural'Max (1, Available));
       Drained     : Natural := 0;
    begin
       if Available = 0 then
          May_Remain := True;
          return True;
       end if;
-      if Faults.Enabled
-        and then Faults.Fail (Faults.Poller_File_Drain_Pause)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.Poller_File_Drain_Pause) then
          May_Remain := True;
          return True;
       end if;
-      if not File_Engines.Drain
-        (Item.File_State, Completions, Drained)
-        or else Drained > Available
-      then
+      if not File_Engines.Drain (Item.File_State, Completions, Drained) or else Drained > Available then
          May_Remain := True;
          return False;
       end if;
@@ -244,12 +216,7 @@ package body System.Flyology.Poller is
          return False;
       end if;
 
-      Result :=
-        Epoll_Ctl
-          (Item.Descriptor,
-           EPOLL_CTL_ADD,
-           Item.Wake_Descriptor,
-           EPOLLIN);
+      Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_ADD, Item.Wake_Descriptor, EPOLLIN);
       if Result /= 0 then
          Result := Close (Item.Wake_Descriptor);
          Result := Close (Item.Descriptor);
@@ -257,17 +224,14 @@ package body System.Flyology.Poller is
          Item.Descriptor := -1;
          return False;
       end if;
-      if not File_Engines.Initialize
-        (Item.File_State, Item.Descriptor, Item.Wake_Descriptor)
-      then
+      if not File_Engines.Initialize (Item.File_State, Item.Descriptor, Item.Wake_Descriptor) then
          Result := Close (Item.Wake_Descriptor);
          Result := Close (Item.Descriptor);
          Item.Wake_Descriptor := -1;
          Item.Descriptor := -1;
          return False;
       end if;
-      Item.File_Drain_State :=
-        (Pending => False, File_Only_Last_Batch => False);
+      Item.File_Drain_State := (Pending => False, File_Only_Last_Batch => False);
       return True;
    end Initialize;
 
@@ -284,8 +248,7 @@ package body System.Flyology.Poller is
       Item.State := System.Null_Address;
 
       File_Engines.Finalize (Item.File_State);
-      Item.File_Drain_State :=
-        (Pending => False, File_Only_Last_Batch => False);
+      Item.File_Drain_State := (Pending => False, File_Only_Last_Batch => False);
 
       if Item.Wake_Descriptor >= 0 then
          Result := Close (Item.Wake_Descriptor);
@@ -303,11 +266,7 @@ package body System.Flyology.Poller is
       end if;
    end Finalize;
 
-   function Watch
-     (Item       : in out Poller;
-      Descriptor : C.int;
-      Condition  : Interest) return Boolean
-   is
+   function Watch (Item : in out Poller; Descriptor : C.int; Condition : Interest) return Boolean is
       Watch_Item   : Watch_Access := Find (Item, Descriptor);
       Created      : Boolean := False;
       Was_Readable : Boolean;
@@ -318,8 +277,7 @@ package body System.Flyology.Poller is
          return False;
       end if;
       if Watch_Item = null then
-         Watch_Item :=
-           new Watch_Record'(Descriptor => Descriptor, others => <>);
+         Watch_Item := new Watch_Record'(Descriptor => Descriptor, others => <>);
          Watch_Item.Next := Head (Item);
          Set_Head (Item, Watch_Item);
          Created := True;
@@ -353,28 +311,17 @@ package body System.Flyology.Poller is
          return False;
    end Watch;
 
-   function Watch_Many
-     (Item     : in out Poller;
-      Requests : Interest_Request_Array) return Boolean
-   is
+   function Watch_Many (Item : in out Poller; Requests : Interest_Request_Array) return Boolean is
    begin
       for Index in Requests'Range loop
-         if not Watch
-           (Item,
-            Requests (Index).Descriptor,
-            Requests (Index).Condition)
-         then
+         if not Watch (Item, Requests (Index).Descriptor, Requests (Index).Condition) then
             return False;
          end if;
       end loop;
       return True;
    end Watch_Many;
 
-   function Cancel
-     (Item       : in out Poller;
-      Descriptor : C.int;
-      Condition  : Interest) return Boolean
-   is
+   function Cancel (Item : in out Poller; Descriptor : C.int; Condition : Interest) return Boolean is
       Watch_Item : constant Watch_Access := Find (Item, Descriptor);
       Retained   : Boolean;
       Result     : C.int;
@@ -389,14 +336,9 @@ package body System.Flyology.Poller is
 
       Retained := Watch_Item.Readable or else Watch_Item.Writable;
       if Retained then
-         Result := Epoll_Ctl
-           (Item.Descriptor,
-            EPOLL_CTL_MOD,
-            Descriptor,
-            Mask_For (Watch_Item));
+         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
       else
-         Result := Epoll_Ctl
-           (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
+         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
       end if;
 
       --  EPOLL_CTL_MOD and EPOLL_CTL_DEL both answer EBADF once the owner has
@@ -404,23 +346,22 @@ package body System.Flyology.Poller is
       --  it. That leaves no interest of either direction, so the whole
       --  bookkeeping record goes even when this call retained one.
       case Poller_Policy.Classify_Cancel (Result = 0, Integer (OSI.errno)) is
-         when Poller_Policy.Interest_Cleared =>
+         when Poller_Policy.Interest_Cleared  =>
             if not Retained then
                Remove (Item, Watch_Item);
             end if;
             return True;
+
          when Poller_Policy.Registration_Gone =>
             Remove (Item, Watch_Item);
             return True;
-         when Poller_Policy.Cancel_Failed =>
+
+         when Poller_Policy.Cancel_Failed     =>
             return False;
       end case;
    end Cancel;
 
-   function Cancel_Many
-     (Item     : in out Poller;
-      Requests : Interest_Request_Array) return Boolean
-   is
+   function Cancel_Many (Item : in out Poller; Requests : Interest_Request_Array) return Boolean is
       Succeeded : Boolean := True;
    begin
       for Request of Requests loop
@@ -431,56 +372,44 @@ package body System.Flyology.Poller is
       return Succeeded;
    end Cancel_Many;
 
-   function Retains_Orphaned_One_Shots return Boolean is (False);
+   function Retains_Orphaned_One_Shots return Boolean
+   is (False);
 
    function Submit_File
-     (Item        : in out Poller;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Offset      : C.long_long;
-      For_Write   : Boolean;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
-   is
+     (Item       : in out Poller;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Offset     : C.long_long;
+      For_Write  : Boolean;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean is
    begin
-      if Faults.Enabled
-        and then Faults.Fail (Faults.File_Submission_Full)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
          Error_Code := EAGAIN;
          return False;
       end if;
-      return File_Engines.Submit
-        (Item.File_State,
-         Descriptor,
-         Buffer,
-         Length,
-         Offset,
-         For_Write,
-         Token,
-         Error_Code);
+      return
+        File_Engines.Submit
+          (Item.File_State, Descriptor, Buffer, Length, Offset, For_Write, Token, Error_Code);
    end Submit_File;
 
-   function Supports_Send_ZC (Item : Poller) return Boolean is
-     (File_Engines.Supports_Send_ZC (Item.File_State));
+   function Supports_Send_ZC (Item : Poller) return Boolean
+   is (File_Engines.Supports_Send_ZC (Item.File_State));
 
    function Submit_Send_ZC
-     (Item        : in out Poller;
-      Descriptor  : C.int;
-      Buffer      : System.Address;
-      Length      : C.size_t;
-      Token       : System.Address;
-      Error_Code  : out C.int) return Boolean
-   is
+     (Item       : in out Poller;
+      Descriptor : C.int;
+      Buffer     : System.Address;
+      Length     : C.size_t;
+      Token      : System.Address;
+      Error_Code : out C.int) return Boolean is
    begin
-      if Faults.Enabled
-        and then Faults.Fail (Faults.File_Submission_Full)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
          Error_Code := EAGAIN;
          return False;
       end if;
-      return File_Engines.Submit_Send_ZC
-        (Item.File_State, Descriptor, Buffer, Length, Token, Error_Code);
+      return File_Engines.Submit_Send_ZC (Item.File_State, Descriptor, Buffer, Length, Token, Error_Code);
    end Submit_Send_ZC;
 
    function Cancel_File
@@ -489,83 +418,59 @@ package body System.Flyology.Poller is
       Token          : System.Address;
       Value          : out File_Engines.Completion;
       Has_Completion : out Boolean;
-      Error_Code     : out C.int)
-      return File_Engines.Cancellation_Disposition
-   is
+      Error_Code     : out C.int) return File_Engines.Cancellation_Disposition is
    begin
-      if Faults.Enabled
-        and then Faults.Fail (Faults.File_Cancel_Not_Cancelable)
-      then
+      if Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Not_Cancelable) then
          Value := (others => <>);
          Has_Completion := False;
          Error_Code := 0;
          return File_Engines.Not_Cancelable;
-      elsif Faults.Enabled
-        and then Faults.Fail (Faults.File_Cancel_Already_Completing)
-      then
+      elsif Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Already_Completing) then
          Value := (others => <>);
          Has_Completion := False;
          Error_Code := 0;
          return File_Engines.Already_Completing;
       end if;
-      return File_Engines.Cancel
-        (Item.File_State,
-         Descriptor,
-         Token,
-         Value,
-         Has_Completion,
-         Error_Code);
+      return File_Engines.Cancel (Item.File_State, Descriptor, Token, Value, Has_Completion, Error_Code);
    end Cancel_File;
 
-   function File_Quiescent (Item : Poller) return Boolean is
-     (File_Engines.Is_Quiescent (Item.File_State));
+   function File_Quiescent (Item : Poller) return Boolean
+   is (File_Engines.Is_Quiescent (Item.File_State));
 
-   function Wait
-     (Item                : in out Poller;
-      Timeout             : Duration;
-      Event               : out Poll_Event) return Boolean
-   is
+   function Wait (Item : in out Poller; Timeout : Duration; Event : out Poll_Event) return Boolean is
       Events : Poll_Event_Array (1 .. 1);
       Count  : Natural;
    begin
       if not Wait_Batch (Item, Timeout, Events, Count) then
-         Event :=
-           (Kind => Timeout_Event, Descriptor => -1, others => <>);
+         Event := (Kind => Timeout_Event, Descriptor => -1, others => <>);
          return False;
       end if;
-      Event :=
-        (if Count = 0
-         then (Kind => Timeout_Event, Descriptor => -1, others => <>)
-         else Events (1));
+      Event := (if Count = 0 then (Kind => Timeout_Event, Descriptor => -1, others => <>) else Events (1));
       return True;
    end Wait;
 
    function Wait_Batch
-     (Item                : in out Poller;
-      Timeout             : Duration;
-      Events              : out Poll_Event_Array;
-      Count               : out Natural) return Boolean
+     (Item : in out Poller; Timeout : Duration; Events : out Poll_Event_Array; Count : out Natural)
+      return Boolean
    is
-      Kernel_Events : aliased Epoll_Event_Array (Events'Range);
-      Kernel_Count  : C.int;
-      Descriptor    : C.int;
-      Watch_Item    : Watch_Access;
-      Mask          : C.unsigned;
-      Error_Event   : Boolean;
-      Read_Ready    : Boolean;
-      Write_Ready   : Boolean;
-      Result        : C.int;
-      Read_Result   : C.long;
-      Wake_Value    : aliased C.unsigned_long_long;
-      May_Remain    : Boolean := False;
+      Kernel_Events  : aliased Epoll_Event_Array (Events'Range);
+      Kernel_Count   : C.int;
+      Descriptor     : C.int;
+      Watch_Item     : Watch_Access;
+      Mask           : C.unsigned;
+      Error_Event    : Boolean;
+      Read_Ready     : Boolean;
+      Write_Ready    : Boolean;
+      Result         : C.int;
+      Read_Result    : C.long;
+      Wake_Value     : aliased C.unsigned_long_long;
+      May_Remain     : Boolean := False;
       Epoll_Capacity : Natural;
       Drain_Budget   : Poller_Policy.Drain_Budget;
       Plan           : Poller_Policy.Batch_Plan;
-      Capacity       : constant Poller_Policy.Batch_Capacity :=
-        Poller_Policy.Batch_Capacity (Events'Length);
+      Capacity       : constant Poller_Policy.Batch_Capacity := Poller_Policy.Batch_Capacity (Events'Length);
    begin
-      Events :=
-        (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
+      Events := (others => (Kind => Timeout_Event, Descriptor => -1, others => <>));
       Count := 0;
       if Faults.Enabled and then Faults.Fail (Faults.Poller_Wait) then
          return False;
@@ -581,18 +486,10 @@ package body System.Flyology.Poller is
       Plan := Poller_Policy.Plan_Batch (Item.File_Drain_State, Capacity);
       Item.File_Drain_State := Plan.State;
       if Plan.Initial_Drain_Budget > 0 then
-         if not Drain_File_Events
-           (Item,
-            Events,
-            Count,
-            Plan.Initial_Drain_Budget,
-            May_Remain)
-         then
+         if not Drain_File_Events (Item, Events, Count, Plan.Initial_Drain_Budget, May_Remain) then
             return False;
          end if;
-         Item.File_Drain_State :=
-           Poller_Policy.After_Drain
-             (Item.File_Drain_State, May_Remain);
+         Item.File_Drain_State := Poller_Policy.After_Drain (Item.File_Drain_State, May_Remain);
          if Count = Events'Length then
             Item.File_Drain_State :=
               Poller_Policy.After_Batch
@@ -604,27 +501,16 @@ package body System.Flyology.Poller is
          end if;
       end if;
 
-      Drain_Budget :=
-        Poller_Policy.Remaining_Budget
-          (Capacity, Poller_Policy.Batch_Count (Count));
+      Drain_Budget := Poller_Policy.Remaining_Budget (Capacity, Poller_Policy.Batch_Count (Count));
       Epoll_Capacity := Natural (Drain_Budget);
-      Kernel_Count :=
-        Epoll_Wait
-          (Item.Descriptor,
-           Kernel_Events'Address,
-           C.int (Epoll_Capacity),
-           0);
+      Kernel_Count := Epoll_Wait (Item.Descriptor, Kernel_Events'Address, C.int (Epoll_Capacity), 0);
       if Kernel_Count < 0 then
          return OSI.errno = OSI.EINTR;
       elsif Kernel_Count = 0 and then Count = 0 then
-         if not Drain_File_Events
-           (Item, Events, Count, Drain_Budget, May_Remain)
-         then
+         if not Drain_File_Events (Item, Events, Count, Drain_Budget, May_Remain) then
             return False;
          end if;
-         Item.File_Drain_State :=
-           Poller_Policy.After_Drain
-             (Item.File_Drain_State, May_Remain);
+         Item.File_Drain_State := Poller_Policy.After_Drain (Item.File_Drain_State, May_Remain);
          if Count > 0 then
             Item.File_Drain_State :=
               Poller_Policy.After_Batch
@@ -641,47 +527,32 @@ package body System.Flyology.Poller is
          end if;
          Kernel_Count :=
            Epoll_Wait
-             (Item.Descriptor,
-              Kernel_Events'Address,
-              C.int (Epoll_Capacity),
-              Timeout_Milliseconds (Timeout));
+             (Item.Descriptor, Kernel_Events'Address, C.int (Epoll_Capacity), Timeout_Milliseconds (Timeout));
          if Kernel_Count < 0 then
             return OSI.errno = OSI.EINTR;
          end if;
       end if;
 
       for Index in 1 .. Natural (Kernel_Count) loop
-         Descriptor :=
-           Kernel_Events (Kernel_Events'First + Index - 1).Descriptor;
+         Descriptor := Kernel_Events (Kernel_Events'First + Index - 1).Descriptor;
          Mask := Kernel_Events (Kernel_Events'First + Index - 1).Events;
 
          if Descriptor = Item.Wake_Descriptor then
             Read_Result :=
-              Read
-                (Item.Wake_Descriptor,
-                 Wake_Value'Address,
-                 C.size_t (C.unsigned_long_long'Size / 8));
+              Read (Item.Wake_Descriptor, Wake_Value'Address, C.size_t (C.unsigned_long_long'Size / 8));
             if Read_Result < 0 and then OSI.errno /= EAGAIN then
                return False;
             end if;
-            Item.File_Drain_State :=
-              Poller_Policy.After_Wake (Item.File_Drain_State);
+            Item.File_Drain_State := Poller_Policy.After_Wake (Item.File_Drain_State);
             Count := Count + 1;
-            Events (Events'First + Count - 1) :=
-              (Kind => Wake_Event, Descriptor => Descriptor, others => <>);
+            Events (Events'First + Count - 1) := (Kind => Wake_Event, Descriptor => Descriptor, others => <>);
          else
             Watch_Item := Find (Item, Descriptor);
             if Watch_Item /= null then
                Error_Event :=
-                 Has (Mask, EPOLLERR)
-                 or else Has (Mask, EPOLLHUP)
-                 or else Has (Mask, EPOLLRDHUP);
-               Read_Ready :=
-                 Watch_Item.Readable
-                   and then (Has (Mask, EPOLLIN) or Error_Event);
-               Write_Ready :=
-                 Watch_Item.Writable and then
-                   (Has (Mask, EPOLLOUT) or Error_Event);
+                 Has (Mask, EPOLLERR) or else Has (Mask, EPOLLHUP) or else Has (Mask, EPOLLRDHUP);
+               Read_Ready := Watch_Item.Readable and then (Has (Mask, EPOLLIN) or Error_Event);
+               Write_Ready := Watch_Item.Writable and then (Has (Mask, EPOLLOUT) or Error_Event);
 
                if Read_Ready then
                   Watch_Item.Readable := False;
@@ -691,19 +562,9 @@ package body System.Flyology.Poller is
                end if;
 
                if Watch_Item.Readable or else Watch_Item.Writable then
-                  Result :=
-                    Epoll_Ctl
-                      (Item.Descriptor,
-                       EPOLL_CTL_MOD,
-                       Descriptor,
-                       Mask_For (Watch_Item));
+                  Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
                else
-                  Result :=
-                    Epoll_Ctl
-                      (Item.Descriptor,
-                       EPOLL_CTL_DEL,
-                       Descriptor,
-                       0);
+                  Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
                   Remove (Item, Watch_Item);
                end if;
                if Result /= 0 then
@@ -713,37 +574,31 @@ package body System.Flyology.Poller is
                if Read_Ready or else Write_Ready then
                   Count := Count + 1;
                   Events (Events'First + Count - 1) :=
-                     (Kind =>
-                       (if Read_Ready and Write_Ready then Read_Write_Event
-                        elsif Read_Ready then Readable_Event
+                    (Kind       =>
+                       (if Read_Ready and Write_Ready
+                        then Read_Write_Event
+                        elsif Read_Ready
+                        then Readable_Event
                         else Writable_Event),
                      Descriptor => Descriptor,
-                     others => <>);
+                     others     => <>);
                end if;
             end if;
          end if;
       end loop;
-      Drain_Budget :=
-        Poller_Policy.Remaining_Budget
-          (Capacity, Poller_Policy.Batch_Count (Count));
+      Drain_Budget := Poller_Policy.Remaining_Budget (Capacity, Poller_Policy.Batch_Count (Count));
       if Drain_Budget > 0 then
-         if not Drain_File_Events
-           (Item, Events, Count, Drain_Budget, May_Remain)
-         then
+         if not Drain_File_Events (Item, Events, Count, Drain_Budget, May_Remain) then
             return False;
          end if;
-         Item.File_Drain_State :=
-           Poller_Policy.After_Drain
-             (Item.File_Drain_State, May_Remain);
+         Item.File_Drain_State := Poller_Policy.After_Drain (Item.File_Drain_State, May_Remain);
       end if;
       Item.File_Drain_State :=
         Poller_Policy.After_Batch
           (Item.File_Drain_State,
            Capacity,
            Poller_Policy.Batch_Count (Count),
-           Only_File_Events =>
-             Count = 1
-             and then Events (Events'First).Kind = File_Event);
+           Only_File_Events => Count = 1 and then Events (Events'First).Kind = File_Event);
       return True;
    end Wait_Batch;
 
@@ -755,11 +610,7 @@ package body System.Flyology.Poller is
          return False;
       end if;
       loop
-         Result :=
-           Write
-             (Item.Wake_Descriptor,
-              Value'Address,
-              C.size_t (C.unsigned_long_long'Size / 8));
+         Result := Write (Item.Wake_Descriptor, Value'Address, C.size_t (C.unsigned_long_long'Size / 8));
          if Result >= 0 or else OSI.errno = EAGAIN then
             return True;
          elsif OSI.errno /= OSI.EINTR then

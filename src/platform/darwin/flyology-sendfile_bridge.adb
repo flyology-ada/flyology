@@ -18,18 +18,13 @@ package body Flyology.Sendfile_Bridge is
    pragma Import (C, Darwin_Sendfile, "sendfile");
 
    function Send_File
-     (Socket : C.int;
-      File   : C.int;
-      Offset : C.long_long;
-      Length : C.size_t;
-      Error  : not null access C.int) return C.long
+     (Socket : C.int; File : C.int; Offset : C.long_long; Length : C.size_t; Error : not null access C.int)
+      return C.long
    is
       Sent   : aliased C.long_long := C.long_long (Length);
       Result : C.int;
    begin
-      Result :=
-        Darwin_Sendfile
-          (File, Socket, Offset, Sent'Access, System.Null_Address, 0);
+      Result := Darwin_Sendfile (File, Socket, Offset, Sent'Access, System.Null_Address, 0);
       if Sent > 0 then
          --  Darwin reports partial progress through len alongside EAGAIN or
          --  EINTR. Progress wins so the caller can advance without replay.

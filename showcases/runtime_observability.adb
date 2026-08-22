@@ -53,29 +53,40 @@ procedure Runtime_Observability is
       end Finished;
    end Load;
 
-   procedure Print
-     (Label : String;
-      Item  : Observation.Group_Snapshot)
-   is
+   procedure Print (Label : String; Item : Observation.Group_Snapshot) is
    begin
       TIO.Put_Line
         (Label
-         & " group=" & Item.Group'Image
-         & " members=" & Item.Members'Image
-         & " pinned=" & Item.Pinned_Members'Image
-         & " ready=" & Item.Ready'Image
-         & " waiting=" & Item.Waiting'Image
-         & " running=" & Item.Running'Image);
+         & " group="
+         & Item.Group'Image
+         & " members="
+         & Item.Members'Image
+         & " pinned="
+         & Item.Pinned_Members'Image
+         & " ready="
+         & Item.Ready'Image
+         & " waiting="
+         & Item.Waiting'Image
+         & " running="
+         & Item.Running'Image);
       TIO.Put_Line
-        ("  timers=" & Item.Timer_Waits'Image
-         & " descriptors=" & Item.Descriptor_Waits'Image
-         & " files=" & Item.File_Waits'Image
-         & " queued-files=" & Item.Pending_File_Submissions'Image);
+        ("  timers="
+         & Item.Timer_Waits'Image
+         & " descriptors="
+         & Item.Descriptor_Waits'Image
+         & " files="
+         & Item.File_Waits'Image
+         & " queued-files="
+         & Item.Pending_File_Submissions'Image);
       TIO.Put_Line
-        ("  dispatches=" & Item.Dispatches'Image
-         & " poll-batches=" & Item.Poll_Batches'Image
-         & " poll-events=" & Item.Poll_Events'Image
-         & " wakeups=" & Item.Wakeups'Image);
+        ("  dispatches="
+         & Item.Dispatches'Image
+         & " poll-batches="
+         & Item.Poll_Batches'Image
+         & " poll-events="
+         & Item.Poll_Events'Image
+         & " wakeups="
+         & Item.Wakeups'Image);
    end Print;
 
    First, Idle, Released : Observation.Group_Snapshot;
@@ -105,8 +116,7 @@ begin
       end if;
       Print ("parked", Idle);
       TIO.Put_Line
-        ("  progress over idle sample: "
-         & Boolean'Image (Observation.Made_Progress (First, Idle)));
+        ("  progress over idle sample: " & Boolean'Image (Observation.Made_Progress (First, Idle)));
 
       Load.Open;
       Load.Wait_Until_Finished;
@@ -117,7 +127,5 @@ begin
       raise Program_Error with "group 0 disappeared";
    end if;
    Print ("released", Released);
-   TIO.Put_Line
-     ("  progress after release: "
-      & Boolean'Image (Observation.Made_Progress (Idle, Released)));
+   TIO.Put_Line ("  progress after release: " & Boolean'Image (Observation.Made_Progress (Idle, Released)));
 end Runtime_Observability;

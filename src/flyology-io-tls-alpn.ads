@@ -6,6 +6,7 @@ with Flyology.IO.Sockets;
 --  Providers and sessions opt into these interfaces independently of the core
 --  TLS interfaces, so an existing provider remains source-compatible. ALPN
 --  identifiers are opaque byte strings; protocol policy belongs to callers.
+
 package Flyology.IO.TLS.ALPN is
 
    --  Ordered protocol identifiers offered to a peer. Each identifier is one
@@ -34,8 +35,7 @@ package Flyology.IO.TLS.ALPN is
    --  @param Right Opaque nonempty protocol identifier
    --  @return Extended ordered protocol list
    --  @exception Constraint_Error Right or total encoded length is invalid
-   function "&"
-     (Left : Protocol_List; Right : String) return Protocol_List;
+   function "&" (Left : Protocol_List; Right : String) return Protocol_List;
 
    --  Return the number of offered identifiers.
    --  @param Item Protocol list to inspect
@@ -47,8 +47,7 @@ package Flyology.IO.TLS.ALPN is
    --  @param Index One-based offer position
    --  @return Opaque protocol identifier
    --  @exception Constraint_Error Index is outside the list
-   function Identifier
-     (Item : Protocol_List; Index : Positive) return String;
+   function Identifier (Item : Protocol_List; Index : Positive) return String;
 
    --  Optional provider capability for per-session ALPN offers. Implementing
    --  this interface does not change the core provider primitives. Factories
@@ -67,11 +66,9 @@ package Flyology.IO.TLS.ALPN is
    --  @return Newly allocated ALPN-capable provider session
    --  @exception TLS_Error Provider setup fails
    function Create_Session
-     (Item        : in out Provider;
-      FD          : Descriptor;
-      Side        : Role;
-      Server_Name : String;
-      Protocols   : Protocol_List) return Session_Access is abstract;
+     (Item : in out Provider; FD : Descriptor; Side : Role; Server_Name : String; Protocols : Protocol_List)
+      return Session_Access
+   is abstract;
 
    --  Optional session capability for reading the ALPN result.
    type Session is limited interface;
@@ -114,8 +111,8 @@ package Flyology.IO.TLS.ALPN is
    function Selected_Protocol (Item : in out Connection) return String;
 
 private
-   package Protocol_Vectors is new Ada.Containers.Indefinite_Vectors
-     (Index_Type => Positive, Element_Type => String);
+   package Protocol_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Index_Type => Positive, Element_Type => String);
 
    type Protocol_List is record
       Values         : Protocol_Vectors.Vector;
@@ -123,7 +120,6 @@ private
    end record;
 
    Empty_Protocol_List : constant Protocol_List :=
-     (Values         => Protocol_Vectors.Empty_Vector,
-      Encoded_Length => 0);
+     (Values => Protocol_Vectors.Empty_Vector, Encoded_Length => 0);
 
 end Flyology.IO.TLS.ALPN;

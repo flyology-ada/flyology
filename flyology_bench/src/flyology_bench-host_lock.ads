@@ -65,8 +65,7 @@ package Flyology_Bench.Host_Lock is
    --  subtree, so the claim covers only this mount namespace. systemd
    --  PrivateTmp= produces exactly this.
    --  @enum Isolation_Unknown The platform did not answer the question.
-   type Path_Isolation is
-     (Isolation_Not_Detected, Private_Namespace, Isolation_Unknown);
+   type Path_Isolation is (Isolation_Not_Detected, Private_Namespace, Isolation_Unknown);
 
    --  Diagnostic identity parsed from a claim file. Every field may be empty:
    --  content is written after the lock is taken, so a reader can observe an
@@ -168,8 +167,7 @@ private
 
    Whole_Machine : constant CPU_List := (1 .. 0 => 0);
 
-   type Descriptor_Array is
-     array (Positive range 1 .. Maximum_Claimed_CPUs) of Interfaces.C.int;
+   type Descriptor_Array is array (Positive range 1 .. Maximum_Claimed_CPUs) of Interfaces.C.int;
 
    type Claim is limited new Ada.Finalization.Limited_Controlled with record
       Machine_Descriptor : Interfaces.C.int := -1;
@@ -182,5 +180,6 @@ private
 
    --  @exclude
    --  @param Object Claim being finalized.
-   overriding procedure Finalize (Object : in out Claim);
+   overriding
+   procedure Finalize (Object : in out Claim);
 end Flyology_Bench.Host_Lock;

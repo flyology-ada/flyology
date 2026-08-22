@@ -10,26 +10,23 @@ with Interfaces;
 --  supervision. Task-generation generics own application-defined Ada task
 --  types; controllers supply typed topology and policy. No supervised task is
 --  detached from its Ada master.
+
 package Flyology.Supervision is
 
    --  Stable nonzero logical identity of one configured child. Capacity is a
    --  separate property of each supervisor instance.
-   subtype Child_Id is Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   subtype Child_Id is Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Nonzero identity of one task-object generation. A restart creates a new
    --  generation and a new Ada task identity.
-   subtype Generation is Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   subtype Generation is Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Stable nonzero identity of one recovery cascade. The same value is
    --  propagated through nested supervisors until the cascade completes.
-   subtype Incident_Id is Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   subtype Incident_Id is Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  One admitted recovery attempt within an incident.
-   subtype Incident_Attempt is Interfaces.Unsigned_64 range
-     1 .. Interfaces.Unsigned_64'Last;
+   subtype Incident_Attempt is Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;
 
    --  Fixed recovery identity propagated through structured child calls.
    --  Inactive is the only representation that does not name an incident.
@@ -59,8 +56,7 @@ package Flyology.Supervision is
    --  @param Context Active recovery context
    --  @return Absolute deadline shared by the recovery hierarchy
    --  @exception Program_Error Context is inactive
-   function Recovery_Deadline
-     (Context : Incident_Context) return Ada.Real_Time.Time;
+   function Recovery_Deadline (Context : Incident_Context) return Ada.Real_Time.Time;
 
    --  Logical child plus exact generation. Supervisory operations must reject
    --  a handle whose generation is no longer current.
@@ -89,10 +85,7 @@ package Flyology.Supervision is
    --  @param Id Expected logical child identity
    --  @param Value Expected generation
    --  @return True only for an exact logical and generational match
-   function Is_Current
-     (Handle : Child_Handle;
-      Id     : Child_Id;
-      Value  : Generation) return Boolean;
+   function Is_Current (Handle : Child_Handle; Id : Child_Id; Value : Generation) return Boolean;
 
    --  Observable lifecycle of one logical child.
    --  @enum Configured Policy is validated but no task object exists
@@ -147,16 +140,13 @@ package Flyology.Supervision is
       Policy_Exhaustion);
 
    --  Maximum retained exception or policy diagnostic text.
-   Maximum_Diagnostic_Length : constant := 512;
+   Maximum_Diagnostic_Length     : constant := 512;
    --  Maximum retained fully qualified exception-name characters.
-   Maximum_Exception_Name_Length : constant :=
-     Flyology.Task_Results.Exception_Name_Capacity;
+   Maximum_Exception_Name_Length : constant := Flyology.Task_Results.Exception_Name_Capacity;
    --  Valid used length within a fixed diagnostic buffer.
-   subtype Diagnostic_Length is
-     Natural range 0 .. Maximum_Diagnostic_Length;
+   subtype Diagnostic_Length is Natural range 0 .. Maximum_Diagnostic_Length;
    --  Valid used length within a fixed exception-name buffer.
-   subtype Exception_Name_Length is
-     Natural range 0 .. Maximum_Exception_Name_Length;
+   subtype Exception_Name_Length is Natural range 0 .. Maximum_Exception_Name_Length;
 
    --  Bounded failure information safe after an exception occurrence and task
    --  object are gone. Task_Id is diagnostic only and must not be used to
@@ -175,34 +165,30 @@ package Flyology.Supervision is
    --  storage
    --  @field Message Bounded copied diagnostic text
    type Termination_Summary is record
-      Kind           : Termination_Kind := No_Termination;
-      Exception_Id   : Ada.Exceptions.Exception_Id :=
-        Ada.Exceptions.Null_Id;
-      Exception_Name_Length : Supervision.Exception_Name_Length := 0;
+      Kind                     : Termination_Kind := No_Termination;
+      Exception_Id             : Ada.Exceptions.Exception_Id := Ada.Exceptions.Null_Id;
+      Exception_Name_Length    : Supervision.Exception_Name_Length := 0;
       Exception_Name_Truncated : Boolean := False;
-      Exception_Name : String (1 .. Maximum_Exception_Name_Length) :=
-        (others => ' ');
-      Task_Id        : Ada.Task_Identification.Task_Id :=
-        Ada.Task_Identification.Null_Task_Id;
-      Message_Length : Diagnostic_Length := 0;
-      Message_Truncated : Boolean := False;
-      Message        : String (1 .. Maximum_Diagnostic_Length) :=
-        (others => ' ');
+      Exception_Name           : String (1 .. Maximum_Exception_Name_Length) := (others => ' ');
+      Task_Id                  : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
+      Message_Length           : Diagnostic_Length := 0;
+      Message_Truncated        : Boolean := False;
+      Message                  : String (1 .. Maximum_Diagnostic_Length) := (others => ' ');
    end record;
 
    --  Return the meaningful fully qualified exception name, or the empty
    --  string when no exception name was retained.
    --  @param Item Bounded terminal summary
    --  @return Retained exception name without unused fixed storage
-   function Exception_Name_Text (Item : Termination_Summary) return String is
-     (Item.Exception_Name (1 .. Item.Exception_Name_Length));
+   function Exception_Name_Text (Item : Termination_Summary) return String
+   is (Item.Exception_Name (1 .. Item.Exception_Name_Length));
 
    --  Return the meaningful diagnostic message, or the empty string when no
    --  message was retained.
    --  @param Item Bounded terminal summary
    --  @return Retained message without unused fixed storage
-   function Message_Text (Item : Termination_Summary) return String is
-     (Item.Message (1 .. Item.Message_Length));
+   function Message_Text (Item : Termination_Summary) return String
+   is (Item.Message (1 .. Item.Message_Length));
 
    --  Child-level restart selection.
    --  @enum Never Do not replace a terminated generation
@@ -216,8 +202,7 @@ package Flyology.Supervision is
    --  @enum Restart_Cohort Restart the failed child and a named cohort
    --  @enum Restart_Dependents Restart the failed child and declared users
    --  @enum Escalate Do not recover at this supervisor node
-   type Restart_Impact is
-     (Isolate_Child, Restart_Cohort, Restart_Dependents, Escalate);
+   type Restart_Impact is (Isolate_Child, Restart_Cohort, Restart_Dependents, Escalate);
 
    --  Fixed recovery limits. Total_Attempts applies to one incident and is
    --  reset only after Stability_Reset. Window and all delays use monotonic
@@ -291,13 +276,11 @@ package Flyology.Supervision is
       Impact            : Restart_Impact := Escalate;
       Recovery          : Recovery_Limits := Default_Recovery_Limits;
       Stopping          : Stop_Policy := Default_Stop_Policy;
-      Readiness_Timeout : Ada.Real_Time.Time_Span :=
-        Ada.Real_Time.Seconds (30);
+      Readiness_Timeout : Ada.Real_Time.Time_Span := Ada.Real_Time.Seconds (30);
       Restart_Safe      : Boolean := False;
       Task_Model        : Flyology.Execution_Model := Flyology.Project_Default;
       Has_Group         : Boolean := False;
-      Group             : Flyology.Execution_Groups.Group_Id :=
-        Flyology.Execution_Groups.Group_Id'First;
+      Group             : Flyology.Execution_Groups.Group_Id := Flyology.Execution_Groups.Group_Id'First;
    end record;
 
    --  Generation-local readiness and cancellation channel. A child receives
@@ -316,8 +299,7 @@ package Flyology.Supervision is
    --  @param Control Active generation control kept alive by the caller
    --  @return Borrowed generation-owned cancellation source
    function Stopping
-     (Control : aliased in out Generation_Control)
-      return not null access Flyology.Cancellation.Token;
+     (Control : aliased in out Generation_Control) return not null access Flyology.Cancellation.Token;
 
    --  Publish that activation and application initialization completed. This
    --  is a one-shot handshake; a second call or a call after stopping begins
@@ -343,8 +325,7 @@ package Flyology.Supervision is
    --  the incident and attempt that admitted them.
    --  @param Control Active generation control
    --  @return Inherited recovery context or No_Incident
-   function Recovery_Incident
-     (Control : Generation_Control) return Incident_Context;
+   function Recovery_Incident (Control : Generation_Control) return Incident_Context;
 
    --  Propagate a nested supervisor's active incident through this generation
    --  without creating another attempt. The call is accepted only while the
@@ -352,9 +333,7 @@ package Flyology.Supervision is
    --  @param Control Active outer generation control
    --  @param Context Active incident returned by a nested supervisor
    --  @exception Program_Error Control or Context is inactive
-   procedure Report_Escalation
-     (Control : in out Generation_Control;
-      Context : Incident_Context);
+   procedure Report_Escalation (Control : in out Generation_Control; Context : Incident_Context);
 
    --  Optionally override automatic task-result classification with normal
    --  completion. Task_Generations already observes an uncaught normal return;
@@ -384,9 +363,7 @@ package Flyology.Supervision is
    --  @param Diagnostic Application health diagnostic copied immediately
    --  @exception Program_Error No active generation exists or an outcome was
    --  already reported
-   procedure Report_Unhealthy
-     (Control    : in out Generation_Control;
-      Diagnostic : String);
+   procedure Report_Unhealthy (Control : in out Generation_Control; Diagnostic : String);
 
    --  Optionally override automatic task-result classification with an
    --  exception that application code caught and suppressed. Exceptions that
@@ -398,8 +375,7 @@ package Flyology.Supervision is
    --  @exception Program_Error No active generation exists or an outcome was
    --  already reported
    procedure Report_Exception
-     (Control    : in out Generation_Control;
-      Occurrence : Ada.Exceptions.Exception_Occurrence);
+     (Control : in out Generation_Control; Occurrence : Ada.Exceptions.Exception_Occurrence);
 
    --  Completion returned by one structured generation runner after its local
    --  Ada master has joined the task and completed task-body finalization.
@@ -419,11 +395,7 @@ package Flyology.Supervision is
    --  @enum Failure_Escalated Child policy required the owning scope to fail
    --  @enum Child_Stuck A child remained live after the diagnostic stop policy
    type Supervisor_Outcome is
-     (Shutdown_Completed,
-      Startup_Failed,
-      Recovery_Exhausted,
-      Failure_Escalated,
-      Child_Stuck);
+     (Shutdown_Completed, Startup_Failed, Recovery_Exhausted, Failure_Escalated, Child_Stuck);
 
    --  Typed terminal result returned only after every terminable child joins.
    --  A Child_Stuck result remains observable in snapshots, but synchronous
@@ -490,17 +462,14 @@ package Flyology.Supervision is
       After       : Child_State := Configured;
       Task_Model  : Flyology.Execution_Model := Flyology.Project_Default;
       Has_Group   : Boolean := False;
-      Group       : Flyology.Execution_Groups.Group_Id :=
-        Flyology.Execution_Groups.Group_Id'First;
+      Group       : Flyology.Execution_Groups.Group_Id := Flyology.Execution_Groups.Group_Id'First;
       Termination : Termination_Kind := No_Termination;
       Incident    : Incident_Context := No_Incident;
-      Backoff     : Ada.Real_Time.Time_Span :=
-        Ada.Real_Time.Time_Span_Zero;
+      Backoff     : Ada.Real_Time.Time_Span := Ada.Real_Time.Time_Span_Zero;
    end record;
 
    --  Caller-owned destination for copied bounded events.
-   type Supervisor_Event_Array is
-     array (Positive range <>) of Supervisor_Event;
+   type Supervisor_Event_Array is array (Positive range <>) of Supervisor_Event;
 
    --  Bounded observation of one configured logical child.
    --  @field Id Stable logical identity
@@ -536,10 +505,7 @@ package Flyology.Supervision is
    --  @enum Generation_Replaced The logical child now names another
    --     generation; the returned snapshot describes that current generation
    --  @enum Observation_Timed_Out The deadline elapsed before either outcome
-   type Generation_Observation_Status is
-     (Generation_Terminated,
-      Generation_Replaced,
-      Observation_Timed_Out);
+   type Generation_Observation_Status is (Generation_Terminated, Generation_Replaced, Observation_Timed_Out);
 
    --  One generation-safe supervisor observation. A timeout carries no
    --  snapshot; completed observations contain only fixed copied state and do
@@ -547,20 +513,18 @@ package Flyology.Supervision is
    --  @field Status Whether the generation terminated, was replaced, or the
    --     wait timed out
    --  @field Snapshot Exact terminal snapshot or current replacement snapshot
-   type Generation_Observation
-     (Status : Generation_Observation_Status := Observation_Timed_Out)
-   is record
+   type Generation_Observation (Status : Generation_Observation_Status := Observation_Timed_Out) is record
       case Status is
          when Observation_Timed_Out =>
             null;
+
          when Generation_Terminated | Generation_Replaced =>
             Snapshot : Child_Snapshot;
       end case;
    end record;
 
 private
-   type Controller_Id is new Interfaces.Unsigned_64 range
-     0 .. Interfaces.Unsigned_64'Last;
+   type Controller_Id is new Interfaces.Unsigned_64 range 0 .. Interfaces.Unsigned_64'Last;
 
    type Incident_Context is record
       Is_Active : Boolean := False;
@@ -594,14 +558,10 @@ private
    --  @param Kind Internal terminal classification
    --  @param Diagnostic Diagnostic copied into bounded retained storage
    --  @return Fixed terminal summary without exception or task identity
-   function Diagnostic_Summary
-     (Kind       : Termination_Kind;
-      Diagnostic : String) return Termination_Summary;
+   function Diagnostic_Summary (Kind : Termination_Kind; Diagnostic : String) return Termination_Summary;
 
    protected type Generation_Control_State is
-      procedure Open
-        (Value    : Child_Handle;
-         Incident : Incident_Context);
+      procedure Open (Value : Child_Handle; Incident : Incident_Context);
       procedure Publish_Ready;
       procedure Publish_Stop (Shutdown : Boolean);
       procedure Publish_Abort;
@@ -614,18 +574,16 @@ private
       function Is_Shutdown return Boolean;
       function Is_Abort_Requested return Boolean;
       function Current_Incident return Incident_Context;
-      procedure Read_Termination
-        (Reported : out Boolean;
-         Value    : out Termination_Summary);
+      procedure Read_Termination (Reported : out Boolean; Value : out Termination_Summary);
    private
-      Value           : Child_Handle;
-      Opened          : Boolean := False;
-      Ready           : Boolean := False;
-      Stopping        : Boolean := False;
-      Shutdown_Stop   : Boolean := False;
-      Abort_Requested : Boolean := False;
-      Escalated       : Boolean := False;
-      Incident        : Incident_Context := No_Incident;
+      Value                : Child_Handle;
+      Opened               : Boolean := False;
+      Ready                : Boolean := False;
+      Stopping             : Boolean := False;
+      Shutdown_Stop        : Boolean := False;
+      Abort_Requested      : Boolean := False;
+      Escalated            : Boolean := False;
+      Incident             : Incident_Context := No_Incident;
       Termination_Reported : Boolean := False;
       Termination          : Termination_Summary;
    end Generation_Control_State;
@@ -640,37 +598,29 @@ private
    --  @param Value Internal generation handle
    --  @param Incident Internal inherited recovery context
    procedure Open
-     (Control : in out Generation_Control;
-      Value   : Child_Handle;
-      Incident : Incident_Context := No_Incident);
+     (Control : in out Generation_Control; Value : Child_Handle; Incident : Incident_Context := No_Incident);
 
    --  @exclude
    --  @param Now Monotonic incident start
    --  @param Deadline Absolute incident deadline
    --  @return Fresh process-local incident context
-   function New_Incident
-     (Now      : Ada.Real_Time.Time;
-      Deadline : Ada.Real_Time.Time) return Incident_Context;
+   function New_Incident (Now : Ada.Real_Time.Time; Deadline : Ada.Real_Time.Time) return Incident_Context;
 
    --  @exclude
    --  @param Context Active incident to advance
    --  @return Same incident with the next attempt
    --  @exception Program_Error Context is inactive or exhausted
-   function Next_Attempt
-     (Context : Incident_Context) return Incident_Context;
+   function Next_Attempt (Context : Incident_Context) return Incident_Context;
 
    --  @exclude
    --  @param Control Internal generation control whose inherited recovery
    --  incident reached its stability boundary
-   procedure Close_Recovery_Incident
-     (Control : in out Generation_Control);
+   procedure Close_Recovery_Incident (Control : in out Generation_Control);
 
    --  @exclude
    --  @param Control Internal generation control
    --  @param Shutdown Whether the owning supervisor is shutting down
-   procedure Request_Stop
-     (Control  : in out Generation_Control;
-      Shutdown : Boolean);
+   procedure Request_Stop (Control : in out Generation_Control; Shutdown : Boolean);
 
    --  @exclude
    --  @param Control Internal generation control
@@ -694,15 +644,12 @@ private
    function From_Task_Result
      (Control : Generation_Control;
       Task_Id : Ada.Task_Identification.Task_Id;
-      Result  : Flyology.Task_Results.Task_Result)
-      return Termination_Summary;
+      Result  : Flyology.Task_Results.Task_Result) return Termination_Summary;
 
    --  @exclude
    --  @param Control Internal generation control
    --  @param Reported Whether the generation task published an outcome
    --  @param Value Published outcome when Reported is True
    procedure Read_Termination
-     (Control  : in out Generation_Control;
-      Reported : out Boolean;
-      Value    : out Termination_Summary);
+     (Control : in out Generation_Control; Reported : out Boolean; Value : out Termination_Summary);
 end Flyology.Supervision;

@@ -28,25 +28,16 @@ package body Flyology_NUMA.Sysfs is
 
    type Range_Array is array (1 .. Max_Ranges) of Value_Range;
 
-   function Is_Space (Item : Character) return Boolean is
-     (Item = ' '
-      or else Item = ASCII.HT
-      or else Item = ASCII.CR
-      or else Item = ASCII.LF);
+   function Is_Space (Item : Character) return Boolean
+   is (Item = ' ' or else Item = ASCII.HT or else Item = ASCII.CR or else Item = ASCII.LF);
 
    function Trimmed (Text : String) return String;
 
    function Read_First_Line (Path : String) return String;
 
-   procedure Parse_Count
-     (Text  : String;
-      Value : out Byte_Count;
-      Valid : out Boolean);
+   procedure Parse_Count (Text : String; Value : out Byte_Count; Valid : out Boolean);
 
-   procedure Parse_Natural
-     (Text  : String;
-      Value : out Natural;
-      Valid : out Boolean);
+   procedure Parse_Natural (Text : String; Value : out Natural; Valid : out Boolean);
 
    procedure Scan_Range_List
      (Text     : String;
@@ -55,10 +46,7 @@ package body Flyology_NUMA.Sysfs is
       Valid    : out Boolean;
       Complete : out Boolean);
 
-   function Read_Node_Set
-     (Path     : String;
-      Complete : in out Boolean;
-      Found    : out Boolean) return Node_Set;
+   function Read_Node_Set (Path : String; Complete : in out Boolean; Found : out Boolean) return Node_Set;
 
    function Read_Memory_Total (Path : String) return Byte_Query;
 
@@ -106,8 +94,7 @@ package body Flyology_NUMA.Sysfs is
 
       declare
          Line : constant String :=
-           (if Ada.Text_IO.End_Of_File (File) then ""
-            else Ada.Text_IO.Get_Line (File));
+           (if Ada.Text_IO.End_Of_File (File) then "" else Ada.Text_IO.Get_Line (File));
       begin
          Ada.Text_IO.Close (File);
          return Line;
@@ -131,11 +118,7 @@ package body Flyology_NUMA.Sysfs is
    -- Parse_Natural --
    -------------------
 
-   procedure Parse_Natural
-     (Text  : String;
-      Value : out Natural;
-      Valid : out Boolean)
-   is
+   procedure Parse_Natural (Text : String; Value : out Natural; Valid : out Boolean) is
       Result : Byte_Count;
    begin
       Parse_Count (Text, Result, Valid);
@@ -151,11 +134,7 @@ package body Flyology_NUMA.Sysfs is
    -- Parse_Count --
    -----------------
 
-   procedure Parse_Count
-     (Text  : String;
-      Value : out Byte_Count;
-      Valid : out Boolean)
-   is
+   procedure Parse_Count (Text : String; Value : out Byte_Count; Valid : out Boolean) is
       Result : Byte_Count := 0;
       Digit  : Byte_Count;
    begin
@@ -272,25 +251,20 @@ package body Flyology_NUMA.Sysfs is
    -- Node_Directory --
    --------------------
 
-   function Node_Directory
-     (Node_Root : String; Node : Node_Id) return String is
-     (Node_Root & "/node" & Image (Natural (Node)));
+   function Node_Directory (Node_Root : String; Node : Node_Id) return String
+   is (Node_Root & "/node" & Image (Natural (Node)));
 
    -------------------
    -- Read_Node_Set --
    -------------------
 
-   function Read_Node_Set
-     (Path     : String;
-      Complete : in out Boolean;
-      Found    : out Boolean) return Node_Set
-   is
-      Text      : constant String := Read_First_Line (Path);
-      Ranges    : Range_Array;
-      Count     : Natural;
-      Valid     : Boolean;
-      Whole     : Boolean;
-      Result    : Node_Set;
+   function Read_Node_Set (Path : String; Complete : in out Boolean; Found : out Boolean) return Node_Set is
+      Text   : constant String := Read_First_Line (Path);
+      Ranges : Range_Array;
+      Count  : Natural;
+      Valid  : Boolean;
+      Whole  : Boolean;
+      Result : Node_Set;
    begin
       Found := False;
 
@@ -312,9 +286,7 @@ package body Flyology_NUMA.Sysfs is
             Complete := False;
          end if;
 
-         for Value in Ranges (Index).Low
-                      .. Natural'Min (Ranges (Index).High, Max_Node)
-         loop
+         for Value in Ranges (Index).Low .. Natural'Min (Ranges (Index).High, Max_Node) loop
             Bits.Include (Result, Node_Id (Value));
          end loop;
       end loop;
@@ -340,15 +312,12 @@ package body Flyology_NUMA.Sysfs is
          begin
             if Mark > 0 then
                declare
-                  Tail  : constant String :=
-                    Trimmed (Line (Mark + Marker'Length .. Line'Last));
+                  Tail  : constant String := Trimmed (Line (Mark + Marker'Length .. Line'Last));
                   Stop  : Integer := Tail'First;
                   Value : Byte_Count;
                   Valid : Boolean;
                begin
-                  while Stop <= Tail'Last
-                    and then not Is_Space (Tail (Stop))
-                  loop
+                  while Stop <= Tail'Last and then not Is_Space (Tail (Stop)) loop
                      Stop := Stop + 1;
                   end loop;
 
@@ -356,8 +325,7 @@ package body Flyology_NUMA.Sysfs is
 
                   --  The host reports this quantity in kilobytes.
                   if Valid and then Value <= Byte_Count'Last / Report_Unit then
-                     Result := (Available => True,
-                                Bytes     => Value * Report_Unit);
+                     Result := (Available => True, Bytes => Value * Report_Unit);
                   end if;
                end;
 
@@ -394,10 +362,10 @@ package body Flyology_NUMA.Sysfs is
    is
       Allowed_Marker : constant String := "Mems_allowed_list:";
 
-      Found          : Boolean;
-      Highest        : Integer := -1;
-      Seen           : Processor_Set;
-      Unread         : Machine_Facts;
+      Found   : Boolean;
+      Highest : Integer := -1;
+      Seen    : Processor_Set;
+      Unread  : Machine_Facts;
    begin
       --  Start from a description that says nothing, so that a caller
       --  reusing one object across two reads cannot carry the first result
@@ -408,8 +376,7 @@ package body Flyology_NUMA.Sysfs is
 
       --  The set of online nodes is the description.  Without it there is
       --  nothing here to read.
-      Facts.Online := Read_Node_Set
-        (Node_Root & "/online", Facts.Complete, Found);
+      Facts.Online := Read_Node_Set (Node_Root & "/online", Facts.Complete, Found);
 
       if not Found or else Bits.Is_Empty (Facts.Online) then
          return;
@@ -417,12 +384,10 @@ package body Flyology_NUMA.Sysfs is
 
       --  Nodes that carry memory.  Newer hosts name this directly; older
       --  ones name only the ordinary memory they carry.
-      Facts.With_Memory := Read_Node_Set
-        (Node_Root & "/has_memory", Facts.Complete, Found);
+      Facts.With_Memory := Read_Node_Set (Node_Root & "/has_memory", Facts.Complete, Found);
 
       if not Found then
-         Facts.With_Memory := Read_Node_Set
-           (Node_Root & "/has_normal_memory", Facts.Complete, Found);
+         Facts.With_Memory := Read_Node_Set (Node_Root & "/has_normal_memory", Facts.Complete, Found);
       end if;
 
       if not Found then
@@ -433,16 +398,13 @@ package body Flyology_NUMA.Sysfs is
       for Node in Node_Id loop
          if Bits.Contains (Facts.Online, Node) then
             declare
-               Directory : constant String :=
-                 Node_Directory (Node_Root, Node);
+               Directory : constant String := Node_Directory (Node_Root, Node);
                Ranges    : Range_Array;
                Count     : Natural;
                Valid     : Boolean;
                Whole     : Boolean;
             begin
-               Scan_Range_List
-                 (Read_First_Line (Directory & "/cpulist"),
-                  Ranges, Count, Valid, Whole);
+               Scan_Range_List (Read_First_Line (Directory & "/cpulist"), Ranges, Count, Valid, Whole);
 
                --  A list this package cannot read leaves the node's
                --  processors unknown.  Saying so keeps it distinct from a
@@ -455,59 +417,45 @@ package body Flyology_NUMA.Sysfs is
                         Facts.Complete := False;
                      end if;
 
-                     for Value in Ranges (Index).Low
-                                  .. Natural'Min (Ranges (Index).High,
-                                                  Max_Processor)
-                     loop
-                        Bits.Include (Facts.Nodes (Node).Processors,
-                                 Processor_Id (Value));
+                     for Value in Ranges (Index).Low .. Natural'Min (Ranges (Index).High, Max_Processor) loop
+                        Bits.Include (Facts.Nodes (Node).Processors, Processor_Id (Value));
                         Bits.Include (Seen, Processor_Id (Value));
-                        Facts.Owner (Processor_Id (Value)) :=
-                          (Available => True, Node => Node);
+                        Facts.Owner (Processor_Id (Value)) := (Available => True, Node => Node);
                         Highest := Integer'Max (Highest, Value);
                      end loop;
                   end loop;
                end if;
 
-               Facts.Nodes (Node).Memory :=
-                 Read_Memory_Total (Directory & "/meminfo");
+               Facts.Nodes (Node).Memory := Read_Memory_Total (Directory & "/meminfo");
 
                --  A distance row names one value per online node, in
                --  increasing node order, so the values are matched against
                --  the online set rather than against node numbers.
                declare
-                  Row     : constant String :=
-                    Trimmed (Read_First_Line (Directory & "/distance"));
-                  Start   : Integer := Row'First;
-                  Stop    : Integer;
-                  Value   : Natural;
-                  Ok      : Boolean;
-                  Column  : Node_Cursor := Bits.First (Facts.Online);
+                  Row    : constant String := Trimmed (Read_First_Line (Directory & "/distance"));
+                  Start  : Integer := Row'First;
+                  Stop   : Integer;
+                  Value  : Natural;
+                  Ok     : Boolean;
+                  Column : Node_Cursor := Bits.First (Facts.Online);
                begin
-                  while Start <= Row'Last
-                    and then Bits.Has_Element (Facts.Online, Column)
-                  loop
+                  while Start <= Row'Last and then Bits.Has_Element (Facts.Online, Column) loop
                      Stop := Start;
-                     while Stop <= Row'Last
-                       and then not Is_Space (Row (Stop))
-                     loop
+                     while Stop <= Row'Last and then not Is_Space (Row (Stop)) loop
                         Stop := Stop + 1;
                      end loop;
 
                      Parse_Natural (Row (Start .. Stop - 1), Value, Ok);
 
                      if Ok and then Value <= Natural (Distance'Last) then
-                        Facts.Nodes (Node).Distances
-                          (Bits.Element (Facts.Online, Column)) :=
-                            (Available => True, Value => Distance (Value));
+                        Facts.Nodes (Node).Distances (Bits.Element (Facts.Online, Column)) :=
+                          (Available => True, Value => Distance (Value));
                      end if;
 
                      Column := Bits.Next (Facts.Online, Column);
 
                      Start := Stop;
-                     while Start <= Row'Last
-                       and then Is_Space (Row (Start))
-                     loop
+                     while Start <= Row'Last and then Is_Space (Row (Start)) loop
                         Start := Start + 1;
                      end loop;
                   end loop;
@@ -528,25 +476,22 @@ package body Flyology_NUMA.Sysfs is
       --  nodes reporting one package number are two memory domains of one
       --  package.
       for Node in Node_Id loop
-         if Bits.Contains (Facts.Online, Node)
-           and then not Bits.Is_Empty (Facts.Nodes (Node).Processors)
-         then
+         if Bits.Contains (Facts.Online, Node) and then not Bits.Is_Empty (Facts.Nodes (Node).Processors) then
             declare
                Lead  : constant Processor_Id :=
-                 Bits.Element (Facts.Nodes (Node).Processors,
-                          Bits.First (Facts.Nodes (Node).Processors));
+                 Bits.Element (Facts.Nodes (Node).Processors, Bits.First (Facts.Nodes (Node).Processors));
                Value : Natural;
                Ok    : Boolean;
             begin
                Parse_Natural
-                 (Trimmed (Read_First_Line
-                    (CPU_Root & "/cpu" & Image (Natural (Lead))
-                     & "/topology/physical_package_id")),
-                  Value, Ok);
+                 (Trimmed
+                    (Read_First_Line
+                       (CPU_Root & "/cpu" & Image (Natural (Lead)) & "/topology/physical_package_id")),
+                  Value,
+                  Ok);
 
                if Ok then
-                  Facts.Nodes (Node).Packaging :=
-                    (Available => True, Value => Value);
+                  Facts.Nodes (Node).Packaging := (Available => True, Value => Value);
                end if;
             end;
          end if;
@@ -564,9 +509,8 @@ package body Flyology_NUMA.Sysfs is
 
          while not Ada.Text_IO.End_Of_File (File) loop
             declare
-               Line : constant String := Ada.Text_IO.Get_Line (File);
-               Mark : constant Natural :=
-                 Ada.Strings.Fixed.Index (Line, Allowed_Marker);
+               Line   : constant String := Ada.Text_IO.Get_Line (File);
+               Mark   : constant Natural := Ada.Strings.Fixed.Index (Line, Allowed_Marker);
                Ranges : Range_Array;
                Count  : Natural;
                Valid  : Boolean;
@@ -574,15 +518,11 @@ package body Flyology_NUMA.Sysfs is
             begin
                if Mark > 0 then
                   Scan_Range_List
-                    (Line (Mark + Allowed_Marker'Length .. Line'Last),
-                     Ranges, Count, Valid, Whole);
+                    (Line (Mark + Allowed_Marker'Length .. Line'Last), Ranges, Count, Valid, Whole);
 
                   if Valid then
                      for Index in 1 .. Count loop
-                        for Value in Ranges (Index).Low
-                                     .. Natural'Min (Ranges (Index).High,
-                                                     Max_Node)
-                        loop
+                        for Value in Ranges (Index).Low .. Natural'Min (Ranges (Index).High, Max_Node) loop
                            Bits.Include (Allowed, Node_Id (Value));
                         end loop;
                      end loop;
@@ -638,8 +578,7 @@ package body Flyology_NUMA.Sysfs is
 
       --  Ada numbers processors from one and expects them to be consecutive.
       --  Record whether this host's numbering can carry that mapping.
-      Facts.Consecutive_Processors :=
-        Highest >= 0 and then Bits.Count (Seen) = Highest + 1;
+      Facts.Consecutive_Processors := Highest >= 0 and then Bits.Count (Seen) = Highest + 1;
 
       Success := True;
    end Read;

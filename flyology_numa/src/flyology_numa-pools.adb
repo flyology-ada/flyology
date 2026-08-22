@@ -14,16 +14,12 @@ package body Flyology_NUMA.Pools is
 
    package Elements renames System.Storage_Elements;
 
-   procedure Free is
-     new Ada.Unchecked_Deallocation (Page_Run, Page_Run_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Page_Run, Page_Run_Access);
 
    function Owner (Subpool : not null Subpool_Handle) return Node_Id;
 
    procedure Obtain
-     (Pool    : in out Node_Pool;
-      Holder  : in out Node_Subpool;
-      Wanted  : Byte_Count;
-      Success : out Boolean);
+     (Pool : in out Node_Pool; Holder : in out Node_Subpool; Wanted : Byte_Count; Success : out Boolean);
 
    procedure Discard (Runs : in out Page_Run_Access);
 
@@ -31,8 +27,8 @@ package body Flyology_NUMA.Pools is
    -- Owner --
    -----------
 
-   function Owner (Subpool : not null Subpool_Handle) return Node_Id is
-     (Node_Subpool (Subpool.all).Node);
+   function Owner (Subpool : not null Subpool_Handle) return Node_Id
+   is (Node_Subpool (Subpool.all).Node);
 
    -------------
    -- Discard --
@@ -57,13 +53,9 @@ package body Flyology_NUMA.Pools is
    ------------
 
    procedure Obtain
-     (Pool    : in out Node_Pool;
-      Holder  : in out Node_Subpool;
-      Wanted  : Byte_Count;
-      Success : out Boolean)
+     (Pool : in out Node_Pool; Holder : in out Node_Subpool; Wanted : Byte_Count; Success : out Boolean)
    is
-      Extent  : constant Byte_Count :=
-        Mapping.Whole_Pages (Byte_Count'Max (Wanted, Pool.Extent));
+      Extent  : constant Byte_Count := Mapping.Whole_Pages (Byte_Count'Max (Wanted, Pool.Extent));
       Base    : System.Address;
       Outcome : Placement.Placement_Outcome;
       Run     : Page_Run_Access;
@@ -87,23 +79,20 @@ package body Flyology_NUMA.Pools is
       Bits.Include (Nodes, Holder.Node);
 
       Placement.Apply_To
-        (Base   => Base,
-         Length => Extent,
-         Policy => Pool.Policy,
-         Nodes  => Nodes,
-         Result => Outcome);
+        (Base => Base, Length => Extent, Policy => Pool.Policy, Nodes => Nodes, Result => Outcome);
 
       --  The memory is usable whatever the host said; only its whereabouts
       --  may not be what was asked for.  Each block records what happened to
       --  it, which is what Placement_Reached reads.
 
       begin
-         Run := new Page_Run'
-           (Base   => Base,
-            Extent => Extent,
-            Used   => 0,
-            Placed => Outcome = Placement.Applied,
-            Next   => Holder.Runs);
+         Run :=
+           new Page_Run'
+             (Base   => Base,
+              Extent => Extent,
+              Used   => 0,
+              Placed => Outcome = Placement.Applied,
+              Next   => Holder.Runs);
       exception
          --  The pages were obtained and cannot now be recorded, so they go
          --  back rather than staying reserved with nothing naming them.
@@ -120,13 +109,11 @@ package body Flyology_NUMA.Pools is
    -- On_Node --
    -------------
 
-   function On_Node
-     (Pool : in out Node_Pool; Node : Node_Id) return Subpool_Handle is
+   function On_Node (Pool : in out Node_Pool; Node : Node_Id) return Subpool_Handle is
    begin
       if not Pool.Present (Node) then
          Pool.Table (Node).Node := Node;
-         Subpools.Set_Pool_Of_Subpool
-           (Pool.Table (Node)'Unchecked_Access, Pool);
+         Subpools.Set_Pool_Of_Subpool (Pool.Table (Node)'Unchecked_Access, Pool);
          Pool.Present (Node) := True;
       end if;
 
@@ -139,9 +126,8 @@ package body Flyology_NUMA.Pools is
 
    --  A subpool with no node named draws from the lowest node this process
    --  may use, which is the only node on a host with one memory domain.
-   overriding function Create_Subpool
-     (Pool : in out Node_Pool) return not null Subpool_Handle
-   is
+   overriding
+   function Create_Subpool (Pool : in out Node_Pool) return not null Subpool_Handle is
       Permitted : constant Node_Set := Allowed_Nodes;
    begin
       return On_Node (Pool, Bits.Element (Permitted, Bits.First (Permitted)));
@@ -151,7 +137,8 @@ package body Flyology_NUMA.Pools is
    -- Allocate_From_Subpool --
    -----------------------------
 
-   overriding procedure Allocate_From_Subpool
+   overriding
+   procedure Allocate_From_Subpool
      (Pool                     : in out Node_Pool;
       Storage_Address          : out System.Address;
       Size_In_Storage_Elements : Elements.Storage_Count;
@@ -161,10 +148,8 @@ package body Flyology_NUMA.Pools is
       Holder  : Node_Subpool renames Node_Subpool (Subpool.all);
       --  An allocation of nothing still needs an address no other
       --  allocation holds, so it is served a byte.
-      Wanted  : constant Byte_Count :=
-        Byte_Count'Max (Byte_Count (Size_In_Storage_Elements), 1);
-      Step    : constant Byte_Count :=
-        Byte_Count (Elements.Storage_Count'Max (Alignment, 1));
+      Wanted  : constant Byte_Count := Byte_Count'Max (Byte_Count (Size_In_Storage_Elements), 1);
+      Step    : constant Byte_Count := Byte_Count (Elements.Storage_Count'Max (Alignment, 1));
       Success : Boolean;
    begin
       Storage_Address := System.Null_Address;
@@ -172,9 +157,7 @@ package body Flyology_NUMA.Pools is
       --  A subpool of another pool would be handed out memory this pool
       --  does not own and would not release.  The subpools live inside the
       --  pool, so belonging to it means being one of them.
-      if not Pool.Present (Holder.Node)
-        or else Subpool.all'Address /= Pool.Table (Holder.Node)'Address
-      then
+      if not Pool.Present (Holder.Node) or else Subpool.all'Address /= Pool.Table (Holder.Node)'Address then
          raise Program_Error with "subpool belongs to another pool";
       end if;
 
@@ -183,20 +166,14 @@ package body Flyology_NUMA.Pools is
             declare
                Run   : Page_Run renames Holder.Runs.all;
                Start : constant Elements.Integer_Address :=
-                 Elements.To_Integer (Run.Base)
-                 + Elements.Integer_Address (Run.Used);
-               Skew  : constant Elements.Integer_Address :=
-                 Start mod Elements.Integer_Address (Step);
+                 Elements.To_Integer (Run.Base) + Elements.Integer_Address (Run.Used);
+               Skew  : constant Elements.Integer_Address := Start mod Elements.Integer_Address (Step);
                Pad   : constant Byte_Count :=
-                 (if Skew = 0 then 0
-                  else Byte_Count (Elements.Integer_Address (Step) - Skew));
+                 (if Skew = 0 then 0 else Byte_Count (Elements.Integer_Address (Step) - Skew));
             begin
-               if Wanted <= Run.Extent - Run.Used
-                 and then Pad <= Run.Extent - Run.Used - Wanted
-               then
+               if Wanted <= Run.Extent - Run.Used and then Pad <= Run.Extent - Run.Used - Wanted then
                   Run.Used := Run.Used + Pad;
-                  Storage_Address :=
-                    Run.Base + Elements.Storage_Offset (Run.Used);
+                  Storage_Address := Run.Base + Elements.Storage_Offset (Run.Used);
                   Run.Used := Run.Used + Wanted;
                   return;
                end if;
@@ -226,9 +203,8 @@ package body Flyology_NUMA.Pools is
    --  it by the time this is reached, so the pool forgets it too: asking for
    --  this node again then claims the subpool afresh, which is what the
    --  runtime expects of a subpool it no longer owns.
-   overriding procedure Deallocate_Subpool
-     (Pool    : in out Node_Pool;
-      Subpool : in out Subpool_Handle) is
+   overriding
+   procedure Deallocate_Subpool (Pool : in out Node_Pool; Subpool : in out Subpool_Handle) is
    begin
       Discard (Node_Subpool (Subpool.all).Runs);
       Pool.Present (Owner (Subpool)) := False;
@@ -238,9 +214,7 @@ package body Flyology_NUMA.Pools is
    -- Placement_Reached --
    -----------------------
 
-   function Placement_Reached
-     (Pool : Node_Pool; Node : Node_Id) return Boolean
-   is
+   function Placement_Reached (Pool : Node_Pool; Node : Node_Id) return Boolean is
       Current : Page_Run_Access := Pool.Table (Node).Runs;
    begin
       if not Pool.Present (Node) or else Current = null then
@@ -262,9 +236,7 @@ package body Flyology_NUMA.Pools is
    -- Reserved_Bytes --
    --------------------
 
-   function Reserved_Bytes
-     (Pool : Node_Pool; Node : Node_Id) return Byte_Count
-   is
+   function Reserved_Bytes (Pool : Node_Pool; Node : Node_Id) return Byte_Count is
       Total   : Byte_Count := 0;
       Current : Page_Run_Access := Pool.Table (Node).Runs;
    begin

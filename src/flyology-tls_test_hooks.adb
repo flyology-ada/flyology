@@ -1,22 +1,19 @@
 package body Flyology.TLS_Test_Hooks
-  with SPARK_Mode => On,
-       Refined_State =>
-         (Barrier_State => (Armed_Flags, Reached_Flags, Released_Flags))
+  with SPARK_Mode => On, Refined_State => (Barrier_State => (Armed_Flags, Reached_Flags, Released_Flags))
 is
    subtype Barrier_Index is Integer range 0 .. Barrier_Count - 1;
 
-   type Barrier_Flags is array (Barrier_Index) of Boolean
-     with Atomic_Components;
+   type Barrier_Flags is array (Barrier_Index) of Boolean with Atomic_Components;
 
-   Armed_Flags : Barrier_Flags := (others => False)
-     with Async_Readers, Async_Writers;
-   Reached_Flags : Barrier_Flags := (others => False)
-     with Async_Readers, Async_Writers;
+   Armed_Flags    : Barrier_Flags := (others => False)
+   with Async_Readers, Async_Writers;
+   Reached_Flags  : Barrier_Flags := (others => False)
+   with Async_Readers, Async_Writers;
    Released_Flags : Barrier_Flags := (others => False)
-     with Async_Readers, Async_Writers;
+   with Async_Readers, Async_Writers;
 
-   function Valid_Point (Point : Integer) return Boolean is
-     (Point >= 0 and then Point < Barrier_Count);
+   function Valid_Point (Point : Integer) return Boolean
+   is (Point >= 0 and then Point < Barrier_Count);
 
    procedure Reset is
    begin

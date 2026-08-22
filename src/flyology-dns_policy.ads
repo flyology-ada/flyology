@@ -7,9 +7,9 @@
 --  exhausted attempt sequence reports.
 --
 --  Example: `Window := Receive_Window (0.4, 1.2, False);`
+
 private package Flyology.DNS_Policy
-  with Preelaborate,
-       SPARK_Mode => On
+  with Preelaborate, SPARK_Mode => On
 is
 
    --  Result reported once every attempt round of one query kind is spent.
@@ -18,10 +18,7 @@ is
    --  @enum Report_Transport_Failure A transport failed without an answer
    --  @enum Report_Deadline No server produced anything before the deadline
    type Exhausted_Outcome is
-     (Report_Malformed,
-      Report_Server_Failure,
-      Report_Transport_Failure,
-      Report_Deadline);
+     (Report_Malformed, Report_Server_Failure, Report_Transport_Failure, Report_Deadline);
 
    --  Zero-based offset added to an attempt round when picking an endpoint.
    subtype Rotation_Offset is Natural;
@@ -35,14 +32,13 @@ is
    --  @param Count Number of configured endpoints
    --  @return Zero-based offset of the selected endpoint
    function Selected_Endpoint
-     (Attempt : Positive; Rotation : Rotation_Offset; Count : Positive)
-      return Natural
+     (Attempt : Positive; Rotation : Rotation_Offset; Count : Positive) return Natural
    with
      Global => null,
-     Pre => Attempt <= Integer'Last - Rotation,
-     Post => Selected_Endpoint'Result < Count
-       and then Selected_Endpoint'Result
-         = (Attempt - 1 + Rotation) mod Count;
+     Pre    => Attempt <= Integer'Last - Rotation,
+     Post   =>
+       Selected_Endpoint'Result < Count
+       and then Selected_Endpoint'Result = (Attempt - 1 + Rotation) mod Count;
 
    --  Seconds a receive wait may last. A hostile peer can keep a socket
    --  readable indefinitely, so the caller re-evaluates this before every
@@ -53,19 +49,14 @@ is
    --  @param Infinite The caller supplied no overall deadline
    --  @return Nonnegative seconds the next wait may block
    function Receive_Window
-     (Attempt_Remaining : Duration;
-      Overall_Remaining : Duration;
-      Infinite          : Boolean) return Duration
+     (Attempt_Remaining : Duration; Overall_Remaining : Duration; Infinite : Boolean) return Duration
    with
      Global => null,
-     Post => Receive_Window'Result >= 0.0
-       and then Receive_Window'Result
-         <= Duration'Max (0.0, Attempt_Remaining)
-       and then (if not Infinite then
-                   Receive_Window'Result
-                     <= Duration'Max (0.0, Overall_Remaining))
-       and then (if Attempt_Remaining > 0.0
-                   and then (Infinite or else Overall_Remaining > 0.0)
+     Post   =>
+       Receive_Window'Result >= 0.0
+       and then Receive_Window'Result <= Duration'Max (0.0, Attempt_Remaining)
+       and then (if not Infinite then Receive_Window'Result <= Duration'Max (0.0, Overall_Remaining))
+       and then (if Attempt_Remaining > 0.0 and then (Infinite or else Overall_Remaining > 0.0)
                  then Receive_Window'Result > 0.0);
 
    --  True when neither deadline leaves room for another receive wait.
@@ -74,14 +65,12 @@ is
    --  @param Infinite The caller supplied no overall deadline
    --  @return True when the attempt must be abandoned
    function Receive_Window_Expired
-     (Attempt_Remaining : Duration;
-      Overall_Remaining : Duration;
-      Infinite          : Boolean) return Boolean
+     (Attempt_Remaining : Duration; Overall_Remaining : Duration; Infinite : Boolean) return Boolean
    with
      Global => null,
-     Post => Receive_Window_Expired'Result
-       = (Receive_Window (Attempt_Remaining, Overall_Remaining, Infinite)
-          <= 0.0);
+     Post   =>
+       Receive_Window_Expired'Result
+       = (Receive_Window (Attempt_Remaining, Overall_Remaining, Infinite) <= 0.0);
 
    --  Character code of the presentation separator between DNS labels.
    Label_Separator : constant Natural := Character'Pos ('.');
@@ -93,9 +82,7 @@ is
    --  @param Value Byte taken from a wire-format label
    --  @return True when the byte is usable in a dotted name
    function Label_Byte_Is_Usable (Value : Natural) return Boolean
-   with
-     Global => null,
-     Post => Label_Byte_Is_Usable'Result = (Value /= Label_Separator);
+   with Global => null, Post => Label_Byte_Is_Usable'Result = (Value /= Label_Separator);
 
    --  Outcome reported once every attempt round is spent. A server-failure
    --  answer is distinguished from a deadline because the servers replied and
@@ -105,20 +92,17 @@ is
    --  @param Transport_Failed Some transport failed without an answer
    --  @return Outcome the caller reports for the exhausted query
    function Classify_Exhausted
-     (Malformed        : Boolean;
-      Server_Failed    : Boolean;
-      Transport_Failed : Boolean) return Exhausted_Outcome
+     (Malformed : Boolean; Server_Failed : Boolean; Transport_Failed : Boolean) return Exhausted_Outcome
    with
-     Global => null,
+     Global         => null,
      Contract_Cases =>
-       (Malformed =>
+       (Malformed                                                              =>
           Classify_Exhausted'Result = Report_Malformed,
-        not Malformed and then Server_Failed =>
+        not Malformed and then Server_Failed                                   =>
           Classify_Exhausted'Result = Report_Server_Failure,
-        not Malformed and then not Server_Failed and then Transport_Failed =>
+        not Malformed and then not Server_Failed and then Transport_Failed     =>
           Classify_Exhausted'Result = Report_Transport_Failure,
-        not Malformed and then not Server_Failed
-          and then not Transport_Failed =>
+        not Malformed and then not Server_Failed and then not Transport_Failed =>
           Classify_Exhausted'Result = Report_Deadline);
 
 end Flyology.DNS_Policy;

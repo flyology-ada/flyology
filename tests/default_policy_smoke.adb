@@ -4,8 +4,7 @@ with Flyology.IO;
 
 procedure Default_Policy_Smoke is
    Expected_Lightweight : constant Boolean :=
-     Ada.Command_Line.Argument_Count = 1
-     and then Ada.Command_Line.Argument (1) = "lightweight";
+     Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "lightweight";
 
    protected Results is
       procedure Report (Lightweight : Boolean);
@@ -28,7 +27,8 @@ procedure Default_Policy_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Results;
 
    task Implicit_Default;
@@ -55,9 +55,8 @@ begin
    end if;
 
    if Ada.Command_Line.Argument_Count /= 1
-     or else
-       (Ada.Command_Line.Argument (1) /= "native"
-        and then Ada.Command_Line.Argument (1) /= "lightweight")
+     or else (Ada.Command_Line.Argument (1) /= "native"
+              and then Ada.Command_Line.Argument (1) /= "lightweight")
    then
       raise Program_Error with "expected native or lightweight policy argument";
    end if;

@@ -36,9 +36,7 @@ package body Flyology.Worker_Pools is
 
       procedure Job_Started is
       begin
-         if not Policy.Job_Start_Allowed
-           (Is_Running, Active, Expected)
-         then
+         if not Policy.Job_Start_Allowed (Is_Running, Active, Expected) then
             raise Program_Error with "worker pool active count is invalid";
          end if;
          Active := Policy.Active_After_Start (Active, Expected);
@@ -53,28 +51,25 @@ package body Flyology.Worker_Pools is
          case Policy.Classify_Completion (Cancelled, Failed) is
             when Policy.Count_Completed =>
                Completed := Counters.Saturating_Increment (Completed);
+
             when Policy.Count_Cancelled =>
-               Cancelled_Total :=
-                 Counters.Saturating_Increment (Cancelled_Total);
-            when Policy.Count_Neither =>
+               Cancelled_Total := Counters.Saturating_Increment (Cancelled_Total);
+
+            when Policy.Count_Neither   =>
                null;
          end case;
       end Job_Completed;
 
       procedure Worker_Finished is
       begin
-         if not Policy.Worker_Finish_Allowed
-           (Is_Running, Workers_Done, Expected)
-         then
+         if not Policy.Worker_Finish_Allowed (Is_Running, Workers_Done, Expected) then
             raise Program_Error with "worker pool completion exceeds count";
          end if;
-         Workers_Done :=
-           Policy.Workers_After_Finish (Workers_Done, Expected);
+         Workers_Done := Policy.Workers_After_Finish (Workers_Done, Expected);
       end Worker_Finished;
 
       procedure Record_Failure (Information : String) is
-         Length : constant Natural :=
-           Natural'Min (Information'Length, Failure_Text'Length);
+         Length : constant Natural := Natural'Min (Information'Length, Failure_Text'Length);
       begin
          Failure_Total := Counters.Saturating_Increment (Failure_Total);
          if not Failure_Recorded then
@@ -82,25 +77,20 @@ package body Flyology.Worker_Pools is
             Failure_Length := Length;
             if Length > 0 then
                Failure_Text (1 .. Length) :=
-                 Information
-                   (Information'First .. Information'First + Length - 1);
+                 Information (Information'First .. Information'First + Length - 1);
             end if;
          end if;
          Stop_Requested := True;
       end Record_Failure;
 
-      entry Await_All_Workers
-        when Policy.All_Workers_Done (Workers_Done, Expected)
-      is
+      entry Await_All_Workers when Policy.All_Workers_Done (Workers_Done, Expected) is
       begin
          null;
       end Await_All_Workers;
 
       procedure Finish_Run is
       begin
-         if not Policy.Finish_Allowed
-           (Is_Running, Active, Workers_Done, Expected)
-         then
+         if not Policy.Finish_Allowed (Is_Running, Active, Workers_Done, Expected) then
             raise Program_Error with "worker pool finished with live work";
          end if;
          Is_Running := False;
@@ -118,14 +108,14 @@ package body Flyology.Worker_Pools is
          Workers_Done := 0;
       end Abandon_Run;
 
-      function Read_Snapshot return Snapshot is
-        (Running            => Is_Running,
-         Shutdown_Requested => Stop_Requested,
-         Active_Workers     => Active,
-         Pending_Jobs       => 0,
-         Completed_Jobs     => Completed,
-         Cancelled_Jobs     => Cancelled_Total,
-         Failures           => Failure_Total);
+      function Read_Snapshot return Snapshot
+      is (Running            => Is_Running,
+          Shutdown_Requested => Stop_Requested,
+          Active_Workers     => Active,
+          Pending_Jobs       => 0,
+          Completed_Jobs     => Completed,
+          Cancelled_Jobs     => Cancelled_Total,
+          Failures           => Failure_Total);
 
       function Failure_Information return String is
       begin
@@ -136,11 +126,7 @@ package body Flyology.Worker_Pools is
       end Failure_Information;
    end Lifecycle;
 
-   procedure Submit
-     (Item     : in out Pool;
-      Job      : Job_Type;
-      Accepted : out Boolean)
-   is
+   procedure Submit (Item : in out Pool; Job : Job_Type; Accepted : out Boolean) is
    begin
       Item.Jobs.Send (Job);
       Accepted := True;
@@ -149,12 +135,7 @@ package body Flyology.Worker_Pools is
          Accepted := False;
    end Submit;
 
-   procedure Submit
-     (Item    : in out Pool;
-      Job     : Job_Type;
-      Timeout : Duration;
-      Result  : out Submit_Result)
-   is
+   procedure Submit (Item : in out Pool; Job : Job_Type; Timeout : Duration; Result : out Submit_Result) is
    begin
       Job_Channels.Timed_Send (Item.Jobs, Job, Timeout);
       Result := Job_Accepted;
@@ -168,12 +149,13 @@ package body Flyology.Worker_Pools is
    procedure Request_Shutdown (Item : in out Pool) is
       Failed : Boolean := False;
 
-      type Shutdown_Guard is
-        new Ada.Finalization.Limited_Controlled with null record;
+      type Shutdown_Guard is new Ada.Finalization.Limited_Controlled with null record;
 
-      overriding procedure Finalize (Guard : in out Shutdown_Guard);
+      overriding
+      procedure Finalize (Guard : in out Shutdown_Guard);
 
-      overriding procedure Finalize (Guard : in out Shutdown_Guard) is
+      overriding
+      procedure Finalize (Guard : in out Shutdown_Guard) is
          pragma Unreferenced (Guard);
       begin
          begin
@@ -219,29 +201,28 @@ package body Flyology.Worker_Pools is
    end Request_Shutdown;
 
    function Current (Item : Pool) return Snapshot is
-      Result : Snapshot := Item.State.Read_Snapshot;
+      Result      : Snapshot := Item.State.Read_Snapshot;
       Queue_State : constant Job_Channels.Snapshot := Item.Jobs.Current;
    begin
       Result.Pending_Jobs := Queue_State.Pending;
       return Result;
    end Current;
 
-   function First_Failure_Information (Item : Pool) return String is
-     (Item.State.Failure_Information);
+   function First_Failure_Information (Item : Pool) return String
+   is (Item.State.Failure_Information);
 
-   procedure Run
-     (Item    : aliased in out Pool;
-      Context : aliased in out Worker_Context)
-   is
+   procedure Run (Item : aliased in out Pool; Context : aliased in out Worker_Context) is
       Cleanup_Armed : Boolean := False;
 
-      type Run_Guard is
-        new Ada.Finalization.Limited_Controlled with null record;
+      type Run_Guard is new Ada.Finalization.Limited_Controlled with null record;
 
-      overriding procedure Initialize (Guard : in out Run_Guard);
-      overriding procedure Finalize (Guard : in out Run_Guard);
+      overriding
+      procedure Initialize (Guard : in out Run_Guard);
+      overriding
+      procedure Finalize (Guard : in out Run_Guard);
 
-      overriding procedure Initialize (Guard : in out Run_Guard) is
+      overriding
+      procedure Initialize (Guard : in out Run_Guard) is
          pragma Unreferenced (Guard);
       begin
          --  Claiming the one-shot run and arming teardown is one abort-
@@ -254,7 +235,8 @@ package body Flyology.Worker_Pools is
          Cleanup_Armed := True;
       end Initialize;
 
-      overriding procedure Finalize (Guard : in out Run_Guard) is
+      overriding
+      procedure Finalize (Guard : in out Run_Guard) is
          pragma Unreferenced (Guard);
       begin
          if not Policy.Teardown_Allowed (Cleanup_Armed) then
@@ -304,8 +286,7 @@ package body Flyology.Worker_Pools is
          end Worker;
 
          task body Worker is
-            Activation_Checked : constant Boolean :=
-              Test_Hooks.Check_Activation;
+            Activation_Checked  : constant Boolean := Test_Hooks.Check_Activation;
             pragma Unreferenced (Activation_Checked);
             Completion_Reported : Boolean := False;
 
@@ -348,8 +329,7 @@ package body Flyology.Worker_Pools is
                         when Flyology.Cancellation.Operation_Cancelled =>
                            Cancelled := True;
                         when Event : others =>
-                           Item.State.Record_Failure
-                             (Ada.Exceptions.Exception_Information (Event));
+                           Item.State.Record_Failure (Ada.Exceptions.Exception_Information (Event));
                            Failed := True;
                            Stop_After_Failure;
                      end;
@@ -358,15 +338,13 @@ package body Flyology.Worker_Pools is
                end loop;
             exception
                when Event : others =>
-                  Item.State.Record_Failure
-                    (Ada.Exceptions.Exception_Information (Event));
+                  Item.State.Record_Failure (Ada.Exceptions.Exception_Information (Event));
                   Stop_After_Failure;
             end;
             Report_Finished;
          exception
             when Event : others =>
-               Item.State.Record_Failure
-                 (Ada.Exceptions.Exception_Information (Event));
+               Item.State.Record_Failure (Ada.Exceptions.Exception_Information (Event));
                Stop_After_Failure;
                Report_Finished;
          end Worker;

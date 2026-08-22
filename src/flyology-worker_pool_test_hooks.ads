@@ -1,5 +1,6 @@
 --  Test-only worker-pool control compiled with Flyology's own switches. The
 --  disabled implementation has no native imports or observable effects.
+
 private package Flyology.Worker_Pool_Test_Hooks is
    function Check_Activation return Boolean;
    function Consume_Failure return Boolean;

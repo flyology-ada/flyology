@@ -17,12 +17,10 @@ procedure TLS_State_Model is
    use type Provider.Operation_Counts;
 
    type Model_Array is array (Positive range <>) of Flyology.Execution_Model;
-   Models : constant Model_Array :=
-     [Flyology.Lightweight_Task, Flyology.Native_Task];
+   Models : constant Model_Array := [Flyology.Lightweight_Task, Flyology.Native_Task];
 
    function Open_FD_Count return Interfaces.C.int
-     with Import, Convention => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
 
    protected type Result_Box is
       procedure Report (Passed : Boolean);
@@ -45,7 +43,8 @@ procedure TLS_State_Model is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result_Box;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -71,8 +70,7 @@ procedure TLS_State_Model is
       null;
    end Warm_Model;
 
-   procedure Assert_Resources (Created : Natural)
-   is
+   procedure Assert_Resources (Created : Natural) is
       State : Provider.State_Telemetry;
    begin
       Provider.Get_State_Telemetry (State);
@@ -124,8 +122,7 @@ procedure TLS_State_Model is
           (TLS.Complete, Provider.Preserve_Output, 0)]);
    end Configure_Happy_Path;
 
-   type Lifecycle_State is
-     (Closed, Owned, Handshaken, Receiving, Sending, Shutdown_Complete);
+   type Lifecycle_State is (Closed, Owned, Handshaken, Receiving, Sending, Shutdown_Complete);
    type Lifecycle_Action is
      (Take_Action,
       Handshake_Action,
@@ -151,11 +148,11 @@ procedure TLS_State_Model is
       (Close_Again_Action, Closed, Closed, False)];
 
    procedure Run_Lifecycle (Model : Flyology.Execution_Model) is
-      Backend  : Provider.Provider;
-      Socket   : Sockets.Socket_Type;
-      Peer     : Sockets.Socket_Type;
-      Item     : TLS.Connection;
-      Result   : Result_Box;
+      Backend : Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+      Result  : Result_Box;
    begin
       Provider.Reset_State_Telemetry;
       Configure_Happy_Path (Backend);
@@ -174,18 +171,23 @@ procedure TLS_State_Model is
             for Edge of Lifecycle loop
                pragma Assert (State = Edge.From);
                case Edge.Action is
-                  when Take_Action =>
+                  when Take_Action                       =>
                      TLS.Take (Backend, Socket, TLS.Server, "", Item);
                      pragma Assert (not Sockets.Is_Open (Socket));
-                  when Handshake_Action =>
+
+                  when Handshake_Action                  =>
                      TLS.Handshake (Item, Timeout => 1.0);
-                  when Receive_Action =>
+
+                  when Receive_Action                    =>
                      TLS.Receive_Exactly (Item, Received, Timeout => 1.0);
                      pragma Assert (Received = [42, 42, 42]);
-                  when Send_Action =>
+
+                  when Send_Action                       =>
                      TLS.Send_All (Item, Input, Timeout => 1.0);
-                  when Shutdown_Action =>
+
+                  when Shutdown_Action                   =>
                      TLS.Shutdown (Item, Timeout => 1.0);
+
                   when Close_Action | Close_Again_Action =>
                      TLS.Close (Item);
                end case;
@@ -207,12 +209,13 @@ procedure TLS_State_Model is
          State : Provider.State_Telemetry;
       begin
          Provider.Get_State_Telemetry (State);
-         pragma Assert
-           (State.Calls =
-              [Provider.Handshake_Operation => 4,
-               Provider.Receive_Operation => 5,
-               Provider.Send_Operation => 5,
-               Provider.Shutdown_Operation => 4]);
+         pragma
+           Assert
+             (State.Calls
+                = [Provider.Handshake_Operation => 4,
+                   Provider.Receive_Operation   => 5,
+                   Provider.Send_Operation      => 5,
+                   Provider.Shutdown_Operation  => 4]);
       end;
    end Run_Lifecycle;
 
@@ -222,29 +225,19 @@ procedure TLS_State_Model is
    end record;
 
    Invalid_Results : constant array (Positive range <>) of Invalid_Case :=
-     [(Provider.Handshake_Operation,
-       (TLS.Peer_Closed, Provider.Preserve_Output, 0)),
-      (Provider.Handshake_Operation,
-       (TLS.Failed, Provider.Preserve_Output, 0)),
-      (Provider.Receive_Operation,
-       (TLS.Complete, Provider.Before_First, 0)),
-      (Provider.Receive_Operation,
-       (TLS.Want_Read, Provider.After_Last, 0)),
-      (Provider.Receive_Operation,
-       (TLS.Peer_Closed, Provider.After_Last, 0)),
-      (Provider.Send_Operation,
-       (TLS.Complete, Provider.Preserve_Output, 0)),
-      (Provider.Send_Operation,
-       (TLS.Want_Write, Provider.Advance_Output, 1)),
-      (Provider.Send_Operation,
-       (TLS.Peer_Closed, Provider.Advance_Output, 1)),
-      (Provider.Shutdown_Operation,
-       (TLS.Peer_Closed, Provider.Preserve_Output, 0)),
-      (Provider.Shutdown_Operation,
-       (TLS.Failed, Provider.Preserve_Output, 0))];
+     [(Provider.Handshake_Operation, (TLS.Peer_Closed, Provider.Preserve_Output, 0)),
+      (Provider.Handshake_Operation, (TLS.Failed, Provider.Preserve_Output, 0)),
+      (Provider.Receive_Operation, (TLS.Complete, Provider.Before_First, 0)),
+      (Provider.Receive_Operation, (TLS.Want_Read, Provider.After_Last, 0)),
+      (Provider.Receive_Operation, (TLS.Peer_Closed, Provider.After_Last, 0)),
+      (Provider.Send_Operation, (TLS.Complete, Provider.Preserve_Output, 0)),
+      (Provider.Send_Operation, (TLS.Want_Write, Provider.Advance_Output, 1)),
+      (Provider.Send_Operation, (TLS.Peer_Closed, Provider.Advance_Output, 1)),
+      (Provider.Shutdown_Operation, (TLS.Peer_Closed, Provider.Preserve_Output, 0)),
+      (Provider.Shutdown_Operation, (TLS.Failed, Provider.Preserve_Output, 0))];
 
    procedure Run_Invalid_Results (Model : Flyology.Execution_Model) is
-      Result   : Result_Box;
+      Result : Result_Box;
    begin
       Provider.Reset_State_Telemetry;
       declare
@@ -264,19 +257,21 @@ procedure TLS_State_Model is
                   Last     : Stream_Element_Offset;
                   Rejected : Boolean := False;
                begin
-                  Provider.Set_Script
-                    (Backend, Test.Operation, [1 => Test.Step]);
+                  Provider.Set_Script (Backend, Test.Operation, [1 => Test.Step]);
                   Sockets.Create_Socket_Pair (Socket, Peer);
                   TLS.Take (Backend, Socket, TLS.Server, "", Item);
                   begin
                      case Test.Operation is
                         when Provider.Handshake_Operation =>
                            TLS.Handshake (Item, Timeout => 0.0);
-                        when Provider.Receive_Operation =>
+
+                        when Provider.Receive_Operation   =>
                            TLS.Receive (Item, Buffer, Last, Timeout => 0.0);
-                        when Provider.Send_Operation =>
+
+                        when Provider.Send_Operation      =>
                            TLS.Send_All (Item, Buffer, Timeout => 0.0);
-                        when Provider.Shutdown_Operation =>
+
+                        when Provider.Shutdown_Operation  =>
                            TLS.Shutdown (Item, Timeout => 0.0);
                      end case;
                   exception
@@ -301,17 +296,15 @@ procedure TLS_State_Model is
    end Run_Invalid_Results;
 
    procedure Run_Immediate_Timeout (Model : Flyology.Execution_Model) is
-      Backend  : Provider.Provider;
-      Socket   : Sockets.Socket_Type;
-      Peer     : Sockets.Socket_Type;
-      Item     : TLS.Connection;
-      Result   : Result_Box;
+      Backend : Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+      Result  : Result_Box;
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
-        (Backend,
-         Provider.Handshake_Operation,
-         [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       declare
          task Worker is
@@ -352,9 +345,7 @@ procedure TLS_State_Model is
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
-        (Backend,
-         Provider.Handshake_Operation,
-         [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       TLS.Take (Backend, Socket, TLS.Server, "", Item);
       Token.Request;
@@ -385,30 +376,26 @@ procedure TLS_State_Model is
          State : Provider.State_Telemetry;
       begin
          Provider.Get_State_Telemetry (State);
-         pragma Assert
-           (State.Calls = Provider.Operation_Counts'[others => 0]);
+         pragma Assert (State.Calls = Provider.Operation_Counts'[others => 0]);
       end;
       TLS.Close (Item);
       Close_If_Open (Peer);
       Assert_Resources (Created => 1);
    end Run_Pre_Cancelled;
 
-   procedure Run_Requested_Cancellation
-     (Model : Flyology.Execution_Model)
-   is
-      Backend  : Provider.Provider;
-      Socket   : Sockets.Socket_Type;
-      Peer     : Sockets.Socket_Type;
-      Item     : TLS.Connection;
-      Token    : aliased Flyology.Cancellation.Token;
-      Result   : Result_Box;
+   procedure Run_Requested_Cancellation (Model : Flyology.Execution_Model) is
+      Backend : Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+      Token   : aliased Flyology.Cancellation.Token;
+      Result  : Result_Box;
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
         (Backend,
          Provider.Handshake_Operation,
-         [(TLS.Want_Read, Provider.Preserve_Output, 0),
-          (TLS.Complete, Provider.Preserve_Output, 0)]);
+         [(TLS.Want_Read, Provider.Preserve_Output, 0), (TLS.Complete, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       TLS.Take (Backend, Socket, TLS.Server, "", Item);
       declare
@@ -441,14 +428,12 @@ procedure TLS_State_Model is
       Assert_Resources (Created => 1);
    end Run_Requested_Cancellation;
 
-   procedure Run_Queued_Serialization
-     (Model : Flyology.Execution_Model)
-   is
-      Backend  : Provider.Provider;
-      Socket   : Sockets.Socket_Type;
-      Peer     : Sockets.Socket_Type;
-      Item     : TLS.Connection;
-      Token    : aliased Flyology.Cancellation.Token;
+   procedure Run_Queued_Serialization (Model : Flyology.Execution_Model) is
+      Backend : Provider.Provider;
+      Socket  : Sockets.Socket_Type;
+      Peer    : Sockets.Socket_Type;
+      Item    : TLS.Connection;
+      Token   : aliased Flyology.Cancellation.Token;
 
       protected Progress is
          procedure Release_Queued;
@@ -489,14 +474,13 @@ procedure TLS_State_Model is
          begin
             null;
          end Wait_All;
-         function Passed return Boolean is (OK);
+         function Passed return Boolean
+         is (OK);
       end Progress;
    begin
       Provider.Reset_State_Telemetry;
       Provider.Set_Script
-        (Backend,
-         Provider.Handshake_Operation,
-         [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+        (Backend, Provider.Handshake_Operation, [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
       Sockets.Create_Socket_Pair (Socket, Peer);
       TLS.Take (Backend, Socket, TLS.Server, "", Item);
       declare
@@ -545,8 +529,7 @@ procedure TLS_State_Model is
             State : Provider.State_Telemetry;
          begin
             Provider.Get_State_Telemetry (State);
-            pragma Assert
-              (State.Calls (Provider.Handshake_Operation) = 1);
+            pragma Assert (State.Calls (Provider.Handshake_Operation) = 1);
          end;
          Token.Request;
          Progress.Wait_All;
@@ -559,10 +542,7 @@ procedure TLS_State_Model is
 
    type Model_Test is access procedure (Model : Flyology.Execution_Model);
 
-   procedure Run_Checked
-     (Test  : not null Model_Test;
-      Model : Flyology.Execution_Model)
-   is
+   procedure Run_Checked (Test : not null Model_Test; Model : Flyology.Execution_Model) is
       Baseline : Interfaces.C.int;
    begin
       Warm_Model (Model);

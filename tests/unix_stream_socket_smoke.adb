@@ -22,19 +22,16 @@ procedure Unix_Stream_Socket_Smoke is
    pragma Import (C, C_Process_ID, "getpid");
 
    Process_ID : constant String :=
-     Ada.Strings.Fixed.Trim
-       (Interfaces.C.int'Image (C_Process_ID), Ada.Strings.Both);
-   Test_Root : constant String := "/tmp/flyology-unix-" & Process_ID;
-   Path_Text : constant String := Test_Root & "/listener.sock";
-   Path      : constant Sockets.Unix_Path :=
-     Sockets.Unix_Pathname (Path_Text);
+     Ada.Strings.Fixed.Trim (Interfaces.C.int'Image (C_Process_ID), Ada.Strings.Both);
+   Test_Root  : constant String := "/tmp/flyology-unix-" & Process_ID;
+   Path_Text  : constant String := Test_Root & "/listener.sock";
+   Path       : constant Sockets.Unix_Path := Sockets.Unix_Pathname (Path_Text);
 
    function C_Unlink (Path : Interfaces.C.char_array) return Interfaces.C.int;
    pragma Import (C, C_Unlink, "unlink");
 
    procedure Remove_Path is
-      Result : constant Interfaces.C.int :=
-        C_Unlink (Interfaces.C.To_C (Path_Text));
+      Result : constant Interfaces.C.int := C_Unlink (Interfaces.C.To_C (Path_Text));
       pragma Unreferenced (Result);
    begin
       null;
@@ -114,8 +111,7 @@ procedure Unix_Stream_Socket_Smoke is
       begin
          declare
             Ignored : constant Sockets.Unix_Path :=
-              Sockets.Unix_Pathname
-                ((1 .. Sockets.Maximum_Unix_Path_Length + 1 => 'x'));
+              Sockets.Unix_Pathname ((1 .. Sockets.Maximum_Unix_Path_Length + 1 => 'x'));
             pragma Unreferenced (Ignored);
          begin
             null;
@@ -132,14 +128,14 @@ procedure Unix_Stream_Socket_Smoke is
    procedure Run_Round;
 
    procedure Run_Round is
-      Listener    : Sockets.Socket_Type;
-      Wake        : Flyology.Wake_Sources.Source;
-      Server_OK   : Boolean := False with Atomic;
-      Client_OK   : Boolean := False with Atomic;
-      Request     : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
-        (16#50#, 16#49#, 16#4E#, 16#47#);
-      Response    : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
-        (16#50#, 16#4F#, 16#4E#, 16#47#);
+      Listener  : Sockets.Socket_Type;
+      Wake      : Flyology.Wake_Sources.Source;
+      Server_OK : Boolean := False
+      with Atomic;
+      Client_OK : Boolean := False
+      with Atomic;
+      Request   : constant Ada.Streams.Stream_Element_Array (1 .. 4) := (16#50#, 16#49#, 16#4E#, 16#47#);
+      Response  : constant Ada.Streams.Stream_Element_Array (1 .. 4) := (16#50#, 16#4F#, 16#4E#, 16#47#);
 
       protected Gate is
          procedure Release;
@@ -180,26 +176,24 @@ procedure Unix_Stream_Socket_Smoke is
             Interrupted : Boolean := False;
          begin
             begin
-               Sockets.Accept_Connection
-                 (Listener, Accepted, Timeout => 0.020);
+               Sockets.Accept_Connection (Listener, Accepted, Timeout => 0.020);
             exception
                when Flyology.IO.Timeout_Error =>
                   Timed_Out := True;
             end;
-            pragma Assert
-              (Timed_Out and then not Sockets.Is_Open (Accepted));
+            pragma Assert (Timed_Out and then not Sockets.Is_Open (Accepted));
 
             begin
                Sockets.Accept_Connection
-                 (Listener, Accepted, Timeout => 1.0,
-                  Interrupts =>
-                    (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+                 (Listener,
+                  Accepted,
+                  Timeout    => 1.0,
+                  Interrupts => (1 => Flyology.Wake_Sources.Descriptor (Wake)));
             exception
                when Sockets.Operation_Interrupted =>
                   Interrupted := True;
             end;
-            pragma Assert
-              (Interrupted and then not Sockets.Is_Open (Accepted));
+            pragma Assert (Interrupted and then not Sockets.Is_Open (Accepted));
             Flyology.Wake_Sources.Consume (Wake);
 
             Gate.Release;
@@ -253,7 +247,8 @@ procedure Unix_Stream_Socket_Smoke is
    procedure Check_Scoped_Round;
 
    procedure Check_Scoped_Round is
-      Passed : Boolean := False with Atomic;
+      Passed : Boolean := False
+      with Atomic;
    begin
       declare
          task Worker is
@@ -262,25 +257,23 @@ procedure Unix_Stream_Socket_Smoke is
 
          task body Worker is
             Listener, Client : aliased Sockets.Socket_Type;
-            Accepted : Sockets.Socket_Type;
+            Accepted         : Sockets.Socket_Type;
          begin
             Remove_Path;
             Open_Listener (Listener);
             Sockets.Create_Unix_Stream_Socket (Client);
             declare
-               Set : aliased Flyology.Operations.Completion_Set (3);
+               Set        : aliased Flyology.Operations.Completion_Set (3);
                Acceptance : aliased Sockets.Unix_Accept_Operation :=
-                 Sockets.Accept_Connection
-                   (Set'Access, Listener'Access, 1.0);
+                 Sockets.Accept_Connection (Set'Access, Listener'Access, 1.0);
                Connection : aliased Sockets.Connect_Operation :=
                  Sockets.Connect (Set'Access, Client'Access, Path, 1.0);
-               Both : Flyology.Operations.Gate_Operation :=
+               Both       : Flyology.Operations.Gate_Operation :=
                  Flyology.Operations.Wait_For_Successes
                    (Set'Access,
-                    [Flyology.Operations.Reference (Acceptance),
-                     Flyology.Operations.Reference (Connection)],
+                    [Flyology.Operations.Reference (Acceptance), Flyology.Operations.Reference (Connection)],
                     2);
-               Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+               Batch      : Flyology.Operations.Completion_Batch (Set.Capacity);
             begin
                Flyology.Operations.Wait_All (Set);
                Flyology.Operations.Finish (Both, Batch);
@@ -305,10 +298,8 @@ procedure Unix_Stream_Socket_Smoke is
       pragma Assert (Passed);
    end Check_Scoped_Round;
 
-   procedure Check_Native_Scoped_Round is new
-     Check_Scoped_Round (Flyology.Native_Task);
-   procedure Check_Lightweight_Scoped_Round is new
-     Check_Scoped_Round (Flyology.Lightweight_Task);
+   procedure Check_Native_Scoped_Round is new Check_Scoped_Round (Flyology.Native_Task);
+   procedure Check_Lightweight_Scoped_Round is new Check_Scoped_Round (Flyology.Lightweight_Task);
 
    procedure Check_Missing_Path is
       Socket : Sockets.Socket_Type;
@@ -362,9 +353,11 @@ procedure Unix_Stream_Socket_Smoke is
    procedure Check_Connect_Deadline_And_Interrupt;
 
    procedure Check_Connect_Deadline_And_Interrupt is
-      Passed : Boolean := False with Atomic;
+      Passed  : Boolean := False
+      with Atomic;
       pragma Warnings (Off, """Host_OS"" is not modified");
-      Host_OS    : String := Flyology_Config.Alire_Host_OS with Volatile;
+      Host_OS : String := Flyology_Config.Alire_Host_OS
+      with Volatile;
       pragma Warnings (On, """Host_OS"" is not modified");
    begin
       --  Linux reports a full AF_UNIX accept queue as a pending nonblocking
@@ -381,16 +374,15 @@ procedure Unix_Stream_Socket_Smoke is
          end Worker;
 
          task body Worker is
-            type Socket_Array is
-              array (Positive range <>) of Sockets.Socket_Type;
-            Listener    : Sockets.Socket_Type;
-            Fillers     : Socket_Array (1 .. 8);
-            Probe       : Sockets.Socket_Type;
+            type Socket_Array is array (Positive range <>) of Sockets.Socket_Type;
+            Listener     : Sockets.Socket_Type;
+            Fillers      : Socket_Array (1 .. 8);
+            Probe        : Sockets.Socket_Type;
             Scoped_Probe : aliased Sockets.Socket_Type;
-            Wake        : Flyology.Wake_Sources.Source;
-            Last        : Natural := 0;
-            Timed_Out   : Boolean := False;
-            Interrupted : Boolean := False;
+            Wake         : Flyology.Wake_Sources.Source;
+            Last         : Natural := 0;
+            Timed_Out    : Boolean := False;
+            Interrupted  : Boolean := False;
          begin
             Remove_Path;
             Open_Listener (Listener);
@@ -402,8 +394,7 @@ procedure Unix_Stream_Socket_Smoke is
                Last := Index;
                Sockets.Create_Unix_Stream_Socket (Fillers (Index));
                begin
-                  Sockets.Connect
-                    (Fillers (Index), Path, Timeout => 0.030);
+                  Sockets.Connect (Fillers (Index), Path, Timeout => 0.030);
                exception
                   when Flyology.IO.Timeout_Error =>
                      Timed_Out := True;
@@ -419,9 +410,7 @@ procedure Unix_Stream_Socket_Smoke is
             Sockets.Create_Unix_Stream_Socket (Probe);
             begin
                Sockets.Connect
-                 (Probe, Path, Timeout => 1.0,
-                  Interrupts =>
-                    (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+                 (Probe, Path, Timeout => 1.0, Interrupts => (1 => Flyology.Wake_Sources.Descriptor (Wake)));
             exception
                when Sockets.Operation_Interrupted =>
                   Interrupted := True;
@@ -437,15 +426,14 @@ procedure Unix_Stream_Socket_Smoke is
             Sockets.Create_Unix_Stream_Socket (Scoped_Probe);
             Flyology.Wake_Sources.Signal (Wake);
             declare
-               Set : aliased Flyology.Operations.Completion_Set (1);
-               Connection : Sockets.Connect_Operation :=
+               Set                : aliased Flyology.Operations.Completion_Set (1);
+               Connection         : Sockets.Connect_Operation :=
                  Sockets.Connect
                    (Set'Access,
                     Scoped_Probe'Access,
                     Path,
-                    Timeout => 1.0,
-                    Interrupts =>
-                      (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+                    Timeout    => 1.0,
+                    Interrupts => (1 => Flyology.Wake_Sources.Descriptor (Wake)));
                Scoped_Interrupted : Boolean := False;
             begin
                Flyology.Operations.Wait_All (Set);
@@ -462,10 +450,9 @@ procedure Unix_Stream_Socket_Smoke is
 
             Sockets.Create_Unix_Stream_Socket (Scoped_Probe);
             declare
-               Set : aliased Flyology.Operations.Completion_Set (1);
-               Connection : Sockets.Connect_Operation :=
-                 Sockets.Connect
-                   (Set'Access, Scoped_Probe'Access, Path, 0.030);
+               Set              : aliased Flyology.Operations.Completion_Set (1);
+               Connection       : Sockets.Connect_Operation :=
+                 Sockets.Connect (Set'Access, Scoped_Probe'Access, Path, 0.030);
                Scoped_Timed_Out : Boolean := False;
             begin
                Flyology.Operations.Wait_All (Set);
@@ -501,14 +488,12 @@ procedure Unix_Stream_Socket_Smoke is
       pragma Assert (Passed);
    end Check_Connect_Deadline_And_Interrupt;
 
-   procedure Check_Native_Connect_Deadline is new
-     Check_Connect_Deadline_And_Interrupt (Flyology.Native_Task);
+   procedure Check_Native_Connect_Deadline is new Check_Connect_Deadline_And_Interrupt (Flyology.Native_Task);
    procedure Check_Lightweight_Connect_Deadline is new
      Check_Connect_Deadline_And_Interrupt (Flyology.Lightweight_Task);
 
    function C_Change_Mode
-     (Path : Interfaces.C.char_array;
-      Mode : Interfaces.C.unsigned) return Interfaces.C.int;
+     (Path : Interfaces.C.char_array; Mode : Interfaces.C.unsigned) return Interfaces.C.int;
    pragma Import (C, C_Change_Mode, "chmod");
 
    function C_Effective_User return Interfaces.C.unsigned;
@@ -517,8 +502,7 @@ procedure Unix_Stream_Socket_Smoke is
    procedure Check_Permission_Failure is
       Directory : constant String := Test_Root & "/denied";
       Denied    : constant String := Directory & "/listener.sock";
-      C_Dir     : constant Interfaces.C.char_array :=
-        Interfaces.C.To_C (Directory);
+      C_Dir     : constant Interfaces.C.char_array := Interfaces.C.To_C (Directory);
       Socket    : Sockets.Socket_Type;
       Failed    : Boolean := False;
       Result    : Interfaces.C.int;

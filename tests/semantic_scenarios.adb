@@ -9,9 +9,7 @@ package body Semantic_Scenarios is
    package Priorities renames Ada.Dynamic_Priorities;
    package STC renames Ada.Synchronous_Task_Control;
 
-   package Attributes is new Ada.Task_Attributes
-     (Attribute     => Natural,
-      Initial_Value => 0);
+   package Attributes is new Ada.Task_Attributes (Attribute => Natural, Initial_Value => 0);
 
    protected type Signal is
       procedure Set;
@@ -32,26 +30,27 @@ package body Semantic_Scenarios is
          null;
       end Wait;
 
-      function Is_Set return Boolean is (Raised);
+      function Is_Set return Boolean
+      is (Raised);
    end Signal;
 
    function Run return Results is
-      Outcome                    : Results := (others => False);
-      Select_Delay_Fired         : Boolean := False;
-      Reached_Terminate_Select   : Boolean := False;
-      Requeue_Value_Seen         : Natural := 0;
-      ATC_Triggered              : Boolean := False;
-      ATC_Continued              : Boolean := False;
-      Suspension_Continued       : Boolean := False;
-      First_Attribute_Value      : Natural := 0;
-      Second_Attribute_Value     : Natural := 0;
-      Dynamic_Priority_OK        : Boolean := False;
-      Nested_Master_Completed    : Boolean := False;
-      Activation_Body_Started   : Boolean := False;
-      Delay_Abort_Continued      : Boolean := False;
-      Entry_Abort_Continued      : Boolean := False;
-      Finalization_Done          : Signal;
-      Rendezvous_Returned        : Natural := 0;
+      Outcome                  : Results := (others => False);
+      Select_Delay_Fired       : Boolean := False;
+      Reached_Terminate_Select : Boolean := False;
+      Requeue_Value_Seen       : Natural := 0;
+      ATC_Triggered            : Boolean := False;
+      ATC_Continued            : Boolean := False;
+      Suspension_Continued     : Boolean := False;
+      First_Attribute_Value    : Natural := 0;
+      Second_Attribute_Value   : Natural := 0;
+      Dynamic_Priority_OK      : Boolean := False;
+      Nested_Master_Completed  : Boolean := False;
+      Activation_Body_Started  : Boolean := False;
+      Delay_Abort_Continued    : Boolean := False;
+      Entry_Abort_Continued    : Boolean := False;
+      Finalization_Done        : Signal;
+      Rendezvous_Returned      : Natural := 0;
    begin
       --  Conditional and timed calls are made while the server is
       --  deterministically held before its accept statement.  The test does
@@ -174,8 +173,8 @@ package body Semantic_Scenarios is
       Outcome (Abortable_Select) := ATC_Triggered and not ATC_Continued;
 
       declare
-         Gate      : STC.Suspension_Object;
-         Started   : Signal;
+         Gate    : STC.Suspension_Object;
+         Started : Signal;
 
          task Waiter is
             pragma Task_Info (Model);
@@ -218,14 +217,15 @@ package body Semantic_Scenarios is
       begin
          null;
       end;
-      Outcome (Task_Attribute) :=
-        First_Attribute_Value = 101 and Second_Attribute_Value = 202;
+      Outcome (Task_Attribute) := First_Attribute_Value = 101 and Second_Attribute_Value = 202;
 
       --  A maximum-ceiling protected operation remains legal after a real
       --  base-priority change, and the changed priority remains observable.
       --  This does not attempt to prescribe an OS dispatch trace.
       declare
-         protected Ceiling_Object with Priority => System.Priority'Last is
+         protected Ceiling_Object
+           with Priority => System.Priority'Last
+         is
             procedure Touch;
             function Was_Touched return Boolean;
          private
@@ -238,7 +238,8 @@ package body Semantic_Scenarios is
                Touched := True;
             end Touch;
 
-            function Was_Touched return Boolean is (Touched);
+            function Was_Touched return Boolean
+            is (Touched);
          end Ceiling_Object;
 
          task Priority_Worker is
@@ -248,15 +249,11 @@ package body Semantic_Scenarios is
          task body Priority_Worker is
             Original : constant System.Any_Priority := Priorities.Get_Priority;
             Changed  : constant System.Any_Priority :=
-              (if Original < System.Any_Priority'Last
-               then Original + 1
-               else Original - 1);
+              (if Original < System.Any_Priority'Last then Original + 1 else Original - 1);
          begin
             Priorities.Set_Priority (Changed);
             Ceiling_Object.Touch;
-            Dynamic_Priority_OK :=
-              Priorities.Get_Priority = Changed
-              and then Ceiling_Object.Was_Touched;
+            Dynamic_Priority_OK := Priorities.Get_Priority = Changed and then Ceiling_Object.Was_Touched;
             Priorities.Set_Priority (Original);
          end Priority_Worker;
       begin
@@ -344,7 +341,7 @@ package body Semantic_Scenarios is
       Outcome (Abort_Activation) := not Activation_Body_Started;
 
       declare
-         Started   : Signal;
+         Started : Signal;
 
          task Sleeper is
             pragma Task_Info (Model);
@@ -363,7 +360,7 @@ package body Semantic_Scenarios is
       Outcome (Abort_Delay) := not Delay_Abort_Continued;
 
       declare
-         Started   : Signal;
+         Started : Signal;
 
          protected Closed_Gate is
             entry Wait;
@@ -397,7 +394,8 @@ package body Semantic_Scenarios is
          Finalize_Release : STC.Suspension_Object;
 
          type Probe is new Ada.Finalization.Controlled with null record;
-         overriding procedure Finalize (Object : in out Probe);
+         overriding
+         procedure Finalize (Object : in out Probe);
 
          procedure Finalize (Object : in out Probe) is
             pragma Unreferenced (Object);

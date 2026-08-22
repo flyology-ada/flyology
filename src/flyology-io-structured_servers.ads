@@ -14,6 +14,7 @@ private with Flyology.Structured_Server_Policy;
 --  @formal Handle Per-connection callback invoked by a handler task
 --  @formal Handler_Model Fixed lightweight or native handler designation
 --  @formal Handler_CPU CPU aspect applied to every handler task
+
 generic
    --  State shared by every concurrent Handle call. Mutable state must provide
    --  its own synchronization.
@@ -25,12 +26,12 @@ generic
    --  @param Connection Open connection owned by its handler task
    --  @param Peer Accepted peer address
    --  @param Cancellation One-shot server cancellation source
-   with procedure Handle
-     (Context      : in out Handler_Context;
-      Connection   : in out Flyology.IO.Connections.Connection;
-      Peer         : Flyology.IO.Sockets.Endpoint;
-      Cancellation : not null access
-        Flyology.IO.Connections.Cancellation_Token);
+   with
+     procedure Handle
+       (Context      : in out Handler_Context;
+        Connection   : in out Flyology.IO.Connections.Connection;
+        Peer         : Flyology.IO.Sockets.Endpoint;
+        Cancellation : not null access Flyology.IO.Connections.Cancellation_Token);
 
    --  Fixed task designation for all handlers in this generic instance.
    Handler_Model : Flyology.Execution_Model := Flyology.Project_Default;
@@ -38,10 +39,10 @@ generic
    --  shared execution group and the default Not_A_Specific_CPU distributes
    --  handlers over the configured pool; for native tasks it retains Ada CPU
    --  affinity.
-   Handler_CPU   : System.Multiprocessors.CPU_Range :=
-     System.Multiprocessors.Not_A_Specific_CPU;
+   Handler_CPU : System.Multiprocessors.CPU_Range := System.Multiprocessors.Not_A_Specific_CPU;
 
-package Flyology.IO.Structured_Servers is
+package Flyology.IO.Structured_Servers
+is
 
    --  Raised by Serve after one or more handler or admission failures.
    Server_Failed : exception;
@@ -68,16 +69,16 @@ package Flyology.IO.Structured_Servers is
    --  @field Failures Cumulative admission, callback, or cleanup failures
    --  @field First_Failure Origin of the first failure
    type Snapshot is record
-      Running              : Boolean;
-      Accepting            : Boolean;
-      Shutdown_Requested   : Boolean;
-      Forced_Cancellation  : Boolean;
-      Active_Handlers      : Natural;
-      Accepted_Connections : Natural;
-      Completed_Connections  : Natural;
-      Cancelled_Connections  : Natural;
-      Failures             : Natural;
-      First_Failure        : Failure_Origin;
+      Running               : Boolean;
+      Accepting             : Boolean;
+      Shutdown_Requested    : Boolean;
+      Forced_Cancellation   : Boolean;
+      Active_Handlers       : Natural;
+      Accepted_Connections  : Natural;
+      Completed_Connections : Natural;
+      Cancelled_Connections : Natural;
+      Failures              : Natural;
+      First_Failure         : Failure_Origin;
    end record;
 
    --  One-shot server object. Capacity is both the admission limit and the
@@ -163,13 +164,9 @@ private
       procedure Handler_Started;
       --  @exclude Internal readiness publication.
       procedure Mark_Accepting;
-      procedure Handler_Completed
-        (Cancelled : Boolean;
-         Failed    : Boolean);
+      procedure Handler_Completed (Cancelled : Boolean; Failed : Boolean);
       procedure Worker_Finished;
-      procedure Record_Failure
-        (Origin      : Failure_Origin;
-         Information : String);
+      procedure Record_Failure (Origin : Failure_Origin; Information : String);
       procedure Mark_Forced;
       procedure Finish_Serve;
       procedure Abandon_Serve;
@@ -178,24 +175,23 @@ private
       function Read_Snapshot return Snapshot;
       function Failure_Information return String;
    private
-      Phase                 : Run_Phase := Idle;
-      Serve_Started         : Boolean := False;
-      Accepting_Marked      : Boolean := False;
-      Active                : Natural := 0;
-      Accepted              : Natural := 0;
-      Completed             : Natural := 0;
-      Cancelled             : Natural := 0;
-      Workers_Done          : Natural := 0;
-      Expected_Workers      : Natural := 0;
-      Failure_Total         : Natural := 0;
-      Failure_Source        : Failure_Origin := No_Failure;
-      Failure_Text_Length   : Natural := 0;
-      Failure_Text          : String (1 .. 2_048) := (others => ' ');
-      Forced                : Boolean := False;
+      Phase               : Run_Phase := Idle;
+      Serve_Started       : Boolean := False;
+      Accepting_Marked    : Boolean := False;
+      Active              : Natural := 0;
+      Accepted            : Natural := 0;
+      Completed           : Natural := 0;
+      Cancelled           : Natural := 0;
+      Workers_Done        : Natural := 0;
+      Expected_Workers    : Natural := 0;
+      Failure_Total       : Natural := 0;
+      Failure_Source      : Failure_Origin := No_Failure;
+      Failure_Text_Length : Natural := 0;
+      Failure_Text        : String (1 .. 2_048) := (others => ' ');
+      Forced              : Boolean := False;
    end Lifecycle;
 
-   type Server (Capacity : Positive) is
-     new Ada.Finalization.Limited_Controlled with record
+   type Server (Capacity : Positive) is new Ada.Finalization.Limited_Controlled with record
       State          : Lifecycle;
       Accept_Stop    : aliased Cancellation_Token;
       Handler_Stop   : aliased Cancellation_Token;
@@ -205,6 +201,7 @@ private
    --  Request shutdown and cancellation if Item is still serving. Close only
    --  a listener retained because terminal Serve cleanup did not begin.
    --  @param Item Server being finalized
-   overriding procedure Finalize (Item : in out Server);
+   overriding
+   procedure Finalize (Item : in out Server);
 
 end Flyology.IO.Structured_Servers;

@@ -29,9 +29,7 @@ package body Flyology.Task_Scopes is
 
    protected body Shared_State is
       procedure Configure
-        (Token      : Cancellation_Access;
-         Deadline   : Ada.Real_Time.Time;
-         Cancel_On_Failure : Boolean) is
+        (Token : Cancellation_Access; Deadline : Ada.Real_Time.Time; Cancel_On_Failure : Boolean) is
       begin
          if Configured then
             raise Program_Error with "task scope is already configured";
@@ -59,10 +57,7 @@ package body Flyology.Task_Scopes is
          Index := Submitted;
       end Submit;
 
-      entry Next
-        (Index : out Positive; Stop : out Boolean)
-        when Next_Index <= Submitted or else Stopping
-      is
+      entry Next (Index : out Positive; Stop : out Boolean) when Next_Index <= Submitted or else Stopping is
       begin
          if Stopping and then Next_Index > Submitted then
             Stop := True;
@@ -75,9 +70,9 @@ package body Flyology.Task_Scopes is
       end Next;
 
       procedure Operation_Context
-        (Index    : Positive;
-         Token    : out Cancellation_Access;
-         Deadline : out Ada.Real_Time.Time;
+        (Index             : Positive;
+         Token             : out Cancellation_Access;
+         Deadline          : out Ada.Real_Time.Time;
          Cancel_On_Failure : out Boolean) is
       begin
          pragma Unreferenced (Index);
@@ -86,8 +81,7 @@ package body Flyology.Task_Scopes is
          Cancel_On_Failure := Cancel_On_Failure_Value;
       end Operation_Context;
 
-      procedure Operation_Input
-        (Index : Positive; Input : out Input_Type) is
+      procedure Operation_Input (Index : Positive; Input : out Input_Type) is
       begin
          Input := Inputs (Index);
       end Operation_Input;
@@ -99,8 +93,7 @@ package body Flyology.Task_Scopes is
          Completed := Completed + 1;
       end Complete;
 
-      procedure Fail
-        (Index : Positive; Occurrence : Ada.Exceptions.Exception_Occurrence) is
+      procedure Fail (Index : Positive; Occurrence : Ada.Exceptions.Exception_Occurrence) is
       begin
          Failure_Ids (Index) := Ada.Exceptions.Exception_Identity (Occurrence);
          Successes (Index) := False;
@@ -108,8 +101,7 @@ package body Flyology.Task_Scopes is
          --  Terminalize before copying diagnostic text so allocation failure
          --  cannot leave Join waiting forever.
          Failure_Messages (Index) :=
-           Ada.Strings.Unbounded.To_Unbounded_String
-             (Ada.Exceptions.Exception_Message (Occurrence));
+           Ada.Strings.Unbounded.To_Unbounded_String (Ada.Exceptions.Exception_Message (Occurrence));
       end Fail;
 
       procedure Close_Admission is
@@ -138,14 +130,13 @@ package body Flyology.Task_Scopes is
          Stopped_Workers := Stopped_Workers + 1;
       end Worker_Stopped;
 
-      entry Await_Workers
-        when Expected_Workers_Set
-          and then Stopped_Workers = Expected_Workers is
+      entry Await_Workers when Expected_Workers_Set and then Stopped_Workers = Expected_Workers is
       begin
          null;
       end Await_Workers;
 
-      function Submitted_Count return Natural is (Submitted);
+      function Submitted_Count return Natural
+      is (Submitted);
 
       function Was_Successful (Index : Positive) return Boolean is
       begin
@@ -163,8 +154,7 @@ package body Flyology.Task_Scopes is
          return Results (Index);
       end Result_Value;
 
-      function Failure_Id
-        (Index : Positive) return Ada.Exceptions.Exception_Id is
+      function Failure_Id (Index : Positive) return Ada.Exceptions.Exception_Id is
       begin
          if Index > Submitted or else Completed < Submitted then
             raise Invalid_Handle;
@@ -172,8 +162,7 @@ package body Flyology.Task_Scopes is
          return Failure_Ids (Index);
       end Failure_Id;
 
-      function Failure_Message
-        (Index : Positive) return Ada.Strings.Unbounded.Unbounded_String is
+      function Failure_Message (Index : Positive) return Ada.Strings.Unbounded.Unbounded_String is
       begin
          if Index > Submitted or else Completed < Submitted then
             raise Invalid_Handle;
@@ -187,10 +176,9 @@ package body Flyology.Task_Scopes is
       --  True, so this declaration disappears outside hook builds.
       Activation_Checked : constant Boolean := Test_Hooks.Check_Activation;
       pragma Unreferenced (Activation_Checked);
-      package Conversions is new
-        System.Address_To_Access_Conversions (Shared_State);
-      State   : Conversions.Object_Pointer;
-      Stopped : Boolean := False;
+      package Conversions is new System.Address_To_Access_Conversions (Shared_State);
+      State              : Conversions.Object_Pointer;
+      Stopped            : Boolean := False;
    begin
       select
          accept Start (State_Address : System.Address) do
@@ -204,27 +192,23 @@ package body Flyology.Task_Scopes is
       begin
          while not Stopped loop
             declare
-               Index      : Positive;
-               Input      : Input_Type;
-               Stop       : Boolean;
-               Token      : Cancellation_Access;
-               Deadline   : Ada.Real_Time.Time;
+               Index             : Positive;
+               Input             : Input_Type;
+               Stop              : Boolean;
+               Token             : Cancellation_Access;
+               Deadline          : Ada.Real_Time.Time;
                Cancel_On_Failure : Boolean;
-               Value      : Result_Type;
+               Value             : Result_Type;
             begin
                State.Next (Index, Stop);
                exit when Stop;
                begin
-                  State.Operation_Context
-                    (Index, Token, Deadline, Cancel_On_Failure);
+                  State.Operation_Context (Index, Token, Deadline, Cancel_On_Failure);
                   State.Operation_Input (Index, Input);
                   if Token.Requested then
                      raise Flyology.Cancellation.Operation_Cancelled;
-                  elsif Deadline /= Ada.Real_Time.Time_Last
-                    and then Ada.Real_Time.Clock >= Deadline
-                  then
-                     raise Flyology.IO.Timeout_Error with
-                       "task scope operation deadline expired";
+                  elsif Deadline /= Ada.Real_Time.Time_Last and then Ada.Real_Time.Clock >= Deadline then
+                     raise Flyology.IO.Timeout_Error with "task scope operation deadline expired";
                   end if;
                   Execute (Input, Token, Deadline, Value);
                   State.Complete (Index, Value);
@@ -233,7 +217,8 @@ package body Flyology.Task_Scopes is
                      begin
                         State.Fail (Index, Error);
                      exception
-                        when others => null;
+                        when others =>
+                           null;
                      end;
                      if Cancel_On_Failure and then not Token.Requested then
                         Token.Request;
@@ -242,7 +227,8 @@ package body Flyology.Task_Scopes is
             end;
          end loop;
       exception
-         when others => null;
+         when others =>
+            null;
       end;
       if not Stopped then
          State.Worker_Stopped;
@@ -257,9 +243,7 @@ package body Flyology.Task_Scopes is
    begin
       select
          accept Start
-           (Parent  : Cancellation_Access;
-            Child   : Cancellation_Access;
-            Release : Cancellation_Access)
+           (Parent : Cancellation_Access; Child : Cancellation_Access; Release : Cancellation_Access)
          do
             Parent_Source := Parent;
             Child_Source := Child;
@@ -287,7 +271,8 @@ package body Flyology.Task_Scopes is
                --  be signalled, and the monitor must survive to answer the
                --  Stop rendezvous: a terminated monitor turns Join into
                --  Tasking_Error and strands every completed result.
-               when others => null;
+               when others =>
+                  null;
             end;
          then abort
             Release_Source.Await_Request;
@@ -303,17 +288,13 @@ package body Flyology.Task_Scopes is
    end Cancellation_Monitor;
 
    procedure Configure
-     (Item       : in out Scope;
-      Deadline   : Ada.Real_Time.Time;
-      Cancel_Siblings_On_Failure : Boolean := True)
-   is
+     (Item : in out Scope; Deadline : Ada.Real_Time.Time; Cancel_Siblings_On_Failure : Boolean := True) is
    begin
       if Item.Is_Configured then
          raise Program_Error with "task scope is already configured";
       end if;
       Item.Token := Item.Local_Stop'Unchecked_Access;
-      Item.State.Configure
-        (Item.Token, Deadline, Cancel_Siblings_On_Failure);
+      Item.State.Configure (Item.Token, Deadline, Cancel_Siblings_On_Failure);
       --  From here Finalize owns rollback if allocation or activation raises.
       Item.Cleanup_Required := True;
       Identity_Source.Next (Item.Identity);
@@ -338,17 +319,12 @@ package body Flyology.Task_Scopes is
          Item.Monitor := new Cancellation_Monitor;
          Item.Monitor_Stopped := False;
          Item.Monitor.Start
-           (Item.Parent.all'Unchecked_Access, Item.Token,
-            Item.Monitor_Release'Unchecked_Access);
+           (Item.Parent.all'Unchecked_Access, Item.Token, Item.Monitor_Release'Unchecked_Access);
       end if;
       Item.Is_Configured := True;
    end Configure;
 
-   procedure Spawn
-     (Item   : in out Scope;
-      Input  : Input_Type;
-      Handle : out Operation_Handle)
-   is
+   procedure Spawn (Item : in out Scope; Input : Input_Type; Handle : out Operation_Handle) is
       Index : Positive;
    begin
       if Item.Is_Joined then
@@ -370,7 +346,8 @@ package body Flyology.Task_Scopes is
          begin
             Item.Monitor.Stop;
          exception
-            when Tasking_Error => null;
+            when Tasking_Error =>
+               null;
          end;
       end if;
       Item.Monitor_Stopped := True;
@@ -387,17 +364,14 @@ package body Flyology.Task_Scopes is
       Item.State.Await_All;
       Item.State.Shutdown;
       Item.State.Set_Expected_Workers
-        (Task_Scope_Policy.Awaited_Workers
-           (Item.Created_Workers, Item.Activated_Workers));
+        (Task_Scope_Policy.Awaited_Workers (Item.Created_Workers, Item.Activated_Workers));
       Item.State.Await_Workers;
       Stop_Monitor (Item);
       Item.Is_Joined := True;
       Item.Cleanup_Required := False;
    end Join;
 
-   function Succeeded
-     (Item   : Scope;
-      Handle : Operation_Handle) return Boolean is
+   function Succeeded (Item : Scope; Handle : Operation_Handle) return Boolean is
    begin
       if not Item.Is_Joined then
          raise Program_Error with "task scope is not joined";
@@ -408,10 +382,7 @@ package body Flyology.Task_Scopes is
       return Item.State.Was_Successful (Handle.Index);
    end Succeeded;
 
-   function Result
-     (Item   : Scope;
-      Handle : Operation_Handle) return Result_Type
-   is
+   function Result (Item : Scope; Handle : Operation_Handle) return Result_Type is
       Index : constant Positive := Handle.Index;
    begin
       if not Item.Is_Joined then
@@ -420,35 +391,31 @@ package body Flyology.Task_Scopes is
          raise Invalid_Handle;
       end if;
       declare
-         Successful : constant Boolean :=
-           Item.State.Was_Successful (Index);
+         Successful : constant Boolean := Item.State.Was_Successful (Index);
       begin
          if not Successful then
             Ada.Exceptions.Raise_Exception
               (Item.State.Failure_Id (Index),
-               Ada.Strings.Unbounded.To_String
-                 (Item.State.Failure_Message (Index)));
+               Ada.Strings.Unbounded.To_String (Item.State.Failure_Message (Index)));
          end if;
          return Item.State.Result_Value (Index);
       end;
    end Result;
 
-   overriding procedure Finalize (Item : in out Scope) is
-      procedure Free_Worker is new Ada.Unchecked_Deallocation
-        (Worker, Worker_Access);
-      procedure Free_Workers is new Ada.Unchecked_Deallocation
-        (Worker_Array, Worker_Array_Access);
-      procedure Free_Monitor is new Ada.Unchecked_Deallocation
-        (Cancellation_Monitor, Cancellation_Monitor_Access);
+   overriding
+   procedure Finalize (Item : in out Scope) is
+      procedure Free_Worker is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
+      procedure Free_Workers is new Ada.Unchecked_Deallocation (Worker_Array, Worker_Array_Access);
+      procedure Free_Monitor is new
+        Ada.Unchecked_Deallocation (Cancellation_Monitor, Cancellation_Monitor_Access);
       Cancel_Failed  : Boolean := False;
       Cancel_Failure : Ada.Exceptions.Exception_Occurrence;
       --  Worker bookkeeping is settled once Configure has returned or
       --  raised, so this census is stable for the whole cleanup.
-      Created   : constant Natural := Item.Created_Workers;
-      Activated : constant Natural := Item.Activated_Workers;
+      Created        : constant Natural := Item.Created_Workers;
+      Activated      : constant Natural := Item.Activated_Workers;
    begin
-      pragma Assert
-        (Task_Scope_Policy.Accounts_For_Every_Worker (Created, Activated));
+      pragma Assert (Task_Scope_Policy.Accounts_For_Every_Worker (Created, Activated));
       if Item.Cleanup_Required and then not Item.Is_Joined then
          begin
             if not Item.Local_Stop.Requested then
@@ -479,12 +446,12 @@ package body Flyology.Task_Scopes is
                begin
                   Item.Workers (Index).Stop;
                exception
-                  when Tasking_Error => null;
+                  when Tasking_Error =>
+                     null;
                end;
             end loop;
          end if;
-         Item.State.Set_Expected_Workers
-           (Task_Scope_Policy.Awaited_Workers (Created, Activated));
+         Item.State.Set_Expected_Workers (Task_Scope_Policy.Awaited_Workers (Created, Activated));
          Item.State.Await_Workers;
          Stop_Monitor (Item);
          Item.Is_Joined := True;

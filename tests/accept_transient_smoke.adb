@@ -19,30 +19,17 @@ procedure Accept_Transient_Smoke is
 
    Injected_Count : constant Positive := 4;
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint)
-   is
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option
-        (Listener,
-         Sockets.Socket_Level,
-         (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 16);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
 
-   procedure Await_Calls
-     (At_Point : Fault_Control.Point;
-      Count    : Positive)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   procedure Await_Calls (At_Point : Fault_Control.Point; Count : Positive) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while Fault_Control.Calls (At_Point) < Count loop
          if Ada.Real_Time.Clock >= Deadline then
@@ -54,7 +41,7 @@ procedure Accept_Transient_Smoke is
 
    generic
       Model : Flyology.Execution_Model;
-      CPU   : System.Multiprocessors.CPU_Range;
+      CPU : System.Multiprocessors.CPU_Range;
    procedure Run_Lane;
 
    procedure Run_Lane is
@@ -71,7 +58,8 @@ procedure Accept_Transient_Smoke is
             Total := Total + 1;
          end Handled;
 
-         function Count return Natural is (Total);
+         function Count return Natural
+         is (Total);
       end Tracker;
 
       type Context is limited record
@@ -87,28 +75,29 @@ procedure Accept_Transient_Smoke is
          Data : Ada.Streams.Stream_Element_Array (1 .. 1);
          pragma Unreferenced (Peer);
       begin
-         Connection.Receive_Exactly
-           (Data, Timeout => 1.0, Token => Cancellation);
-         Connection.Send_All
-           (Data, Timeout => 1.0, Token => Cancellation);
+         Connection.Receive_Exactly (Data, Timeout => 1.0, Token => Cancellation);
+         Connection.Send_All (Data, Timeout => 1.0, Token => Cancellation);
          State.State.Handled;
       end Handle;
 
-      package Structured is new Flyology.IO.Structured_Servers
-        (Handler_Context => Context,
-         Handle          => Handle,
-         Handler_Model   => Model,
-         Handler_CPU     => CPU);
+      package Structured is new
+        Flyology.IO.Structured_Servers
+          (Handler_Context => Context,
+           Handle          => Handle,
+           Handler_Model   => Model,
+           Handler_CPU     => CPU);
 
       use type Structured.Failure_Origin;
 
       procedure Run_Recovery (At_Point : Fault_Control.Point) is
-         Item       : aliased Structured.Server (Capacity => 1);
-         State      : aliased Context;
-         Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Endpoint;
-         Failed     : Boolean := False with Atomic;
-         Client_OK  : Boolean := False with Atomic;
+         Item      : aliased Structured.Server (Capacity => 1);
+         State     : aliased Context;
+         Listener  : Sockets.Socket_Type;
+         Address   : Sockets.Endpoint;
+         Failed    : Boolean := False
+         with Atomic;
+         Client_OK : Boolean := False
+         with Atomic;
       begin
          Open_Listener (Listener, Address);
          Fault_Control.Reset;
@@ -122,8 +111,7 @@ procedure Accept_Transient_Smoke is
             task body Runner is
             begin
                begin
-                  Structured.Serve
-                    (Item, Listener, State, Drain_Timeout => 0.2);
+                  Structured.Serve (Item, Listener, State, Drain_Timeout => 0.2);
                exception
                   when others =>
                      Failed := True;
@@ -132,15 +120,13 @@ procedure Accept_Transient_Smoke is
 
             task body Client is
                Socket : Sockets.Socket_Type;
-               Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-                 (1 => 73);
+               Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 73);
                Got    : Ada.Streams.Stream_Element_Array (1 .. 1);
             begin
                Sockets.Create_Socket (Socket);
                Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
                Flyology.IO.Sockets.Send_All (Socket, Sent, Timeout => 1.0);
-               Flyology.IO.Sockets.Receive_Exactly
-                 (Socket, Got, Timeout => 1.0);
+               Flyology.IO.Sockets.Receive_Exactly (Socket, Got, Timeout => 1.0);
                Client_OK := Got = Sent;
                Sockets.Close_Socket (Socket);
                Structured.Request_Shutdown (Item);
@@ -158,8 +144,7 @@ procedure Accept_Transient_Smoke is
          pragma Assert (not Failed);
          pragma Assert (Client_OK);
          pragma Assert (State.State.Count = 1);
-         pragma Assert
-           (Fault_Control.Calls (At_Point) >= Injected_Count);
+         pragma Assert (Fault_Control.Calls (At_Point) >= Injected_Count);
          declare
             Sample : constant Structured.Snapshot := Structured.Current (Item);
          begin
@@ -171,25 +156,24 @@ procedure Accept_Transient_Smoke is
       end Run_Recovery;
 
       procedure Run_Pressure_Shutdown is
-         Item       : aliased Structured.Server (Capacity => 1);
-         State      : aliased Context;
-         Listener   : Sockets.Socket_Type;
-         Address    : Sockets.Endpoint;
-         Failed     : Boolean := False with Atomic;
-         Started    : Ada.Real_Time.Time;
+         Item     : aliased Structured.Server (Capacity => 1);
+         State    : aliased Context;
+         Listener : Sockets.Socket_Type;
+         Address  : Sockets.Endpoint;
+         Failed   : Boolean := False
+         with Atomic;
+         Started  : Ada.Real_Time.Time;
       begin
          Open_Listener (Listener, Address);
          Fault_Control.Reset;
-         Fault_Control.Arm
-           (Fault_Control.Accept_Process_File_Limit, Count => 1_000_000);
+         Fault_Control.Arm (Fault_Control.Accept_Process_File_Limit, Count => 1_000_000);
          declare
             task Runner;
 
             task body Runner is
             begin
                begin
-                  Structured.Serve
-                    (Item, Listener, State, Drain_Timeout => 0.2);
+                  Structured.Serve (Item, Listener, State, Drain_Timeout => 0.2);
                exception
                   when others =>
                      Failed := True;
@@ -202,26 +186,22 @@ procedure Accept_Transient_Smoke is
          end;
 
          pragma Assert (not Failed);
-         pragma Assert
-           (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (1));
-         pragma Assert
-           (Fault_Control.Calls (Fault_Control.Accept_Process_File_Limit) <
-              100);
+         pragma Assert (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (1));
+         pragma Assert (Fault_Control.Calls (Fault_Control.Accept_Process_File_Limit) < 100);
          pragma Assert (Structured.Current (Item).Failures = 0);
-         pragma Assert
-           (Structured.Current (Item).Accepted_Connections = 0);
+         pragma Assert (Structured.Current (Item).Accepted_Connections = 0);
          Fault_Control.Reset;
       end Run_Pressure_Shutdown;
 
       procedure Run_Deadline is
          Listener  : Sockets.Socket_Type;
          Address   : Sockets.Endpoint;
-         Timed_Out : Boolean := False with Atomic;
+         Timed_Out : Boolean := False
+         with Atomic;
       begin
          Open_Listener (Listener, Address);
          Fault_Control.Reset;
-         Fault_Control.Arm
-           (Fault_Control.Accept_System_File_Limit, Count => 1_000_000);
+         Fault_Control.Arm (Fault_Control.Accept_System_File_Limit, Count => 1_000_000);
          declare
             task Acceptor is
                pragma Task_Info (Model);
@@ -232,8 +212,7 @@ procedure Accept_Transient_Smoke is
                Peer     : Sockets.Endpoint;
             begin
                begin
-                  Flyology.IO.Sockets.Accept_Connection
-                    (Listener, Accepted, Peer, Timeout => 0.020);
+                  Flyology.IO.Sockets.Accept_Connection (Listener, Accepted, Peer, Timeout => 0.020);
                exception
                   when Flyology.IO.Timeout_Error =>
                      Timed_Out := True;
@@ -247,9 +226,7 @@ procedure Accept_Transient_Smoke is
          end;
          Sockets.Close_Socket (Listener);
          pragma Assert (Timed_Out);
-         pragma Assert
-           (Fault_Control.Calls (Fault_Control.Accept_System_File_Limit) <
-              100);
+         pragma Assert (Fault_Control.Calls (Fault_Control.Accept_System_File_Limit) < 100);
          Fault_Control.Reset;
       end Run_Deadline;
 
@@ -264,17 +241,14 @@ procedure Accept_Transient_Smoke is
          Fault_Control.Reset;
          Fault_Control.Arm (Fault_Control.Accept_Bad_Descriptor);
          begin
-            Structured.Serve
-              (Item, Listener, State, Drain_Timeout => 0.2);
+            Structured.Serve (Item, Listener, State, Drain_Timeout => 0.2);
          exception
             when Structured.Server_Failed =>
                Propagated := True;
          end;
          pragma Assert (Propagated);
          pragma Assert (Structured.Current (Item).Failures = 1);
-         pragma Assert
-           (Structured.Current (Item).First_Failure =
-              Structured.Admission_Loop);
+         pragma Assert (Structured.Current (Item).First_Failure = Structured.Admission_Loop);
          Fault_Control.Reset;
       end Run_Structural_Failure;
    begin
@@ -287,16 +261,12 @@ procedure Accept_Transient_Smoke is
       Run_Structural_Failure;
    end Run_Lane;
 
-   procedure Run_Lightweight is new Run_Lane
-     (Model => Flyology.Lightweight_Task,
-      CPU   => 1);
-   procedure Run_Native is new Run_Lane
-     (Model => Flyology.Native_Task,
-      CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Run_Lightweight is new Run_Lane (Model => Flyology.Lightweight_Task, CPU => 1);
+   procedure Run_Native is new
+     Run_Lane (Model => Flyology.Native_Task, CPU => System.Multiprocessors.Not_A_Specific_CPU);
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "accept transient test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "accept transient test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
    Run_Lightweight;
    Run_Native;

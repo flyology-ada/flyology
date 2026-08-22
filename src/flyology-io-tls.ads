@@ -17,6 +17,7 @@ private with Ada.Exceptions;
 --
 --     Take (OpenSSL, Socket, Client, "example.com", Secure);
 --     Handshake (Secure, Timeout => 5.0);
+
 package Flyology.IO.TLS is
 
    --  Raised when a provider rejects configuration, a handshake, a record, or
@@ -24,8 +25,7 @@ package Flyology.IO.TLS is
    TLS_Error : exception;
 
    --  Raised when a token or concurrent Close interrupts an operation.
-   Operation_Cancelled : exception renames
-     Flyology.Cancellation.Operation_Cancelled;
+   Operation_Cancelled : exception renames Flyology.Cancellation.Operation_Cancelled;
 
    --  TLS endpoint role.
    --  @enum Client Initiates a handshake and verifies Server_Name
@@ -38,16 +38,14 @@ package Flyology.IO.TLS is
    --  @enum Want_Write Retry after descriptor write readiness
    --  @enum Peer_Closed A valid TLS close_notify was received
    --  @enum Failed The session diagnostic describes a fatal failure
-   type Step_Status is
-     (Complete, Want_Read, Want_Write, Peer_Closed, Failed);
+   type Step_Status is (Complete, Want_Read, Want_Write, Peer_Closed, Failed);
 
    --  One provider-owned TLS session. Implementations must not perform a
    --  blocking descriptor operation: every would-block condition is returned
    --  as Want_Read or Want_Write. Operations on one Session are serialized by
    --  Flyology. Finalization must release provider state but must not close
    --  the borrowed descriptor or propagate an exception.
-   type Session is abstract new Ada.Finalization.Limited_Controlled with
-     null record;
+   type Session is abstract new Ada.Finalization.Limited_Controlled with null record;
    --  Owning access to one provider session; Flyology deallocates it after the
    --  active operation has drained and before closing the socket.
    type Session_Access is access all Session'Class;
@@ -57,8 +55,7 @@ package Flyology.IO.TLS is
    --  Peer_Closed reports that the peer closed before completion.
    --  @param Item Session to advance
    --  @return Provider progress state
-   function Handshake_Step
-     (Item : in out Session) return Step_Status is abstract;
+   function Handshake_Step (Item : in out Session) return Step_Status is abstract;
 
    --  Execute one decrypted receive step. All Step_Status values are valid.
    --  Complete must return at least one byte; Peer_Closed represents
@@ -95,8 +92,7 @@ package Flyology.IO.TLS is
    --  shutdown completed.
    --  @param Item Session to shut down
    --  @return Provider progress state
-   function Shutdown_Step
-     (Item : in out Session) return Step_Status is abstract;
+   function Shutdown_Step (Item : in out Session) return Step_Status is abstract;
 
    --  Return the diagnostic for the most recent Failed result. The returned
    --  String owns its Ada value and remains valid across later provider calls.
@@ -149,10 +145,8 @@ package Flyology.IO.TLS is
    --  @return Newly allocated provider session
    --  @exception TLS_Error Provider setup fails
    function Create_Session
-     (Item        : in out Provider;
-      FD          : Descriptor;
-      Side        : Role;
-      Server_Name : String) return Session_Access is abstract;
+     (Item : in out Provider; FD : Descriptor; Side : Role; Server_Name : String) return Session_Access
+   is abstract;
 
    --  Sole closing owner of one connected socket and one provider session.
    --  Take transfers ownership. Finalize calls Close. Handshake, Receive,
@@ -287,8 +281,7 @@ package Flyology.IO.TLS is
    --  completion or finalization. The owning task must cancel or finalize its
    --  pending operations before calling Close itself; a concurrent Close may
    --  interrupt them and waits until their leases are discharged.
-   type Connection_Operation is
-     abstract new Flyology.Operations.Operation with private;
+   type Connection_Operation is abstract new Flyology.Operations.Operation with private;
    --  Scoped standalone TLS handshake result.
    type Handshake_Operation is new Connection_Operation with private;
    --  Scoped one-chunk decrypted receive result.
@@ -310,8 +303,7 @@ package Flyology.IO.TLS is
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Item    : not null access Connection'Class;
       Timeout : Duration := Infinite;
-      Token   : access Flyology.Cancellation.Token := null)
-      return Handshake_Operation;
+      Token   : access Flyology.Cancellation.Token := null) return Handshake_Operation;
 
    --  Start or restart a handshake operation.
    --  @param Item Open standalone TLS connection
@@ -323,9 +315,9 @@ package Flyology.IO.TLS is
       Timeout   : Duration := Infinite;
       Token     : access Flyology.Cancellation.Token := null;
       Operation : in out Handshake_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a composable one-chunk decrypted receive.
    --  @param Set Completion set owning the operation slot
@@ -339,8 +331,7 @@ package Flyology.IO.TLS is
       Item    : not null access Connection'Class;
       Data    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Flyology.Cancellation.Token := null)
-      return Receive_Operation;
+      Token   : access Flyology.Cancellation.Token := null) return Receive_Operation;
 
    --  Start or restart a one-chunk receive operation.
    --  @param Item Open standalone TLS connection
@@ -354,9 +345,9 @@ package Flyology.IO.TLS is
       Timeout   : Duration := Infinite;
       Token     : access Flyology.Cancellation.Token := null;
       Operation : in out Receive_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a composable receive that fills Data.
    --  @param Set Completion set owning the operation slot
@@ -370,8 +361,7 @@ package Flyology.IO.TLS is
       Item    : not null access Connection'Class;
       Data    : not null access Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Flyology.Cancellation.Token := null)
-      return Receive_Exactly_Operation;
+      Token   : access Flyology.Cancellation.Token := null) return Receive_Exactly_Operation;
 
    --  Start or restart an exact-receive operation.
    --  @param Item Open standalone TLS connection
@@ -385,9 +375,9 @@ package Flyology.IO.TLS is
       Timeout   : Duration := Infinite;
       Token     : access Flyology.Cancellation.Token := null;
       Operation : in out Receive_Exactly_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a composable complete encrypted send.
    --  @param Set Completion set owning the operation slot
@@ -401,8 +391,7 @@ package Flyology.IO.TLS is
       Item    : not null access Connection'Class;
       Data    : not null access constant Ada.Streams.Stream_Element_Array;
       Timeout : Duration := Infinite;
-      Token   : access Flyology.Cancellation.Token := null)
-      return Send_All_Operation;
+      Token   : access Flyology.Cancellation.Token := null) return Send_All_Operation;
 
    --  Start or restart a complete-send operation.
    --  @param Item Open standalone TLS connection
@@ -416,9 +405,9 @@ package Flyology.IO.TLS is
       Timeout   : Duration := Infinite;
       Token     : access Flyology.Cancellation.Token := null;
       Operation : in out Send_All_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start a composable TLS close-notify exchange.
    --  @param Set Completion set owning the operation slot
@@ -430,8 +419,7 @@ package Flyology.IO.TLS is
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
       Item    : not null access Connection'Class;
       Timeout : Duration := Infinite;
-      Token   : access Flyology.Cancellation.Token := null)
-      return Shutdown_Operation;
+      Token   : access Flyology.Cancellation.Token := null) return Shutdown_Operation;
 
    --  Start or restart a shutdown operation.
    --  @param Item Open standalone TLS connection
@@ -443,9 +431,9 @@ package Flyology.IO.TLS is
       Timeout   : Duration := Infinite;
       Token     : access Flyology.Cancellation.Token := null;
       Operation : in out Shutdown_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal handshake operation.
    --  @param Operation Terminal handshake operation
@@ -453,9 +441,7 @@ package Flyology.IO.TLS is
    --  Consume a terminal receive and publish Last.
    --  @param Operation Terminal receive operation
    --  @param Last Last element received, or Data'First - 1 on close-notify
-   procedure Finish
-     (Operation : in out Receive_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Receive_Operation; Last : out Ada.Streams.Stream_Element_Offset);
    --  Consume a terminal exact-receive operation.
    --  @param Operation Terminal exact-receive operation
    procedure Finish (Operation : in out Receive_Exactly_Operation);
@@ -500,8 +486,7 @@ private
       Socket      : in out Flyology.IO.Sockets.Socket_Type;
       Side        : Role;
       Server_Name : String;
-      Factory     : not null access function
-        (FD : Descriptor) return Session_Access;
+      Factory     : not null access function (FD : Descriptor) return Session_Access;
       Item        : in out Connection);
 
    --  @exclude
@@ -509,11 +494,10 @@ private
    --  @param Query Capability-specific session query
    --  @return Stable query result copied under operation serialization
    function Query_Session
-     (Item  : in out Connection;
-      Query : not null access function
-        (Value : Session'Class) return String) return String;
+     (Item : in out Connection; Query : not null access function (Value : Session'Class) return String)
+      return String;
 
-   type Descriptor_Generation is mod 2 ** 64;
+   type Descriptor_Generation is mod 2**64;
    --  Distinguish a busy lease from acquisition and lifecycle cancellation.
    type Lease_Result is (Lease_Busy, Lease_Acquired, Lease_Cancelled);
    type Operation_State is (Unregistered, Registered, Acquired);
@@ -533,16 +517,11 @@ private
          FD                  : in out Descriptor;
          Close_Source        : in out Descriptor);
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation;
-         State      : not null access Operation_State);
+        (Generation : Descriptor_Generation; State : not null access Operation_State);
       procedure Check_Operation (Generation : Descriptor_Generation);
-      procedure Release
-        (Generation : Descriptor_Generation;
-         State      : not null access Operation_State);
+      procedure Release (Generation : Descriptor_Generation; State : not null access Operation_State);
       procedure Begin_Close
-        (FD         : out Descriptor;
-         Generation : out Descriptor_Generation;
-         Leader     : out Boolean);
+        (FD : out Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean);
       entry Await_Drained;
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
@@ -579,7 +558,8 @@ private
    procedure Release_Operation (Guard : in out Operation_Guard);
    --  @exclude
    --  @param Guard Internal lease guard
-   overriding procedure Finalize (Guard : in out Operation_Guard);
+   overriding
+   procedure Finalize (Guard : in out Operation_Guard);
 
    type Cancellation_Access is access all Flyology.Cancellation.Token;
 
@@ -609,9 +589,7 @@ private
    --  @exclude
    --  @param State Internal driver state
    --  @param Result Lease retry result
-   procedure Poll_Driver
-     (State  : in out Driver_State;
-      Result : out Lease_Result);
+   procedure Poll_Driver (State : in out Driver_State; Result : out Lease_Result);
    --  @exclude
    --  @param State Internal driver state
    procedure Check_Driver (State : in out Driver_State);
@@ -626,8 +604,7 @@ private
    --  @param State Internal driver state
    --  @param Operation Outer operation to arm
    procedure Arm_Driver_Acquisition
-     (State     : in out Driver_State;
-      Operation : in out Flyology.Operations.Operation'Class);
+     (State : in out Driver_State; Operation : in out Flyology.Operations.Operation'Class);
    --  @exclude
    --  @param State Internal driver state
    --  @param Operation Outer operation to arm
@@ -640,22 +617,13 @@ private
    --  @param State Internal driver state
    --  @param Operation Outer operation to arm
    procedure Arm_Driver_Deadline
-     (State     : in out Driver_State;
-      Operation : in out Flyology.Operations.Operation'Class);
+     (State : in out Driver_State; Operation : in out Flyology.Operations.Operation'Class);
 
-   type Scoped_TLS_Kind is
-     (Handshake_IO,
-      Receive_One,
-      Receive_Complete,
-      Send_Complete,
-      Shutdown_IO);
-   type Stream_Array_Access is access all
-     Ada.Streams.Stream_Element_Array;
-   type Constant_Stream_Array_Access is access constant
-     Ada.Streams.Stream_Element_Array;
+   type Scoped_TLS_Kind is (Handshake_IO, Receive_One, Receive_Complete, Send_Complete, Shutdown_IO);
+   type Stream_Array_Access is access all Ada.Streams.Stream_Element_Array;
+   type Constant_Stream_Array_Access is access constant Ada.Streams.Stream_Element_Array;
 
-   type Connection_Operation is
-     abstract new Flyology.Operations.Operation with record
+   type Connection_Operation is abstract new Flyology.Operations.Operation with record
       State       : Driver_State;
       Kind        : Scoped_TLS_Kind := Handshake_IO;
       Data        : Stream_Array_Access := null;
@@ -669,22 +637,21 @@ private
    --  @exclude
    --  @param Item Internal scoped TLS operation
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out Connection_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Connection_Operation; Event : Flyology.Operations.Driver_Event);
    --  @exclude
    --  @param Item Internal scoped TLS operation
-   overriding procedure Request_Cancellation
-     (Item : in out Connection_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Connection_Operation);
 
    type Handshake_Operation is new Connection_Operation with null record;
    type Receive_Operation is new Connection_Operation with null record;
-   type Receive_Exactly_Operation is
-     new Connection_Operation with null record;
+   type Receive_Exactly_Operation is new Connection_Operation with null record;
    type Send_All_Operation is new Connection_Operation with null record;
    type Shutdown_Operation is new Connection_Operation with null record;
 
    --  Close Item without propagating finalization errors.
    --  @param Item Connection being finalized
-   overriding procedure Finalize (Item : in out Connection);
+   overriding
+   procedure Finalize (Item : in out Connection);
 end Flyology.IO.TLS;

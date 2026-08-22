@@ -4,6 +4,7 @@ with Flyology.Observability;
 
 --  Compile and run the utilization example printed in the website guide, so
 --  that page cannot drift from the public API.
+
 procedure Guide_Utilization_Example is
    task Probe is
       pragma Task_Info (Flyology.Lightweight_Task);
@@ -21,12 +22,14 @@ begin
    begin
       if Flyology.Observability.Snapshot (0, Sample) then
          Ada.Text_IO.Put_Line
-           ("uptime ns=" & Sample.Uptime_Nanoseconds'Image
-            & " idle ns=" & Sample.Idle_Nanoseconds'Image
+           ("uptime ns="
+            & Sample.Uptime_Nanoseconds'Image
+            & " idle ns="
+            & Sample.Idle_Nanoseconds'Image
             & " busy ns="
-            & Flyology.Observability.Counter'Image
-                (Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds)
-            & " poller waits=" & Sample.Idle_Waits'Image);
+            & Flyology.Observability.Counter'Image (Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds)
+            & " poller waits="
+            & Sample.Idle_Waits'Image);
       else
          raise Program_Error with "guide example found no group snapshot";
       end if;

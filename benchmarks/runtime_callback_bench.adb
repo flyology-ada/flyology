@@ -35,6 +35,7 @@ with Flyology_Bench.Reporters;
 --
 --  Run with no argument to print results. Pass "save <directory>" to persist
 --  baselines and "check <directory>" to compare against them.
+
 procedure Runtime_Callback_Bench is
    package Bench renames Flyology_Bench;
 
@@ -50,8 +51,7 @@ procedure Runtime_Callback_Bench is
    end record
    with Convention => C;
 
-   function Monotonic_Clock
-     (Value : access Timespec) return Interfaces.C.int;
+   function Monotonic_Clock (Value : access Timespec) return Interfaces.C.int;
    pragma Import (C, Monotonic_Clock, "flyology_monotonic_clock");
 
    --  Volatile so the escaping callback cannot be optimized away, which would
@@ -102,8 +102,7 @@ procedure Runtime_Callback_Bench is
 
    procedure Select_Debug_Producer is
    begin
-      Selected_Producer :=
-        Flyology.Debug_Producer_Selection.Choose (Producer_Count => 4);
+      Selected_Producer := Flyology.Debug_Producer_Selection.Choose (Producer_Count => 4);
    end Select_Debug_Producer;
 
    procedure Measure_Trampoline is new Bench.Measure (Trampoline_Cycle);
@@ -113,10 +112,7 @@ procedure Runtime_Callback_Bench is
    procedure Measure_Selection is new Bench.Measure (Select_Debug_Producer);
 
    Config : constant Bench.Configuration :=
-     (Bench.Default_Configuration with delta
-        Warmup_Time      => 0.100,
-        Measurement_Time => 0.750,
-        Samples          => 50);
+     (Bench.Default_Configuration with delta Warmup_Time => 0.100, Measurement_Time => 0.750, Samples => 50);
 
    Lightweight_Trampoline : Bench.Measurement;
    Lightweight_Dispatch   : Bench.Measurement;
@@ -128,7 +124,8 @@ procedure Runtime_Callback_Bench is
 
    --  The environment task is native, so the lightweight measurements run in a
    --  task pinned to one execution group.
-   task Lightweight_Probe with CPU => 1 is
+   task Lightweight_Probe
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Lightweight_Probe;
 
@@ -139,8 +136,7 @@ procedure Runtime_Callback_Bench is
       Measure_Idle_Cycle (Config => Config, Result => Lightweight_Idle_Cycle);
       Measure_Selection (Config => Config, Result => Lightweight_Selection);
       if Selected_Producer /= 2 then
-         raise Program_Error with
-           "lightweight debug producer selector returned the wrong shard";
+         raise Program_Error with "lightweight debug producer selector returned the wrong shard";
       end if;
    end Lightweight_Probe;
 
@@ -153,8 +149,8 @@ procedure Runtime_Callback_Bench is
       Debug_Selector_Lightweight,
       Debug_Selector_Native);
 
-   function Label (Item : Case_Name) return String is
-     (case Item is
+   function Label (Item : Case_Name) return String
+   is (case Item is
          when Trampoline_Cycle_Lightweight => "trampoline_cycle_lightweight",
          when Trampoline_Cycle_Native      => "trampoline_cycle_native",
          when Fiber_Dispatch_Case          => "fiber_dispatch",
@@ -163,8 +159,8 @@ procedure Runtime_Callback_Bench is
          when Debug_Selector_Lightweight   => "debug_selector_lightweight",
          when Debug_Selector_Native        => "debug_selector_native");
 
-   function Result_Of (Item : Case_Name) return Bench.Measurement is
-     (case Item is
+   function Result_Of (Item : Case_Name) return Bench.Measurement
+   is (case Item is
          when Trampoline_Cycle_Lightweight => Lightweight_Trampoline,
          when Trampoline_Cycle_Native      => Native_Trampoline,
          when Fiber_Dispatch_Case          => Lightweight_Dispatch,
@@ -174,13 +170,9 @@ procedure Runtime_Callback_Bench is
          when Debug_Selector_Native        => Native_Selection);
 
    Mode      : constant String :=
-     (if Ada.Command_Line.Argument_Count >= 1
-      then Ada.Command_Line.Argument (1)
-      else "report");
+     (if Ada.Command_Line.Argument_Count >= 1 then Ada.Command_Line.Argument (1) else "report");
    Directory : constant String :=
-     (if Ada.Command_Line.Argument_Count >= 2
-      then Ada.Command_Line.Argument (2)
-      else "");
+     (if Ada.Command_Line.Argument_Count >= 2 then Ada.Command_Line.Argument (2) else "");
    Regressed : Boolean := False;
 begin
    --  Wait for the lightweight probe before measuring on this native task, so
@@ -216,20 +208,14 @@ begin
       end if;
       for Item in Case_Name loop
          declare
-            Saved : constant Bench.Baselines.Baseline :=
-              Bench.Baselines.Load
-                (Directory & "/" & Label (Item) & ".baseline");
-            Change : constant Bench.Baselines.Regression :=
-              Bench.Baselines.Compare (Saved, Result_Of (Item));
+            Saved  : constant Bench.Baselines.Baseline :=
+              Bench.Baselines.Load (Directory & "/" & Label (Item) & ".baseline");
+            Change : constant Bench.Baselines.Regression := Bench.Baselines.Compare (Saved, Result_Of (Item));
          begin
             Ada.Text_IO.Put_Line
-              (Label (Item)
-               & ": time change "
-               & Bench.Baselines.Time_Change_Percent (Change)'Image
-               & "%");
+              (Label (Item) & ": time change " & Bench.Baselines.Time_Change_Percent (Change)'Image & "%");
             if not Bench.Baselines.Compatible (Change) then
-               Ada.Text_IO.Put_Line
-                 (Label (Item) & ": baseline host or build is incompatible");
+               Ada.Text_IO.Put_Line (Label (Item) & ": baseline host or build is incompatible");
             elsif Bench.Baselines.Time_Change_Percent (Change) > 10.0 then
                Ada.Text_IO.Put_Line (Label (Item) & ": REGRESSED");
                Regressed := True;

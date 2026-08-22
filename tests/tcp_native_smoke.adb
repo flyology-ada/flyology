@@ -17,16 +17,11 @@ procedure TCP_Native_Smoke is
    SO_NOSIGPIPE : constant C.int := 16#1022#;
 
    function Get_Socket_Option
-     (Socket     : C.int;
-      Level      : C.int;
-      Option     : C.int;
-      Value      : System.Address;
-      Value_Size : access C.unsigned) return C.int;
+     (Socket : C.int; Level : C.int; Option : C.int; Value : System.Address; Value_Size : access C.unsigned)
+      return C.int;
    pragma Import (C, Get_Socket_Option, "getsockopt");
 
-   function SIGPIPE_Is_Disabled
-     (Socket : Flyology.IO.Sockets.Socket_Type) return Boolean
-   is
+   function SIGPIPE_Is_Disabled (Socket : Flyology.IO.Sockets.Socket_Type) return Boolean is
       Value : aliased C.int := 0;
       Size  : aliased C.unsigned := C.unsigned (C.int'Size / 8);
    begin
@@ -41,7 +36,8 @@ procedure TCP_Native_Smoke is
            SOL_SOCKET,
            SO_NOSIGPIPE,
            Value'Address,
-           Size'Access) = 0
+           Size'Access)
+        = 0
         and then Value = 1;
    end SIGPIPE_Is_Disabled;
 
@@ -69,16 +65,15 @@ procedure TCP_Native_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Results;
 
 begin
    Flyology.IO.Sockets.Create_Socket (Listener);
    Flyology.IO.Sockets.Bind_Socket
      (Listener,
-      Flyology.IO.Sockets.Network_Endpoint
-        (Flyology.IO.Sockets.Loopback_IPv4,
-         Flyology.IO.Sockets.Any_Port));
+      Flyology.IO.Sockets.Network_Endpoint (Flyology.IO.Sockets.Loopback_IPv4, Flyology.IO.Sockets.Any_Port));
    Flyology.IO.Sockets.Listen_Socket (Listener);
    Address := Flyology.IO.Sockets.Get_Socket_Name (Listener);
 
@@ -92,35 +87,33 @@ begin
       end Client;
 
       task body Server is
-         Peer : Flyology.IO.Sockets.Socket_Type;
-         From : Flyology.IO.Sockets.Endpoint;
-         Data : Stream_Element_Array (1 .. 1);
-         Last : Stream_Element_Offset;
+         Peer  : Flyology.IO.Sockets.Socket_Type;
+         From  : Flyology.IO.Sockets.Endpoint;
+         Data  : Stream_Element_Array (1 .. 1);
+         Last  : Stream_Element_Offset;
          Stage : Natural := 0;
       begin
          Stage := 1;
-         Flyology.IO.Sockets.Accept_Connection
-           (Listener, Peer, From, Timeout => 1.0);
+         Flyology.IO.Sockets.Accept_Connection (Listener, Peer, From, Timeout => 1.0);
          Stage := 2;
          Flyology.IO.Sockets.Receive (Peer, Data, Last, Timeout => 1.0);
          Stage := 3;
-         Results.Report
-           (Last = Data'Last
-            and then Data (1) = 42
-            and then SIGPIPE_Is_Disabled (Peer));
+         Results.Report (Last = Data'Last and then Data (1) = 42 and then SIGPIPE_Is_Disabled (Peer));
          Stage := 4;
          Flyology.IO.Sockets.Close_Socket (Peer);
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
-              ("native server failed at stage" & Stage'Image & ": "
+              ("native server failed at stage"
+               & Stage'Image
+               & ": "
                & Ada.Exceptions.Exception_Information (Occurrence));
             Results.Report (False);
       end Server;
 
       task body Client is
-         Data : constant Stream_Element_Array (1 .. 1) := [1 => 42];
-         Last : Stream_Element_Offset;
+         Data  : constant Stream_Element_Array (1 .. 1) := [1 => 42];
+         Last  : Stream_Element_Offset;
          Stage : Natural := 0;
       begin
          Stage := 1;
@@ -141,7 +134,9 @@ begin
       exception
          when Occurrence : others =>
             Ada.Text_IO.Put_Line
-              ("native client failed at stage" & Stage'Image & ": "
+              ("native client failed at stage"
+               & Stage'Image
+               & ": "
                & Ada.Exceptions.Exception_Information (Occurrence));
             Results.Report (False);
       end Client;

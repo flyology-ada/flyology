@@ -9,6 +9,7 @@ with Interfaces.C;
 --
 --     Stop : aliased Flyology.Cancellation.Token;
 --     Stop.Request;
+
 package Flyology.Cancellation is
    pragma Preelaborate;
 
@@ -39,8 +40,7 @@ package Flyology.Cancellation is
       --  @param FD Borrowed descriptor, or -1 when already requested
       --  @param Already_Requested True when Request preceded this call
       --  @exception Program_Error Wake descriptor creation fails
-      procedure Wait_Source
-        (FD : out Interfaces.C.int; Already_Requested : out Boolean);
+      procedure Wait_Source (FD : out Interfaces.C.int; Already_Requested : out Boolean);
    private
       Is_Requested : Boolean := False;  --  One-shot state
       Wake         : Flyology.Wake_Sources.Source;  --  Owned readiness source

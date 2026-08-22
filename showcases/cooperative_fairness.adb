@@ -11,11 +11,7 @@ procedure Cooperative_Fairness is
    Work_Time  : constant Time_Span := Milliseconds (300);
    Pulse_Time : constant Duration := 0.020;
 
-   procedure Run
-     (Cooperative  : Boolean;
-      Pulse_Latency : out Duration;
-      Work_Elapsed  : out Duration)
-   is
+   procedure Run (Cooperative : Boolean; Pulse_Latency : out Duration; Work_Elapsed : out Duration) is
       protected State is
          procedure Arm;
          entry Await_Arm (Started : out Time);
@@ -25,11 +21,11 @@ procedure Cooperative_Fairness is
          function Pulse_At return Time;
          function Finished_At return Time;
       private
-         Armed      : Boolean := False;
-         Completed  : Natural := 0;
-         Armed_At   : Time := Time_First;
-         Pulsed_At  : Time := Time_First;
-         Work_At    : Time := Time_First;
+         Armed     : Boolean := False;
+         Completed : Natural := 0;
+         Armed_At  : Time := Time_First;
+         Pulsed_At : Time := Time_First;
+         Work_At   : Time := Time_First;
       end State;
 
       protected body State is
@@ -61,8 +57,10 @@ procedure Cooperative_Fairness is
             null;
          end Await_Completion;
 
-         function Pulse_At return Time is (Pulsed_At);
-         function Finished_At return Time is (Work_At);
+         function Pulse_At return Time
+         is (Pulsed_At);
+         function Finished_At return Time
+         is (Work_At);
       end State;
 
       task CPU_Work is
@@ -120,19 +118,13 @@ begin
    Run (True, Cooperative_Pulse, Cooperative_Work);
 
    Put_Line
-     ("  no checkpoints: pulse=" & Uncooperative_Pulse'Image
-      & " s, work=" & Uncooperative_Work'Image & " s");
+     ("  no checkpoints: pulse=" & Uncooperative_Pulse'Image & " s, work=" & Uncooperative_Work'Image & " s");
    Put_Line
-     ("  100 us budget: pulse=" & Cooperative_Pulse'Image
-      & " s, work=" & Cooperative_Work'Image & " s");
+     ("  100 us budget: pulse=" & Cooperative_Pulse'Image & " s, work=" & Cooperative_Work'Image & " s");
    Put_Line
      ("  pulse-latency improvement: "
       & Showcase_Support.Fixed_Image
-          (Long_Float (Uncooperative_Pulse) /
-           Long_Float (Cooperative_Pulse),
-           Decimals => 2)
+          (Long_Float (Uncooperative_Pulse) / Long_Float (Cooperative_Pulse), Decimals => 2)
       & "x");
-   Put_Line
-     ("checkpoints preserve cooperative safety; they do not preempt arbitrary"
-      & " Ada instructions");
+   Put_Line ("checkpoints preserve cooperative safety; they do not preempt arbitrary" & " Ada instructions");
 end Cooperative_Fairness;

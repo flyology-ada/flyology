@@ -11,15 +11,10 @@ procedure Socket_Preparation_Benchmark is
    use Ada.Streams;
    use type Ada.Real_Time.Time;
    procedure Reset_Nonblocking_Setups
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_socket_reset_nonblocking_setups";
+   with Import, Convention => C, External_Name => "flyology_test_socket_reset_nonblocking_setups";
 
-   function Nonblocking_Setup_Count
-     return Interfaces.C.unsigned_long_long
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_socket_nonblocking_setup_count";
+   function Nonblocking_Setup_Count return Interfaces.C.unsigned_long_long
+   with Import, Convention => C, External_Name => "flyology_test_socket_nonblocking_setup_count";
 
    function Parse_Rounds return Positive is
    begin
@@ -32,11 +27,11 @@ procedure Socket_Preparation_Benchmark is
       end if;
    end Parse_Rounds;
 
-   Rounds : constant Positive := Parse_Rounds;
+   Rounds         : constant Positive := Parse_Rounds;
    Server, Client : Sockets.Socket_Type;
    Server_Address : Sockets.Endpoint;
-   Request  : constant Stream_Element_Array := [16#A5#];
-   Response : constant Stream_Element_Array := [16#5A#];
+   Request        : constant Stream_Element_Array := [16#A5#];
+   Response       : constant Stream_Element_Array := [16#5A#];
 
    protected Completion is
       procedure Report (Succeeded : Boolean);
@@ -68,14 +63,10 @@ procedure Socket_Preparation_Benchmark is
 
 begin
    Sockets.Create_Socket (Server, Sockets.IPv4, Sockets.Socket_Datagram);
-   Sockets.Bind_Socket
-     (Server,
-      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+   Sockets.Bind_Socket (Server, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
    Server_Address := Sockets.Get_Socket_Name (Server);
    Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
-   Sockets.Bind_Socket
-     (Client,
-      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+   Sockets.Bind_Socket (Client, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
    Reset_Nonblocking_Setups;
 
    declare
@@ -90,16 +81,17 @@ begin
          Metadata : Sockets.Datagram_Metadata;
       begin
          for Iteration in 1 .. Rounds loop
-            Sockets.Receive_Datagram
-              (Server, Buffer, Last, Metadata, Timeout => 5.0);
+            Sockets.Receive_Datagram (Server, Buffer, Last, Metadata, Timeout => 5.0);
             if Last /= Buffer'Last or else Buffer /= Request then
                raise Program_Error with "benchmark request mismatch";
             end if;
             Sockets.Send_Datagram
-              (Server, Response, Sent,
+              (Server,
+               Response,
+               Sent,
                Destination => Metadata.Source,
-               Source => Metadata.Destination,
-               Timeout => 5.0);
+               Source      => Metadata.Destination,
+               Timeout     => 5.0);
             if Sent /= Response'Last then
                raise Program_Error with "benchmark response send mismatch";
             end if;
@@ -110,23 +102,18 @@ begin
             Completion.Report (False);
       end Server_Task;
 
-      Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Buffer  : Stream_Element_Array (Response'Range);
-      Last    : Stream_Element_Offset;
-      Sent    : Stream_Element_Offset;
-      Metadata : Sockets.Datagram_Metadata;
+      Started   : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Buffer    : Stream_Element_Array (Response'Range);
+      Last      : Stream_Element_Offset;
+      Sent      : Stream_Element_Offset;
+      Metadata  : Sockets.Datagram_Metadata;
       Server_OK : Boolean;
-      Elapsed : Duration;
+      Elapsed   : Duration;
    begin
       for Iteration in 1 .. Rounds loop
-         Sockets.Send_Datagram
-           (Client, Request, Sent, Server_Address, Timeout => 5.0);
-         Sockets.Receive_Datagram
-           (Client, Buffer, Last, Metadata, Timeout => 5.0);
-         if Sent /= Request'Last
-           or else Last /= Buffer'Last
-           or else Buffer /= Response
-         then
+         Sockets.Send_Datagram (Client, Request, Sent, Server_Address, Timeout => 5.0);
+         Sockets.Receive_Datagram (Client, Buffer, Last, Metadata, Timeout => 5.0);
+         if Sent /= Request'Last or else Last /= Buffer'Last or else Buffer /= Response then
             raise Program_Error with "benchmark response mismatch";
          end if;
       end loop;
@@ -136,14 +123,14 @@ begin
       end if;
       Elapsed := Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started);
       Ada.Text_IO.Put_Line
-        ("rounds=" & Rounds'Image
-         & " elapsed_seconds=" & Duration'Image (Elapsed)
+        ("rounds="
+         & Rounds'Image
+         & " elapsed_seconds="
+         & Duration'Image (Elapsed)
          & " round_trips_per_second="
-         & Long_Long_Integer'Image
-             (Long_Long_Integer (Duration (Rounds) / Elapsed))
+         & Long_Long_Integer'Image (Long_Long_Integer (Duration (Rounds) / Elapsed))
          & " nonblocking_setups="
-         & Interfaces.C.unsigned_long_long'Image
-             (Nonblocking_Setup_Count));
+         & Interfaces.C.unsigned_long_long'Image (Nonblocking_Setup_Count));
    end;
 
    Sockets.Close_Socket (Client);

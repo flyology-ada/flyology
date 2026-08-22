@@ -5,30 +5,32 @@ package body Flyology.Process_Lifecycle is
    use type C.int;
 
    function Runtime_State return C.int;
-   pragma Import
-     (C, Runtime_State, "flyology_runtime_observe_lifecycle");
+   pragma Import (C, Runtime_State, "flyology_runtime_observe_lifecycle");
 
    function Runtime_Created_Groups return C.int;
-   pragma Import
-     (C,
-      Runtime_Created_Groups,
-      "flyology_runtime_observe_created_groups");
+   pragma Import (C, Runtime_Created_Groups, "flyology_runtime_observe_created_groups");
 
    function State return Event_Runtime_State is
    begin
       case Runtime_State is
-         when 0 =>
+         when 0      =>
             return Dormant;
-         when 1 =>
+
+         when 1      =>
             return Running;
-         when 2 =>
+
+         when 2      =>
             return Finalizing;
-         when 3 =>
+
+         when 3      =>
             return Stopped;
-         when 4 =>
+
+         when 4      =>
             return Cleanup_Deferred;
-         when 5 =>
+
+         when 5      =>
             return Fork_Child;
+
          when others =>
             raise Program_Error with "unknown Flyology lifecycle state";
       end case;

@@ -8,6 +8,7 @@
 --  get_mempolicy and set_mempolicy. Reading them from the wrong table would
 --  call a working but different kernel service, so each table is written out
 --  separately rather than derived.
+
 private package Flyology_NUMA.Syscall_Numbers is
 
    --  Whether this architecture's numbers are recorded here.

@@ -29,15 +29,13 @@ use type Interfaces.Unsigned_64;
 --  @formal Element Immutable byte-backed element stored in each slot
 --  @formal Slots_Per_Chunk Fixed slot count in every allocated slab chunk
 --  @formal Maximum_Chunks Maximum number of arena-backed chunks
+
 generic
-   with package Arena_Provider is new
-     Flyology.Data_Structures.Arenas (<>);
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Arena_Provider is new Flyology.Data_Structures.Arenas (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
    Slots_Per_Chunk : Positive;
-   Maximum_Chunks  : Positive;
-package Flyology.Data_Structures.Allocation_Pools.Adaptive
-  with Preelaborate is
+   Maximum_Chunks : Positive;
+package Flyology.Data_Structures.Allocation_Pools.Adaptive with Preelaborate is
 
    --  Smallest backing-arena allocation alignment accepted by this pool.
    Minimum_Arena_Alignment : constant Byte_Count := 64;
@@ -47,19 +45,19 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
 
    --  Schema binds arena, element, and fixed chunk geometry.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_4150_4F4F_0001# xor Arena_Provider.Identity.Magic xor
-     Arena_Provider.Identity.Schema xor Element.Signature xor
-     Interfaces.Shift_Left
-       (Interfaces.Unsigned_64 (Element.Version), 32) xor
-     Interfaces.Unsigned_64 (Slots_Per_Chunk) xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Maximum_Chunks), 32);
+     16#0001_4150_4F4F_0001#
+     xor Arena_Provider.Identity.Magic
+     xor Arena_Provider.Identity.Schema
+     xor Element.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32)
+     xor Interfaces.Unsigned_64 (Slots_Per_Chunk)
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Maximum_Chunks), 32);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 1;
 
    --  Complete persisted pool identity.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Generation-stamped address-independent slot identity.
    --  @field Chunk One-based chunk table index
@@ -72,12 +70,13 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
       Stamp : Handles.Generation := 0;
       Epoch : Interfaces.Unsigned_32 := 0;
    end record;
-   for Handle use record
-      Chunk at 0 range 0 .. 31;
-      Slot  at 4 range 0 .. 31;
-      Stamp at 8 range 0 .. 31;
-      Epoch at 12 range 0 .. 31;
-   end record;
+   for Handle use
+     record
+       Chunk at 0 range 0 .. 31;
+       Slot at 4 range 0 .. 31;
+       Stamp at 8 range 0 .. 31;
+       Epoch at 12 range 0 .. 31;
+     end record;
    for Handle'Size use 128;
 
    --  Null adaptive-pool relationship.
@@ -88,8 +87,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @enum Exhausted Every permitted chunk is full
    --  @enum Allocation_Contended Pool or slot metadata is currently owned
    --  @enum Arena_Exhausted The backing arena cannot allocate another chunk
-   type Allocation_Result is
-     (Allocated, Exhausted, Allocation_Contended, Arena_Exhausted);
+   type Allocation_Result is (Allocated, Exhausted, Allocation_Contended, Arena_Exhausted);
 
    --  Process-local attached view with bounded chunk attachment caches.
    type View is limited private;
@@ -109,10 +107,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Arena Attached backing arena
    --  @exception Constraint_Error Arena allocation alignment is insufficient
    procedure Initialize
-     (Item     : out View;
-      Region   : Region_View;
-      Location : Region_Offset;
-      Arena    : Arena_Provider.View);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Arena : Arena_Provider.View);
 
    --  Create in allocation-certified virgin bytes or attach to an exact ready
    --  pool. Arena algorithm, instance, incarnation, element, and chunk
@@ -139,10 +134,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --    chunk is incompatible or corrupt
    --  @exception Busy_Error A chunk creation was active or abandoned
    procedure Attach
-     (Item     : out View;
-      Region   : Region_View;
-      Location : Region_Offset;
-      Arena    : Arena_Provider.View);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Arena : Arena_Provider.View);
 
    --  Detach local chunk caches and the outer view without releasing storage.
    --  @param Item View to detach
@@ -179,30 +171,20 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Value Live adaptive-pool handle
    --  @param Data Observation assigned on success
    procedure Read
-     (Item  : in out View;
-      Arena : Arena_Provider.View;
-      Value : Handle;
-      Data  : out Element.Observed);
+     (Item : in out View; Arena : Arena_Provider.View; Value : Handle; Data : out Element.Observed);
 
    --  Replace one live immutable element.
    --  @param Item Non-shared process-local pool view
    --  @param Arena Matching backing arena view
    --  @param Value Live adaptive-pool handle
    --  @param Data Application value accepted by Element
-   procedure Replace
-     (Item  : in out View;
-      Arena : Arena_Provider.View;
-      Value : Handle;
-      Data  : Element.Source);
+   procedure Replace (Item : in out View; Arena : Arena_Provider.View; Value : Handle; Data : Element.Source);
 
    --  Release one live slot. Every copy of Value becomes stale.
    --  @param Item Non-shared process-local pool view
    --  @param Arena Matching backing arena view
    --  @param Value Live adaptive-pool handle
-   procedure Release
-     (Item  : in out View;
-      Arena : Arena_Provider.View;
-      Value : Handle);
+   procedure Release (Item : in out View; Arena : Arena_Provider.View; Value : Handle);
 
    --  Destroy every empty chunk, return its allocation to Arena, invalidate
    --  the outer pool, and detach Item. All views and handles must be
@@ -212,24 +194,20 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive
    --  @param Item Exclusively synchronized pool view
    --  @param Arena Matching exclusively synchronized backing arena view
    --  @exception Program_Error A chunk still contains a live slot
-   procedure Destroy
-     (Item : in out View; Arena : in out Arena_Provider.View);
+   procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 
 private
-   package Chunk_Slabs is new Flyology.Data_Structures.Slab_Pools
-     (Element => Element);
+   package Chunk_Slabs is new Flyology.Data_Structures.Slab_Pools (Element => Element);
 
    type Chunk_Cache is limited record
-      Region : Region_View;
-      Slab   : Chunk_Slabs.View;
-      Allocation : Arena_Provider.Allocation_Handle :=
-        Arena_Provider.Null_Allocation;
+      Region     : Region_View;
+      Slab       : Chunk_Slabs.View;
+      Allocation : Arena_Provider.Allocation_Handle := Arena_Provider.Null_Allocation;
    end record;
-   type Chunk_Cache_Array is
-     array (Positive range 1 .. Maximum_Chunks) of Chunk_Cache;
+   type Chunk_Cache_Array is array (Positive range 1 .. Maximum_Chunks) of Chunk_Cache;
    type View is limited record
-      Core          : Layouts.Local_View;
-      Guard_Address : System.Address := System.Null_Address;
+      Core           : Layouts.Local_View;
+      Guard_Address  : System.Address := System.Null_Address;
       Arena_Instance : Interfaces.Unsigned_64 := 0;
       Arena_Epoch    : Interfaces.Unsigned_32 := 0;
       Chunks         : Chunk_Cache_Array;

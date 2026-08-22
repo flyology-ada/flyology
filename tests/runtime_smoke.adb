@@ -19,9 +19,9 @@ procedure Runtime_Smoke is
       entry Await_Complete;
       function Passed return Boolean;
    private
-      Event_Reported            : Boolean := False;
-      Native_Reported           : Boolean := False;
-      Event_Was_Separate        : Boolean := False;
+      Event_Reported           : Boolean := False;
+      Native_Reported          : Boolean := False;
+      Event_Was_Separate       : Boolean := False;
       Native_Was_Separate      : Boolean := False;
       Rendezvous_Was_Completed : Boolean := False;
       Event_Delay_Was_Correct  : Boolean := False;
@@ -46,20 +46,16 @@ procedure Runtime_Smoke is
          Event_Delay_Was_Correct := Delay_Was_Correct;
       end Rendezvous_Completed;
 
-      entry Await_Complete
-        when Event_Reported
-          and Native_Reported
-          and Rendezvous_Was_Completed
-      is
+      entry Await_Complete when Event_Reported and Native_Reported and Rendezvous_Was_Completed is
       begin
          null;
       end Await_Complete;
 
-      function Passed return Boolean is
-        (Event_Was_Separate
-         and Native_Was_Separate
-         and Rendezvous_Was_Completed
-         and Event_Delay_Was_Correct);
+      function Passed return Boolean
+      is (Event_Was_Separate
+          and Native_Was_Separate
+          and Rendezvous_Was_Completed
+          and Event_Delay_Was_Correct);
    end Results;
 
    task Lightweight is
@@ -74,8 +70,7 @@ procedure Runtime_Smoke is
       accept Called_From_Native;
       Started := Clock;
       delay 0.020;
-      Results.Rendezvous_Completed
-        (To_Duration (Clock - Started) >= 0.019);
+      Results.Rendezvous_Completed (To_Duration (Clock - Started) >= 0.019);
    end Lightweight;
 
    task Native is

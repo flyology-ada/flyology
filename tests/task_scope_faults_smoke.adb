@@ -10,6 +10,7 @@ with Worker_Pool_Test_Control;
 --  Task-scope lifecycle behavior that needs injected faults or timing
 --  evidence. Each section is individually selectable so one regression can be
 --  reproduced on its own.
+
 procedure Task_Scope_Faults_Smoke is
    use type Ada.Real_Time.Time;
    use type Interfaces.C.int;
@@ -78,7 +79,8 @@ procedure Task_Scope_Faults_Smoke is
          Instant := Ada.Real_Time.Clock;
       end Mark_Request;
 
-      function Requested_At return Ada.Real_Time.Time is (Instant);
+      function Requested_At return Ada.Real_Time.Time
+      is (Instant);
    end Cancel_Timing;
 
    protected Progress is
@@ -114,7 +116,8 @@ procedure Task_Scope_Faults_Smoke is
          null;
       end Await_Started;
 
-      function Finished return Boolean is (Complete);
+      function Finished return Boolean
+      is (Complete);
    end Progress;
 
    --  Borrow the scope token's wake descriptor, then stay inside Execute for
@@ -163,17 +166,12 @@ procedure Task_Scope_Faults_Smoke is
    begin
       Cancel_Timing.Mark_Started;
       Token.Await_Request;
-      Result :=
-        Ada.Real_Time.To_Duration
-          (Ada.Real_Time.Clock - Cancel_Timing.Requested_At);
+      Result := Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Cancel_Timing.Requested_At);
    end Measure_Cancellation;
 
-   package Hold_Scopes is new
-     Flyology.Task_Scopes (Integer, Integer, Cancelled_Hold);
-   package Idle_Scopes is new
-     Flyology.Task_Scopes (Integer, Integer, Never_Run);
-   package Timing_Scopes is new
-     Flyology.Task_Scopes (Integer, Duration, Measure_Cancellation);
+   package Hold_Scopes is new Flyology.Task_Scopes (Integer, Integer, Cancelled_Hold);
+   package Idle_Scopes is new Flyology.Task_Scopes (Integer, Integer, Never_Run);
+   package Timing_Scopes is new Flyology.Task_Scopes (Integer, Duration, Measure_Cancellation);
 
    --  Finalization of an unjoined scope must join its workers even when
    --  requesting local cancellation cannot signal the borrowed wake
@@ -193,7 +191,7 @@ procedure Task_Scope_Faults_Smoke is
             Hold_Scopes.Spawn (Item, 7, Handle);
             Progress.Await_Started;
             Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
-            --  Leaving the block finalizes a configured, unjoined scope.
+         --  Leaving the block finalizes a configured, unjoined scope.
          end;
       exception
          when Program_Error =>
@@ -201,9 +199,7 @@ procedure Task_Scope_Faults_Smoke is
       end;
       --  Finalization really did take the failing signalling path, reported
       --  it, and still waited for the operation to leave Execute.
-      pragma Assert
-        (Worker_Pool_Test_Control
-           .Remaining_Native_Executor_Cancellation_Failures = 0);
+      pragma Assert (Worker_Pool_Test_Control.Remaining_Native_Executor_Cancellation_Failures = 0);
       Worker_Pool_Test_Control.Reset;
       pragma Assert (Reported);
       pragma Assert (Progress.Finished);
@@ -226,9 +222,7 @@ procedure Task_Scope_Faults_Smoke is
       Parent.Request;
       Hold_Scopes.Join (Item);
       --  The monitor really did take the failing signalling path.
-      pragma Assert
-        (Worker_Pool_Test_Control
-           .Remaining_Native_Executor_Cancellation_Failures = 0);
+      pragma Assert (Worker_Pool_Test_Control.Remaining_Native_Executor_Cancellation_Failures = 0);
       Worker_Pool_Test_Control.Reset;
       pragma Assert (Progress.Finished);
       pragma Assert (Hold_Scopes.Succeeded (Item, Handle));
@@ -253,29 +247,34 @@ procedure Task_Scope_Faults_Smoke is
                Failed := True;
          end;
          pragma Assert (Failed);
-         --  Leaving the block must release every created worker.
+      --  Leaving the block must release every created worker.
       end;
       Worker_Pool_Test_Control.Reset;
    end Check_Activation_Failure_Rollback;
 
    --  Report every measured round so a failure says which rounds were slow
    --  and by how much instead of only naming the assertion's source line.
-   procedure Report_Latencies
-     (Observed : Latency_Samples; Prompt : Natural; Worst : Duration) is
+   procedure Report_Latencies (Observed : Latency_Samples; Prompt : Natural; Worst : Duration) is
    begin
       Ada.Text_IO.Put_Line
         (Ada.Text_IO.Standard_Error,
-         "parent cancellation latency:" & Natural'Image (Prompt) & " of"
-         & Natural'Image (Latency_Rounds) & " rounds within"
-         & Duration'Image (Prompt_Limit) & "s (at least"
-         & Natural'Image (Prompt_Rounds_Required) & " required), worst"
-         & Duration'Image (Worst) & "s (ceiling"
-         & Duration'Image (Stall_Ceiling) & "s)");
+         "parent cancellation latency:"
+         & Natural'Image (Prompt)
+         & " of"
+         & Natural'Image (Latency_Rounds)
+         & " rounds within"
+         & Duration'Image (Prompt_Limit)
+         & "s (at least"
+         & Natural'Image (Prompt_Rounds_Required)
+         & " required), worst"
+         & Duration'Image (Worst)
+         & "s (ceiling"
+         & Duration'Image (Stall_Ceiling)
+         & "s)");
       for Round in Observed'Range loop
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
-            "  round" & Integer'Image (Round) & ":"
-            & Duration'Image (Observed (Round)) & "s");
+            "  round" & Integer'Image (Round) & ":" & Duration'Image (Observed (Round)) & "s");
       end loop;
    end Report_Latencies;
 
@@ -293,8 +292,7 @@ procedure Task_Scope_Faults_Smoke is
       for Round in 1 .. Latency_Rounds loop
          declare
             Parent : aliased Flyology.Cancellation.Token;
-            Item   : Timing_Scopes.Scope
-              (Capacity => 1, Parent => Parent'Access);
+            Item   : Timing_Scopes.Scope (Capacity => 1, Parent => Parent'Access);
             Handle : Timing_Scopes.Operation_Handle;
          begin
             Cancel_Timing.Reset;
@@ -324,8 +322,7 @@ procedure Task_Scope_Faults_Smoke is
    end Check_Parent_Cancellation_Is_Prompt;
 
    Selection : constant String :=
-     (if Ada.Command_Line.Argument_Count = 0 then "all"
-      else Ada.Command_Line.Argument (1));
+     (if Ada.Command_Line.Argument_Count = 0 then "all" else Ada.Command_Line.Argument (1));
 begin
    if Selection = "all" or else Selection = "finalize" then
       Check_Finalize_Joins_After_Wake_Failure;

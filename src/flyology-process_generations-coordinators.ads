@@ -9,23 +9,23 @@ private with Flyology.Process_Generations.Transport;
 --  Stable owner for one listener escrow, one active image, and at most one
 --  candidate. Operations are synchronous and must be externally serialized;
 --  each returns only after its protocol boundary is acknowledged.
+
 package Flyology.Process_Generations.Coordinators is
    --  Launch, protocol, application, or image-lifecycle operation failed.
-   Upgrade_Error       : exception;
+   Upgrade_Error      : exception;
    --  Supplied transaction authority does not match the active upgrade.
-   Stale_Authority     : exception;
+   Stale_Authority    : exception;
    --  Requested operation is not valid in the current lifecycle phase.
-   Invalid_Phase       : exception;
+   Invalid_Phase      : exception;
    --  A nonwrapping upgrade or generation identifier is exhausted.
-   Identity_Exhausted  : exception;
+   Identity_Exhausted : exception;
 
    --  Maximum retained failure-message size.
    Maximum_Failure_Length : constant Positive := 256;
    --  Significant retained failure-message length.
    subtype Failure_Length is Natural range 0 .. Maximum_Failure_Length;
    --  Fixed storage for a bounded failure message.
-   type Failure_Buffer is array (Positive range 1 ..
-     Maximum_Failure_Length) of Character;
+   type Failure_Buffer is array (Positive range 1 .. Maximum_Failure_Length) of Character;
 
    --  Point-in-time observation of coordinator state.
    --  @field Initialized Listener escrow and identity are initialized
@@ -44,22 +44,21 @@ package Flyology.Process_Generations.Coordinators is
    --  @field Failure_Size Significant bytes in Failure
    --  @field Failure Fixed storage for the latest bounded failure message
    type Coordinator_Snapshot is record
-      Initialized          : Boolean := False;
-      Phase                : Upgrade_Phase := Stable;
-      Authority            : Upgrade_Handle :=
-        (Coordinator => 1, Upgrade => 1, Candidate => 1);
-      Has_Active           : Boolean := False;
-      Active_Generation    : Image_Generation := 1;
-      Has_Candidate        : Boolean := False;
-      Candidate_Generation : Image_Generation := 1;
-      Candidate_Ready      : Boolean := False;
-      Candidate_Admitted   : Boolean := False;
-      Rollback_Available   : Boolean := False;
-      Desired_Topology_Epoch : Messages.Nonzero_U64 := 1;
+      Initialized             : Boolean := False;
+      Phase                   : Upgrade_Phase := Stable;
+      Authority               : Upgrade_Handle := (Coordinator => 1, Upgrade => 1, Candidate => 1);
+      Has_Active              : Boolean := False;
+      Active_Generation       : Image_Generation := 1;
+      Has_Candidate           : Boolean := False;
+      Candidate_Generation    : Image_Generation := 1;
+      Candidate_Ready         : Boolean := False;
+      Candidate_Admitted      : Boolean := False;
+      Rollback_Available      : Boolean := False;
+      Desired_Topology_Epoch  : Messages.Nonzero_U64 := 1;
       Desired_Topology_Digest : Messages.Topology_Digest := (others => 0);
-      Compensation         : Compensation_Result := Not_Required;
-      Failure_Size         : Failure_Length := 0;
-      Failure              : Failure_Buffer := (others => ' ');
+      Compensation            : Compensation_Result := Not_Required;
+      Failure_Size            : Failure_Length := 0;
+      Failure                 : Failure_Buffer := (others => ' ');
    end record;
 
    --  Extract the significant retained failure text.
@@ -134,10 +133,7 @@ package Flyology.Process_Generations.Coordinators is
    --  @param Item Coordinator holding the ready candidate
    --  @param Authority Exact current transaction authority
    --  @param Timeout Total promotion and previous-image drain timeout
-   procedure Promote
-     (Item      : in out Coordinator;
-      Authority : Upgrade_Handle;
-      Timeout   : Duration := 30.0);
+   procedure Promote (Item : in out Coordinator; Authority : Upgrade_Handle; Timeout : Duration := 30.0);
 
    --  Convenience for bootstrapping the first managed active image.
    --  @param Item Initialized coordinator with no active image
@@ -161,17 +157,13 @@ package Flyology.Process_Generations.Coordinators is
    --  @param Authority Newly allocated rollback transaction authority
    --  @param Timeout Total fencing and fresh-image startup timeout
    procedure Rollback_To_Previous
-     (Item      : in out Coordinator;
-      Authority : out Upgrade_Handle;
-      Timeout   : Duration := 30.0);
+     (Item : in out Coordinator; Authority : out Upgrade_Handle; Timeout : Duration := 30.0);
 
    --  Cleanly drain every managed image when possible, then release listener
    --  escrow. Cleanup failures are reported after all slots are attempted.
    --  @param Item Coordinator to shut down
    --  @param Timeout Total drain timeout for each managed image
-   procedure Shutdown
-     (Item    : in out Coordinator;
-      Timeout : Duration := 30.0);
+   procedure Shutdown (Item : in out Coordinator; Timeout : Duration := 30.0);
 
 private
    package Sockets renames Flyology.IO.Sockets;
@@ -180,13 +172,13 @@ private
 
    type Slot_Index is range 0 .. 1;
    type Image_Slot is limited record
-      Occupied    : Boolean := False;
-      Generation  : Image_Generation := 1;
-      Child       : Flyology.Subprocesses.Process;
-      Control     : Transport.Control_Channel;
+      Occupied     : Boolean := False;
+      Generation   : Image_Generation := 1;
+      Child        : Flyology.Subprocesses.Process;
+      Control      : Transport.Control_Channel;
       Capabilities : Handoffs.Handoff_Channel;
-      Artifact    : Flyology.Subprocesses.Command;
-      Provision   : Messages.Provisioning_Data :=
+      Artifact     : Flyology.Subprocesses.Command;
+      Provision    : Messages.Provisioning_Data :=
         (Application_Signature => 1,
          Topology_Schema       => 1,
          Topology_Epoch        => 1,
@@ -196,18 +188,18 @@ private
    type Slot_Array is array (Slot_Index) of Image_Slot;
 
    type Coordinator is new Ada.Finalization.Limited_Controlled with record
-      State            : Coordinator_Snapshot;
-      Identity         : Coordinator_Id := 1;
-      Next_Upgrade     : Upgrade_Id := 1;
-      Next_Generation  : Image_Generation := 1;
+      State                : Coordinator_Snapshot;
+      Identity             : Coordinator_Id := 1;
+      Next_Upgrade         : Upgrade_Id := 1;
+      Next_Generation      : Image_Generation := 1;
       Upgrade_Exhausted    : Boolean := False;
       Generation_Exhausted : Boolean := False;
-      Listener         : Sockets.Socket_Type;
-      Slots            : Slot_Array;
-      Active_Slot      : Slot_Index := 0;
-      Candidate_Slot   : Slot_Index := 0;
-      Rollback_Artifact : Flyology.Subprocesses.Command;
-      Rollback_Provision : Messages.Provisioning_Data :=
+      Listener             : Sockets.Socket_Type;
+      Slots                : Slot_Array;
+      Active_Slot          : Slot_Index := 0;
+      Candidate_Slot       : Slot_Index := 0;
+      Rollback_Artifact    : Flyology.Subprocesses.Command;
+      Rollback_Provision   : Messages.Provisioning_Data :=
         (Application_Signature => 1,
          Topology_Schema       => 1,
          Topology_Epoch        => 1,
@@ -217,5 +209,6 @@ private
 
    --  Release managed resources without propagating cleanup failures.
    --  @param Item Coordinator owner being finalized
-   overriding procedure Finalize (Item : in out Coordinator);
+   overriding
+   procedure Finalize (Item : in out Coordinator);
 end Flyology.Process_Generations.Coordinators;

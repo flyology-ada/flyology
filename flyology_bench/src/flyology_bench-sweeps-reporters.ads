@@ -6,6 +6,7 @@ with Flyology_Bench.Scaling;
 
 --  Coherent console, CSV, and newline-delimited JSON schemas for sweeps.
 --  These reporters do not alter the crate's existing measurement schemas.
+
 package Flyology_Bench.Sweeps.Reporters is
    --  Renders sweep and scaling data without altering legacy schemas.
 
@@ -35,8 +36,7 @@ package Flyology_Bench.Sweeps.Reporters is
 
    --  Print the ordinary sweep CSV header.
    --  @param File Destination text stream.
-   procedure Put_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   procedure Put_CSV_Header (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
    --  Print one ordinary CSV row per attempted point, including exact
    --  throughput availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
@@ -49,8 +49,7 @@ package Flyology_Bench.Sweeps.Reporters is
 
    --  Print the paired sweep CSV header.
    --  @param File Destination text stream.
-   procedure Put_Comparison_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   procedure Put_Comparison_CSV_Header (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
    --  Print one paired CSV row per attempted point, including independent
    --  per-side throughput availability and unscaled work rates.
    --  @param Case_Name Suite-compatible full benchmark identity.
@@ -100,8 +99,7 @@ package Flyology_Bench.Sweeps.Reporters is
       File      : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
    --  Print the long-form empirical scaling CSV header.
    --  @param File Destination text stream.
-   procedure Put_Scaling_CSV_Header
-     (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   procedure Put_Scaling_CSV_Header (File : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
    --  Print one CSV row per candidate scaling model.
    --  @param Case_Name Stable analyzed case identity.
    --  @param Result Empirical scaling analysis.

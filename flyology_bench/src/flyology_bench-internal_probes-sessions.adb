@@ -22,22 +22,18 @@ package body Flyology_Bench.Internal_Probes.Sessions is
    --  taken from a thread-exit callback, which runs while the platform is
    --  tearing the thread down and must not depend on the tasking runtime.
    Native_Mutex_Size : constant C.size_t;
-   pragma Import
-     (C, Native_Mutex_Size, "flyology_bench_pthread_mutex_size");
+   pragma Import (C, Native_Mutex_Size, "flyology_bench_pthread_mutex_size");
 
    --  Reserved storage, checked against the platform's own size during
    --  elaboration, so the mutex can be initialized in place.
    Mutex_Storage_Bytes : constant := 128;
 
-   type Mutex_Storage is
-     array (1 .. Mutex_Storage_Bytes) of Interfaces.Unsigned_8
-     with Alignment => 16;
+   type Mutex_Storage is array (1 .. Mutex_Storage_Bytes) of Interfaces.Unsigned_8 with Alignment => 16;
 
-   Registry : Mutex_Storage := [others => 0];
+   Registry       : Mutex_Storage := [others => 0];
    Registry_Ready : Boolean := False;
 
-   function Mutex_Initialize
-     (Mutex : System.Address; Attributes : System.Address) return C.int;
+   function Mutex_Initialize (Mutex : System.Address; Attributes : System.Address) return C.int;
    pragma Import (C, Mutex_Initialize, "pthread_mutex_init");
 
    function Mutex_Lock (Mutex : System.Address) return C.int;
@@ -46,8 +42,8 @@ package body Flyology_Bench.Internal_Probes.Sessions is
    function Mutex_Unlock (Mutex : System.Address) return C.int;
    pragma Import (C, Mutex_Unlock, "pthread_mutex_unlock");
 
-   function Acquire return Boolean is
-     (Registry_Ready and then Mutex_Lock (Registry'Address) = 0);
+   function Acquire return Boolean
+   is (Registry_Ready and then Mutex_Lock (Registry'Address) = 0);
 
    procedure Release is
       Ignored : constant C.int := Mutex_Unlock (Registry'Address);
@@ -60,14 +56,13 @@ package body Flyology_Bench.Internal_Probes.Sessions is
    --  Worker identity                                                 --
    ---------------------------------------------------------------------
 
-   type Exit_Handler is access procedure (Token : System.Address)
-     with Convention => C;
+   type Exit_Handler is access procedure (Token : System.Address) with Convention => C;
 
    function Thread_Token (At_Exit : Exit_Handler) return System.Address;
    pragma Import (C, Thread_Token, "flyology_bench_thread_token");
 
    procedure Release_Thread (Token : System.Address)
-     with Convention => C;
+   with Convention => C;
 
    ---------------------------------------------------------------------
    --  Registry                                                        --
@@ -90,12 +85,10 @@ package body Flyology_Bench.Internal_Probes.Sessions is
       Next      : Session_Access := null;
    end record;
 
-   procedure Free is new Ada.Unchecked_Deallocation
-     (Context_Record, Context_Access);
-   procedure Free is new Ada.Unchecked_Deallocation
-     (Session_Record, Session_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Context_Record, Context_Access);
+   procedure Free is new Ada.Unchecked_Deallocation (Session_Record, Session_Access);
 
-   Known : Session_Access := null;
+   Known  : Session_Access := null;
    Issued : Identifier := No_Session;
 
    --  Callers hold the registry lock for every operation below.
@@ -177,9 +170,7 @@ package body Flyology_Bench.Internal_Probes.Sessions is
    --  Sessions                                                        --
    ---------------------------------------------------------------------
 
-   function Start
-     (Requested_Mask : Interfaces.Unsigned_64) return Identifier
-   is
+   function Start (Requested_Mask : Interfaces.Unsigned_64) return Identifier is
       Created : Session_Access := null;
       Locked  : Boolean := False;
       Name    : Identifier;
@@ -307,9 +298,7 @@ package body Flyology_Bench.Internal_Probes.Sessions is
 
 begin
    if Native_Mutex_Size > Mutex_Storage_Bytes then
-      raise Program_Error with
-        "platform mutex is larger than the recorder registry reserves";
+      raise Program_Error with "platform mutex is larger than the recorder registry reserves";
    end if;
-   Registry_Ready :=
-     Mutex_Initialize (Registry'Address, System.Null_Address) = 0;
+   Registry_Ready := Mutex_Initialize (Registry'Address, System.Null_Address) = 0;
 end Flyology_Bench.Internal_Probes.Sessions;

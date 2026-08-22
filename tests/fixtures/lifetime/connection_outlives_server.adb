@@ -6,6 +6,7 @@ with Flyology.IO.Connections;
 --  rejects the access discriminant instead of leaving the rule to prose.
 --  scripts/test.sh compiles this fixture and fails if the compiler accepts
 --  it.
+
 procedure Connection_Outlives_Server is
    package Connections renames Flyology.IO.Connections;
 

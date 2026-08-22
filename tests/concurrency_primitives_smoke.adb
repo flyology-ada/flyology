@@ -49,7 +49,8 @@ procedure Concurrency_Primitives_Smoke is
          null;
       end Wait_Started;
 
-      function Cancellation_Observed return Boolean is (Observed);
+      function Cancellation_Observed return Boolean
+      is (Observed);
    end Active_Native_Work;
 
    procedure Native_Work
@@ -92,8 +93,7 @@ procedure Concurrency_Primitives_Smoke is
       Result := Input * 2;
    end Native_Work;
 
-   package Native_Executors is new Flyology.Native_Executors
-     (Integer, Integer, Native_Work);
+   package Native_Executors is new Flyology.Native_Executors (Integer, Integer, Native_Work);
 
    --  Result_Type is a generic formal private type, so copying a result into
    --  the executor's bounded storage runs application code that may raise.
@@ -101,16 +101,18 @@ procedure Concurrency_Primitives_Smoke is
    --  other allocating component would under memory pressure. Only the worker
    --  task arms and observes the injection, and the executor's protected
    --  state orders it against the waiting caller.
-   Fragile_Copy_Armed : Boolean := False;
+   Fragile_Copy_Armed    : Boolean := False;
    Fragile_Copy_Failures : Natural := 0;
 
    type Fragile_Result is new Ada.Finalization.Controlled with record
       Value : Integer := 0;
    end record;
 
-   overriding procedure Adjust (Item : in out Fragile_Result);
+   overriding
+   procedure Adjust (Item : in out Fragile_Result);
 
-   overriding procedure Adjust (Item : in out Fragile_Result) is
+   overriding
+   procedure Adjust (Item : in out Fragile_Result) is
       pragma Unreferenced (Item);
    begin
       if Fragile_Copy_Armed then
@@ -136,8 +138,7 @@ procedure Concurrency_Primitives_Smoke is
       end if;
    end Fragile_Work;
 
-   package Fragile_Executors is new Flyology.Native_Executors
-     (Integer, Fragile_Result, Fragile_Work);
+   package Fragile_Executors is new Flyology.Native_Executors (Integer, Fragile_Result, Fragile_Work);
 
    protected type Boolean_Result is
       procedure Set (Value : Boolean);
@@ -162,7 +163,7 @@ procedure Concurrency_Primitives_Smoke is
 
    generic
       Model : Flyology.Execution_Model;
-      CPU   : System.Multiprocessors.CPU_Range;
+      CPU : System.Multiprocessors.CPU_Range;
    procedure Exercise_Task_Waits;
 
    procedure Exercise_Task_Waits is
@@ -182,7 +183,8 @@ procedure Concurrency_Primitives_Smoke is
       declare
          Outcome : Boolean_Result;
 
-         task Waiter with CPU => CPU is
+         task Waiter
+           with CPU => CPU is
             pragma Task_Info (Model);
          end Waiter;
 
@@ -214,7 +216,8 @@ procedure Concurrency_Primitives_Smoke is
          Stop    : aliased Flyology.Cancellation.Token;
          Outcome : Boolean_Result;
 
-         task Cancellation_Waiter with CPU => CPU is
+         task Cancellation_Waiter
+           with CPU => CPU is
             pragma Task_Info (Model);
          end Cancellation_Waiter;
 
@@ -235,7 +238,8 @@ procedure Concurrency_Primitives_Smoke is
          Queue   : Integer_Channels.Channel (Capacity => 1);
          Outcome : Boolean_Result;
 
-         task Receiver with CPU => CPU is
+         task Receiver
+           with CPU => CPU is
             pragma Task_Info (Model);
          end Receiver;
 
@@ -270,7 +274,8 @@ procedure Concurrency_Primitives_Smoke is
          declare
             Outcome : Boolean_Result;
 
-            task Sender with CPU => CPU is
+            task Sender
+              with CPU => CPU is
                pragma Task_Info (Model);
             end Sender;
 
@@ -302,12 +307,11 @@ procedure Concurrency_Primitives_Smoke is
       end;
    end Exercise_Task_Waits;
 
-   procedure Exercise_Lightweight_Waits is new Exercise_Task_Waits
-     (Model => Flyology.Lightweight_Task, CPU => 1);
+   procedure Exercise_Lightweight_Waits is new
+     Exercise_Task_Waits (Model => Flyology.Lightweight_Task, CPU => 1);
 
-   procedure Exercise_Native_Waits is new Exercise_Task_Waits
-     (Model => Flyology.Native_Task,
-      CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Exercise_Native_Waits is new
+     Exercise_Task_Waits (Model => Flyology.Native_Task, CPU => System.Multiprocessors.Not_A_Specific_CPU);
 
    procedure Exercise_Channel is
       use type Integer_Channels.Try_Send_Result;
@@ -336,8 +340,7 @@ procedure Concurrency_Primitives_Smoke is
       pragma Assert (Timed_Out);
 
       Queue.Try_Receive (Value, Receive_Result);
-      pragma Assert
-        (Receive_Result = Integer_Channels.Item_Received and Value = 1);
+      pragma Assert (Receive_Result = Integer_Channels.Item_Received and Value = 1);
       Queue.Send (3);
       Queue.Close;
 
@@ -350,16 +353,14 @@ procedure Concurrency_Primitives_Smoke is
       Queue.Await_Drained;
       Value := 41;
       Queue.Try_Receive (Value, Receive_Result);
-      pragma Assert
-        (Receive_Result = Integer_Channels.Receive_Closed and Value = 41);
+      pragma Assert (Receive_Result = Integer_Channels.Receive_Closed and Value = 41);
 
       declare
          Empty : Integer_Channels.Channel (Capacity => 1);
       begin
          Value := 42;
          Empty.Try_Receive (Value, Receive_Result);
-         pragma Assert
-           (Receive_Result = Integer_Channels.Channel_Empty and Value = 42);
+         pragma Assert (Receive_Result = Integer_Channels.Channel_Empty and Value = 42);
 
          Timed_Out := False;
          begin
@@ -374,20 +375,16 @@ procedure Concurrency_Primitives_Smoke is
    end Exercise_Channel;
 
    procedure Exercise_Native_Executor_Abandon_Failure is
-      Item     : aliased Native_Executors.Executor
-        (Workers => 1, Capacity => 1);
+      Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
       Accepted : Boolean;
 
       procedure Wait_For_Success (Count : Interfaces.Unsigned_64) is
       begin
          for Attempt in 1 .. 100 loop
-            exit when
-              Native_Executors.Statistics (Item).Successful_Executions =
-                Count;
+            exit when Native_Executors.Statistics (Item).Successful_Executions = Count;
             delay 0.001;
          end loop;
-         pragma Assert
-           (Native_Executors.Statistics (Item).Successful_Executions = Count);
+         pragma Assert (Native_Executors.Statistics (Item).Successful_Executions = Count);
       end Wait_For_Success;
    begin
       Worker_Pool_Test_Control.Reset;
@@ -396,41 +393,37 @@ procedure Concurrency_Primitives_Smoke is
          Handle : Native_Executors.Operation_Handle (Item'Access);
          Failed : Boolean := False;
       begin
-         Native_Executors.Submit
-           (Item, 1, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Native_Executors.Submit (Item, 1, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Wait_For_Success (1);
          Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
          begin
             Native_Executors.Abandon (Item, Handle);
          exception
-            when Program_Error => Failed := True;
+            when Program_Error =>
+               Failed := True;
          end;
          pragma Assert (Failed);
-         pragma Assert
-           (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+         pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
       end;
 
       declare
          Handle : Native_Executors.Operation_Handle (Item'Access);
       begin
-         Native_Executors.Submit
-           (Item, 2, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Native_Executors.Submit (Item, 2, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Wait_For_Success (2);
          Worker_Pool_Test_Control.Fail_Native_Executor_Cancellation_Once;
-         --  Finalization must consume the handle and release the completed
-         --  slot even though cancellation signalling raises internally.
+      --  Finalization must consume the handle and release the completed
+      --  slot even though cancellation signalling raises internally.
       end;
-      pragma Assert
-        (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
 
       declare
          Handle : Native_Executors.Operation_Handle (Item'Access);
          Result : Integer;
       begin
-         Native_Executors.Submit
-           (Item, 3, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Native_Executors.Submit (Item, 3, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Native_Executors.Await (Item, Handle, Result);
          pragma Assert (Result = 6);
@@ -441,19 +434,18 @@ procedure Concurrency_Primitives_Smoke is
          Failed : Boolean := False;
       begin
          Worker_Pool_Test_Control.Arm_Native_Executor_Completion_Wake;
-         Native_Executors.Submit
-           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Native_Executors.Submit (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Wait_For_Success (4);
          Worker_Pool_Test_Control.Fail_Native_Executor_Consume_Once;
          begin
             Native_Executors.Abandon (Item, Handle);
          exception
-            when Program_Error => Failed := True;
+            when Program_Error =>
+               Failed := True;
          end;
          pragma Assert (Failed);
-         pragma Assert
-           (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+         pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
       end;
 
       --  A failed wake consumption must not retain capacity or leave the
@@ -462,8 +454,7 @@ procedure Concurrency_Primitives_Smoke is
          Handle : Native_Executors.Operation_Handle (Item'Access);
          Result : Integer;
       begin
-         Native_Executors.Submit
-           (Item, 5, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Native_Executors.Submit (Item, 5, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Native_Executors.Await (Item, Handle, Result);
          pragma Assert (Result = 10);
@@ -475,8 +466,7 @@ procedure Concurrency_Primitives_Smoke is
    procedure Exercise_Native_Executor_Result_Copy_Failure is
       use type Ada.Real_Time.Time;
 
-      Item      : aliased Fragile_Executors.Executor
-        (Workers => 1, Capacity => 1);
+      Item      : aliased Fragile_Executors.Executor (Workers => 1, Capacity => 1);
       Accepted  : Boolean;
       Reported  : Boolean := False;
       Timed_Out : Boolean := False;
@@ -487,13 +477,11 @@ procedure Concurrency_Primitives_Smoke is
       declare
          Handle : Fragile_Executors.Operation_Handle (Item'Access);
       begin
-         Fragile_Executors.Submit
-           (Item, 7, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Fragile_Executors.Submit (Item, 7, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          begin
             Fragile_Executors.Await
-              (Item, Handle, Result,
-               Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
+              (Item, Handle, Result, Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
          exception
             when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
@@ -507,30 +495,23 @@ procedure Concurrency_Primitives_Smoke is
       --  no worker still owns.
       pragma Assert (not Timed_Out);
       pragma Assert (Reported);
-      pragma Assert
-        (Fragile_Executors.Statistics (Item).Failed_Executions = 1);
-      pragma Assert
-        (Fragile_Executors.Statistics (Item).Successful_Executions = 0);
-      pragma Assert
-        (Fragile_Executors.Statistics (Item).Running_Operations = 0);
-      pragma Assert
-        (Fragile_Executors.Statistics (Item).Outstanding_Operations = 0);
+      pragma Assert (Fragile_Executors.Statistics (Item).Failed_Executions = 1);
+      pragma Assert (Fragile_Executors.Statistics (Item).Successful_Executions = 0);
+      pragma Assert (Fragile_Executors.Statistics (Item).Running_Operations = 0);
+      pragma Assert (Fragile_Executors.Statistics (Item).Outstanding_Operations = 0);
 
       --  Exactly one accounting transition happened, so the slot is free and
       --  the executor still admits and completes further work.
       declare
          Handle : Fragile_Executors.Operation_Handle (Item'Access);
       begin
-         Fragile_Executors.Submit
-           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         Fragile_Executors.Submit (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
          Fragile_Executors.Await
-           (Item, Handle, Result,
-            Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
+           (Item, Handle, Result, Deadline => Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5));
          pragma Assert (Result.Value = 12);
       end;
-      pragma Assert
-        (Fragile_Executors.Statistics (Item).Successful_Executions = 1);
+      pragma Assert (Fragile_Executors.Statistics (Item).Successful_Executions = 1);
       Fragile_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Result_Copy_Failure;
 
@@ -538,15 +519,13 @@ procedure Concurrency_Primitives_Smoke is
       --  Instantiating locally makes this subprogram the master of the worker
       --  collection, so a worker orphaned by a partial activation must
       --  terminate before the procedure can return.
-      package Local_Executors is new Flyology.Native_Executors
-        (Integer, Integer, Native_Work);
+      package Local_Executors is new Flyology.Native_Executors (Integer, Integer, Native_Work);
       Failed : Boolean := False;
    begin
       Worker_Pool_Test_Control.Reset;
       Worker_Pool_Test_Control.Fail_Activation_At (2);
       declare
-         Item : aliased Local_Executors.Executor
-           (Workers => 3, Capacity => 1);
+         Item : aliased Local_Executors.Executor (Workers => 3, Capacity => 1);
       begin
          begin
             Local_Executors.Start (Item);
@@ -560,8 +539,7 @@ procedure Concurrency_Primitives_Smoke is
    end Exercise_Native_Executor_Activation_Failure;
 
    procedure Exercise_Native_Executor_Shutdown_Failure is
-      Item     : aliased Native_Executors.Executor
-        (Workers => 1, Capacity => 1);
+      Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
       Handle   : Native_Executors.Operation_Handle (Item'Access);
       Accepted : Boolean;
       Failed   : Boolean := False;
@@ -570,8 +548,7 @@ procedure Concurrency_Primitives_Smoke is
       Worker_Pool_Test_Control.Reset;
       Active_Native_Work.Reset;
       Native_Executors.Start (Item);
-      Native_Executors.Submit
-        (Item, 99, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+      Native_Executors.Submit (Item, 99, null, Ada.Real_Time.Time_Last, Handle, Accepted);
       pragma Assert (Accepted);
       Active_Native_Work.Wait_Started;
 
@@ -579,15 +556,14 @@ procedure Concurrency_Primitives_Smoke is
       begin
          Native_Executors.Shutdown (Item);
       exception
-         when Program_Error => Failed := True;
+         when Program_Error =>
+            Failed := True;
       end;
       pragma Assert (Failed);
       --  A persistent signaling fault is observed once, not retried in an
       --  abort-deferred cleanup loop. Logical cancellation still lets the
       --  active worker terminate before the original failure is re-raised.
-      pragma Assert
-        (Worker_Pool_Test_Control
-           .Remaining_Native_Executor_Cancellation_Failures = 99);
+      pragma Assert (Worker_Pool_Test_Control.Remaining_Native_Executor_Cancellation_Failures = 99);
       pragma Assert (Active_Native_Work.Cancellation_Observed);
       Worker_Pool_Test_Control.Reset;
 
@@ -598,31 +574,27 @@ procedure Concurrency_Primitives_Smoke is
          Native_Executors.Await (Item, Handle, Result);
          pragma Assert (False);
       exception
-         when Flyology.Cancellation.Operation_Cancelled => null;
+         when Flyology.Cancellation.Operation_Cancelled =>
+            null;
       end;
-      pragma Assert
-        (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
    end Exercise_Native_Executor_Shutdown_Failure;
 
    procedure Exercise_Native_Executor_Token_Cleanup_Abort is
-      Item     : aliased Native_Executors.Executor
-        (Workers => 1, Capacity => 1);
+      Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
       Handle   : Native_Executors.Operation_Handle (Item'Access);
       Accepted : Boolean;
       Result   : Integer;
    begin
       Worker_Pool_Test_Control.Reset;
       Native_Executors.Start (Item);
-      Native_Executors.Submit
-        (Item, 6, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+      Native_Executors.Submit (Item, 6, null, Ada.Real_Time.Time_Last, Handle, Accepted);
       pragma Assert (Accepted);
       for Attempt in 1 .. 100 loop
-         exit when
-           Native_Executors.Statistics (Item).Successful_Executions = 1;
+         exit when Native_Executors.Statistics (Item).Successful_Executions = 1;
          delay 0.001;
       end loop;
-      pragma Assert
-        (Native_Executors.Statistics (Item).Successful_Executions = 1);
+      pragma Assert (Native_Executors.Statistics (Item).Successful_Executions = 1);
 
       Worker_Pool_Test_Control.Arm_Token_Cleanup_Barrier;
       declare
@@ -641,8 +613,7 @@ procedure Concurrency_Primitives_Smoke is
       end;
 
       Native_Executors.Shutdown (Item);
-      pragma Assert
-        (Worker_Pool_Test_Control.Outstanding_Cleanup_Tokens = 0);
+      pragma Assert (Worker_Pool_Test_Control.Outstanding_Cleanup_Tokens = 0);
       Native_Executors.Await (Item, Handle, Result);
       pragma Assert (Result = 12);
    end Exercise_Native_Executor_Token_Cleanup_Abort;
@@ -656,13 +627,16 @@ procedure Concurrency_Primitives_Smoke is
       Admission : aliased Flyology.Capacity.Gate (Capacity => 1);
 
       type Permit_Guard (Item : not null access Flyology.Capacity.Gate) is
-        new Ada.Finalization.Limited_Controlled with record
+        new Ada.Finalization.Limited_Controlled
+      with record
          Armed : aliased Boolean := False;
       end record;
 
-      overriding procedure Finalize (Guard : in out Permit_Guard);
+      overriding
+      procedure Finalize (Guard : in out Permit_Guard);
 
-      overriding procedure Finalize (Guard : in out Permit_Guard) is
+      overriding
+      procedure Finalize (Guard : in out Permit_Guard) is
       begin
          if Guard.Armed then
             Guard.Item.Release (Guard.Armed'Access);
@@ -676,8 +650,7 @@ procedure Concurrency_Primitives_Smoke is
          Guard   : Permit_Guard (Admission'Access);
          Outcome : Flyology.Capacity.Acquire_Result;
       begin
-         Flyology.Capacity.Timed_Acquire
-           (Admission, 1.0, Outcome, Guard.Armed'Access);
+         Flyology.Capacity.Timed_Acquire (Admission, 1.0, Outcome, Guard.Armed'Access);
          pragma Assert (Outcome = Flyology.Capacity.Permit_Acquired);
          pragma Assert (Guard.Armed);
          pragma Assert (Admission.Active = 1);
@@ -695,11 +668,8 @@ procedure Concurrency_Primitives_Smoke is
             Guard   : Permit_Guard (Admission'Access);
             Outcome : Flyology.Capacity.Acquire_Result;
          begin
-            Flyology.Capacity.Timed_Acquire
-              (Admission, 10.0, Outcome, Guard.Armed'Access);
-            pragma Assert
-              (Guard.Armed =
-                 (Outcome = Flyology.Capacity.Permit_Acquired));
+            Flyology.Capacity.Timed_Acquire (Admission, 10.0, Outcome, Guard.Armed'Access);
+            pragma Assert (Guard.Armed = (Outcome = Flyology.Capacity.Permit_Acquired));
          end Acquirer;
       begin
          Worker_Pool_Test_Control.Wait_Capacity_Acquire_Barrier;
@@ -714,8 +684,7 @@ procedure Concurrency_Primitives_Smoke is
    end Exercise_Capacity_Timed_Acquire_Abort;
 
    procedure Exercise_Native_Executor_Shutdown_Abort is
-      Item : aliased Native_Executors.Executor
-        (Workers => 1, Capacity => 1);
+      Item : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
    begin
       Worker_Pool_Test_Control.Reset;
       Native_Executors.Start (Item);
@@ -757,20 +726,20 @@ procedure Concurrency_Primitives_Smoke is
          Total := Total + Value;
       end Add;
 
-      function Count return Natural is (Seen);
-      function Sum return Integer is (Total);
+      function Count return Natural
+      is (Seen);
+      function Sum return Integer
+      is (Total);
    end Totals;
 
    generic
       Model : Flyology.Execution_Model;
-      CPU   : System.Multiprocessors.CPU_Range;
+      CPU : System.Multiprocessors.CPU_Range;
    procedure Exercise_Worker_Pool;
 
    procedure Exercise_Worker_Pool is
       procedure Process
-        (Context  : in out Totals;
-         Job      : Integer;
-         Stopping : not null access Flyology.Cancellation.Token)
+        (Context : in out Totals; Job : Integer; Stopping : not null access Flyology.Cancellation.Token)
       is
          pragma Unreferenced (Stopping);
       begin
@@ -780,13 +749,14 @@ procedure Concurrency_Primitives_Smoke is
          Context.Add (Job);
       end Process;
 
-      package Pools is new Flyology.Worker_Pools
-        (Job_Type       => Integer,
-         Empty_Job      => 0,
-         Worker_Context => Totals,
-         Process        => Process,
-         Worker_Model   => Model,
-         Worker_CPU     => CPU);
+      package Pools is new
+        Flyology.Worker_Pools
+          (Job_Type       => Integer,
+           Empty_Job      => 0,
+           Worker_Context => Totals,
+           Process        => Process,
+           Worker_Model   => Model,
+           Worker_CPU     => CPU);
 
       type Run_Result is (Run_Succeeded, Run_Failed, Run_Unexpected);
 
@@ -812,8 +782,7 @@ procedure Concurrency_Primitives_Smoke is
       end Run_Outcome;
 
       procedure Exercise_Success is
-         Item    : aliased Pools.Pool
-           (Worker_Count => 3, Queue_Capacity => 2);
+         Item    : aliased Pools.Pool (Worker_Count => 3, Queue_Capacity => 2);
          Context : aliased Totals;
          Outcome : Run_Outcome;
 
@@ -850,8 +819,7 @@ procedure Concurrency_Primitives_Smoke is
       end Exercise_Success;
 
       procedure Exercise_Failure is
-         Item     : aliased Pools.Pool
-           (Worker_Count => 2, Queue_Capacity => 4);
+         Item     : aliased Pools.Pool (Worker_Count => 2, Queue_Capacity => 4);
          Context  : aliased Totals;
          Accepted : Boolean;
       begin
@@ -890,8 +858,7 @@ procedure Concurrency_Primitives_Smoke is
          pragma Assert (Context.Sum = 3);
          pragma Assert (Pools.Current (Item).Completed_Jobs = 2);
          pragma Assert (Pools.Current (Item).Failures = 1);
-         pragma Assert
-           (Pools.First_Failure_Information (Item)'Length > 0);
+         pragma Assert (Pools.First_Failure_Information (Item)'Length > 0);
 
          declare
             Rejected : Boolean := False;
@@ -907,8 +874,7 @@ procedure Concurrency_Primitives_Smoke is
       end Exercise_Failure;
 
       procedure Exercise_Activation_Failure is
-         Item    : aliased Pools.Pool
-           (Worker_Count => 3, Queue_Capacity => 2);
+         Item    : aliased Pools.Pool (Worker_Count => 3, Queue_Capacity => 2);
          Context : aliased Totals;
          Failed  : Boolean := False;
       begin
@@ -929,8 +895,7 @@ procedure Concurrency_Primitives_Smoke is
       end Exercise_Activation_Failure;
 
       procedure Exercise_Abort_Safe_Shutdown is
-         Item    : aliased Pools.Pool
-           (Worker_Count => 2, Queue_Capacity => 2);
+         Item    : aliased Pools.Pool (Worker_Count => 2, Queue_Capacity => 2);
          Context : aliased Totals;
          Outcome : Run_Outcome;
 
@@ -979,8 +944,7 @@ procedure Concurrency_Primitives_Smoke is
       end Exercise_Abort_Safe_Shutdown;
 
       procedure Exercise_Run_Abort is
-         Item     : aliased Pools.Pool
-           (Worker_Count => 2, Queue_Capacity => 2);
+         Item     : aliased Pools.Pool (Worker_Count => 2, Queue_Capacity => 2);
          Context  : aliased Totals;
          Accepted : Boolean;
       begin
@@ -1010,8 +974,7 @@ procedure Concurrency_Primitives_Smoke is
       --  run that already owns the pool untouched: admission stays open, jobs
       --  still complete, and the owner still joins its workers.
       procedure Exercise_Duplicate_Run is
-         Item    : aliased Pools.Pool
-           (Worker_Count => 2, Queue_Capacity => 2);
+         Item    : aliased Pools.Pool (Worker_Count => 2, Queue_Capacity => 2);
          Context : aliased Totals;
          Outcome : Run_Outcome;
 
@@ -1083,8 +1046,7 @@ procedure Concurrency_Primitives_Smoke is
       --  aborted while it is still trying to claim never armed teardown, so
       --  the owning run keeps its workers, its queue, and its join barrier.
       procedure Exercise_Claim_Abort is
-         Item    : aliased Pools.Pool
-           (Worker_Count => 2, Queue_Capacity => 2);
+         Item    : aliased Pools.Pool (Worker_Count => 2, Queue_Capacity => 2);
          Context : aliased Totals;
          Outcome : Run_Outcome;
 
@@ -1168,12 +1130,11 @@ procedure Concurrency_Primitives_Smoke is
       Exercise_Claim_Abort;
    end Exercise_Worker_Pool;
 
-   procedure Exercise_Lightweight_Pool is new Exercise_Worker_Pool
-     (Model => Flyology.Lightweight_Task, CPU => 1);
+   procedure Exercise_Lightweight_Pool is new
+     Exercise_Worker_Pool (Model => Flyology.Lightweight_Task, CPU => 1);
 
-   procedure Exercise_Native_Pool is new Exercise_Worker_Pool
-     (Model => Flyology.Native_Task,
-      CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Exercise_Native_Pool is new
+     Exercise_Worker_Pool (Model => Flyology.Native_Task, CPU => System.Multiprocessors.Not_A_Specific_CPU);
 
 begin
    Exercise_Channel;

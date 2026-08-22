@@ -44,7 +44,8 @@ procedure Wall_Clock_Wait_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Results;
 
    task Lightweight is
@@ -56,10 +57,8 @@ procedure Wall_Clock_Wait_Smoke is
    end Native;
 
    task body Lightweight is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
-      Calendar_Delay : constant Ada.Calendar.Time :=
-        Ada.Calendar.Clock + 0.010;
+      Deadline        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
+      Calendar_Delay  : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.010;
       Calendar_Select : Ada.Calendar.Time;
       Target          : Ada.Calendar.Time;
       Result          : Flyology.IO.Timers.Wall_Clock_Wait_Result;
@@ -83,20 +82,17 @@ procedure Wall_Clock_Wait_Smoke is
          and then Result.Backward_Adjustment = 0.0);
    exception
       when Error : others =>
-         Ada.Text_IO.Put_Line
-           (Ada.Exceptions.Exception_Information (Error));
+         Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
          Results.Finished (False);
    end Lightweight;
 
    task body Native is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (5);
       Target   : constant Ada.Calendar.Time := Ada.Calendar.Clock + 0.020;
       Result   : Flyology.IO.Timers.Wall_Clock_Wait_Result;
    begin
       Flyology.IO.Timers.Sleep_Until (Deadline);
-      Result := Flyology.IO.Timers.Wait_Until
-        (Target, Backstep_Tolerance => 0.010);
+      Result := Flyology.IO.Timers.Wait_Until (Target, Backstep_Tolerance => 0.010);
       Results.Finished
         (Ada.Real_Time.Clock >= Deadline
          and then Result.Outcome = Flyology.IO.Timers.Target_Reached
@@ -104,15 +100,13 @@ procedure Wall_Clock_Wait_Smoke is
          and then Result.Backward_Adjustment = 0.0);
    exception
       when Error : others =>
-         Ada.Text_IO.Put_Line
-           (Ada.Exceptions.Exception_Information (Error));
+         Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
          Results.Finished (False);
    end Native;
 begin
    declare
       Target : constant Ada.Calendar.Time := Ada.Calendar.Clock - 0.010;
-      Result : constant Flyology.IO.Timers.Wall_Clock_Wait_Result :=
-        Flyology.IO.Timers.Wait_Until (Target);
+      Result : constant Flyology.IO.Timers.Wall_Clock_Wait_Result := Flyology.IO.Timers.Wait_Until (Target);
    begin
       if Result.Outcome /= Flyology.IO.Timers.Target_Reached
         or else Result.Observed_Time < Target

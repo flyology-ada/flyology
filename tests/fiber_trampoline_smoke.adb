@@ -13,6 +13,7 @@ with Flyology;
 --  released, then C publishes a third. A pthread-local cursor hands C the
 --  slot B still owns, so B's stored callback would reach C's body with C's
 --  static chain and report C's marker.
+
 procedure Fiber_Trampoline_Smoke is
    type Callback_Access is access procedure;
 
@@ -55,8 +56,8 @@ procedure Fiber_Trampoline_Smoke is
          Actions (Who) := Action;
       end Publish;
 
-      function Published (Who : Participant) return Callback_Access is
-        (Actions (Who));
+      function Published (Who : Participant) return Callback_Access
+      is (Actions (Who));
 
       procedure A_Created is
       begin
@@ -113,20 +114,24 @@ procedure Fiber_Trampoline_Smoke is
          Last_Marker := Marker;
       end Record_Callback;
 
-      function Observed return Natural is (Last_Marker);
+      function Observed return Natural
+      is (Last_Marker);
    end Coordination;
 
    --  One shared execution group keeps all three fibers on a single
    --  event-loop thread, whose trampoline cursor they would otherwise share.
-   task A with CPU => 1 is
+   task A
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end A;
 
-   task B with CPU => 1 is
+   task B
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end B;
 
-   task C with CPU => 1 is
+   task C
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end C;
 
@@ -198,7 +203,6 @@ procedure Fiber_Trampoline_Smoke is
 begin
    Coordination.Await_B_Called;
    if Coordination.Observed /= B_Marker then
-      raise Program_Error
-        with "a live lightweight-task callback was overwritten";
+      raise Program_Error with "a live lightweight-task callback was overwritten";
    end if;
 end Fiber_Trampoline_Smoke;

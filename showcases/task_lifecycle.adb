@@ -38,38 +38,31 @@ procedure Task_Lifecycle is
 
    type Duration_Array is array (Positive range <>) of Duration;
    type Boolean_Array is array (Positive range <>) of Boolean;
-   procedure Sort is new Ada.Containers.Generic_Array_Sort
-     (Positive, Duration, Duration_Array);
+   procedure Sort is new Ada.Containers.Generic_Array_Sort (Positive, Duration, Duration_Array);
 
-   function Seconds (Value : Duration) return String is
-     (Showcase_Support.Fixed_Image (Long_Float (Value), 9));
+   function Seconds (Value : Duration) return String
+   is (Showcase_Support.Fixed_Image (Long_Float (Value), 9));
 
-   function Microseconds (Value : Duration) return String is
-     (Showcase_Support.Fixed_Image (Long_Float (Value) * 1_000_000.0, 3));
+   function Microseconds (Value : Duration) return String
+   is (Showcase_Support.Fixed_Image (Long_Float (Value) * 1_000_000.0, 3));
 
-   function Per_Second (Count : Positive; Elapsed : Duration) return String is
-     (if Elapsed <= 0.0
-      then "0.000"
-      else Showcase_Support.Fixed_Image
-        (Long_Float (Count) / Long_Float (Elapsed), 3));
+   function Per_Second (Count : Positive; Elapsed : Duration) return String
+   is (if Elapsed <= 0.0
+       then "0.000"
+       else Showcase_Support.Fixed_Image (Long_Float (Count) / Long_Float (Elapsed), 3));
 
-   function Percentile
-     (Values : Duration_Array;
-      Numerator : Positive) return Duration
-   is
+   function Percentile (Values : Duration_Array; Numerator : Positive) return Duration is
       Position : constant Positive :=
-        Positive'Min
-          (Values'Length,
-           Positive'Max (1, (Values'Length * Numerator + 99) / 100));
+        Positive'Min (Values'Length, Positive'Max (1, (Values'Length * Numerator + 99) / 100));
    begin
       return Values (Values'First + Position - 1);
    end Percentile;
 
-   function Maximum (Left, Right : C.long_long) return C.long_long is
-     (C.long_long'Max (Left, Right));
+   function Maximum (Left, Right : C.long_long) return C.long_long
+   is (C.long_long'Max (Left, Right));
 
-   function Maximum (Left, Right : C.int) return C.int is
-     (C.int'Max (Left, Right));
+   function Maximum (Left, Right : C.int) return C.int
+   is (C.int'Max (Left, Right));
 
    type Phase_Measurements (Count : Positive) is record
       Start_Latencies    : Duration_Array (1 .. Count) := (others => 0.0);
@@ -88,21 +81,16 @@ procedure Task_Lifecycle is
       Pool    : Observation.Stack_Pool_Snapshot;
    end record;
 
-   function Sample return Resource_Sample is
-     (RSS     => Current_RSS,
-      Virtual => Virtual_Bytes,
-      Threads => Thread_Count,
-      Pool    => Observation.Stack_Pool);
+   function Sample return Resource_Sample
+   is (RSS => Current_RSS, Virtual => Virtual_Bytes, Threads => Thread_Count, Pool => Observation.Stack_Pool);
 
-   procedure Wait_For_Pool
-     (Expected : Observation.Stack_Pool_Snapshot;
-      Elapsed  : out Duration)
-   is
+   procedure Wait_For_Pool (Expected : Observation.Stack_Pool_Snapshot; Elapsed : out Duration) is
       Started : constant Time := Clock;
       Current : Observation.Stack_Pool_Snapshot := Observation.Stack_Pool;
    begin
       for Attempt in 1 .. 10_000 loop
-         exit when Current.Live_Stacks = Expected.Live_Stacks
+         exit when
+           Current.Live_Stacks = Expected.Live_Stacks
            and then Current.Active_Arenas = Expected.Active_Arenas
            and then Current.Live_Usable_Bytes = Expected.Live_Usable_Bytes
            and then Current.Reserved_Bytes = Expected.Reserved_Bytes;
@@ -115,31 +103,30 @@ procedure Task_Lifecycle is
         or else Current.Live_Usable_Bytes /= Expected.Live_Usable_Bytes
         or else Current.Reserved_Bytes /= Expected.Reserved_Bytes
       then
-         raise Program_Error with
-           "fiber stack pool did not return to baseline";
+         raise Program_Error with "fiber stack pool did not return to baseline";
       end if;
    end Wait_For_Pool;
 
    procedure Execute
-     (Model          : Flyology.Execution_Model;
-      Placement      : String;
-      Mode           : String;
-      Count          : Positive;
+     (Model           : Flyology.Execution_Model;
+      Placement       : String;
+      Mode            : String;
+      Count           : Positive;
       Explicit_Groups : Positive;
-      Creators       : Positive;
-      Metrics        : in out Phase_Measurements;
-      Before         : out Resource_Sample;
-      Peak           : out Resource_Sample;
-      After          : out Resource_Sample;
+      Creators        : Positive;
+      Metrics         : in out Phase_Measurements;
+      Before          : out Resource_Sample;
+      Peak            : out Resource_Sample;
+      After           : out Resource_Sample;
       Observed_Groups : out Natural;
-      Window         : out Positive)
+      Window          : out Positive)
    is
       subtype CPU_Range is System.Multiprocessors.CPU_Range;
 
-      function Target_CPU (Sample_Index : Positive) return CPU_Range is
-        (if Model = Flyology.Native_Task or else Placement = "automatic"
-         then System.Multiprocessors.Not_A_Specific_CPU
-         else CPU_Range (1 + (Sample_Index - 1) mod Explicit_Groups));
+      function Target_CPU (Sample_Index : Positive) return CPU_Range
+      is (if Model = Flyology.Native_Task or else Placement = "automatic"
+          then System.Multiprocessors.Not_A_Specific_CPU
+          else CPU_Range (1 + (Sample_Index - 1) mod Explicit_Groups));
 
       protected type Batch_Control (Target : Positive) is
          procedure Started (Slot : Positive);
@@ -169,9 +156,7 @@ procedure Task_Lifecycle is
 
          procedure Completed (Slot : Positive) is
          begin
-            if Slot not in Complete_Seen'Range
-              or else Complete_Seen (Slot)
-            then
+            if Slot not in Complete_Seen'Range or else Complete_Seen (Slot) then
                raise Program_Error with "task did not complete exactly once";
             end if;
             Complete_Seen (Slot) := True;
@@ -250,31 +235,29 @@ procedure Task_Lifecycle is
       end Anchor;
 
       type Anchor_Access is access Anchor;
-      procedure Free_Anchor is new Ada.Unchecked_Deallocation
-        (Anchor, Anchor_Access);
+      procedure Free_Anchor is new Ada.Unchecked_Deallocation (Anchor, Anchor_Access);
 
-      Sample_Index : Positive := 1;
-      Baseline     : Observation.Stack_Pool_Snapshot;
-      Warm_Baseline : Observation.Stack_Pool_Snapshot;
-      Anchor_Item  : Anchor_Access := null;
-      Reap_Elapsed : Duration;
-      Total_Started : Natural := 0;
+      Sample_Index    : Positive := 1;
+      Baseline        : Observation.Stack_Pool_Snapshot;
+      Warm_Baseline   : Observation.Stack_Pool_Snapshot;
+      Anchor_Item     : Anchor_Access := null;
+      Reap_Elapsed    : Duration;
+      Total_Started   : Natural := 0;
       Total_Completed : Natural := 0;
-      Max_RSS       : C.long_long;
-      Max_Virtual   : C.long_long;
-      Max_Threads   : C.int;
+      Max_RSS         : C.long_long;
+      Max_Virtual     : C.long_long;
+      Max_Threads     : C.int;
 
       procedure Run_Batch (Batch_Count : Positive) is
-         Control : Batch_Control (Batch_Count);
-         First_Sample : constant Positive := Sample_Index;
-         Effective_Creators : constant Positive :=
-           Positive'Min (Creators, Batch_Count);
-         Creation_Starts : array (1 .. Batch_Count) of Time;
+         Control            : Batch_Control (Batch_Count);
+         First_Sample       : constant Positive := Sample_Index;
+         Effective_Creators : constant Positive := Positive'Min (Creators, Batch_Count);
+         Creation_Starts    : array (1 .. Batch_Count) of Time;
 
          task type Worker
-           (Slot : Positive;
+           (Slot   : Positive;
             Sample : Positive;
-            CPU : CPU_Range)
+            CPU    : CPU_Range)
            with CPU => CPU
          is
             pragma Task_Info (Model);
@@ -284,19 +267,16 @@ procedure Task_Lifecycle is
          task body Worker is
             Released_At : Time;
          begin
-            Metrics.Start_Latencies (Sample) :=
-              To_Duration (Clock - Creation_Starts (Slot));
+            Metrics.Start_Latencies (Sample) := To_Duration (Clock - Creation_Starts (Slot));
             Control.Started (Slot);
             Control.Start_Gate (Released_At);
-            Metrics.Complete_Latencies (Sample) :=
-              To_Duration (Clock - Released_At);
+            Metrics.Complete_Latencies (Sample) := To_Duration (Clock - Released_At);
             Control.Completed (Slot);
          end Worker;
 
          type Worker_Access is access Worker;
          type Worker_Array is array (Positive range <>) of Worker_Access;
-         procedure Free_Worker is new Ada.Unchecked_Deallocation
-           (Worker, Worker_Access);
+         procedure Free_Worker is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
          Workers : Worker_Array (1 .. Batch_Count) := (others => null);
 
          protected Harness_Control is
@@ -364,9 +344,7 @@ procedure Task_Lifecycle is
                Finalized_Count := Finalized_Count + 1;
             end Finalized;
 
-            entry Wait_Finalized
-              when Finalized_Count = Effective_Creators
-            is
+            entry Wait_Finalized when Finalized_Count = Effective_Creators is
             begin
                null;
             end Wait_Finalized;
@@ -377,7 +355,7 @@ procedure Task_Lifecycle is
          end Creator;
 
          task body Creator is
-            Slot : Positive := Id;
+            Slot        : Positive := Id;
             One_Free_At : Time;
          begin
             Harness_Control.Ready;
@@ -385,10 +363,7 @@ procedure Task_Lifecycle is
             while Slot <= Batch_Count loop
                Creation_Starts (Slot) := Clock;
                Workers (Slot) :=
-                 new Worker
-                   (Slot,
-                    First_Sample + Slot - 1,
-                    Target_CPU (First_Sample + Slot - 1));
+                 new Worker (Slot, First_Sample + Slot - 1, Target_CPU (First_Sample + Slot - 1));
                Slot := Slot + Effective_Creators;
             end loop;
             Harness_Control.Created;
@@ -397,8 +372,7 @@ procedure Task_Lifecycle is
             while Slot <= Batch_Count loop
                One_Free_At := Clock;
                Free_Worker (Workers (Slot));
-               Metrics.Free_Latencies (First_Sample + Slot - 1) :=
-                 To_Duration (Clock - One_Free_At);
+               Metrics.Free_Latencies (First_Sample + Slot - 1) := To_Duration (Clock - One_Free_At);
                Slot := Slot + Effective_Creators;
             end loop;
             Harness_Control.Finalized;
@@ -406,25 +380,20 @@ procedure Task_Lifecycle is
 
          type Creator_Access is access Creator;
          type Creator_Array is array (Positive range <>) of Creator_Access;
-         procedure Free_Creator is new Ada.Unchecked_Deallocation
-           (Creator, Creator_Access);
-         Creator_Tasks : Creator_Array (1 .. Effective_Creators) :=
-           (others => null);
-         Started_At : Time;
-         Finished_At : Time;
-         Release_At : Time;
-         One_Free_At : Time;
-         During : Resource_Sample;
+         procedure Free_Creator is new Ada.Unchecked_Deallocation (Creator, Creator_Access);
+         Creator_Tasks : Creator_Array (1 .. Effective_Creators) := (others => null);
+         Started_At    : Time;
+         Finished_At   : Time;
+         Release_At    : Time;
+         One_Free_At   : Time;
+         During        : Resource_Sample;
       begin
          if Creators = 1 then
             Started_At := Clock;
             for Slot in Workers'Range loop
                Creation_Starts (Slot) := Clock;
                Workers (Slot) :=
-                 new Worker
-                   (Slot,
-                    First_Sample + Slot - 1,
-                    Target_CPU (First_Sample + Slot - 1));
+                 new Worker (Slot, First_Sample + Slot - 1, Target_CPU (First_Sample + Slot - 1));
             end loop;
          else
             for Id in Creator_Tasks'Range loop
@@ -437,8 +406,7 @@ procedure Task_Lifecycle is
          end if;
          Control.Wait_Started;
          Finished_At := Clock;
-         Metrics.Creation_Wall := Metrics.Creation_Wall
-           + To_Duration (Finished_At - Started_At);
+         Metrics.Creation_Wall := Metrics.Creation_Wall + To_Duration (Finished_At - Started_At);
          Total_Started := Total_Started + Batch_Count;
 
          During := Sample;
@@ -453,8 +421,7 @@ procedure Task_Lifecycle is
          Control.Release (Release_At);
          Control.Wait_Completed;
          Finished_At := Clock;
-         Metrics.Completion_Wall := Metrics.Completion_Wall
-           + To_Duration (Finished_At - Release_At);
+         Metrics.Completion_Wall := Metrics.Completion_Wall + To_Duration (Finished_At - Release_At);
          Total_Completed := Total_Completed + Batch_Count;
 
          Started_At := Clock;
@@ -462,15 +429,13 @@ procedure Task_Lifecycle is
             for Slot in Workers'Range loop
                One_Free_At := Clock;
                Free_Worker (Workers (Slot));
-               Metrics.Free_Latencies (First_Sample + Slot - 1) :=
-                 To_Duration (Clock - One_Free_At);
+               Metrics.Free_Latencies (First_Sample + Slot - 1) := To_Duration (Clock - One_Free_At);
             end loop;
          else
             Harness_Control.Release_Finalization;
             Harness_Control.Wait_Finalized;
          end if;
-         Metrics.Finalization_Wall := Metrics.Finalization_Wall
-           + To_Duration (Clock - Started_At);
+         Metrics.Finalization_Wall := Metrics.Finalization_Wall + To_Duration (Clock - Started_At);
 
          if Creators > 1 then
             for Id in Creator_Tasks'Range loop
@@ -481,9 +446,7 @@ procedure Task_Lifecycle is
             end loop;
          end if;
 
-         Wait_For_Pool
-           ((if Anchor_Item = null then Baseline else Warm_Baseline),
-            Reap_Elapsed);
+         Wait_For_Pool ((if Anchor_Item = null then Baseline else Warm_Baseline), Reap_Elapsed);
          Metrics.Reap_Wall := Metrics.Reap_Wall + Reap_Elapsed;
          Sample_Index := Sample_Index + Batch_Count;
       end Run_Batch;
@@ -501,8 +464,7 @@ procedure Task_Lifecycle is
          Anchor_Item := new Anchor (Target_CPU (1));
          Anchor_Control.Wait_Started;
          Warm_Baseline := Observation.Stack_Pool;
-         if Model = Flyology.Lightweight_Task
-           and then Warm_Baseline.Live_Stacks /= Baseline.Live_Stacks + 1
+         if Model = Flyology.Lightweight_Task and then Warm_Baseline.Live_Stacks /= Baseline.Live_Stacks + 1
          then
             raise Program_Error with "warm anchor did not retain one stack";
          end if;
@@ -512,8 +474,7 @@ procedure Task_Lifecycle is
       end if;
 
       while Sample_Index <= Count loop
-         Run_Batch
-           (Positive'Min (Window, Count - Sample_Index + 1));
+         Run_Batch (Positive'Min (Window, Count - Sample_Index + 1));
       end loop;
 
       if Anchor_Item /= null then
@@ -533,8 +494,7 @@ procedure Task_Lifecycle is
       Peak.RSS := Max_RSS;
       Peak.Virtual := Max_Virtual;
       Peak.Threads := Max_Threads;
-      Observed_Groups :=
-        Natural (Flyology.Process_Lifecycle.Created_Groups);
+      Observed_Groups := Natural (Flyology.Process_Lifecycle.Created_Groups);
    end Execute;
 
    procedure Usage is
@@ -566,29 +526,23 @@ begin
    end if;
 
    declare
-      Model_Name : constant String := Ada.Command_Line.Argument (1);
-      Placement : constant String := Ada.Command_Line.Argument (2);
-      Mode : constant String := Ada.Command_Line.Argument (3);
-      Count : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (4));
-      Explicit_Groups : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (5));
-      Creators : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (6));
-      Run : constant Positive :=
-        Positive'Value (Ada.Command_Line.Argument (7));
-      Model : constant Flyology.Execution_Model :=
-        (if Model_Name = "lightweight"
-         then Flyology.Lightweight_Task
-         else Flyology.Native_Task);
-      Metrics : Phase_Measurements (Count);
+      Model_Name          : constant String := Ada.Command_Line.Argument (1);
+      Placement           : constant String := Ada.Command_Line.Argument (2);
+      Mode                : constant String := Ada.Command_Line.Argument (3);
+      Count               : constant Positive := Positive'Value (Ada.Command_Line.Argument (4));
+      Explicit_Groups     : constant Positive := Positive'Value (Ada.Command_Line.Argument (5));
+      Creators            : constant Positive := Positive'Value (Ada.Command_Line.Argument (6));
+      Run                 : constant Positive := Positive'Value (Ada.Command_Line.Argument (7));
+      Model               : constant Flyology.Execution_Model :=
+        (if Model_Name = "lightweight" then Flyology.Lightweight_Task else Flyology.Native_Task);
+      Metrics             : Phase_Measurements (Count);
       Before, Peak, After : Resource_Sample;
-      Observed_Groups : Natural;
-      Window : Positive;
-      Start_Ordered : Duration_Array (1 .. Count) := (others => 0.0);
-      Complete_Ordered : Duration_Array (1 .. Count) := (others => 0.0);
-      Free_Ordered : Duration_Array (1 .. Count) := (others => 0.0);
-      Total_Wall : Duration;
+      Observed_Groups     : Natural;
+      Window              : Positive;
+      Start_Ordered       : Duration_Array (1 .. Count) := (others => 0.0);
+      Complete_Ordered    : Duration_Array (1 .. Count) := (others => 0.0);
+      Free_Ordered        : Duration_Array (1 .. Count) := (others => 0.0);
+      Total_Wall          : Duration;
    begin
       if (Model_Name /= "lightweight" and then Model_Name /= "native")
         or else (Placement /= "automatic" and then Placement /= "explicit")
@@ -622,127 +576,181 @@ begin
       Sort (Start_Ordered);
       Sort (Complete_Ordered);
       Sort (Free_Ordered);
-      Total_Wall := Metrics.Creation_Wall + Metrics.Completion_Wall
-        + Metrics.Finalization_Wall + Metrics.Reap_Wall;
+      Total_Wall :=
+        Metrics.Creation_Wall + Metrics.Completion_Wall + Metrics.Finalization_Wall + Metrics.Reap_Wall;
 
       Put_Line
         (Standard_Error,
-         Model_Name & " " & Placement & " " & Mode
-         & " count=" & Count'Image
-         & " configured_groups=" & Groups.Configured_Pool_Size'Image
-         & " observed_groups=" & Observed_Groups'Image
-         & " creators=" & Creators'Image
-         & " window=" & Window'Image);
+         Model_Name
+         & " "
+         & Placement
+         & " "
+         & Mode
+         & " count="
+         & Count'Image
+         & " configured_groups="
+         & Groups.Configured_Pool_Size'Image
+         & " observed_groups="
+         & Observed_Groups'Image
+         & " creators="
+         & Creators'Image
+         & " window="
+         & Window'Image);
       Put_Line
         (Standard_Error,
-         "  create/start: wall=" & Seconds (Metrics.Creation_Wall)
-         & " s throughput=" & Per_Second (Count, Metrics.Creation_Wall)
+         "  create/start: wall="
+         & Seconds (Metrics.Creation_Wall)
+         & " s throughput="
+         & Per_Second (Count, Metrics.Creation_Wall)
          & "/s p50/p95/p99="
-         & Microseconds (Percentile (Start_Ordered, 50)) & "/"
-         & Microseconds (Percentile (Start_Ordered, 95)) & "/"
-         & Microseconds (Percentile (Start_Ordered, 99)) & " us");
+         & Microseconds (Percentile (Start_Ordered, 50))
+         & "/"
+         & Microseconds (Percentile (Start_Ordered, 95))
+         & "/"
+         & Microseconds (Percentile (Start_Ordered, 99))
+         & " us");
       Put_Line
         (Standard_Error,
-         "  body completion: wall=" & Seconds (Metrics.Completion_Wall)
-         & " s throughput=" & Per_Second (Count, Metrics.Completion_Wall)
+         "  body completion: wall="
+         & Seconds (Metrics.Completion_Wall)
+         & " s throughput="
+         & Per_Second (Count, Metrics.Completion_Wall)
          & "/s p50/p95/p99="
-         & Microseconds (Percentile (Complete_Ordered, 50)) & "/"
-         & Microseconds (Percentile (Complete_Ordered, 95)) & "/"
-         & Microseconds (Percentile (Complete_Ordered, 99)) & " us");
+         & Microseconds (Percentile (Complete_Ordered, 50))
+         & "/"
+         & Microseconds (Percentile (Complete_Ordered, 95))
+         & "/"
+         & Microseconds (Percentile (Complete_Ordered, 99))
+         & " us");
       Put_Line
         (Standard_Error,
          "  task-object finalization: wall="
          & Seconds (Metrics.Finalization_Wall)
-         & " s throughput=" & Per_Second (Count, Metrics.Finalization_Wall)
+         & " s throughput="
+         & Per_Second (Count, Metrics.Finalization_Wall)
          & "/s p50/p95/p99="
-         & Microseconds (Percentile (Free_Ordered, 50)) & "/"
-         & Microseconds (Percentile (Free_Ordered, 95)) & "/"
-         & Microseconds (Percentile (Free_Ordered, 99)) & " us");
+         & Microseconds (Percentile (Free_Ordered, 50))
+         & "/"
+         & Microseconds (Percentile (Free_Ordered, 95))
+         & "/"
+         & Microseconds (Percentile (Free_Ordered, 99))
+         & " us");
       Put_Line
         (Standard_Error,
-         "  observable fiber/stack reap: wall=" & Seconds (Metrics.Reap_Wall)
+         "  observable fiber/stack reap: wall="
+         & Seconds (Metrics.Reap_Wall)
          & " s maps/unmaps/reuse="
-         & Observation.Counter'Image
-             (After.Pool.Arena_Mappings - Before.Pool.Arena_Mappings) & "/"
-         & Observation.Counter'Image
-             (After.Pool.Arena_Unmappings - Before.Pool.Arena_Unmappings) & "/"
-         & Observation.Counter'Image
-             (After.Pool.Shared_Stacks - Before.Pool.Shared_Stacks));
+         & Observation.Counter'Image (After.Pool.Arena_Mappings - Before.Pool.Arena_Mappings)
+         & "/"
+         & Observation.Counter'Image (After.Pool.Arena_Unmappings - Before.Pool.Arena_Unmappings)
+         & "/"
+         & Observation.Counter'Image (After.Pool.Shared_Stacks - Before.Pool.Shared_Stacks));
       Put_Line
         (Standard_Error,
-         "  resources: rss_peak=" & Peak.RSS'Image
-         & " virtual_peak=" & Peak.Virtual'Image
-         & " threads_peak=" & Peak.Threads'Image
-         & " live_stack_peak=" & Peak.Pool.Live_Stacks'Image
-         & " arenas_peak=" & Peak.Pool.Active_Arenas'Image
-         & " usable_peak=" & Peak.Pool.Live_Usable_Bytes'Image
-         & " reserved_peak=" & Peak.Pool.Reserved_Bytes'Image);
+         "  resources: rss_peak="
+         & Peak.RSS'Image
+         & " virtual_peak="
+         & Peak.Virtual'Image
+         & " threads_peak="
+         & Peak.Threads'Image
+         & " live_stack_peak="
+         & Peak.Pool.Live_Stacks'Image
+         & " arenas_peak="
+         & Peak.Pool.Active_Arenas'Image
+         & " usable_peak="
+         & Peak.Pool.Live_Usable_Bytes'Image
+         & " reserved_peak="
+         & Peak.Pool.Reserved_Bytes'Image);
 
-      Put_CSV_Field ("1"); Put (',');
-      Put_CSV_Field (Run'Image); Put (',');
-      Put_CSV_Field (Model_Name); Put (',');
-      Put_CSV_Field (Placement); Put (',');
-      Put_CSV_Field (Mode); Put (',');
-      Put_CSV_Field (Count'Image); Put (',');
-      Put_CSV_Field (Groups.Configured_Pool_Size'Image); Put (',');
-      Put_CSV_Field (Observed_Groups'Image); Put (',');
-      Put_CSV_Field (Requested_Stack_Size'Image); Put (',');
-      Put_CSV_Field (Creators'Image); Put (',');
-      Put_CSV_Field (Window'Image); Put (',');
-      Put_CSV_Field (Seconds (Metrics.Creation_Wall)); Put (',');
-      Put_CSV_Field (Per_Second (Count, Metrics.Creation_Wall)); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Start_Ordered, 50))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Start_Ordered, 95))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Start_Ordered, 99))); Put (',');
-      Put_CSV_Field (Seconds (Metrics.Completion_Wall)); Put (',');
-      Put_CSV_Field (Per_Second (Count, Metrics.Completion_Wall)); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Complete_Ordered, 50))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Complete_Ordered, 95))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Complete_Ordered, 99))); Put (',');
-      Put_CSV_Field (Seconds (Metrics.Finalization_Wall)); Put (',');
-      Put_CSV_Field (Per_Second (Count, Metrics.Finalization_Wall)); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Free_Ordered, 50))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Free_Ordered, 95))); Put (',');
-      Put_CSV_Field
-        (Microseconds (Percentile (Free_Ordered, 99))); Put (',');
-      Put_CSV_Field (Seconds (Metrics.Reap_Wall)); Put (',');
-      Put_CSV_Field (Seconds (Total_Wall)); Put (',');
-      Put_CSV_Field (Before.RSS'Image); Put (',');
-      Put_CSV_Field (Peak.RSS'Image); Put (',');
-      Put_CSV_Field (Peak_RSS'Image); Put (',');
-      Put_CSV_Field (Before.Virtual'Image); Put (',');
-      Put_CSV_Field (Peak.Virtual'Image); Put (',');
-      Put_CSV_Field (Before.Threads'Image); Put (',');
-      Put_CSV_Field (Peak.Threads'Image); Put (',');
-      Put_CSV_Field (Before.Pool.Live_Stacks'Image); Put (',');
-      Put_CSV_Field (Peak.Pool.Live_Stacks'Image); Put (',');
-      Put_CSV_Field (After.Pool.Live_Stacks'Image); Put (',');
-      Put_CSV_Field (Peak.Pool.Active_Arenas'Image); Put (',');
-      Put_CSV_Field (Peak.Pool.Live_Usable_Bytes'Image); Put (',');
-      Put_CSV_Field (Peak.Pool.Reserved_Bytes'Image); Put (',');
-      Put_CSV_Field
-        (Observation.Counter'Image
-           (After.Pool.Arena_Mappings - Before.Pool.Arena_Mappings));
+      Put_CSV_Field ("1");
       Put (',');
-      Put_CSV_Field
-        (Observation.Counter'Image
-           (After.Pool.Arena_Unmappings - Before.Pool.Arena_Unmappings));
+      Put_CSV_Field (Run'Image);
       Put (',');
-      Put_CSV_Field
-        (Observation.Counter'Image
-           (After.Pool.Shared_Stacks - Before.Pool.Shared_Stacks));
+      Put_CSV_Field (Model_Name);
       Put (',');
-      Put_CSV_Field
-        (Observation.Counter'Image
-           (After.Pool.Discarded_Stacks - Before.Pool.Discarded_Stacks));
+      Put_CSV_Field (Placement);
+      Put (',');
+      Put_CSV_Field (Mode);
+      Put (',');
+      Put_CSV_Field (Count'Image);
+      Put (',');
+      Put_CSV_Field (Groups.Configured_Pool_Size'Image);
+      Put (',');
+      Put_CSV_Field (Observed_Groups'Image);
+      Put (',');
+      Put_CSV_Field (Requested_Stack_Size'Image);
+      Put (',');
+      Put_CSV_Field (Creators'Image);
+      Put (',');
+      Put_CSV_Field (Window'Image);
+      Put (',');
+      Put_CSV_Field (Seconds (Metrics.Creation_Wall));
+      Put (',');
+      Put_CSV_Field (Per_Second (Count, Metrics.Creation_Wall));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Start_Ordered, 50)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Start_Ordered, 95)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Start_Ordered, 99)));
+      Put (',');
+      Put_CSV_Field (Seconds (Metrics.Completion_Wall));
+      Put (',');
+      Put_CSV_Field (Per_Second (Count, Metrics.Completion_Wall));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Complete_Ordered, 50)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Complete_Ordered, 95)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Complete_Ordered, 99)));
+      Put (',');
+      Put_CSV_Field (Seconds (Metrics.Finalization_Wall));
+      Put (',');
+      Put_CSV_Field (Per_Second (Count, Metrics.Finalization_Wall));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Free_Ordered, 50)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Free_Ordered, 95)));
+      Put (',');
+      Put_CSV_Field (Microseconds (Percentile (Free_Ordered, 99)));
+      Put (',');
+      Put_CSV_Field (Seconds (Metrics.Reap_Wall));
+      Put (',');
+      Put_CSV_Field (Seconds (Total_Wall));
+      Put (',');
+      Put_CSV_Field (Before.RSS'Image);
+      Put (',');
+      Put_CSV_Field (Peak.RSS'Image);
+      Put (',');
+      Put_CSV_Field (Peak_RSS'Image);
+      Put (',');
+      Put_CSV_Field (Before.Virtual'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Virtual'Image);
+      Put (',');
+      Put_CSV_Field (Before.Threads'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Threads'Image);
+      Put (',');
+      Put_CSV_Field (Before.Pool.Live_Stacks'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Pool.Live_Stacks'Image);
+      Put (',');
+      Put_CSV_Field (After.Pool.Live_Stacks'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Pool.Active_Arenas'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Pool.Live_Usable_Bytes'Image);
+      Put (',');
+      Put_CSV_Field (Peak.Pool.Reserved_Bytes'Image);
+      Put (',');
+      Put_CSV_Field (Observation.Counter'Image (After.Pool.Arena_Mappings - Before.Pool.Arena_Mappings));
+      Put (',');
+      Put_CSV_Field (Observation.Counter'Image (After.Pool.Arena_Unmappings - Before.Pool.Arena_Unmappings));
+      Put (',');
+      Put_CSV_Field (Observation.Counter'Image (After.Pool.Shared_Stacks - Before.Pool.Shared_Stacks));
+      Put (',');
+      Put_CSV_Field (Observation.Counter'Image (After.Pool.Discarded_Stacks - Before.Pool.Discarded_Stacks));
       Put (',');
       Put_CSV_Field ("true");
       New_Line;

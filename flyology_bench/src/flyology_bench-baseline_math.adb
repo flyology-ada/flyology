@@ -4,22 +4,16 @@
 package body Flyology_Bench.Baseline_Math
   with SPARK_Mode => On
 is
-   procedure Add_To_Sum
-     (Sum   : in out Long_Float;
-      Value : Long_Float)
-   is
+   procedure Add_To_Sum (Sum : in out Long_Float; Value : Long_Float) is
    begin
       Sum := Sum + Value;
    end Add_To_Sum;
 
-   function Mean
-     (Sum   : Long_Float;
-      Count : Sample_Count) return Long_Float is
-     (Sum / Long_Float (Count));
+   function Mean (Sum : Long_Float; Count : Sample_Count) return Long_Float
+   is (Sum / Long_Float (Count));
 
-   function Ratio
-     (Numerator, Denominator : Long_Float) return Long_Float is
-     (Numerator / Denominator);
+   function Ratio (Numerator, Denominator : Long_Float) return Long_Float
+   is (Numerator / Denominator);
 
    function Time_Change (Speedup : Long_Float) return Long_Float is
       Result : Long_Float;
@@ -34,15 +28,11 @@ is
       return Result;
    end Time_Change;
 
-   function Interpolate
-     (Low, High, Weight : Long_Float) return Long_Float is
-     (Low + (High - Low) * Weight);
+   function Interpolate (Low, High, Weight : Long_Float) return Long_Float
+   is (Low + (High - Low) * Weight);
 
    function Classify
-     (Change_Low, Change_High : Long_Float;
-      Threshold               : Threshold_Percentage)
-      return Comparison_Verdict
-   is
+     (Change_Low, Change_High : Long_Float; Threshold : Threshold_Percentage) return Comparison_Verdict is
    begin
       if Change_High < -Threshold then
          return Contender_Faster;

@@ -25,8 +25,10 @@ procedure Flyology.Supervision.Adapters_Smoke is
          Is_Stopping := True;
       end Stop;
 
-      function Running return Boolean is (Is_Running);
-      function Stopping return Boolean is (Is_Stopping);
+      function Running return Boolean
+      is (Is_Running);
+      function Stopping return Boolean
+      is (Is_Stopping);
    end Service_State;
 
    type Context is limited record
@@ -35,16 +37,12 @@ procedure Flyology.Supervision.Adapters_Smoke is
 
    type Service (State : not null access Context) is limited null record;
 
-   function Create
-     (State : not null access Context) return Service is
+   function Create (State : not null access Context) return Service is
    begin
       return Item : Service (State);
    end Create;
 
-   procedure Run_Service
-     (Item    : in out Service;
-      Context : aliased in out Adapters_Smoke.Context)
-   is
+   procedure Run_Service (Item : in out Service; Context : aliased in out Adapters_Smoke.Context) is
       pragma Unreferenced (Context);
    begin
       Item.State.State.Begin_Run;
@@ -58,33 +56,36 @@ procedure Flyology.Supervision.Adapters_Smoke is
       Item.State.State.Stop;
    end Request_Shutdown;
 
-   function Ready (Item : Service) return Boolean is
-     (Item.State.State.Running);
+   function Ready (Item : Service) return Boolean
+   is (Item.State.State.Running);
 
-   package Native_Adapter is new Flyology.Supervision.Adapters
-     (Application_Context => Context,
-      Service             => Service,
-      Create              => Create,
-      Run_Service         => Run_Service,
-      Request_Shutdown    => Request_Shutdown,
-      Ready               => Ready,
-      Generation_Model    => Flyology.Native_Task);
+   package Native_Adapter is new
+     Flyology.Supervision.Adapters
+       (Application_Context => Context,
+        Service             => Service,
+        Create              => Create,
+        Run_Service         => Run_Service,
+        Request_Shutdown    => Request_Shutdown,
+        Ready               => Ready,
+        Generation_Model    => Flyology.Native_Task);
 
-   package Lightweight_Adapter is new Flyology.Supervision.Adapters
-     (Application_Context => Context,
-      Service             => Service,
-      Create              => Create,
-      Run_Service         => Run_Service,
-      Request_Shutdown    => Request_Shutdown,
-      Ready               => Ready,
-      Generation_Model    => Flyology.Lightweight_Task,
-      Generation_CPU      => 2);
+   package Lightweight_Adapter is new
+     Flyology.Supervision.Adapters
+       (Application_Context => Context,
+        Service             => Service,
+        Create              => Create,
+        Run_Service         => Run_Service,
+        Request_Shutdown    => Request_Shutdown,
+        Ready               => Ready,
+        Generation_Model    => Flyology.Lightweight_Task,
+        Generation_CPU      => 2);
 
    generic
-      with procedure Run
-        (Context : aliased in out Adapters_Smoke.Context;
-         Control : aliased in out Generation_Control;
-         Result  : out Generation_Result);
+      with
+        procedure Run
+          (Context : aliased in out Adapters_Smoke.Context;
+           Control : aliased in out Generation_Control;
+           Result  : out Generation_Result);
    procedure Check;
 
    procedure Check is
@@ -104,9 +105,7 @@ procedure Flyology.Supervision.Adapters_Smoke is
          accept Join;
       end Owner;
    begin
-      Open
-        (Control,
-         (Controller => New_Controller, Id => 61, Generation => 1));
+      Open (Control, (Controller => New_Controller, Id => 61, Generation => 1));
       Owner.Start;
       while not Is_Ready (Control) loop
          delay 0.001;
@@ -118,11 +117,8 @@ procedure Flyology.Supervision.Adapters_Smoke is
       Owner.Join;
       pragma Assert (Result.Reported_Ready);
       pragma Assert (Result.Termination.Kind = Unhealthy);
-      pragma Assert
-        (Message_Text (Result.Termination) = "adapter probe failed");
-      pragma Assert
-        (Result.Termination.Task_Id /=
-           Ada.Task_Identification.Null_Task_Id);
+      pragma Assert (Message_Text (Result.Termination) = "adapter probe failed");
+      pragma Assert (Result.Termination.Task_Id /= Ada.Task_Identification.Null_Task_Id);
    end Check;
 
    procedure Check_Native is new Check (Native_Adapter.Run);

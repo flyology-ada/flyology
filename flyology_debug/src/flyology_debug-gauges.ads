@@ -16,6 +16,7 @@
 --  @formal Gauge_Kind Typed identity of every gauge retained by the instance
 --  @formal Gauge_Value_Type Definite latest value copied for a gauge
 --  @formal Now Task-safe monotonic timestamp source called by Set
+
 generic
    type Gauge_Kind is (<>);
    type Gauge_Value_Type is private;
@@ -43,24 +44,21 @@ package Flyology_Debug.Gauges is
    --  @param Result Snapshot to inspect
    --  @param Gauge Typed gauge identity
    --  @return True after a Set represented by Result
-   function Is_Set
-     (Result : Snapshot; Gauge : Gauge_Kind) return Boolean;
+   function Is_Set (Result : Snapshot; Gauge : Gauge_Kind) return Boolean;
 
    --  Return the latest value sampled for Gauge.
    --  @param Result Snapshot to inspect
    --  @param Gauge Typed gauge identity
    --  @return Latest copied gauge value
    --  @exception Constraint_Error Gauge is not set in Result
-   function Value_Of
-     (Result : Snapshot; Gauge : Gauge_Kind) return Gauge_Value_Type;
+   function Value_Of (Result : Snapshot; Gauge : Gauge_Kind) return Gauge_Value_Type;
 
    --  Return the producer timestamp sampled for Gauge.
    --  @param Result Snapshot to inspect
    --  @param Gauge Typed gauge identity
    --  @return Monotonic nanosecond timestamp for the latest sampled value
    --  @exception Constraint_Error Gauge is not set in Result
-   function Timestamp_Of
-     (Result : Snapshot; Gauge : Gauge_Kind) return Timestamp;
+   function Timestamp_Of (Result : Snapshot; Gauge : Gauge_Kind) return Timestamp;
 
 private
    type Gauge_Record is record

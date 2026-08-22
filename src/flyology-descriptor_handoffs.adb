@@ -10,16 +10,16 @@ package body Flyology.Descriptor_Handoffs is
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_32;
 
-   function Current_Error return C.int is (C.int (GNAT.OS_Lib.Errno));
+   function Current_Error return C.int
+   is (C.int (GNAT.OS_Lib.Errno));
 
    procedure Raise_Current (Operation : String) is
    begin
-      raise Operating_System_Error with
-        Operation & " failed (errno" & C.int'Image (Current_Error) & ")";
+      raise Operating_System_Error with Operation & " failed (errno" & C.int'Image (Current_Error) & ")";
    end Raise_Current;
 
-   function Has_Flag (Value, Flag : C.int) return Boolean is
-     ((Interfaces.Unsigned_32 (Value) and Interfaces.Unsigned_32 (Flag)) /= 0);
+   function Has_Flag (Value, Flag : C.int) return Boolean
+   is ((Interfaces.Unsigned_32 (Value) and Interfaces.Unsigned_32 (Flag)) /= 0);
 
    procedure Ensure_Close_On_Exec (Descriptor : C.int) is
       Flags : C.int := Native.Get_Descriptor_Flags (Descriptor);
@@ -52,9 +52,7 @@ package body Flyology.Descriptor_Handoffs is
             raise Protocol_Error with "handoff carrier is not connected";
          end if;
          Raise_Current ("handoff peer socket inspection");
-      elsif Local_Family /= Native.Unix_Socket_Family or else
-        Peer_Family /= Native.Unix_Socket_Family
-      then
+      elsif Local_Family /= Native.Unix_Socket_Family or else Peer_Family /= Native.Unix_Socket_Family then
          raise Protocol_Error with "handoff carrier is not AF_UNIX";
       end if;
       Ensure_Close_On_Exec (Socket);
@@ -73,9 +71,7 @@ package body Flyology.Descriptor_Handoffs is
    end Close_Descriptor;
 
    protected body Channel_Controller is
-      procedure Adopt
-        (Descriptor : C.int;
-         Accepted   : out Boolean) is
+      procedure Adopt (Descriptor : C.int; Accepted : out Boolean) is
       begin
          Accepted := State = Closed;
          if Accepted then
@@ -84,19 +80,23 @@ package body Flyology.Descriptor_Handoffs is
          end if;
       end Adopt;
 
-      procedure Try_Begin
-        (Descriptor : out C.int;
-         Result     : out Begin_Result) is
+      procedure Try_Begin (Descriptor : out C.int; Result : out Begin_Result) is
       begin
          Descriptor := -1;
          case State is
-            when Ready =>
+            when Ready    =>
                State := Busy;
                Descriptor := Descriptor_Value;
                Result := Acquired;
-            when Closed => Result := Was_Closed;
-            when Busy => Result := Was_Busy;
-            when Poisoned => Result := Was_Poisoned;
+
+            when Closed   =>
+               Result := Was_Closed;
+
+            when Busy     =>
+               Result := Was_Busy;
+
+            when Poisoned =>
+               Result := Was_Poisoned;
          end case;
       end Try_Begin;
 
@@ -114,9 +114,7 @@ package body Flyology.Descriptor_Handoffs is
          State := Poisoned;
       end Poison;
 
-      procedure Take_For_Close
-        (Descriptor : out C.int;
-         Busy_Now   : out Boolean) is
+      procedure Take_For_Close (Descriptor : out C.int; Busy_Now : out Boolean) is
       begin
          Busy_Now := State = Busy;
          if Busy_Now then
@@ -128,23 +126,26 @@ package body Flyology.Descriptor_Handoffs is
          end if;
       end Take_For_Close;
 
-      function Open return Boolean is (State in Ready | Busy);
-      function Failed return Boolean is (State = Poisoned);
+      function Open return Boolean
+      is (State in Ready | Busy);
+      function Failed return Boolean
+      is (State = Poisoned);
    end Channel_Controller;
 
-   procedure Begin_Operation
-     (Item       : in out Handoff_Channel;
-      Descriptor : out C.int)
-   is
+   procedure Begin_Operation (Item : in out Handoff_Channel; Descriptor : out C.int) is
       Result : Begin_Result;
    begin
       Item.Owner.Controller.Try_Begin (Descriptor, Result);
       case Result is
-         when Acquired => null;
-         when Was_Closed =>
+         when Acquired     =>
+            null;
+
+         when Was_Closed   =>
             raise Validation_Error with "handoff channel is closed";
-         when Was_Busy =>
+
+         when Was_Busy     =>
             raise Channel_Busy with "handoff channel is already in use";
+
          when Was_Poisoned =>
             raise Protocol_Error with "handoff channel is poisoned";
       end case;
@@ -157,26 +158,18 @@ package body Flyology.Descriptor_Handoffs is
       Close_Descriptor (Descriptor);
    end Poison_And_Close;
 
-   procedure Validate_Carrier
-     (Socket : Socket_Descriptor;
-      Trust  : Peer_Trust := Trusted_Peer)
-   is
+   procedure Validate_Carrier (Socket : Socket_Descriptor; Trust : Peer_Trust := Trusted_Peer) is
    begin
       if Socket < 0 then
          raise Validation_Error with "Unix-domain socket is invalid";
-      elsif Trust = Untrusted_Peer and then
-        not Native.Untrusted_Handoff_Supported
-      then
-         raise Security_Error with
-           "untrusted descriptor handoff is unavailable on this host";
+      elsif Trust = Untrusted_Peer and then not Native.Untrusted_Handoff_Supported then
+         raise Security_Error with "untrusted descriptor handoff is unavailable on this host";
       end if;
       Prepare_Channel (C.int (Socket));
    end Validate_Carrier;
 
    procedure Adopt
-     (Item   : in out Handoff_Channel;
-      Socket : in out Socket_Descriptor;
-      Trust  : Peer_Trust := Trusted_Peer)
+     (Item : in out Handoff_Channel; Socket : in out Socket_Descriptor; Trust : Peer_Trust := Trusted_Peer)
    is
       Accepted : Boolean;
    begin
@@ -214,13 +207,14 @@ package body Flyology.Descriptor_Handoffs is
       Poison_And_Close (Item);
    end Poison;
 
-   function Is_Open (Item : Handoff_Channel) return Boolean is
-     (Item.Owner.Controller.Open);
+   function Is_Open (Item : Handoff_Channel) return Boolean
+   is (Item.Owner.Controller.Open);
 
-   function Is_Poisoned (Item : Handoff_Channel) return Boolean is
-     (Item.Owner.Controller.Failed);
+   function Is_Poisoned (Item : Handoff_Channel) return Boolean
+   is (Item.Owner.Controller.Failed);
 
-   overriding procedure Finalize (Item : in out Channel_Owner) is
+   overriding
+   procedure Finalize (Item : in out Channel_Owner) is
       Descriptor : C.int;
       Busy_Now   : Boolean;
    begin
@@ -230,13 +224,11 @@ package body Flyology.Descriptor_Handoffs is
       end if;
       Close_Descriptor (Descriptor);
    exception
-      when others => null;
+      when others =>
+         null;
    end Finalize;
 
-   procedure Send
-     (Channel    : in out Handoff_Channel;
-      Descriptor : C.int)
-   is
+   procedure Send (Channel : in out Handoff_Channel; Descriptor : C.int) is
       Socket   : C.int;
       Amount   : C.long;
       Error    : C.int;
@@ -270,10 +262,7 @@ package body Flyology.Descriptor_Handoffs is
          raise;
    end Send;
 
-   procedure Receive
-     (Channel    : in out Handoff_Channel;
-      Descriptor : out C.int)
-   is
+   procedure Receive (Channel : in out Handoff_Channel; Descriptor : out C.int) is
       Socket      : C.int;
       Descriptors : Native.Descriptor_Array (0 .. 511) := (others => -1);
       Count       : C.size_t := 0;
@@ -289,19 +278,21 @@ package body Flyology.Descriptor_Handoffs is
       Begin_Operation (Channel, Socket);
       Acquired := True;
       loop
-         Amount := Native.Receive_Descriptors_Once
-           (Socket, Native.Message_Close_On_Exec, Descriptors, Count,
-            Payload, Flags, Malformed);
+         Amount :=
+           Native.Receive_Descriptors_Once
+             (Socket, Native.Message_Close_On_Exec, Descriptors, Count, Payload, Flags, Malformed);
          exit when Amount >= 0;
          Error := Current_Error;
          exit when Error /= Native.Error_Interrupted;
       end loop;
       if Amount < 0 then
          Raise_Current ("SCM_RIGHTS receive");
-      elsif Amount /= 1 or else Payload = 0 or else Count /= 1 or else
-        Malformed or else
-        Has_Flag (Flags, Native.Message_Control_Truncated) or else
-        Has_Flag (Flags, Native.Message_Truncated)
+      elsif Amount /= 1
+        or else Payload = 0
+        or else Count /= 1
+        or else Malformed
+        or else Has_Flag (Flags, Native.Message_Control_Truncated)
+        or else Has_Flag (Flags, Native.Message_Truncated)
       then
          raise Protocol_Error with "invalid SCM_RIGHTS record";
       end if;

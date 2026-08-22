@@ -10,6 +10,7 @@ with System.Flyology.Contexts;
 --  unrepresentable size hands the caller a stack with no writable bytes, and
 --  initializing the register image on that stack faults on architectures
 --  whose entry convention stores below the stack top.
+
 procedure Stack_Size_Limits_Child is
    package C renames Interfaces.C;
    package Contexts renames System.Flyology.Contexts;
@@ -39,10 +40,11 @@ procedure Stack_Size_Limits_Child is
       raise Program_Error with "rejected context was dispatched";
    end Unreachable_Entry;
 
-   function Page_Size return C.size_t is (C.size_t (Get_Page_Size));
+   function Page_Size return C.size_t
+   is (C.size_t (Get_Page_Size));
 
-   function Round_Up (Value, Alignment : C.size_t) return C.size_t is
-     ((Value + Alignment - 1) / Alignment * Alignment);
+   function Round_Up (Value, Alignment : C.size_t) return C.size_t
+   is ((Value + Alignment - 1) / Alignment * Alignment);
 
    procedure Expect_Rejected (Requested : C.size_t);
 
@@ -102,8 +104,7 @@ procedure Stack_Size_Limits_Child is
    procedure Expect_Empty_Pool;
 
    procedure Expect_Empty_Pool is
-      Pool : constant Observation.Stack_Pool_Snapshot :=
-        Observation.Stack_Pool;
+      Pool : constant Observation.Stack_Pool_Snapshot := Observation.Stack_Pool;
    begin
       --  A rejected request must retain no stack, arena, or reserved address
       --  space, and an accepted one must release both on Destroy.

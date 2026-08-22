@@ -9,6 +9,7 @@ with System.Multiprocessors;
 --  @formal Execute Application task body
 --  @formal Task_Model Lightweight or native task designation
 --  @formal Task_CPU CPU aspect for the generation task
+
 generic
    type Application_Context (<>) is limited private;
 
@@ -18,15 +19,14 @@ generic
    --  during CPU-only work.
    --  @param Context State kept alive by the enclosing supervisor scope
    --  @param Control Borrowed generation-local readiness and stop channel
-   with procedure Execute
-     (Context : in out Application_Context;
-      Control : not null access Generation_Control);
+   with
+     procedure Execute (Context : in out Application_Context; Control : not null access Generation_Control);
 
    Task_Model : Flyology.Execution_Model := Flyology.Project_Default;
-   Task_CPU   : System.Multiprocessors.CPU_Range :=
-     System.Multiprocessors.Not_A_Specific_CPU;
+   Task_CPU : System.Multiprocessors.CPU_Range := System.Multiprocessors.Not_A_Specific_CPU;
 
-package Flyology.Supervision.Children is
+package Flyology.Supervision.Children
+is
 
    --  Create, activate, observe, and join one generation. Unhandled callback
    --  exceptions are copied automatically into Result rather than propagated.

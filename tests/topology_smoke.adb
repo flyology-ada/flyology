@@ -13,10 +13,7 @@ procedure Topology_Smoke is
    use type Groups.Group_Id;
 
    Pool_Size : constant Groups.Loop_Pool_Size := 3;
-   type Counts_Array is
-     array
-       (Topology.Shard_Id range
-          0 .. Topology.Shard_Id (Pool_Size - 1)) of Natural;
+   type Counts_Array is array (Topology.Shard_Id range 0 .. Topology.Shard_Id (Pool_Size - 1)) of Natural;
 
    protected Results is
       procedure Native_Finished (Passed : Boolean);
@@ -53,7 +50,8 @@ procedure Topology_Smoke is
          null;
       end Wait_Lightweight;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Results;
 
    task type Native_Caller is
@@ -70,9 +68,7 @@ procedure Topology_Smoke is
             Rejected := True;
       end;
       Results.Native_Finished
-        (Rejected
-         and then Topology.Shard_For_Hash (4) = 1
-         and then not Flyology.IO.Is_Lightweight_Task);
+        (Rejected and then Topology.Shard_For_Hash (4) = 1 and then not Flyology.IO.Is_Lightweight_Task);
    exception
       when others =>
          Results.Native_Finished (False);
@@ -126,8 +122,7 @@ begin
    end if;
 
    for Hash in Interfaces.Unsigned_64 range 0 .. 299 loop
-      Counts (Topology.Shard_For_Hash (Hash)) :=
-        Counts (Topology.Shard_For_Hash (Hash)) + 1;
+      Counts (Topology.Shard_For_Hash (Hash)) := Counts (Topology.Shard_For_Hash (Hash)) + 1;
    end loop;
    for Count of Counts loop
       if Count /= 100 then
@@ -136,9 +131,7 @@ begin
    end loop;
 
    --  Key selection and native rejection must not start event machinery.
-   for Group in Groups.Group_Id range
-     0 .. Groups.Group_Id (Pool_Size - 1)
-   loop
+   for Group in Groups.Group_Id range 0 .. Groups.Group_Id (Pool_Size - 1) loop
       if Observe.Snapshot (Group, Snapshot) then
          raise Program_Error with "hash selection started an event loop";
       end if;
@@ -150,9 +143,7 @@ begin
    begin
       Results.Wait_Native;
    end;
-   for Group in Groups.Group_Id range
-     0 .. Groups.Group_Id (Pool_Size - 1)
-   loop
+   for Group in Groups.Group_Id range 0 .. Groups.Group_Id (Pool_Size - 1) loop
       if Observe.Snapshot (Group, Snapshot) then
          raise Program_Error with "native crossing started an event loop";
       end if;

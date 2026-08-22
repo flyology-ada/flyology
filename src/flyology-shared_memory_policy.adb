@@ -1,15 +1,17 @@
-package body Flyology.Shared_Memory_Policy with SPARK_Mode is
+package body Flyology.Shared_Memory_Policy
+  with SPARK_Mode
+is
    function Validate_Descriptor
-     (Actual_Length      : U64;
-      Expected_Length    : U64;
-      Mode               : U32;
-      Type_Mask          : U32;
-      Regular_Type       : U32;
-      Allow_Untyped      : Boolean;
-      Writable           : Boolean;
-      Close_On_Exec      : Boolean;
-      Size_Immutable     : Boolean;
-      Require_Immutable  : Boolean) return Descriptor_Validation is
+     (Actual_Length     : U64;
+      Expected_Length   : U64;
+      Mode              : U32;
+      Type_Mask         : U32;
+      Regular_Type      : U32;
+      Allow_Untyped     : Boolean;
+      Writable          : Boolean;
+      Close_On_Exec     : Boolean;
+      Size_Immutable    : Boolean;
+      Require_Immutable : Boolean) return Descriptor_Validation is
    begin
       if Actual_Length /= Expected_Length then
          return Size_Mismatch;
@@ -19,9 +21,7 @@ package body Flyology.Shared_Memory_Policy with SPARK_Mode is
          return Type_Mismatch;
       elsif not Writable then
          return Type_Mismatch;
-      elsif not Close_On_Exec
-        or else (Require_Immutable and then not Size_Immutable)
-      then
+      elsif not Close_On_Exec or else (Require_Immutable and then not Size_Immutable) then
          return Security_Missing;
       else
          return Descriptor_Valid;
@@ -29,9 +29,7 @@ package body Flyology.Shared_Memory_Policy with SPARK_Mode is
    end Validate_Descriptor;
 
    function Classify_Namespace
-     (Created         : Boolean;
-      Actual_Length   : U64;
-      Expected_Length : U64) return Namespace_Classification is
+     (Created : Boolean; Actual_Length : U64; Expected_Length : U64) return Namespace_Classification is
    begin
       if not Created and then Actual_Length = 0 then
          return Namespace_In_Progress;
@@ -98,20 +96,18 @@ package body Flyology.Shared_Memory_Policy with SPARK_Mode is
    begin
       return
         State = Slot_Free
-        or else
-          (State /= Slot_Invalid
-           and then Generation /= 0
-           and then Name_Length /= 0
-           and then Name_Length <= Name_Limit
-           and then Location >= Data_Start
-           and then Location mod Alignment = 0
-           and then Length /= 0
-           and then Reserved /= 0
-           and then Length <= Reserved
-           and then Reserved mod Alignment = 0
-           and then Location <= Frontier
-           and then Reserved <= Frontier - Location
-           and then
-             (if State = Slot_Failed then Failure /= 0 else True));
+        or else (State /= Slot_Invalid
+                 and then Generation /= 0
+                 and then Name_Length /= 0
+                 and then Name_Length <= Name_Limit
+                 and then Location >= Data_Start
+                 and then Location mod Alignment = 0
+                 and then Length /= 0
+                 and then Reserved /= 0
+                 and then Length <= Reserved
+                 and then Reserved mod Alignment = 0
+                 and then Location <= Frontier
+                 and then Reserved <= Frontier - Location
+                 and then (if State = Slot_Failed then Failure /= 0 else True));
    end Valid_Replacement_Slot;
 end Flyology.Shared_Memory_Policy;

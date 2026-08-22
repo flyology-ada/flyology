@@ -24,8 +24,7 @@ package Allocator_Refinement_Support is
 
    type Index_Array is array (Positive range 1 .. Max_Blocks) of Index_Info;
 
-   type TLSF_Map_Array is array (Natural range 0 .. 31) of
-     Interfaces.Unsigned_32;
+   type TLSF_Map_Array is array (Natural range 0 .. 31) of Interfaces.Unsigned_32;
 
    type Snapshot is record
       Generation  : Interfaces.Unsigned_64 := 0;

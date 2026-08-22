@@ -5,6 +5,7 @@ private with Flyology.Descriptor_Handoffs;
 --  Transfers typed listening-socket capabilities over one dedicated connected
 --  AF_UNIX stream channel. Calls are synchronous and may block; use a native
 --  task unless readiness has been established independently.
+
 package Flyology.IO.Socket_Handoffs is
    --  Ancillary data violates the one-byte, one-descriptor protocol.
    Protocol_Error         : exception;
@@ -68,10 +69,8 @@ package Flyology.IO.Socket_Handoffs is
    --  @param Channel Dedicated capability channel
    --  @param Item Closed destination socket
    procedure Receive_Listener
-     (Channel : in out Handoff_Channel;
-      Item    : in out Flyology.IO.Sockets.Socket_Type)
-   with Pre  => not Flyology.IO.Sockets.Is_Open (Item),
-        Post => Flyology.IO.Sockets.Is_Open (Item);
+     (Channel : in out Handoff_Channel; Item : in out Flyology.IO.Sockets.Socket_Type)
+   with Pre => not Flyology.IO.Sockets.Is_Open (Item), Post => Flyology.IO.Sockets.Is_Open (Item);
 
 private
    package Descriptor_Handoffs renames Flyology.Descriptor_Handoffs;

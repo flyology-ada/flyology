@@ -12,11 +12,12 @@ private with System;
 --  @formal Required_Alignment Power-of-two alignment for each stored value
 --  @formal Type_Signature Stable nonzero semantic type identifier
 --  @formal Layout_Version Nonzero version of the value's byte layout
+
 generic
-   Byte_Size          : Positive;
+   Byte_Size : Positive;
    Required_Alignment : Positive := 1;
-   Type_Signature     : Interfaces.Unsigned_64;
-   Layout_Version     : Interfaces.Unsigned_32;
+   Type_Signature : Interfaces.Unsigned_64;
+   Layout_Version : Interfaces.Unsigned_32;
 package Flyology.Data_Structures.Storage_Types.Immutable is
    pragma Preelaborate;
    --  Exact stored bytes in one immutable value.
@@ -59,76 +60,55 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @param Item Active read-only reference
    --  @param Offset Zero-based byte offset
    --  @return Stored byte
-   function Load_U8
-     (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_8;
+   function Load_U8 (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_8;
 
    --  Return an aligned native 32-bit field from a published reference.
    --  @param Item Active read-only reference
    --  @param Offset Zero-based field offset
    --  @return Stored fixed-width value
-   function Load_U32
-     (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_32;
+   function Load_U32 (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_32;
 
    --  Return an aligned native 64-bit field from a published reference.
    --  @param Item Active read-only reference
    --  @param Offset Zero-based field offset
    --  @return Stored fixed-width value
-   function Load_U64
-     (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_64;
+   function Load_U64 (Item : Const_Ref; Offset : Natural) return Interfaces.Unsigned_64;
 
    --  Write one byte in an unpublished container slot.
    --  @param Item Active unpublished builder
    --  @param Offset Zero-based byte offset
    --  @param Data Byte to store
-   procedure Store_U8
-     (Item : in out Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_8);
+   procedure Store_U8 (Item : in out Builder; Offset : Natural; Data : Interfaces.Unsigned_8);
 
    --  Write an aligned native 32-bit field in an unpublished container slot.
    --  @param Item Active unpublished builder
    --  @param Offset Zero-based field offset
    --  @param Data Fixed-width value to store
-   procedure Store_U32
-     (Item : in out Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_32);
+   procedure Store_U32 (Item : in out Builder; Offset : Natural; Data : Interfaces.Unsigned_32);
 
    --  Write an aligned native 64-bit field in an unpublished container slot.
    --  @param Item Active unpublished builder
    --  @param Offset Zero-based field offset
    --  @param Data Fixed-width value to store
-   procedure Store_U64
-     (Item : in out Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_64);
+   procedure Store_U64 (Item : in out Builder; Offset : Natural; Data : Interfaces.Unsigned_64);
 
    --  Write one byte in a local independent value builder.
    --  @param Item Active local builder
    --  @param Offset Zero-based byte offset
    --  @param Data Byte to store
-   procedure Store_U8
-     (Item : in out Value_Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_8);
+   procedure Store_U8 (Item : in out Value_Builder; Offset : Natural; Data : Interfaces.Unsigned_8);
 
    --  Write an aligned native 32-bit field in a local value builder.
    --  @param Item Active local builder
    --  @param Offset Zero-based field offset
    --  @param Data Fixed-width value to store
-   procedure Store_U32
-     (Item : in out Value_Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_32);
+   procedure Store_U32 (Item : in out Value_Builder; Offset : Natural; Data : Interfaces.Unsigned_32);
 
    --  Write an aligned native 64-bit field in a local value builder.
    --  @param Item Active local builder
    --  @param Offset Zero-based field offset
    --  @param Data Fixed-width value to store
-   procedure Store_U64
-     (Item : in out Value_Builder;
-      Offset : Natural;
-      Data : Interfaces.Unsigned_64);
+   procedure Store_U64 (Item : in out Value_Builder; Offset : Natural; Data : Interfaces.Unsigned_64);
 
    --  Copy an immutable Value into a validated unpublished storage binding.
    --  @param Item Independent immutable value
@@ -147,9 +127,7 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @param Source Validated published element storage
    --  @param Target Validated unpublished element storage
    --  @exclude
-   procedure Copy
-     (Source : Immutable_Storage_View;
-      Target : Immutable_Storage_View);
+   procedure Copy (Source : Immutable_Storage_View; Target : Immutable_Storage_View);
 
    --  Copy a validated published storage binding into an independent value.
    --  @param Source Validated published element storage
@@ -161,15 +139,13 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @param Item Reference initialized on success
    --  @param Source Validated published element storage
    --  @exclude
-   procedure Bind
-     (Item : out Const_Ref; Source : Immutable_Storage_View);
+   procedure Bind (Item : out Const_Ref; Source : Immutable_Storage_View);
 
    --  Bind a builder to validated unpublished storage.
    --  @param Item Builder initialized on success
    --  @param Target Validated unpublished element storage
    --  @exclude
-   procedure Bind
-     (Item : out Builder; Target : Immutable_Storage_View);
+   procedure Bind (Item : out Builder; Target : Immutable_Storage_View);
 
    --  Compute the stable FNV-1a hash of an independent representation.
    --  @param Item Immutable bytes to hash
@@ -195,13 +171,11 @@ package Flyology.Data_Structures.Storage_Types.Immutable is
    --  @param Right Second active published reference
    --  @return True when every representation byte matches
    --  @exclude
-   function Equivalent
-     (Left : Const_Ref; Right : Const_Ref) return Boolean;
+   function Equivalent (Left : Const_Ref; Right : Const_Ref) return Boolean;
 
 private
    subtype Byte_Index is Natural range 0 .. Byte_Size - 1;
-   type Byte_Array is array (Byte_Index) of Interfaces.Unsigned_8
-     with Component_Size => 8;
+   type Byte_Array is array (Byte_Index) of Interfaces.Unsigned_8 with Component_Size => 8;
 
    type Value is new Byte_Array;
 

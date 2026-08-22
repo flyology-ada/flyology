@@ -15,6 +15,7 @@ with Flyology;
 --  with, or without, a live callback and reports the resident-set difference.
 --
 --  Usage: fiber_trampoline_memory [count] [with|without]
+
 procedure Fiber_Trampoline_Memory is
    use type Interfaces.C.unsigned_long_long;
 
@@ -22,20 +23,16 @@ procedure Fiber_Trampoline_Memory is
    pragma Import (C, Resident_Bytes, "flyology_bench_resident_bytes");
 
    Count : constant Positive :=
-     (if Ada.Command_Line.Argument_Count >= 1
-      then Positive'Value (Ada.Command_Line.Argument (1))
-      else 512);
+     (if Ada.Command_Line.Argument_Count >= 1 then Positive'Value (Ada.Command_Line.Argument (1)) else 512);
 
    Use_Callbacks : constant Boolean :=
-     (if Ada.Command_Line.Argument_Count >= 2
-      then Ada.Command_Line.Argument (2) = "with"
-      else True);
+     (if Ada.Command_Line.Argument_Count >= 2 then Ada.Command_Line.Argument (2) = "with" else True);
 
    type Callback_Access is access procedure;
 
    --  Volatile so an escaping callback survives optimization and really needs
    --  a trampoline.
-   Sink : Callback_Access := null;
+   Sink     : Callback_Access := null;
    pragma Volatile (Sink);
    Observed : Natural := 0;
    pragma Volatile (Observed);
@@ -46,8 +43,8 @@ procedure Fiber_Trampoline_Memory is
       procedure Release;
       entry Await_Release;
    private
-      Arrived   : Natural := 0;
-      Released  : Boolean := False;
+      Arrived  : Natural := 0;
+      Released : Boolean := False;
    end Gate;
 
    protected body Gate is
@@ -116,8 +113,7 @@ begin
    After := Resident_Bytes;
    Gate.Release;
 
-   Per_Task :=
-     Long_Float (After - Before) / Long_Float (Count);
+   Per_Task := Long_Float (After - Before) / Long_Float (Count);
    Ada.Text_IO.Put_Line
      ("fibers="
       & Count'Image

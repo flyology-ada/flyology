@@ -33,88 +33,74 @@ procedure Shared_Memory_Child is
       Maximum_Name_Length  => 64,
       Allocation_Alignment => 64);
 
-   function Reserve
-     (Base, Length : C.unsigned_long_long) return C.int;
+   function Reserve (Base, Length : C.unsigned_long_long) return C.int;
    pragma Import (C, Reserve, "flyology_test_reserve_mapping_base");
-   function Release_Reserve
-     (Base, Length : C.unsigned_long_long) return C.int;
-   pragma Import
-     (C, Release_Reserve, "flyology_test_release_reserved_base");
+   function Release_Reserve (Base, Length : C.unsigned_long_long) return C.int;
+   pragma Import (C, Release_Reserve, "flyology_test_release_reserved_base");
 
 begin
    if Ada.Command_Line.Argument_Count = 0 then
       return;
    end if;
    declare
-      Parent_Base : constant Interfaces.Unsigned_64 :=
+      Parent_Base    : constant Interfaces.Unsigned_64 :=
         Interfaces.Unsigned_64'Value (Ada.Command_Line.Argument (1));
-      Length : constant Shared.Byte_Length :=
+      Length         : constant Shared.Byte_Length :=
         Shared.Byte_Length'Value (Ada.Command_Line.Argument (2));
-      Backing : Shared.Backing_Object;
-      Map : Shared.Mapping;
-      Segment : Segments.View;
-      Region : Regions.View;
-      Object : Strings.View;
+      Backing        : Shared.Backing_Object;
+      Map            : Shared.Mapping;
+      Segment        : Segments.View;
+      Region         : Regions.View;
+      Object         : Strings.View;
       Segment_Result : Segments.Segment_Open_Result;
-      Lookup : Segments.Lookup_Result;
-      Handle : Segments.Named_Handle;
-      Failure : Interfaces.Unsigned_32;
-      Location : DS.Region_Offset;
-      Extent : Shared.Byte_Length;
-      Ignored : C.int;
-      Reservation : C.int;
+      Lookup         : Segments.Lookup_Result;
+      Handle         : Segments.Named_Handle;
+      Failure        : Interfaces.Unsigned_32;
+      Location       : DS.Region_Offset;
+      Extent         : Shared.Byte_Length;
+      Ignored        : C.int;
+      Reservation    : C.int;
    begin
-      Reservation := Reserve
-        (C.unsigned_long_long (Parent_Base), C.unsigned_long_long (Length));
+      Reservation := Reserve (C.unsigned_long_long (Parent_Base), C.unsigned_long_long (Length));
       if Reservation < 0 then
-         raise Program_Error with
-           "child could not reserve parent mapping base";
+         raise Program_Error with "child could not reserve parent mapping base";
       end if;
       Sockets.Receive (3, Length, Backing);
       Shared.Map (Map, Backing);
       Shared.Close (Backing);
       if Testing.Base_Value (Map) = Parent_Base then
-         raise Program_Error with
-           "child mapping reused parent virtual address";
+         raise Program_Error with "child mapping reused parent virtual address";
       end if;
       Segments.Create_Or_Attach (Segment, Map, Config, Segment_Result);
       if Segment_Result /= Segments.Attached_Existing then
-         raise Program_Error with
-           "received mapping did not attach ready segment";
+         raise Program_Error with "received mapping did not attach ready segment";
       end if;
       Segments.Attach_Region (Segment, Region);
       loop
-         Segments.Try_Find
-           (Segment, "replacement-handoff", Handle, Lookup, Failure);
+         Segments.Try_Find (Segment, "replacement-handoff", Handle, Lookup, Failure);
          exit when Lookup /= Segments.Registry_Busy;
          delay 0.0;
       end loop;
       if Lookup = Segments.Found then
          if Failure /= 0 then
-            raise Program_Error with
-              "replacement handoff extent reported failure";
+            raise Program_Error with "replacement handoff extent reported failure";
          end if;
          Segments.Resolve (Segment, Handle, Location, Extent);
          Strings.Attach (Object, Region, Location, 64);
          declare
-            Observed : Ada.Streams.Stream_Element_Array (1 .. 4);
+            Observed    : Ada.Streams.Stream_Element_Array (1 .. 4);
             Replacement : constant Ada.Streams.Stream_Element_Array :=
               (1 => 16#65#, 2 => 16#78#, 3 => 16#65#, 4 => 16#63#);
          begin
             Strings.Read (Object, Observed);
-            if Observed /=
-              Ada.Streams.Stream_Element_Array'
-                (16#67#, 16#72#, 16#6F#, 16#77#)
-            then
-               raise Program_Error with
-                 "child observed wrong replacement payload";
+            if Observed /= Ada.Streams.Stream_Element_Array'(16#67#, 16#72#, 16#6F#, 16#77#) then
+               raise Program_Error with "child observed wrong replacement payload";
             end if;
             Strings.Assign (Object, Replacement);
          end;
       elsif Lookup = Segments.Not_Found then
          loop
-            Segments.Try_Find
-              (Segment, "handoff", Handle, Lookup, Failure);
+            Segments.Try_Find (Segment, "handoff", Handle, Lookup, Failure);
             exit when Lookup /= Segments.Registry_Busy;
             delay 0.0;
          end loop;
@@ -124,31 +110,25 @@ begin
          Segments.Resolve (Segment, Handle, Location, Extent);
          Strings.Attach (Object, Region, Location, 16);
          declare
-            Observed : Ada.Streams.Stream_Element_Array (1 .. 3);
+            Observed    : Ada.Streams.Stream_Element_Array (1 .. 3);
             Replacement : constant Ada.Streams.Stream_Element_Array :=
               (1 => 16#49#, 2 => 16#50#, 3 => 16#43#);
          begin
             Strings.Read (Object, Observed);
-            if Observed /=
-              Ada.Streams.Stream_Element_Array'
-                (16#46#, 16#6C#, 16#79#)
-            then
-               raise Program_Error with
-                 "child observed wrong relocatable payload";
+            if Observed /= Ada.Streams.Stream_Element_Array'(16#46#, 16#6C#, 16#79#) then
+               raise Program_Error with "child observed wrong relocatable payload";
             end if;
             Strings.Assign (Object, Replacement);
          end;
       else
-         raise Program_Error with
-           "child could not resolve a handoff extent";
+         raise Program_Error with "child could not resolve a handoff extent";
       end if;
       Strings.Detach (Object);
       Regions.Detach (Region);
       Segments.Detach (Segment);
       Shared.Unmap (Map);
       if Reservation = 0 then
-         Ignored := Release_Reserve
-           (C.unsigned_long_long (Parent_Base), C.unsigned_long_long (Length));
+         Ignored := Release_Reserve (C.unsigned_long_long (Parent_Base), C.unsigned_long_long (Length));
          if Ignored /= 0 then
             raise Program_Error with "child could not release reserved base";
          end if;

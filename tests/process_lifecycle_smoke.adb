@@ -18,14 +18,12 @@ procedure Process_Lifecycle_Smoke is
    pragma Import (C, Current_Thread, "pthread_self");
 
    function Arm_Exit_Check (State, Groups : C.int) return C.int;
-   pragma Import
-     (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
+   pragma Import (C, Arm_Exit_Check, "flyology_test_arm_exit_check");
 
    function Signal_Thread (Thread : System.Address) return C.int;
    pragma Import (C, Signal_Thread, "flyology_test_signal_thread");
 
-   function Fork_Exec
-     (Program : Interfaces.C.Strings.chars_ptr) return C.int;
+   function Fork_Exec (Program : Interfaces.C.Strings.chars_ptr) return C.int;
    pragma Import (C, Fork_Exec, "flyology_test_fork_exec");
 
    protected Result is
@@ -76,22 +74,18 @@ begin
       raise Program_Error with "signal interrupted event-loop progress";
    end if;
 
-   Program := Interfaces.C.Strings.New_String
-     (Ada.Directories.Compose
-        (Ada.Directories.Containing_Directory
-           (Ada.Command_Line.Command_Name),
-         "process_exec_child_smoke"));
+   Program :=
+     Interfaces.C.Strings.New_String
+       (Ada.Directories.Compose
+          (Ada.Directories.Containing_Directory (Ada.Command_Line.Command_Name), "process_exec_child_smoke"));
    if Fork_Exec (Program) /= 0 then
       Interfaces.C.Strings.Free (Program);
       raise Program_Error with "fork/exec lifecycle contract failed";
    end if;
    Interfaces.C.Strings.Free (Program);
 
-   if Lifecycle.State /= Lifecycle.Running
-     or else Lifecycle.Created_Groups /= 1
-   then
-      raise Program_Error with
-        "fork child observation changed the parent runtime";
+   if Lifecycle.State /= Lifecycle.Running or else Lifecycle.Created_Groups /= 1 then
+      raise Program_Error with "fork child observation changed the parent runtime";
    end if;
 
    if Arm_Exit_Check (3, 0) /= 0 then

@@ -11,12 +11,12 @@ private with System;
 --  Example:
 --
 --     File := Flyology.IO.Files.Open ("state.bin");
+
 package Flyology.IO.Files is
 
    --  Raised only after a cancellation request reaches a terminal state and
    --  the caller may safely reuse its I/O buffer.
-   Operation_Cancelled : exception renames
-     Flyology.Cancellation.Operation_Cancelled;
+   Operation_Cancelled : exception renames Flyology.Cancellation.Operation_Cancelled;
 
    --  Raised after a timed file operation's abort has reached a terminal state
    --  and the caller may safely reuse its buffer.
@@ -45,8 +45,7 @@ package Flyology.IO.Files is
    --  unique-buffer token until Finish consumes the terminal result. Scoped
    --  file operations currently require a lightweight owner; the existing
    --  synchronous overloads remain available in both lanes.
-   type File_Operation is
-     abstract new Flyology.Operations.Operation with private;
+   type File_Operation is abstract new Flyology.Operations.Operation with private;
    --  Scoped completion-driven positional read.
    type Read_Operation is new File_Operation with private;
    --  Scoped completion-driven positional write.
@@ -81,9 +80,9 @@ package Flyology.IO.Files is
       Item      : not null access Ada.Streams.Stream_Element_Array;
       Timeout   : Duration := Flyology.IO.Infinite;
       Operation : in out Read_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start one completion-driven positional write without parking the owner.
    --  A terminal cancellation does not roll back bytes already written.
@@ -115,9 +114,9 @@ package Flyology.IO.Files is
       Item      : not null access constant Ada.Streams.Stream_Element_Array;
       Timeout   : Duration := Flyology.IO.Infinite;
       Operation : in out Write_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start one positional read after moving Item into the operation. Item is
    --  vacant on return. Typed Finish moves the buffer back only after the
@@ -135,8 +134,7 @@ package Flyology.IO.Files is
       Offset  : File_Offset;
       Item    : in out Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Flyology.IO.Infinite) return Read_Operation
-     with Pre => Flyology.Buffers.Has_Buffer (Item),
-          Post => not Flyology.Buffers.Has_Buffer (Item);
+   with Pre => Flyology.Buffers.Has_Buffer (Item), Post => not Flyology.Buffers.Has_Buffer (Item);
 
    --  Start or restart one owning positional read.
    --  @param File Open descriptor permitting reads
@@ -150,11 +148,12 @@ package Flyology.IO.Files is
       Item      : in out Flyology.Buffers.Unique_Buffer;
       Timeout   : Duration := Flyology.IO.Infinite;
       Operation : in out Read_Operation)
-     with Pre =>
+   with
+     Pre  =>
        Flyology.Buffers.Has_Buffer (Item)
        and then not Flyology.Operations.Is_Active (Operation)
        and then not Flyology.Operations.Is_Terminal (Operation),
-          Post => not Flyology.Buffers.Has_Buffer (Item);
+     Post => not Flyology.Buffers.Has_Buffer (Item);
 
    --  Start one positional write after moving Item into the operation. The
    --  readable payload length bounds the write.
@@ -170,8 +169,7 @@ package Flyology.IO.Files is
       Offset  : File_Offset;
       Item    : in out Flyology.Buffers.Unique_Buffer;
       Timeout : Duration := Flyology.IO.Infinite) return Write_Operation
-     with Pre => Flyology.Buffers.Has_Buffer (Item),
-          Post => not Flyology.Buffers.Has_Buffer (Item);
+   with Pre => Flyology.Buffers.Has_Buffer (Item), Post => not Flyology.Buffers.Has_Buffer (Item);
 
    --  Start or restart one owning positional write.
    --  @param File Open descriptor permitting writes
@@ -185,11 +183,12 @@ package Flyology.IO.Files is
       Item      : in out Flyology.Buffers.Unique_Buffer;
       Timeout   : Duration := Flyology.IO.Infinite;
       Operation : in out Write_Operation)
-     with Pre =>
+   with
+     Pre  =>
        Flyology.Buffers.Has_Buffer (Item)
        and then not Flyology.Operations.Is_Active (Operation)
        and then not Flyology.Operations.Is_Terminal (Operation),
-          Post => not Flyology.Buffers.Has_Buffer (Item);
+     Post => not Flyology.Buffers.Has_Buffer (Item);
 
    --  Consume a terminal positional read and publish its Last value.
    --  @param Operation Terminal read operation
@@ -197,9 +196,7 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission or completion failed
    --  @exception Operation_Cancelled Cancellation reached terminal state
    --  @exception Timeout_Error Deadline cancellation reached terminal state
-   procedure Finish
-     (Operation : in out Read_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Read_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume a terminal positional write and publish its Last value.
    --  @param Operation Terminal write operation
@@ -207,9 +204,7 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission or completion failed
    --  @exception Operation_Cancelled Cancellation reached terminal state
    --  @exception Timeout_Error Deadline cancellation reached terminal state
-   procedure Finish
-     (Operation : in out Write_Operation;
-      Last      : out Ada.Streams.Stream_Element_Offset);
+   procedure Finish (Operation : in out Write_Operation; Last : out Ada.Streams.Stream_Element_Offset);
 
    --  Consume an owning positional read, move its buffer into vacant Item,
    --  and publish the new readable length. The move also occurs before a
@@ -220,12 +215,10 @@ package Flyology.IO.Files is
    --  @exception Program_Error Item is occupied, belongs to another pool, or
    --     Operation does not own a buffer
    procedure Finish
-     (Operation : in out Read_Operation;
-      Item      : in out Flyology.Buffers.Unique_Buffer;
-      Read      : out Natural)
-     with Pre => not Flyology.Buffers.Has_Buffer (Item),
-          Post => Flyology.Buffers.Has_Buffer (Item)
-            and then Flyology.Buffers.Length (Item) = Read;
+     (Operation : in out Read_Operation; Item : in out Flyology.Buffers.Unique_Buffer; Read : out Natural)
+   with
+     Pre  => not Flyology.Buffers.Has_Buffer (Item),
+     Post => Flyology.Buffers.Has_Buffer (Item) and then Flyology.Buffers.Length (Item) = Read;
 
    --  Consume an owning positional write, move its buffer into vacant Item,
    --  and publish the transferred byte count. The move also occurs before a
@@ -236,11 +229,8 @@ package Flyology.IO.Files is
    --  @exception Program_Error Item is occupied, belongs to another pool, or
    --     Operation does not own a buffer
    procedure Finish
-     (Operation : in out Write_Operation;
-      Item      : in out Flyology.Buffers.Unique_Buffer;
-      Written   : out Natural)
-     with Pre => not Flyology.Buffers.Has_Buffer (Item),
-          Post => Flyology.Buffers.Has_Buffer (Item);
+     (Operation : in out Write_Operation; Item : in out Flyology.Buffers.Unique_Buffer; Written : out Natural)
+   with Pre => not Flyology.Buffers.Has_Buffer (Item), Post => Flyology.Buffers.Has_Buffer (Item);
 
    --  Open Path directly on the calling lane. Create adds the platform create
    --  flag and Truncate truncates an existing file. Truncate is invalid with
@@ -253,10 +243,8 @@ package Flyology.IO.Files is
    --  @return Newly owned file descriptor; the caller must Close it
    --  @exception Device_Error The mode combination is invalid or open(2) fails
    function Open
-     (Path     : String;
-      Mode     : Open_Mode := Read_Only;
-      Create   : Boolean := False;
-      Truncate : Boolean := False) return File_Descriptor;
+     (Path : String; Mode : Open_Mode := Read_Only; Create : Boolean := False; Truncate : Boolean := False)
+      return File_Descriptor;
 
    --  Close File and set it to Invalid_File. Closing Invalid_File is harmless.
    --  @param File Descriptor whose ownership is released
@@ -329,8 +317,7 @@ package Flyology.IO.Files is
       Item   : in out Flyology.Buffers.Unique_Buffer;
       Read   : out Natural;
       Token  : access Cancellation_Token := null)
-     with Pre => Flyology.Buffers.Has_Buffer (Item),
-          Post => Flyology.Buffers.Length (Item) = Read;
+   with Pre => Flyology.Buffers.Has_Buffer (Item), Post => Flyology.Buffers.Length (Item) = Read;
 
    --  Read positionally into a unique buffer within one relative deadline.
    --  Timeout, cancellation, and terminal buffer ownership match the array
@@ -353,8 +340,7 @@ package Flyology.IO.Files is
       Read    : out Natural;
       Timeout : Duration;
       Token   : access Cancellation_Token := null)
-     with Pre => Flyology.Buffers.Has_Buffer (Item),
-          Post => Flyology.Buffers.Length (Item) = Read;
+   with Pre => Flyology.Buffers.Has_Buffer (Item), Post => Flyology.Buffers.Length (Item) = Read;
 
    --  Write at Offset without changing the descriptor's file position. A
    --  single call may transfer fewer than Item'Length elements. Lightweight
@@ -397,7 +383,7 @@ package Flyology.IO.Files is
       Item    : Flyology.Buffers.Unique_Buffer;
       Written : out Natural;
       Token   : access Cancellation_Token := null)
-     with Pre => Flyology.Buffers.Has_Buffer (Item);
+   with Pre => Flyology.Buffers.Has_Buffer (Item);
 
 private
    type File_Descriptor is new Interfaces.C.int;
@@ -425,37 +411,32 @@ private
       Cancelled        : Interfaces.C.int := 0;
       Cancel_Requested : Interfaces.C.int := 0;
       Next             : System.Address := System.Null_Address;
-   end record with Convention => C;
+   end record
+   with Convention => C;
 
    type Scoped_File_Failure is
-     (No_Failure,
-      Submission_Failure,
-      Completion_Failure,
-      Deadline_Failure,
-      Wrong_Lane_Failure);
+     (No_Failure, Submission_Failure, Completion_Failure, Deadline_Failure, Wrong_Lane_Failure);
 
-   type File_Operation is
-     abstract new Flyology.Operations.Operation with record
-      Node        : aliased Async_File_Node;
-      Buffer_First : Ada.Streams.Stream_Element_Offset := 1;
-      Buffer_Length : Natural := 0;
-      Failure     : Scoped_File_Failure := No_Failure;
-      Timed_Out   : Boolean := False;
+   type File_Operation is abstract new Flyology.Operations.Operation with record
+      Node                   : aliased Async_File_Node;
+      Buffer_First           : Ada.Streams.Stream_Element_Offset := 1;
+      Buffer_Length          : Natural := 0;
+      Failure                : Scoped_File_Failure := No_Failure;
+      Timed_Out              : Boolean := False;
       Cancellation_Requested : Boolean := False;
-      Owned       : Flyology.Buffers.Drivers.Detached_Buffer;
+      Owned                  : Flyology.Buffers.Drivers.Detached_Buffer;
    end record;
 
    --  @exclude
    --  @param Item File operation to advance
    --  @param Event Driver event to process
-   overriding procedure Drive
-     (Item  : in out File_Operation;
-      Event : Flyology.Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out File_Operation; Event : Flyology.Operations.Driver_Event);
 
    --  @exclude
    --  @param Item File operation to cancel and drain
-   overriding procedure Request_Cancellation
-     (Item : in out File_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out File_Operation);
 
    type Read_Operation is new File_Operation with null record;
    type Write_Operation is new File_Operation with null record;

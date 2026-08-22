@@ -34,18 +34,18 @@ procedure Priority_Semantics_Smoke is
             return;
          end if;
          if RT.Clock >= Deadline then
-            raise Program_Error with
-              "timed out awaiting event-group priority state";
+            raise Program_Error with "timed out awaiting event-group priority state";
          end if;
          delay 0.001;
       end loop;
    end Await_Group_State;
 
    procedure Check_Waiting_Priority_Change is
-      A_Gate        : STC.Suspension_Object;
-      B_Gate        : STC.Suspension_Object;
-      Blocker_Gate  : STC.Suspension_Object;
-      Stop_Blocker  : Boolean := False with Atomic;
+      A_Gate       : STC.Suspension_Object;
+      B_Gate       : STC.Suspension_Object;
+      Blocker_Gate : STC.Suspension_Object;
+      Stop_Blocker : Boolean := False
+      with Atomic;
 
       protected Result is
          procedure Blocker_Running;
@@ -83,20 +83,24 @@ procedure Priority_Semantics_Smoke is
             null;
          end Await_Done;
 
-         function Passed return Boolean is (First = 1);
+         function Passed return Boolean
+         is (First = 1);
       end Result;
 
-      task A with CPU => 1 is
+      task A
+        with CPU => 1 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
       end A;
 
-      task B with CPU => 1 is
+      task B
+        with CPU => 1 is
          pragma Priority (10);
          pragma Task_Info (Flyology.Lightweight_Task);
       end B;
 
-      task Blocker with CPU => 1 is
+      task Blocker
+        with CPU => 1 is
          pragma Priority (25);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
@@ -135,8 +139,7 @@ procedure Priority_Semantics_Smoke is
       Stop_Blocker := True;
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with
-           "priority change while waiting did not affect wake ordering";
+         raise Program_Error with "priority change while waiting did not affect wake ordering";
       end if;
    end Check_Waiting_Priority_Change;
 
@@ -167,16 +170,18 @@ procedure Priority_Semantics_Smoke is
             null;
          end Await_Done;
 
-         function Passed return Boolean is
-           (Order = [1, 2, 1]);
+         function Passed return Boolean
+         is (Order = [1, 2, 1]);
       end Result;
 
-      task Controller with CPU => 1 is
+      task Controller
+        with CPU => 1 is
          pragma Priority (20);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Controller;
 
-      task Competitor with CPU => 1 is
+      task Competitor
+        with CPU => 1 is
          pragma Priority (10);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Competitor;
@@ -203,8 +208,7 @@ procedure Priority_Semantics_Smoke is
       STC.Set_True (Controller_Gate);
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with
-           "self priority lowering did not dispatch the higher ready task";
+         raise Program_Error with "self priority lowering did not dispatch the higher ready task";
       end if;
    end Check_Running_Priority_Change;
 
@@ -214,7 +218,8 @@ procedure Priority_Semantics_Smoke is
       Medium_Gate  : STC.Suspension_Object;
       Peer_Gate    : STC.Suspension_Object;
       Caller_Done  : STC.Suspension_Object;
-      Stop_Blocker : Boolean := False with Atomic;
+      Stop_Blocker : Boolean := False
+      with Atomic;
 
       protected Result is
          procedure Blocker_Running;
@@ -271,31 +276,37 @@ procedure Priority_Semantics_Smoke is
             null;
          end Await_Done;
 
-         function Passed return Boolean is (Accept_First and Loss_First);
+         function Passed return Boolean
+         is (Accept_First and Loss_First);
       end Result;
 
-      task Server with CPU => 3 is
+      task Server
+        with CPU => 3 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
          entry Work;
       end Server;
 
-      task Caller with CPU => 3 is
+      task Caller
+        with CPU => 3 is
          pragma Priority (20);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Caller;
 
-      task Medium with CPU => 3 is
+      task Medium
+        with CPU => 3 is
          pragma Priority (10);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Medium;
 
-      task Peer with CPU => 3 is
+      task Peer
+        with CPU => 3 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Peer;
 
-      task Blocker with CPU => 3 is
+      task Blocker
+        with CPU => 3 is
          pragma Priority (25);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
@@ -354,8 +365,7 @@ procedure Priority_Semantics_Smoke is
       Result.Await_Done;
       STC.Set_True (Caller_Done);
       if not Result.Passed then
-         raise Program_Error with
-           "rendezvous inheritance or loss ordering was not preserved";
+         raise Program_Error with "rendezvous inheritance or loss ordering was not preserved";
       end if;
    end Check_Rendezvous_Inheritance;
 
@@ -365,7 +375,8 @@ procedure Priority_Semantics_Smoke is
       Caller_Done  : STC.Suspension_Object;
       Peer_Gate    : STC.Suspension_Object;
       Server_Gate  : STC.Suspension_Object;
-      Stop_Blocker : Boolean := False with Atomic;
+      Stop_Blocker : Boolean := False
+      with Atomic;
 
       protected Result is
          procedure In_Accept;
@@ -422,26 +433,31 @@ procedure Priority_Semantics_Smoke is
             null;
          end Await_Done;
 
-         function Passed return Boolean is (First = 1);
+         function Passed return Boolean
+         is (First = 1);
       end Result;
 
-      task Server with CPU => 4 is
+      task Server
+        with CPU => 4 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
          entry Work;
       end Server;
 
-      task Caller with CPU => 4 is
+      task Caller
+        with CPU => 4 is
          pragma Priority (20);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Caller;
 
-      task Peer with CPU => 4 is
+      task Peer
+        with CPU => 4 is
          pragma Priority (5);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Peer;
 
-      task Blocker with CPU => 4 is
+      task Blocker
+        with CPU => 4 is
          pragma Priority (25);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
@@ -499,8 +515,7 @@ procedure Priority_Semantics_Smoke is
       Result.Await_Done;
       STC.Set_True (Caller_Done);
       if not Result.Passed then
-         raise Program_Error with
-           "loss-of-inheritance placement leaked across a blocking wait";
+         raise Program_Error with "loss-of-inheritance placement leaked across a blocking wait";
       end if;
    end Check_Loss_Then_Block;
 
@@ -508,7 +523,8 @@ procedure Priority_Semantics_Smoke is
       Blocker_Gate : STC.Suspension_Object;
       Local_Gate   : STC.Suspension_Object;
       Migrant_Gate : STC.Suspension_Object;
-      Stop_Blocker : Boolean := False with Atomic;
+      Stop_Blocker : Boolean := False
+      with Atomic;
 
       protected Result is
          procedure Blocker_Running;
@@ -546,20 +562,24 @@ procedure Priority_Semantics_Smoke is
             null;
          end Await_Done;
 
-         function Passed return Boolean is (First = 1);
+         function Passed return Boolean
+         is (First = 1);
       end Result;
 
-      task Migrant with CPU => 1 is
+      task Migrant
+        with CPU => 1 is
          pragma Priority (20);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Migrant;
 
-      task Local with CPU => 2 is
+      task Local
+        with CPU => 2 is
          pragma Priority (10);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Local;
 
-      task Blocker with CPU => 2 is
+      task Blocker
+        with CPU => 2 is
          pragma Priority (25);
          pragma Task_Info (Flyology.Lightweight_Task);
       end Blocker;
@@ -597,8 +617,7 @@ procedure Priority_Semantics_Smoke is
       Stop_Blocker := True;
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with
-           "migration did not preserve lightweight task priority";
+         raise Program_Error with "migration did not preserve lightweight task priority";
       end if;
    end Check_Migration_Priority;
 

@@ -13,6 +13,7 @@ with Interfaces;
 --  rendezvous. Client tasks drive it externally, so the benchmark runner
 --  cannot surround a procedure call. Instrumentation instead marks the start
 --  and finish of each request inside the service workers.
+
 procedure Recording_Service is
    use type Interfaces.Unsigned_64;
    package Recording renames Flyology_Bench.Recording;
@@ -22,13 +23,13 @@ procedure Recording_Service is
    type Benchmark_Array is array (Work_Kind) of Recording.Benchmark;
    type Result_Array is array (Work_Kind) of Recording.Recorded_Measurement;
 
-   Recorder : Recording.Recorder
-     (Maximum_Benchmarks => Work_Kind'Pos (Work_Kind'Last) + 1,
-      Retained_Samples   => 256);
+   Recorder   :
+     Recording.Recorder (Maximum_Benchmarks => Work_Kind'Pos (Work_Kind'Last) + 1, Retained_Samples => 256);
    Benchmarks : Benchmark_Array;
    Results    : Result_Array;
 
-   Accumulator : Interfaces.Unsigned_64 := 1 with Volatile;
+   Accumulator : Interfaces.Unsigned_64 := 1
+   with Volatile;
 
    type Bytes is array (Positive range <>) of Interfaces.Unsigned_8;
    type Bytes_Access is access Bytes;
@@ -50,24 +51,24 @@ procedure Recording_Service is
                   Outcome : Recording.Sample_Outcome := Recording.Success;
                   Payload : Bytes_Access := null;
                begin
-                  Recording.Begin_Sample
-                    (Recorder, Benchmarks (Kind), Sample);
+                  Recording.Begin_Sample (Recorder, Benchmarks (Kind), Sample);
                   case Kind is
-                     when Quick =>
-                        Accumulator := Accumulator xor
-                          Interfaces.Unsigned_64 (Sequence);
-                     when CPU_Heavy =>
+                     when Quick        =>
+                        Accumulator := Accumulator xor Interfaces.Unsigned_64 (Sequence);
+
+                     when CPU_Heavy    =>
                         for Index in 1 .. 1_800_000 loop
-                           Accumulator := Interfaces.Rotate_Left
-                             (Accumulator xor Interfaces.Unsigned_64 (Index), 7);
+                           Accumulator :=
+                             Interfaces.Rotate_Left (Accumulator xor Interfaces.Unsigned_64 (Index), 7);
                         end loop;
+
                      when Memory_Burst =>
                         Payload := new Bytes (1 .. 2 * 1_024 * 1_024);
                         for Page in 0 .. (Payload'Length / 4_096) - 1 loop
-                           Payload (Payload'First + Page * 4_096) :=
-                             Interfaces.Unsigned_8 (Sequence mod 256);
+                           Payload (Payload'First + Page * 4_096) := Interfaces.Unsigned_8 (Sequence mod 256);
                         end loop;
-                     when Wait_Bound =>
+
+                     when Wait_Bound   =>
                         delay 0.018;
                   end case;
 
@@ -93,28 +94,24 @@ procedure Recording_Service is
 
    Workers : array (Positive range 1 .. 4) of Service_Worker;
 
-   function Output_Mode return String is
-     (if Ada.Environment_Variables.Exists
-        ("FLYOLOGY_BENCH_RECORDING_OUTPUT")
-      then Ada.Environment_Variables.Value
-        ("FLYOLOGY_BENCH_RECORDING_OUTPUT")
-      else "terminal");
+   function Output_Mode return String
+   is (if Ada.Environment_Variables.Exists ("FLYOLOGY_BENCH_RECORDING_OUTPUT")
+       then Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_RECORDING_OUTPUT")
+       else "terminal");
 begin
    Recording.Register (Recorder, "quick request", Benchmarks (Quick));
    Recording.Register (Recorder, "cpu-heavy request", Benchmarks (CPU_Heavy));
-   Recording.Register
-     (Recorder, "memory-burst request", Benchmarks (Memory_Burst));
+   Recording.Register (Recorder, "memory-burst request", Benchmarks (Memory_Burst));
    Recording.Register (Recorder, "wait-bound request", Benchmarks (Wait_Bound));
 
    Recording.Start
      (Recorder,
-      (Metrics => Flyology_Bench.All_Builtin_Metrics,
-       Retention => Recording.Reservoir,
+      (Metrics     => Flyology_Bench.All_Builtin_Metrics,
+       Retention   => Recording.Reservoir,
        Random_Seed => 42,
-       others => <>));
+       others      => <>));
    if Output_Mode = "terminal" then
-      Recording.Start_Live_Terminal
-        (Recorder, Refresh_Interval => 0.100, ANSI => True);
+      Recording.Start_Live_Terminal (Recorder, Refresh_Interval => 0.100, ANSI => True);
    end if;
 
    --  These clients stand in for an external load generator. They decide when
@@ -165,8 +162,7 @@ begin
          Reporters.Put_JSON (Results (Kind));
       end loop;
    else
-      Ada.Text_IO.Put_Line
-        ("Final snapshots (process-scoped axes can include overlapping work):");
+      Ada.Text_IO.Put_Line ("Final snapshots (process-scoped axes can include overlapping work):");
       for Kind in Work_Kind loop
          Reporters.Put_Console (Results (Kind));
          Ada.Text_IO.New_Line;
@@ -176,8 +172,7 @@ begin
             Compared : Recording.Recorded_Comparison;
          begin
             Recording.Compare_Independent
-              (Results (Work_Kind'First), Results (Kind), Compared,
-               Random_Seed => 42);
+              (Results (Work_Kind'First), Results (Kind), Compared, Random_Seed => 42);
             Reporters.Put_Comparison_Console (Compared);
          end;
       end loop;

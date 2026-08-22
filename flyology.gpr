@@ -258,7 +258,7 @@ project Flyology is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
-        & ("-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
+        & ("-gnatyM110", "-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
            Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
            File_Watch_Test_Hook_Switch, Subprocess_Test_Hook_Switch,
            Wall_Clock_Test_Hook_Switch,
@@ -293,5 +293,14 @@ project Flyology is
          Flyology_Allocators'Project_Dir & "flyology_allocators.gpr");
       for Resources_Dir ("html") use "docs/gnatdoc/html";
    end Documentation;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
 
 end Flyology;

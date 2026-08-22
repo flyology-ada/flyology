@@ -4,17 +4,16 @@ with Flyology.Supervision.Static;
 --  This program must not compile. CPU value zero requests automatic Ada task
 --  placement, so it cannot name the supervisor's dedicated shared control
 --  group. The generic formal subtype rejects it before any task can activate.
+
 procedure Invalid_Supervision_Control_Group is
    type Child_Kind is (Service);
    type Context is limited null record;
 
-   function Logical_Id
-     (Child : Child_Kind) return Flyology.Supervision.Child_Id is
-     (case Child is when Service => 1);
+   function Logical_Id (Child : Child_Kind) return Flyology.Supervision.Child_Id
+   is (case Child is
+         when Service => 1);
 
-   function Specification
-     (Child : Child_Kind) return Flyology.Supervision.Child_Specification
-   is
+   function Specification (Child : Child_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -29,9 +28,7 @@ procedure Invalid_Supervision_Control_Group is
          Group             => 0);
    end Specification;
 
-   function No_Relationship
-     (Left, Right : Child_Kind) return Boolean
-   is
+   function No_Relationship (Left, Right : Child_Kind) return Boolean is
       pragma Unreferenced (Left, Right);
    begin
       return False;
@@ -48,15 +45,16 @@ procedure Invalid_Supervision_Control_Group is
       raise Program_Error;
    end Run_Generation;
 
-   package Invalid_Supervisor is new Flyology.Supervision.Static
-     (Child_Kind          => Child_Kind,
-      Application_Context => Context,
-      Logical_Id          => Logical_Id,
-      Specification       => Specification,
-      Depends_On          => No_Relationship,
-      Cohort_Member       => No_Relationship,
-      Run_One_Generation  => Run_Generation,
-      Control_Group       => 0);
+   package Invalid_Supervisor is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Child_Kind,
+        Application_Context => Context,
+        Logical_Id          => Logical_Id,
+        Specification       => Specification,
+        Depends_On          => No_Relationship,
+        Cohort_Member       => No_Relationship,
+        Run_One_Generation  => Run_Generation,
+        Control_Group       => 0);
 begin
    null;
 end Invalid_Supervision_Control_Group;

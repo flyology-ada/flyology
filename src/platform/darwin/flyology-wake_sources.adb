@@ -8,72 +8,47 @@ package body Flyology.Wake_Sources is
    use type C.long;
    use type C.unsigned;
 
-   F_GETFD : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_f_getfd";
-   F_SETFD : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_f_setfd";
-   F_GETFL : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_f_getfl";
-   F_SETFL : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_f_setfl";
+   F_GETFD    : C.int
+   with Import, Convention => C, External_Name => "flyology_wake_source_f_getfd";
+   F_SETFD    : C.int
+   with Import, Convention => C, External_Name => "flyology_wake_source_f_setfd";
+   F_GETFL    : C.int
+   with Import, Convention => C, External_Name => "flyology_wake_source_f_getfl";
+   F_SETFL    : C.int
+   with Import, Convention => C, External_Name => "flyology_wake_source_f_setfl";
    FD_CLOEXEC : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_fd_cloexec";
+   with Import, Convention => C, External_Name => "flyology_wake_source_fd_cloexec";
    O_NONBLOCK : C.int
-     with Import,
-          Convention    => C,
-          External_Name => "flyology_wake_source_o_nonblock";
+   with Import, Convention => C, External_Name => "flyology_wake_source_o_nonblock";
 
-   type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int
-     with Convention => C;
+   type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int with Convention => C;
 
    function Pipe (Ends : System.Address) return C.int;
    pragma Import (C, Pipe, "pipe");
    function Fcntl_Get (FD : C.int; Command : C.int) return C.int
-     with Import,
-          Convention    => C_Variadic_2,
-          External_Name => "fcntl";
-   function Fcntl_Set
-     (FD : C.int; Command : C.int; Argument : C.int) return C.int
-     with Import,
-          Convention    => C_Variadic_2,
-          External_Name => "fcntl";
-   function Write
-     (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
+   with Import, Convention => C_Variadic_2, External_Name => "fcntl";
+   function Fcntl_Set (FD : C.int; Command : C.int; Argument : C.int) return C.int
+   with Import, Convention => C_Variadic_2, External_Name => "fcntl";
+   function Write (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Write, "write");
-   function Read
-     (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
+   function Read (FD : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, Read, "read");
    function Close (FD : C.int) return C.int;
    pragma Import (C, Close, "close");
 
-   function With_Flag (Flags : C.int; Flag : C.int) return C.int is
-     (C.int (C.unsigned (Flags) or C.unsigned (Flag)));
+   function With_Flag (Flags : C.int; Flag : C.int) return C.int
+   is (C.int (C.unsigned (Flags) or C.unsigned (Flag)));
 
    function Configure (FD : C.int) return C.int is
       Status_Flags     : constant C.int := Fcntl_Get (FD, F_GETFL);
       Descriptor_Flags : C.int;
    begin
-      if Status_Flags < 0
-        or else Fcntl_Set
-          (FD, F_SETFL, With_Flag (Status_Flags, O_NONBLOCK)) < 0
-      then
+      if Status_Flags < 0 or else Fcntl_Set (FD, F_SETFL, With_Flag (Status_Flags, O_NONBLOCK)) < 0 then
          return -1;
       end if;
 
       Descriptor_Flags := Fcntl_Get (FD, F_GETFD);
-      if Descriptor_Flags < 0
-        or else Fcntl_Set
-          (FD, F_SETFD, With_Flag (Descriptor_Flags, FD_CLOEXEC)) < 0
+      if Descriptor_Flags < 0 or else Fcntl_Set (FD, F_SETFD, With_Flag (Descriptor_Flags, FD_CLOEXEC)) < 0
       then
          return -1;
       end if;
@@ -88,14 +63,10 @@ package body Flyology.Wake_Sources is
       if Item.Read_End >= 0 then
          return;
       elsif Pipe (Ends'Address) /= 0 then
-         raise Program_Error with
-           "cannot create cancellation wake source, errno="
-           & GNAT.OS_Lib.Errno'Image;
+         raise Program_Error with "cannot create cancellation wake source, errno=" & GNAT.OS_Lib.Errno'Image;
       end if;
 
-      if Configure (Ends (0)) < 0
-        or else Configure (Ends (1)) < 0
-      then
+      if Configure (Ends (0)) < 0 or else Configure (Ends (1)) < 0 then
          Ignored := Close (Ends (0));
          Ignored := Close (Ends (1));
          raise Program_Error with "cannot configure cancellation wake source";
@@ -140,16 +111,15 @@ package body Flyology.Wake_Sources is
 
    procedure Consume_All (Item : in out Source) is
       type Byte_Array is array (Positive range <>) of C.unsigned_char;
-      Buffer : aliased Byte_Array (1 .. 256);
-      Result : C.long;
+      Buffer   : aliased Byte_Array (1 .. 256);
+      Result   : C.long;
       Consumed : Boolean := False;
    begin
       if Item.Read_End < 0 then
          raise Program_Error with "cannot consume absent wake source";
       end if;
       loop
-         Result := Read
-           (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
+         Result := Read (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
          if Result > 0 then
             Consumed := True;
          elsif Result = 0 then
@@ -167,10 +137,11 @@ package body Flyology.Wake_Sources is
       end if;
    end Consume_All;
 
-   function Descriptor (Item : Source) return C.int is (Item.Read_End);
+   function Descriptor (Item : Source) return C.int
+   is (Item.Read_End);
 
-   function Signal_Descriptor (Item : Source) return C.int is
-     (Item.Write_End);
+   function Signal_Descriptor (Item : Source) return C.int
+   is (Item.Write_End);
 
    procedure Release (Item : in out Source) is
       Ignored : C.int;
@@ -185,7 +156,8 @@ package body Flyology.Wake_Sources is
       end if;
    end Release;
 
-   overriding procedure Finalize (Item : in out Source) is
+   overriding
+   procedure Finalize (Item : in out Source) is
    begin
       Release (Item);
    end Finalize;

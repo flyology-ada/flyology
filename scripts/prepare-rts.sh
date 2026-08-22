@@ -538,11 +538,11 @@ cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
   -o "$build_root/obj/heap_trampoline.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
-  "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
     -I "$generated_include" \
     "$generated_include/s-fllimo.ads"
 fi
-"$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+"$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
   -I "$generated_include" \
   "$generated_include/s-fltiab.ads" \
   "$generated_include/s-fldeex.ads" \
@@ -564,7 +564,7 @@ fi
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-tassta.adb"
 if [ "$compat_family" = gnat-legacy ]; then
-  "$compiler" -c -gnatg -gnat2022 -O2 -fPIC -gnata \
+  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
     -I "$generated_include" \
     "$generated_include/a-sytaco.adb"
 fi

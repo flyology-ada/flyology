@@ -21,28 +21,25 @@ procedure Linux_Poller_Fairness_Smoke is
    use type System.Address;
 
    function Selected_Linux_Backend return Interfaces.C.int;
-   pragma Import
-     (C, Selected_Linux_Backend, "flyology_linux_file_backend");
+   pragma Import (C, Selected_Linux_Backend, "flyology_linux_file_backend");
 
-   Path : constant String := "/tmp/flyology-poller-fairness.data";
-   Iterations : constant Positive := 128;
+   Path                   : constant String := "/tmp/flyology-poller-fairness.data";
+   Iterations             : constant Positive := 128;
    Saturated_Socket_Count : constant Positive := 65;
 
-   subtype Saturated_Socket_Index is
-     Positive range 1 .. Saturated_Socket_Count;
-   type Socket_Array is array (Saturated_Socket_Index) of
-     Flyology.IO.Sockets.Socket_Type;
+   subtype Saturated_Socket_Index is Positive range 1 .. Saturated_Socket_Count;
+   type Socket_Array is array (Saturated_Socket_Index) of Flyology.IO.Sockets.Socket_Type;
 
-   Poller       : Pollers.Poller;
-   Initialized  : Boolean := False;
-   File         : GNAT.OS_Lib.File_Descriptor := GNAT.OS_Lib.Invalid_FD;
-   Reader       : Flyology.IO.Sockets.Socket_Type;
-   Writer       : Flyology.IO.Sockets.Socket_Type;
+   Poller            : Pollers.Poller;
+   Initialized       : Boolean := False;
+   File              : GNAT.OS_Lib.File_Descriptor := GNAT.OS_Lib.Invalid_FD;
+   Reader            : Flyology.IO.Sockets.Socket_Type;
+   Writer            : Flyology.IO.Sockets.Socket_Type;
    Saturated_Readers : Socket_Array;
    Saturated_Writers : Socket_Array;
-   Buffer       : aliased Ada.Streams.Stream_Element_Array (1 .. 1);
-   Token        : aliased Interfaces.C.int := 0;
-   Error_Code   : Interfaces.C.int;
+   Buffer            : aliased Ada.Streams.Stream_Element_Array (1 .. 1);
+   Token             : aliased Interfaces.C.int := 0;
+   Error_Code        : Interfaces.C.int;
 
    task Waker is
       pragma Task_Info (Flyology.Native_Task);
@@ -59,8 +56,7 @@ procedure Linux_Poller_Fairness_Smoke is
             accept Trigger (Succeeded : out Boolean) do
                begin
                   Flyology.IO.Sockets.Send_Socket (Writer, Payload, Last);
-                  Succeeded :=
-                    Last = Payload'Last and then Pollers.Wake (Poller);
+                  Succeeded := Last = Payload'Last and then Pollers.Wake (Poller);
                exception
                   when others =>
                      Succeeded := False;
@@ -77,15 +73,11 @@ procedure Linux_Poller_Fairness_Smoke is
      (Events     : Pollers.Poll_Event_Array;
       Count      : Natural;
       Kind       : Pollers.Event_Kind;
-      Descriptor : Interfaces.C.int := -1) return Boolean
-   is
+      Descriptor : Interfaces.C.int := -1) return Boolean is
    begin
       for Index in 1 .. Count loop
          if Events (Events'First + Index - 1).Kind = Kind
-           and then
-             (Descriptor < 0
-              or else
-                Events (Events'First + Index - 1).Descriptor = Descriptor)
+           and then (Descriptor < 0 or else Events (Events'First + Index - 1).Descriptor = Descriptor)
          then
             return True;
          end if;
@@ -97,44 +89,34 @@ procedure Linux_Poller_Fairness_Smoke is
    begin
       Token := Token + 1;
       if not Pollers.Submit_File
-        (Poller,
-         Interfaces.C.int (File),
-         Buffer'Address,
-         Interfaces.C.size_t (Buffer'Length),
-         0,
-         False,
-         Token'Address,
-         Error_Code)
+               (Poller,
+                Interfaces.C.int (File),
+                Buffer'Address,
+                Interfaces.C.size_t (Buffer'Length),
+                0,
+                False,
+                Token'Address,
+                Error_Code)
       then
-         raise Program_Error with
-           "file submission failed, errno=" & Error_Code'Image;
+         raise Program_Error with "file submission failed, errno=" & Error_Code'Image;
       end if;
    end Submit_One;
 
-   procedure Hold_Completed_File
-     (Events : out Pollers.Poll_Event_Array;
-      Count  : out Natural)
-   is
-      Limit : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   procedure Hold_Completed_File (Events : out Pollers.Poll_Event_Array; Count : out Natural) is
+      Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
-      Fault_Control.Arm
-        (Fault_Control.Poller_File_Drain_Pause, Count => 1_000_000_000);
+      Fault_Control.Arm (Fault_Control.Poller_File_Drain_Pause, Count => 1_000_000_000);
       Submit_One;
       loop
          if not Pollers.Wait_Batch (Poller, 0.01, Events, Count) then
-            raise Program_Error with
-              "poller failed while awaiting file eventfd";
+            raise Program_Error with "poller failed while awaiting file eventfd";
          end if;
          exit when Contains (Events, Count, Pollers.Wake_Event);
          if Ada.Real_Time.Clock >= Limit then
             raise Program_Error with "file completion did not signal eventfd";
          end if;
       end loop;
-      if Events'Length > 1
-        and then Fault_Control.Calls
-          (Fault_Control.Poller_File_Drain_Pause) = 0
-      then
+      if Events'Length > 1 and then Fault_Control.Calls (Fault_Control.Poller_File_Drain_Pause) = 0 then
          raise Program_Error with "file completion drain was not held";
       end if;
       Fault_Control.Disarm (Fault_Control.Poller_File_Drain_Pause);
@@ -165,7 +147,7 @@ procedure Linux_Poller_Fairness_Smoke is
    end Remove_Test_File;
 
    procedure Cleanup is
-      Status : Boolean;
+      Status    : Boolean;
       Quiescent : Boolean := not Initialized;
    begin
       Fault_Control.Disarm (Fault_Control.Poller_File_Drain_Pause);
@@ -204,20 +186,18 @@ procedure Linux_Poller_Fairness_Smoke is
       Remove_Test_File;
       Fault_Control.Reset;
       if not Quiescent then
-         raise Program_Error with
-           "poller fairness cleanup left kernel-owned file operations";
+         raise Program_Error with "poller fairness cleanup left kernel-owned file operations";
       end if;
    end Cleanup;
 
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "poller fairness test requires FLYOLOGY_TEST_FAULTS=1";
+      raise Program_Error with "poller fairness test requires FLYOLOGY_TEST_FAULTS=1";
    end if;
 
    Remove_Test_File;
    declare
-      Seed : aliased Ada.Streams.Stream_Element_Array := [1 => 73];
+      Seed    : aliased Ada.Streams.Stream_Element_Array := [1 => 73];
       Written : Integer;
       Status  : Boolean;
    begin
@@ -245,17 +225,11 @@ begin
    end if;
    Initialized := True;
    if Selected_Linux_Backend = 1 then
-      if Fault_Control.Calls
-        (Fault_Control.File_Uring_Synchronous_Eventfd) /= 1
-      then
-         raise Program_Error with
-           "io_uring did not select synchronous eventfd for fairness test";
+      if Fault_Control.Calls (Fault_Control.File_Uring_Synchronous_Eventfd) /= 1 then
+         raise Program_Error with "io_uring did not select synchronous eventfd for fairness test";
       end if;
-   elsif Fault_Control.Calls
-     (Fault_Control.File_Uring_Synchronous_Eventfd) /= 0
-   then
-      raise Program_Error with
-        "native AIO reached the io_uring eventfd registration seam";
+   elsif Fault_Control.Calls (Fault_Control.File_Uring_Synchronous_Eventfd) /= 0 then
+      raise Program_Error with "native AIO reached the io_uring eventfd registration seam";
    end if;
    Fault_Control.Reset;
 
@@ -272,8 +246,7 @@ begin
         or else Events (Events'First).Kind /= Pollers.File_Event
         or else Events (Events'First).Token /= Token'Address
       then
-         raise Program_Error with
-           "one-element full file batch did not make progress";
+         raise Program_Error with "one-element full file batch did not make progress";
       end if;
    end;
 
@@ -283,14 +256,13 @@ begin
    --  file-first early return reports only File_Event here.
    for Iteration in 1 .. Iterations loop
       declare
-         Events : Pollers.Poll_Event_Array (1 .. 64);
-         Count  : Natural;
-         Woke   : Boolean;
-         Payload : Ada.Streams.Stream_Element_Array (1 .. 1);
-         Last    : Ada.Streams.Stream_Element_Offset;
+         Events    : Pollers.Poll_Event_Array (1 .. 64);
+         Count     : Natural;
+         Woke      : Boolean;
+         Payload   : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Last      : Ada.Streams.Stream_Element_Offset;
          Reader_FD : constant Interfaces.C.int :=
-           Interfaces.C.int
-             (Flyology.IO.Sockets.Native_Descriptor (Reader));
+           Interfaces.C.int (Flyology.IO.Sockets.Native_Descriptor (Reader));
       begin
          Hold_Completed_File (Events, Count);
          if not Pollers.Watch (Poller, Reader_FD, Pollers.Readable) then
@@ -303,13 +275,10 @@ begin
             raise Program_Error with "mixed poller batch failed";
          elsif not Contains (Events, Count, Pollers.File_Event)
            or else not Contains (Events, Count, Pollers.Wake_Event)
-           or else
-             not Contains
-               (Events, Count, Pollers.Readable_Event, Reader_FD)
+           or else not Contains (Events, Count, Pollers.Readable_Event, Reader_FD)
          then
-            raise Program_Error with
-              "file completion hid socket readiness or eventfd wake at" &
-              Iteration'Image;
+            raise Program_Error
+              with "file completion hid socket readiness or eventfd wake at" & Iteration'Image;
          end if;
          Flyology.IO.Sockets.Receive_Socket (Reader, Payload, Last);
          if Last /= Payload'Last or else Payload (Payload'First) /= 73 then
@@ -323,11 +292,11 @@ begin
    --  batch can return. The retained drain obligation must deliver the CQE in
    --  bounded time while every batch continues making socket progress.
    declare
-      Events : Pollers.Poll_Event_Array (1 .. 64);
-      Count  : Natural;
-      Payload : constant Ada.Streams.Stream_Element_Array := [1 => 73];
-      Last    : Ada.Streams.Stream_Element_Offset;
-      File_Seen : Boolean := False;
+      Events        : Pollers.Poll_Event_Array (1 .. 64);
+      Count         : Natural;
+      Payload       : constant Ada.Streams.Stream_Element_Array := [1 => 73];
+      Last          : Ada.Streams.Stream_Element_Offset;
+      File_Seen     : Boolean := False;
       Socket_Events : Natural := 0;
    begin
       Hold_Completed_File (Events, Count);
@@ -336,21 +305,16 @@ begin
       end if;
 
       for Index in Saturated_Socket_Index loop
-         Flyology.IO.Sockets.Create_Socket_Pair
-           (Saturated_Readers (Index), Saturated_Writers (Index));
-         Flyology.IO.Sockets.Send_Socket
-           (Saturated_Writers (Index), Payload, Last);
+         Flyology.IO.Sockets.Create_Socket_Pair (Saturated_Readers (Index), Saturated_Writers (Index));
+         Flyology.IO.Sockets.Send_Socket (Saturated_Writers (Index), Payload, Last);
          if Last /= Payload'Last
-           or else
-             not Pollers.Watch
-               (Poller,
-                Interfaces.C.int
-                  (Flyology.IO.Sockets.Native_Descriptor
-                     (Saturated_Readers (Index))),
-                Pollers.Readable)
+           or else not Pollers.Watch
+                         (Poller,
+                          Interfaces.C.int
+                            (Flyology.IO.Sockets.Native_Descriptor (Saturated_Readers (Index))),
+                          Pollers.Readable)
          then
-            raise Program_Error with
-              "could not saturate poller socket readiness";
+            raise Program_Error with "could not saturate poller socket readiness";
          end if;
       end loop;
 
@@ -361,49 +325,37 @@ begin
             if not Pollers.Wait_Batch (Poller, 0.0, Events, Count) then
                raise Program_Error with "saturated poller batch failed";
             elsif Count /= Events'Length then
-               raise Program_Error with
-                 "continuously-ready sockets did not fill poller batch";
+               raise Program_Error with "continuously-ready sockets did not fill poller batch";
             end if;
 
             for Event_Index in 1 .. Count loop
                if Events (Event_Index).Kind = Pollers.File_Event then
                   File_Seen := True;
                   if Events (Event_Index).Token /= Token'Address then
-                     raise Program_Error with
-                       "saturated poller returned the wrong file token";
+                     raise Program_Error with "saturated poller returned the wrong file token";
                   end if;
                elsif Events (Event_Index).Kind = Pollers.Readable_Event then
                   Socket_Progress := Socket_Progress + 1;
                   Socket_Events := Socket_Events + 1;
-                  if not Pollers.Watch
-                    (Poller,
-                     Events (Event_Index).Descriptor,
-                     Pollers.Readable)
-                  then
-                     raise Program_Error with
-                       "could not rearm continuously-ready socket";
+                  if not Pollers.Watch (Poller, Events (Event_Index).Descriptor, Pollers.Readable) then
+                     raise Program_Error with "could not rearm continuously-ready socket";
                   end if;
                else
-                  raise Program_Error with
-                    "unexpected saturated poller event";
+                  raise Program_Error with "unexpected saturated poller event";
                end if;
             end loop;
             if Socket_Progress = 0 then
-               raise Program_Error with
-                 "file drain starved continuously-ready sockets";
+               raise Program_Error with "file drain starved continuously-ready sockets";
             end if;
          end;
       end loop;
 
       if not File_Seen then
-         raise Program_Error with
-           "saturated sockets stranded the held file CQE";
+         raise Program_Error with "saturated sockets stranded the held file CQE";
       elsif Socket_Events < Saturated_Socket_Count then
-         raise Program_Error with
-           "file drain prevented bounded socket progress";
+         raise Program_Error with "file drain prevented bounded socket progress";
       elsif not Pollers.File_Quiescent (Poller) then
-         raise Program_Error with
-           "drained file CQE did not restore quiescence";
+         raise Program_Error with "drained file CQE did not restore quiescence";
       end if;
    end;
 

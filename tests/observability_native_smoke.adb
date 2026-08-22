@@ -35,7 +35,8 @@ procedure Observability_Native_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Result;
 
    task Native is
@@ -44,32 +45,27 @@ procedure Observability_Native_Smoke is
 
    task body Native is
       Local : Observation.Group_Snapshot;
-      First : constant Positive :=
-        Flyology.Debug_Producer_Selection.Choose (4);
+      First : constant Positive := Flyology.Debug_Producer_Selection.Choose (4);
    begin
       Result.Set
         (not Observation.Snapshot (0, Local)
-         and then Observation.Current_Task_Instance =
-           Observation.No_Task_Instance
+         and then Observation.Current_Task_Instance = Observation.No_Task_Instance
          and then First in 1 .. 4
          and then Flyology.Debug_Producer_Selection.Choose (4) = First);
    end Native;
 begin
    declare
-      First : constant Positive :=
-        Flyology.Debug_Producer_Selection.Choose (4);
+      First : constant Positive := Flyology.Debug_Producer_Selection.Choose (4);
    begin
       if First not in 1 .. 4
         or else Flyology.Debug_Producer_Selection.Choose (4) /= First
         or else Flyology.Debug_Producer_Selection.Choose (1) /= 1
       then
-         raise Program_Error with
-           "native debug producer selection is unstable or out of range";
+         raise Program_Error with "native debug producer selection is unstable or out of range";
       end if;
    end;
    if Observation.Current_Task_Instance /= Observation.No_Task_Instance then
-      raise Program_Error with
-        "environment task received a lightweight task identity";
+      raise Program_Error with "environment task received a lightweight task identity";
    end if;
    if Observation.Last_Fatal /= Observation.No_Fatal then
       raise Program_Error with "fresh runtime retained fatal context";
@@ -81,8 +77,7 @@ begin
      or else Task_Count /= 0
      or else Task_Total /= 0
    then
-      raise Program_Error with
-        "task observation eagerly created event group 0";
+      raise Program_Error with "task observation eagerly created event group 0";
    end if;
    Result.Wait;
    if not Result.Passed or else Observation.Snapshot (0, Sample) then

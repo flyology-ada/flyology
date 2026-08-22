@@ -7,43 +7,31 @@ package body Flyology.IO.Connections.Testing is
    use type Interfaces.C.int;
 
    procedure C_Reset
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_reset";
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_reset";
    procedure C_Arm (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_arm";
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arm";
    function C_Reached (Point : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_reached";
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_reached";
    procedure C_Release (Point : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_barrier_release";
+   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_release";
    procedure C_Fail_Next_Release_Wake
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_connection_arm_capacity_release_wake_failure";
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_connection_arm_capacity_release_wake_failure";
    procedure C_Set_Receive_Cap (Maximum : Interfaces.C.int)
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_set_receive_cap";
+   with Import, Convention => C, External_Name => "flyology_test_connection_set_receive_cap";
    function C_Receive_Calls return Interfaces.C.unsigned
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_connection_receive_calls";
+   with Import, Convention => C, External_Name => "flyology_test_connection_receive_calls";
 
-   function Waiting_Operations (Item : Connection) return Natural is
-     (Item.Controller.Waiting_Count);
+   function Waiting_Operations (Item : Connection) return Natural
+   is (Item.Controller.Waiting_Count);
 
-   function Operation_Active (Item : Connection) return Boolean is
-     (Item.Controller.Lease_Active);
+   function Operation_Active (Item : Connection) return Boolean
+   is (Item.Controller.Lease_Active);
 
-   function Close_Requested (Item : Connection) return Boolean is
-     (Item.Controller.Close_Pending);
+   function Close_Requested (Item : Connection) return Boolean
+   is (Item.Controller.Close_Pending);
 
    procedure Reset_Barriers is
    begin
@@ -56,8 +44,7 @@ package body Flyology.IO.Connections.Testing is
    end Arm;
 
    procedure Wait_Reached (Point : Barrier_Point) is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while C_Reached (Barrier_Point'Pos (Point)) = 0 loop
          if Ada.Real_Time.Clock >= Deadline then
@@ -82,7 +69,7 @@ package body Flyology.IO.Connections.Testing is
       C_Set_Receive_Cap (Interfaces.C.int (Maximum));
    end Set_Receive_Cap;
 
-   function Receive_Calls return Natural is
-     (Natural (C_Receive_Calls));
+   function Receive_Calls return Natural
+   is (Natural (C_Receive_Calls));
 
 end Flyology.IO.Connections.Testing;

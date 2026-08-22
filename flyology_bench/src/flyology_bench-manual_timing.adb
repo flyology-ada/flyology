@@ -4,35 +4,29 @@
 package body Flyology_Bench.Manual_Timing is
    function Output_Resolution return Long_Float is
    begin
-      if Resolution /= Resolution or else Resolution <= 0.0
+      if Resolution /= Resolution
+        or else Resolution <= 0.0
         or else Resolution > Long_Float'Last
         or else Scale_To_Unit /= Scale_To_Unit
         or else Scale_To_Unit <= 0.0
         or else Scale_To_Unit > Long_Float'Last
       then
          raise Constraint_Error with "invalid alternate timing conversion";
-      elsif Scale_To_Unit > 1.0
-        and then Resolution > Long_Float'Last / Scale_To_Unit
-      then
-         raise Constraint_Error with
-           "alternate timing resolution conversion overflow";
+      elsif Scale_To_Unit > 1.0 and then Resolution > Long_Float'Last / Scale_To_Unit then
+         raise Constraint_Error with "alternate timing resolution conversion overflow";
       end if;
       return Resolution * Scale_To_Unit;
    end Output_Resolution;
 
-   procedure Measure
-     (Config : Configuration := Default_Configuration;
-      Result : out Measurement)
-   is
-      Effective : Configuration := Config;
-      Caller_Probe : constant Custom_Probe := Effective.Custom_Metrics.Provider;
+   procedure Measure (Config : Configuration := Default_Configuration; Result : out Measurement) is
+      Effective         : Configuration := Config;
+      Caller_Probe      : constant Custom_Probe := Effective.Custom_Metrics.Provider;
       Source_Resolution : constant Long_Float := Output_Resolution;
-      Timer_Axis : Custom_Metric_Index := Custom_Metric_Index'First;
-      Latest : Custom_Value :=
-        (Status => Metric_Not_Requested, others => <>);
+      Timer_Axis        : Custom_Metric_Index := Custom_Metric_Index'First;
+      Latest            : Custom_Value := (Status => Metric_Not_Requested, others => <>);
 
       procedure Run (Iterations : Iteration_Count) is
-         Raw : Long_Float;
+         Raw    : Long_Float;
          Status : Metric_Availability;
       begin
          Batch (Iterations, Raw, Status);
@@ -45,9 +39,7 @@ package body Flyology_Bench.Manual_Timing is
               or else Scale_To_Unit < 0.0
             then
                Latest.Status := Invalid_Value;
-            elsif Scale_To_Unit > 1.0
-              and then Raw > Long_Float'Last / Scale_To_Unit
-            then
+            elsif Scale_To_Unit > 1.0 and then Raw > Long_Float'Last / Scale_To_Unit then
                Latest.Status := Conversion_Overflow;
             else
                Latest.Sample_Value := Raw * Scale_To_Unit;
@@ -72,13 +64,18 @@ package body Flyology_Bench.Manual_Timing is
    begin
       Register_Custom_Metric
         (Effective.Custom_Metrics,
-         Name => "primary_time", Unit => Unit, Scope => Scope,
-         Attribution => Attribution, Direction => Lower_Is_Better,
-         Semantics => Completed_Elapsed, Normalization => Per_Operation,
-         Comparison => Relative_Positive, Primary_Timing => True,
-         Timing_Source => Source_Name, Resolution => Source_Resolution);
-      Timer_Axis :=
-        Custom_Metric_Index (Custom_Metrics (Effective.Custom_Metrics));
+         Name           => "primary_time",
+         Unit           => Unit,
+         Scope          => Scope,
+         Attribution    => Attribution,
+         Direction      => Lower_Is_Better,
+         Semantics      => Completed_Elapsed,
+         Normalization  => Per_Operation,
+         Comparison     => Relative_Positive,
+         Primary_Timing => True,
+         Timing_Source  => Source_Name,
+         Resolution     => Source_Resolution);
+      Timer_Axis := Custom_Metric_Index (Custom_Metrics (Effective.Custom_Metrics));
       --  Effective is consumed synchronously and completed results copy only
       --  metadata and values, never this instance-local callback address.
       Set_Custom_Probe (Effective.Custom_Metrics, Read'Unrestricted_Access);

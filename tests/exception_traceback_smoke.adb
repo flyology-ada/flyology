@@ -11,8 +11,8 @@ procedure Exception_Traceback_Smoke is
       entry Wait_Caught;
       entry Wait_Uncaught_Started;
    private
-      Caught            : Boolean := False;
-      Uncaught_Started  : Boolean := False;
+      Caught           : Boolean := False;
+      Uncaught_Started : Boolean := False;
    end Results;
 
    protected body Results is
@@ -59,17 +59,13 @@ procedure Exception_Traceback_Smoke is
             Raise_Marker (3);
          exception
             when Error : Marker_Error =>
-               pragma Assert
-                 (Ada.Exceptions.Exception_Message (Error) =
-                    "lightweight traceback marker");
+               pragma Assert (Ada.Exceptions.Exception_Message (Error) = "lightweight traceback marker");
                Ada.Exceptions.Save_Occurrence (Saved, Error);
          end;
          Ada.Exceptions.Reraise_Occurrence (Saved);
       exception
          when Error : Marker_Error =>
-            pragma Assert
-              (Ada.Exceptions.Exception_Message (Error) =
-                 "lightweight traceback marker");
+            pragma Assert (Ada.Exceptions.Exception_Message (Error) = "lightweight traceback marker");
             Results.Report_Caught;
       end;
    end Caught_Worker;
@@ -97,6 +93,5 @@ begin
       pragma Assert (Uncaught_Worker'Terminated);
    end;
 
-   Ada.Text_IO.Put_Line
-     ("lightweight symbolic traceback exception checks passed");
+   Ada.Text_IO.Put_Line ("lightweight symbolic traceback exception checks passed");
 end Exception_Traceback_Smoke;

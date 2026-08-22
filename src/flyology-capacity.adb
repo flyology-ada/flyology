@@ -9,18 +9,12 @@ package body Flyology.Capacity is
 
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
    function Test_Fail_Next_Release_Wake return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name =>
-            "flyology_test_connection_fail_next_capacity_release_wake";
+   with Import, Convention => C, External_Name => "flyology_test_connection_fail_next_capacity_release_wake";
 #end if;
 
    protected body Gate is
-      entry Acquire
-        (Accepted      : out Boolean;
-         Cleanup_Armed : access Boolean := null)
-        when Policy.Acquire_Entry_Open
-          (Stopping, Active_Count, Capacity)
+      entry Acquire (Accepted : out Boolean; Cleanup_Armed : access Boolean := null)
+        when Policy.Acquire_Entry_Open (Stopping, Active_Count, Capacity)
       is
          Action : constant Policy.Acquire_Action :=
            Policy.Classify_Acquire (Stopping, Active_Count, Capacity);
@@ -29,16 +23,17 @@ package body Flyology.Capacity is
             raise Program_Error with "capacity cleanup is already armed";
          end if;
          case Action is
-            when Policy.Admit_Permit =>
+            when Policy.Admit_Permit    =>
                if Active_Count + 1 = Capacity and then Acquire_Signalled then
                   Wake_Sources.Consume (Acquire_Wake);
                   Acquire_Signalled := False;
                end if;
-               Active_Count :=
-                 Policy.Active_After_Acquire (Active_Count, Capacity);
+               Active_Count := Policy.Active_After_Acquire (Active_Count, Capacity);
                Accepted := True;
-            when Policy.Reject_Closed =>
+
+            when Policy.Reject_Closed   =>
                Accepted := False;
+
             when Policy.Wait_For_Permit =>
                raise Program_Error with "capacity entry opened while full";
          end case;
@@ -56,10 +51,7 @@ package body Flyology.Capacity is
          end if;
       end Acquire;
 
-      procedure Try_Acquire
-        (Result        : out Acquire_Result;
-         Cleanup_Armed : access Boolean := null)
-      is
+      procedure Try_Acquire (Result : out Acquire_Result; Cleanup_Armed : access Boolean := null) is
          Action : constant Policy.Acquire_Action :=
            Policy.Classify_Acquire (Stopping, Active_Count, Capacity);
       begin
@@ -67,17 +59,18 @@ package body Flyology.Capacity is
             raise Program_Error with "capacity cleanup is already armed";
          end if;
          case Action is
-            when Policy.Admit_Permit =>
+            when Policy.Admit_Permit    =>
                if Active_Count + 1 = Capacity and then Acquire_Signalled then
                   Wake_Sources.Consume (Acquire_Wake);
                   Acquire_Signalled := False;
                end if;
-               Active_Count :=
-                 Policy.Active_After_Acquire (Active_Count, Capacity);
+               Active_Count := Policy.Active_After_Acquire (Active_Count, Capacity);
                Result := Permit_Acquired;
+
             when Policy.Wait_For_Permit =>
                Result := Gate_Full;
-            when Policy.Reject_Closed =>
+
+            when Policy.Reject_Closed   =>
                Result := Gate_Closed;
          end case;
          --  Permit ownership and the caller's cleanup obligation change in
@@ -102,13 +95,10 @@ package body Flyology.Capacity is
             --  longer active even when signalling reports an error.
             Cleanup_Armed.all := False;
          end if;
-         if Wake_Sources.Descriptor (Acquire_Wake) >= 0
-           and then not Acquire_Signalled
-         then
+         if Wake_Sources.Descriptor (Acquire_Wake) >= 0 and then not Acquire_Signalled then
 #if FLYOLOGY_CONNECTION_TEST_HOOKS then
             if Test_Fail_Next_Release_Wake /= 0 then
-               raise Program_Error with
-                 "injected capacity release wake failure";
+               raise Program_Error with "injected capacity release wake failure";
             end if;
 #end if;
             Wake_Sources.Signal (Acquire_Wake);
@@ -131,9 +121,7 @@ package body Flyology.Capacity is
                      Failed := True;
                end;
             end if;
-            if Wake_Sources.Descriptor (Acquire_Wake) >= 0
-              and then not Acquire_Signalled
-            then
+            if Wake_Sources.Descriptor (Acquire_Wake) >= 0 and then not Acquire_Signalled then
                begin
                   Wake_Sources.Signal (Acquire_Wake);
                   Acquire_Signalled := True;
@@ -148,23 +136,21 @@ package body Flyology.Capacity is
          end if;
       end Request_Shutdown;
 
-      entry Await_Drained
-        when Policy.Is_Drained (Stopping, Active_Count)
-      is
+      entry Await_Drained when Policy.Is_Drained (Stopping, Active_Count) is
       begin
          null;
       end Await_Drained;
 
-      function Shutdown_Requested return Boolean is (Stopping);
+      function Shutdown_Requested return Boolean
+      is (Stopping);
 
-      function Active return Natural is (Active_Count);
+      function Active return Natural
+      is (Active_Count);
 
-      function Waiting return Natural is (Acquire'Count);
+      function Waiting return Natural
+      is (Acquire'Count);
 
-      procedure Wait_Source
-        (FD                : out Interfaces.C.int;
-         Already_Requested : out Boolean)
-      is
+      procedure Wait_Source (FD : out Interfaces.C.int; Already_Requested : out Boolean) is
       begin
          Already_Requested := Stopping;
          if Stopping then
@@ -175,13 +161,9 @@ package body Flyology.Capacity is
          end if;
       end Wait_Source;
 
-      procedure Acquire_Wait_Source
-        (FD          : out Interfaces.C.int;
-         Can_Acquire : out Boolean)
-      is
+      procedure Acquire_Wait_Source (FD : out Interfaces.C.int; Can_Acquire : out Boolean) is
       begin
-         Can_Acquire :=
-           Policy.Acquire_Entry_Open (Stopping, Active_Count, Capacity);
+         Can_Acquire := Policy.Acquire_Entry_Open (Stopping, Active_Count, Capacity);
          if Can_Acquire then
             FD := -1;
          else

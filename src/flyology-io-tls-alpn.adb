@@ -6,8 +6,7 @@ package body Flyology.IO.TLS.ALPN is
       Added : constant Natural := Identifier'Length + 1;
    begin
       if Identifier'Length not in 1 .. 255 then
-         raise Constraint_Error with
-           "ALPN identifiers must contain 1 .. 255 bytes";
+         raise Constraint_Error with "ALPN identifiers must contain 1 .. 255 bytes";
       elsif Added > Maximum_Encoded_Length - Item.Encoded_Length then
          raise Constraint_Error with "ALPN protocol list is too long";
       end if;
@@ -22,21 +21,18 @@ package body Flyology.IO.TLS.ALPN is
       return Result;
    end Offer;
 
-   function "&"
-     (Left : Protocol_List; Right : String) return Protocol_List
-   is
+   function "&" (Left : Protocol_List; Right : String) return Protocol_List is
       Result : Protocol_List := Left;
    begin
       Append (Result, Right);
       return Result;
    end "&";
 
-   function Count (Item : Protocol_List) return Natural is
-     (Natural (Item.Values.Length));
+   function Count (Item : Protocol_List) return Natural
+   is (Natural (Item.Values.Length));
 
-   function Identifier
-     (Item : Protocol_List; Index : Positive) return String is
-     (Item.Values.Element (Index));
+   function Identifier (Item : Protocol_List; Index : Positive) return String
+   is (Item.Values.Element (Index));
 
    procedure Take
      (Backend     : in out Provider'Class;
@@ -46,15 +42,13 @@ package body Flyology.IO.TLS.ALPN is
       Protocols   : Protocol_List;
       Item        : in out Connection)
    is
-      function Factory (FD : Descriptor) return Session_Access is
-        (Create_Session (Backend, FD, Side, Server_Name, Protocols));
+      function Factory (FD : Descriptor) return Session_Access
+      is (Create_Session (Backend, FD, Side, Server_Name, Protocols));
    begin
-      Take_With_Factory
-        (Backend, Socket, Side, Server_Name, Factory'Access, Item);
+      Take_With_Factory (Backend, Socket, Side, Server_Name, Factory'Access, Item);
       if Item.Session.all not in Session'Class then
          Close (Item);
-         raise TLS_Error with
-           Name (Backend) & " returned a session without ALPN capability";
+         raise TLS_Error with Name (Backend) & " returned a session without ALPN capability";
       end if;
    end Take;
 

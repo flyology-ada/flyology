@@ -13,24 +13,26 @@ procedure Dormancy_Smoke is
    use type Interfaces.Unsigned_64;
 
    procedure Check_Minimum_Wait is
-      Started  : Boolean := False with Atomic;
+      Started  : Boolean := False
+      with Atomic;
       Observed : Boolean := False;
       Current  : Observation.Group_Snapshot;
 
-      task Worker with CPU => 1 is
+      task Worker
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Worker;
 
       task body Worker is
       begin
-         Dormancy.Set_Policy
-           (Dormancy.Reclaimable, Minimum_Wait => 1.0);
+         Dormancy.Set_Policy (Dormancy.Reclaimable, Minimum_Wait => 1.0);
          Started := True;
          delay 0.2;
       end Worker;
    begin
       for Attempt in 1 .. 2_000 loop
-         Observed := Started
+         Observed :=
+           Started
            and then Observation.Snapshot (1, Current)
            and then Current.Timer_Waits = 1
            and then Current.Dormancy_Candidates = 1;
@@ -39,43 +41,40 @@ procedure Dormancy_Smoke is
       end loop;
       if not Observed then
          raise Program_Error with "minimum-wait timer was not observed";
-      elsif Current.Cold_Stacks /= 0
-        or else Current.Cold_Advice_Attempts /= 0
-      then
-         raise Program_Error with
-           "stack was reclaimed below the configured minimum wait";
+      elsif Current.Cold_Stacks /= 0 or else Current.Cold_Advice_Attempts /= 0 then
+         raise Program_Error with "stack was reclaimed below the configured minimum wait";
       end if;
    end Check_Minimum_Wait;
 
    procedure Check_Descriptor_Exclusion is
       Reader   : Flyology.IO.Sockets.Socket_Type;
       Writer   : Flyology.IO.Sockets.Socket_Type;
-      Started  : Boolean := False with Atomic;
-      Passed   : Boolean := False with Atomic;
+      Started  : Boolean := False
+      with Atomic;
+      Passed   : Boolean := False
+      with Atomic;
       Observed : Boolean := False;
       Current  : Observation.Group_Snapshot;
    begin
       Flyology.IO.Sockets.Create_Socket_Pair (Reader, Writer);
       declare
-         task Worker with CPU => 1 is
+         task Worker
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Worker;
 
          task body Worker is
          begin
-            Dormancy.Set_Policy
-              (Dormancy.Reclaimable, Minimum_Wait => 0.0);
+            Dormancy.Set_Policy (Dormancy.Reclaimable, Minimum_Wait => 0.0);
             Started := True;
-            Passed := Flyology.IO.Wait
-              (Flyology.IO.Sockets.Native_Descriptor (Reader),
-               Flyology.IO.For_Read,
-               Timeout => 1.0);
+            Passed :=
+              Flyology.IO.Wait
+                (Flyology.IO.Sockets.Native_Descriptor (Reader), Flyology.IO.For_Read, Timeout => 1.0);
          end Worker;
       begin
          for Attempt in 1 .. 2_000 loop
-            Observed := Started
-              and then Observation.Snapshot (1, Current)
-              and then Current.Descriptor_Waits = 1;
+            Observed :=
+              Started and then Observation.Snapshot (1, Current) and then Current.Descriptor_Waits = 1;
             exit when Observed;
             delay 0.001;
          end loop;
@@ -85,8 +84,7 @@ procedure Dormancy_Smoke is
            or else Current.Cold_Stacks /= 0
            or else Current.Cold_Advice_Attempts /= 0
          then
-            raise Program_Error with
-              "descriptor wait was treated as a dormancy candidate";
+            raise Program_Error with "descriptor wait was treated as a dormancy candidate";
          end if;
          Flyology.IO.Sockets.Send_All (Writer, [1 => 42], Timeout => 1.0);
       end;
@@ -171,7 +169,8 @@ begin
    Check_Descriptor_Exclusion;
 
    declare
-      task Worker with CPU => 1 is
+      task Worker
+        with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Worker;
 
@@ -180,17 +179,14 @@ begin
          if Dormancy.Current_Policy /= Dormancy.Prompt then
             raise Program_Error with "lightweight policy did not default prompt";
          end if;
-         Dormancy.Set_Policy
-           (Dormancy.Reclaimable, Minimum_Wait => 30.0);
-         Dormancy.Set_Policy
-           (Dormancy.Reclaimable, Minimum_Wait => 0.0);
+         Dormancy.Set_Policy (Dormancy.Reclaimable, Minimum_Wait => 30.0);
+         Dormancy.Set_Policy (Dormancy.Reclaimable, Minimum_Wait => 0.0);
          if Dormancy.Current_Policy /= Dormancy.Reclaimable then
             raise Program_Error with "reclaimable policy was not retained";
          end if;
          Control.Started;
          delay 1.0;
-         Dormancy.Set_Policy
-           (Dormancy.Page_Out, Minimum_Wait => 0.0);
+         Dormancy.Set_Policy (Dormancy.Page_Out, Minimum_Wait => 0.0);
          if Dormancy.Current_Policy /= Dormancy.Page_Out then
             raise Program_Error with "page-out policy was not retained";
          end if;
@@ -207,21 +203,21 @@ begin
       end select;
 
       for Attempt in 1 .. 2_000 loop
-         Parked := Observation.Snapshot (1, Sample)
+         Parked :=
+           Observation.Snapshot (1, Sample)
            and then Sample.Dormancy_Candidates = 1
            and then Sample.Dormancy_Candidate_Bytes > 0
-           and then
-             (if Dormancy.Cold_Advice_Supported then
-                 Sample.Cold_Stacks = 1
-                 and then Sample.Cold_Stack_Bytes =
-                   Sample.Dormancy_Candidate_Bytes
-                 and then Sample.Cold_Advice_Attempts >= 1
-                 and then Sample.Cold_Advice_Accepted >= 1
-                 and then Sample.Cold_Advice_Failures = 0
-              else
-                 Sample.Cold_Stacks = 0
-                 and then Sample.Cold_Stack_Bytes = 0
-                 and then Sample.Cold_Advice_Attempts = 0);
+           and then (if Dormancy.Cold_Advice_Supported
+                     then
+                       Sample.Cold_Stacks = 1
+                       and then Sample.Cold_Stack_Bytes = Sample.Dormancy_Candidate_Bytes
+                       and then Sample.Cold_Advice_Attempts >= 1
+                       and then Sample.Cold_Advice_Accepted >= 1
+                       and then Sample.Cold_Advice_Failures = 0
+                     else
+                       Sample.Cold_Stacks = 0
+                       and then Sample.Cold_Stack_Bytes = 0
+                       and then Sample.Cold_Advice_Attempts = 0);
          exit when Parked;
          delay 0.001;
       end loop;
@@ -231,7 +227,8 @@ begin
 
       if Dormancy.Pageout_Advice_Supported then
          for Attempt in 1 .. 2_000 loop
-            Paged_Out := Observation.Snapshot (1, Sample)
+            Paged_Out :=
+              Observation.Snapshot (1, Sample)
               and then Sample.Cold_Stacks = 1
               and then Sample.Pageout_Advice_Attempts >= 1
               and then Sample.Pageout_Advice_Accepted >= 1

@@ -7,6 +7,7 @@ with Interfaces;
 --  independent immutable value once; Value_Of reads a published zero-copy
 --  reference with one aligned scalar load. This layout is stable across the
 --  currently tested little-endian targets.
+
 package Flyology.Data_Structures.Storage_Types.Unsigned_64s is
    --  Underlying immutable storage contract accepted by container generics.
    package Representation is new
@@ -44,16 +45,15 @@ package Flyology.Data_Structures.Storage_Types.Unsigned_64s is
    --  @param Item Active unpublished builder
    --  @param Value Scalar value to write before publication
    --  @exclude
-   procedure Set
-     (Item : in out Representation.Builder;
-      Value : Interfaces.Unsigned_64);
+   procedure Set (Item : in out Representation.Builder; Value : Interfaces.Unsigned_64);
 
    --  Complete statically bound element contract for generic containers.
-   package Element is new Flyology.Data_Structures.Storage_Types.Elements
-     (Representation     => Representation,
-      Source_Type        => Interfaces.Unsigned_64,
-      Observed_Type      => Interfaces.Unsigned_64,
-      Create_Value       => Create,
-      Observe_Value      => Value_Of,
-      Direct_Constructor => Set'Access);
+   package Element is new
+     Flyology.Data_Structures.Storage_Types.Elements
+       (Representation     => Representation,
+        Source_Type        => Interfaces.Unsigned_64,
+        Observed_Type      => Interfaces.Unsigned_64,
+        Create_Value       => Create,
+        Observe_Value      => Value_Of,
+        Direct_Constructor => Set'Access);
 end Flyology.Data_Structures.Storage_Types.Unsigned_64s;

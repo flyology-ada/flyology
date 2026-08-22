@@ -21,11 +21,8 @@ procedure File_Cancellation_Smoke is
    function Open_FD_Count return Interfaces.C.int;
    pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
 
-   procedure Wait_Terminated
-     (Terminated : not null access function return Boolean)
-   is
-      Limit : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   procedure Wait_Terminated (Terminated : not null access function return Boolean) is
+      Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
    begin
       while not Terminated.all loop
          if Ada.Real_Time.Clock >= Limit then
@@ -36,8 +33,9 @@ procedure File_Cancellation_Smoke is
    end Wait_Terminated;
 
    procedure Test_Pre_Cancel (Kind : Flyology.Execution_Model) is
-      Token : aliased Connections.Cancellation_Token;
-      Caught : Boolean := False with Atomic;
+      Token  : aliased Connections.Cancellation_Token;
+      Caught : Boolean := False
+      with Atomic;
 
       task type Worker is
          pragma Task_Info (Kind);
@@ -51,18 +49,19 @@ procedure File_Cancellation_Smoke is
       exception
          --  Prove that the connection-qualified compatibility name catches
          --  the canonical exception raised from Files.
-         when Connections.Operation_Cancelled => Caught := True;
+         when Connections.Operation_Cancelled =>
+            Caught := True;
       end Worker;
 
       type Worker_Access is access Worker;
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Worker, Worker_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
       Item : Worker_Access;
    begin
       Token.Request;
       Item := new Worker;
       declare
-         function Done return Boolean is (Item.all'Terminated);
+         function Done return Boolean
+         is (Item.all'Terminated);
       begin
          Wait_Terminated (Done'Access);
       end;
@@ -73,12 +72,13 @@ procedure File_Cancellation_Smoke is
    end Test_Pre_Cancel;
 
    procedure Test_No_Spurious_Wake_Source is
-      Token  : aliased Files.Cancellation_Token;
-      Before : Interfaces.C.int;
-      After  : Interfaces.C.int;
+      Token       : aliased Files.Cancellation_Token;
+      Before      : Interfaces.C.int;
+      After       : Interfaces.C.int;
       Native_Data : constant Ada.Streams.Stream_Element_Array := [1 => 7];
       Native_Last : Ada.Streams.Stream_Element_Offset;
-      Event_Done  : Boolean := False with Atomic;
+      Event_Done  : Boolean := False
+      with Atomic;
 
       task type Event_Worker is
          pragma Task_Info (Flyology.Lightweight_Task);
@@ -94,8 +94,7 @@ procedure File_Cancellation_Smoke is
       end Event_Worker;
 
       type Event_Worker_Access is access Event_Worker;
-      procedure Free is new Ada.Unchecked_Deallocation
-        (Event_Worker, Event_Worker_Access);
+      procedure Free is new Ada.Unchecked_Deallocation (Event_Worker, Event_Worker_Access);
       Worker : Event_Worker_Access;
    begin
       Before := Open_FD_Count;
@@ -111,7 +110,8 @@ procedure File_Cancellation_Smoke is
       --  token merely because one was supplied.
       Worker := new Event_Worker;
       declare
-         function Done return Boolean is (Worker.all'Terminated);
+         function Done return Boolean
+         is (Worker.all'Terminated);
       begin
          Wait_Terminated (Done'Access);
       end;
@@ -122,8 +122,7 @@ procedure File_Cancellation_Smoke is
 
       After := Open_FD_Count;
       if After /= Before then
-         raise Program_Error with
-           "non-waiting file operation allocated a cancellation descriptor";
+         raise Program_Error with "non-waiting file operation allocated a cancellation descriptor";
       end if;
    end Test_No_Spurious_Wake_Source;
 
@@ -134,51 +133,52 @@ procedure File_Cancellation_Smoke is
    begin
       for Iteration in 1 .. Iterations loop
          declare
-            Token : aliased Files.Cancellation_Token;
-            Outcome : Natural := 0 with Atomic;
+            Token   : aliased Files.Cancellation_Token;
+            Outcome : Natural := 0
+            with Atomic;
 
             task type Worker is
                pragma Task_Info (Kind);
             end Worker;
 
             task body Worker is
-               Data : constant Ada.Streams.Stream_Element_Array
-                 (1 .. 64 * 1_024) :=
+               Data : constant Ada.Streams.Stream_Element_Array (1 .. 64 * 1_024) :=
                  (others => Ada.Streams.Stream_Element (Iteration mod 251));
                Last : Ada.Streams.Stream_Element_Offset;
             begin
                Files.Write_At
-                 (File,
-                  Files.File_Offset ((Iteration - 1) * Data'Length),
-                  Data,
-                  Last,
-                  Token'Access);
+                 (File, Files.File_Offset ((Iteration - 1) * Data'Length), Data, Last, Token'Access);
                Outcome := (if Last = Data'Last then 1 else 3);
             exception
                --  Prove the inverse cross-qualified compatibility catch.
-               when Connections.Operation_Cancelled => Outcome := 2;
-               when others => Outcome := 3;
+               when Connections.Operation_Cancelled =>
+                  Outcome := 2;
+               when others =>
+                  Outcome := 3;
             end Worker;
 
             type Worker_Access is access Worker;
-            procedure Free is new Ada.Unchecked_Deallocation
-              (Worker, Worker_Access);
+            procedure Free is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
             Item : Worker_Access := new Worker;
          begin
             delay 0.0;
             Token.Request;
             declare
-               function Done return Boolean is (Item.all'Terminated);
+               function Done return Boolean
+               is (Item.all'Terminated);
             begin
                Wait_Terminated (Done'Access);
             end;
             Free (Item);
             case Outcome is
-               when 1 => Completed := Completed + 1;
-               when 2 => Cancelled := Cancelled + 1;
+               when 1      =>
+                  Completed := Completed + 1;
+
+               when 2      =>
+                  Cancelled := Cancelled + 1;
+
                when others =>
-                  raise Program_Error with
-                    "completion/cancellation race lost terminal ownership";
+                  raise Program_Error with "completion/cancellation race lost terminal ownership";
             end case;
          end;
       end loop;
@@ -191,8 +191,7 @@ begin
    if Ada.Directories.Exists (Path) then
       Ada.Directories.Delete_File (Path);
    end if;
-   File := Files.Open
-     (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+   File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
 
    Test_Pre_Cancel (Flyology.Native_Task);
    Test_Pre_Cancel (Flyology.Lightweight_Task);
@@ -203,8 +202,7 @@ begin
    --  Closing only after every terminal result and then reusing the likely
    --  descriptor number catches stale kernel completions and request reuse.
    Files.Close (File);
-   File := Files.Open
-     (Path, Mode => Files.Read_Write, Create => False, Truncate => False);
+   File := Files.Open (Path, Mode => Files.Read_Write, Create => False, Truncate => False);
    Files.Close (File);
    Ada.Directories.Delete_File (Path);
 exception

@@ -17,9 +17,9 @@ private package Flyology_Cachelines.Platform is
    --  described no class, and Line_Size is the flat hardware line size, which
    --  no supported platform reports per class.
    type Host_Facts is record
-      Count     : Natural        := 0;
+      Count     : Natural := 0;
       Ordering  : Class_Ordering := Unordered;
-      Line_Size : Natural        := 0;
+      Line_Size : Natural := 0;
       Classes   : Class_Facts_Table;
    end record;
 

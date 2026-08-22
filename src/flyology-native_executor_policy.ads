@@ -1,9 +1,9 @@
 --  Internal, proved slot bookkeeping decisions for native executors. Worker
 --  activation, cancellation tokens, wake sources, and result storage stay in
 --  the generic executor implementation that consumes these decisions.
+
 private package Flyology.Native_Executor_Policy
-  with Preelaborate,
-       SPARK_Mode
+  with Preelaborate, SPARK_Mode
 is
    --  @exclude Internal proof policy, not part of the public API.
 
@@ -28,9 +28,10 @@ is
    --  @param Relinquished Whether the waiter already abandoned the operation
    --  @return Free for an abandoned operation, otherwise Completed
    function State_After_Report (Relinquished : Boolean) return Slot_State
-   with Post => State_After_Report'Result =
-     (if Relinquished then Free else Completed)
-     and then State_After_Report'Result /= Running;
+   with
+     Post =>
+       State_After_Report'Result = (if Relinquished then Free else Completed)
+       and then State_After_Report'Result /= Running;
 
    --  Decrement the running count claimed by one terminal report.
    --  @param Running Operations currently executing natively
@@ -44,9 +45,6 @@ is
    --  @param Outstanding Currently occupied operation slots
    --  @param Relinquished Whether the waiter already abandoned the operation
    --  @return Occupied slot count after the report
-   function Outstanding_After_Report
-     (Outstanding  : Positive;
-      Relinquished : Boolean) return Natural
-   with Post => Outstanding_After_Report'Result =
-     (if Relinquished then Outstanding - 1 else Outstanding);
+   function Outstanding_After_Report (Outstanding : Positive; Relinquished : Boolean) return Natural
+   with Post => Outstanding_After_Report'Result = (if Relinquished then Outstanding - 1 else Outstanding);
 end Flyology.Native_Executor_Policy;

@@ -12,8 +12,7 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
       procedure Started (Identity : Ada.Task_Identification.Task_Id);
       function Identity return Ada.Task_Identification.Task_Id;
    private
-      Value : Ada.Task_Identification.Task_Id :=
-        Ada.Task_Identification.Null_Task_Id;
+      Value : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
    end Observation_State;
 
    protected body Observation_State is
@@ -22,7 +21,8 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
          Value := Identity;
       end Started;
 
-      function Identity return Ada.Task_Identification.Task_Id is (Value);
+      function Identity return Ada.Task_Identification.Task_Id
+      is (Value);
    end Observation_State;
 
    type Context is limited record
@@ -37,19 +37,16 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
       return Item : Service (State);
    end Create;
 
-   procedure Run_Service
-     (Item    : in out Service;
-      Context : aliased in out Adapters_Exit_Smoke.Context)
-   is
+   procedure Run_Service (Item : in out Service; Context : aliased in out Adapters_Exit_Smoke.Context) is
       pragma Unreferenced (Context);
    begin
       Item.State.State.Started (Ada.Task_Identification.Current_Task);
       case Item.State.Mode is
-         when Raise_Exception =>
+         when Raise_Exception  =>
             raise Service_Error with "service exception retained";
+
          when Abort_Abnormally =>
-            Ada.Task_Identification.Abort_Task
-              (Ada.Task_Identification.Current_Task);
+            Ada.Task_Identification.Abort_Task (Ada.Task_Identification.Current_Task);
       end case;
    end Run_Service;
 
@@ -65,30 +62,33 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
       return False;
    end Ready;
 
-   package Native_Adapter is new Flyology.Supervision.Adapters
-     (Application_Context => Context,
-      Service             => Service,
-      Create              => Create,
-      Run_Service         => Run_Service,
-      Request_Shutdown    => Request_Shutdown,
-      Ready               => Ready,
-      Generation_Model    => Native_Task);
+   package Native_Adapter is new
+     Flyology.Supervision.Adapters
+       (Application_Context => Context,
+        Service             => Service,
+        Create              => Create,
+        Run_Service         => Run_Service,
+        Request_Shutdown    => Request_Shutdown,
+        Ready               => Ready,
+        Generation_Model    => Native_Task);
 
-   package Lightweight_Adapter is new Flyology.Supervision.Adapters
-     (Application_Context => Context,
-      Service             => Service,
-      Create              => Create,
-      Run_Service         => Run_Service,
-      Request_Shutdown    => Request_Shutdown,
-      Ready               => Ready,
-      Generation_Model    => Lightweight_Task,
-      Generation_CPU      => 2);
+   package Lightweight_Adapter is new
+     Flyology.Supervision.Adapters
+       (Application_Context => Context,
+        Service             => Service,
+        Create              => Create,
+        Run_Service         => Run_Service,
+        Request_Shutdown    => Request_Shutdown,
+        Ready               => Ready,
+        Generation_Model    => Lightweight_Task,
+        Generation_CPU      => 2);
 
    generic
-      with procedure Run
-        (Context : aliased in out Adapters_Exit_Smoke.Context;
-         Control : aliased in out Generation_Control;
-         Result  : out Generation_Result);
+      with
+        procedure Run
+          (Context : aliased in out Adapters_Exit_Smoke.Context;
+           Control : aliased in out Generation_Control;
+           Result  : out Generation_Result);
    procedure Check_Exit (Mode : Exit_Mode);
 
    procedure Check_Exit (Mode : Exit_Mode) is
@@ -97,21 +97,18 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
       Result  : Generation_Result;
    begin
       State.Mode := Mode;
-      Open
-        (Control,
-         (Controller => New_Controller, Id => 71, Generation => 1));
+      Open (Control, (Controller => New_Controller, Id => 71, Generation => 1));
       Run (State, Control, Result);
-      pragma Assert
-        (Result.Termination.Task_Id = State.State.Identity);
+      pragma Assert (Result.Termination.Task_Id = State.State.Identity);
       case Mode is
-         when Raise_Exception =>
+         when Raise_Exception  =>
             pragma Assert (Result.Termination.Kind = Unhandled_Exception);
-            pragma Assert
-              (Exception_Name_Text (Result.Termination) =
-                 Ada.Exceptions.Exception_Name (Service_Error'Identity));
-            pragma Assert
-              (Message_Text (Result.Termination) =
-                 "service exception retained");
+            pragma
+              Assert
+                (Exception_Name_Text (Result.Termination)
+                   = Ada.Exceptions.Exception_Name (Service_Error'Identity));
+            pragma Assert (Message_Text (Result.Termination) = "service exception retained");
+
          when Abort_Abnormally =>
             pragma Assert (Result.Termination.Kind = Abnormal_Completion);
       end case;
@@ -141,18 +138,13 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
 
    type Failing_Context is limited null record;
 
-   function Create_Failing
-     (State : not null access Failing_Context) return Failing_Service
-   is
+   function Create_Failing (State : not null access Failing_Context) return Failing_Service is
       pragma Unreferenced (State);
    begin
       return Item : Failing_Service;
    end Create_Failing;
 
-   procedure Run_Failing
-     (Item    : in out Failing_Service;
-      Context : aliased in out Failing_Context)
-   is
+   procedure Run_Failing (Item : in out Failing_Service; Context : aliased in out Failing_Context) is
       pragma Unreferenced (Item, Context);
    begin
       null;
@@ -170,14 +162,15 @@ procedure Flyology.Supervision.Adapters_Exit_Smoke is
       return False;
    end Failing_Ready;
 
-   package Failing_Adapter is new Flyology.Supervision.Adapters
-     (Application_Context => Failing_Context,
-      Service             => Failing_Service,
-      Create              => Create_Failing,
-      Run_Service         => Run_Failing,
-      Request_Shutdown    => Stop_Failing,
-      Ready               => Failing_Ready,
-      Generation_Model    => Native_Task);
+   package Failing_Adapter is new
+     Flyology.Supervision.Adapters
+       (Application_Context => Failing_Context,
+        Service             => Failing_Service,
+        Create              => Create_Failing,
+        Run_Service         => Run_Failing,
+        Request_Shutdown    => Stop_Failing,
+        Ready               => Failing_Ready,
+        Generation_Model    => Native_Task);
 begin
    Check_Native (Raise_Exception);
    Check_Native (Abort_Abnormally);
@@ -189,15 +182,13 @@ begin
       Control : aliased Generation_Control;
       Result  : Generation_Result;
    begin
-      Open
-        (Control,
-         (Controller => New_Controller, Id => 72, Generation => 1));
+      Open (Control, (Controller => New_Controller, Id => 72, Generation => 1));
       begin
          Failing_Adapter.Run (State, Control, Result);
-         raise Program_Error with
-           "service activation failure did not propagate Tasking_Error";
+         raise Program_Error with "service activation failure did not propagate Tasking_Error";
       exception
-         when Tasking_Error => null;
+         when Tasking_Error =>
+            null;
       end;
    end;
 end Flyology.Supervision.Adapters_Exit_Smoke;

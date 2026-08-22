@@ -16,27 +16,25 @@ package body Flyology_Bench.Host_Lock is
    --  Open flags and flock operations are C macros, so the crate's native
    --  unit publishes their values as objects. Every call below is an
    --  ordinary libc entry point.
-   Open_Read_Write : constant Interfaces.C.int;
+   Open_Read_Write    : constant Interfaces.C.int;
    pragma Import (C, Open_Read_Write, "flyology_bench_o_rdwr");
-   Open_Create : constant Interfaces.C.int;
+   Open_Create        : constant Interfaces.C.int;
    pragma Import (C, Open_Create, "flyology_bench_o_creat");
    Open_Close_On_Exec : constant Interfaces.C.int;
    pragma Import (C, Open_Close_On_Exec, "flyology_bench_o_cloexec");
-   Open_No_Follow : constant Interfaces.C.int;
+   Open_No_Follow     : constant Interfaces.C.int;
    pragma Import (C, Open_No_Follow, "flyology_bench_o_nofollow");
 
-   Lock_Shared : constant Interfaces.C.int;
+   Lock_Shared      : constant Interfaces.C.int;
    pragma Import (C, Lock_Shared, "flyology_bench_lock_shared");
-   Lock_Exclusive : constant Interfaces.C.int;
+   Lock_Exclusive   : constant Interfaces.C.int;
    pragma Import (C, Lock_Exclusive, "flyology_bench_lock_exclusive");
    Lock_Nonblocking : constant Interfaces.C.int;
    pragma Import (C, Lock_Nonblocking, "flyology_bench_lock_nonblocking");
-   Lock_Unlock : constant Interfaces.C.int;
+   Lock_Unlock      : constant Interfaces.C.int;
    pragma Import (C, Lock_Unlock, "flyology_bench_lock_unlock");
 
-   function C_Flock
-     (Descriptor : Interfaces.C.int;
-      Operation  : Interfaces.C.int) return Interfaces.C.int;
+   function C_Flock (Descriptor : Interfaces.C.int; Operation : Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, C_Flock, "flock");
 
    function C_Close (Descriptor : Interfaces.C.int) return Interfaces.C.int;
@@ -53,21 +51,17 @@ package body Flyology_Bench.Host_Lock is
    --  The convention compiles on every GNAT this crate supports; it was
    --  checked against 13.2.2 through 16.1.0, and alire.toml floors at 13.
    function C_Open
-     (Path  : Interfaces.C.char_array;
-      Flags : Interfaces.C.int;
-      Mode  : Interfaces.C.unsigned) return Interfaces.C.int
-     with Import, Convention => C_Variadic_2, External_Name => "open";
+     (Path : Interfaces.C.char_array; Flags : Interfaces.C.int; Mode : Interfaces.C.unsigned)
+      return Interfaces.C.int
+   with Import, Convention => C_Variadic_2, External_Name => "open";
 
    --  mode_t is 32-bit on Linux and 16-bit on Darwin. The only value passed
    --  is 8#666#, which both ABIs carry in the low bits of one register.
-   function C_Fchmod
-     (Descriptor : Interfaces.C.int;
-      Mode       : Interfaces.C.unsigned) return Interfaces.C.int;
+   function C_Fchmod (Descriptor : Interfaces.C.int; Mode : Interfaces.C.unsigned) return Interfaces.C.int;
    pragma Import (C, C_Fchmod, "fchmod");
 
    function C_Ftruncate
-     (Descriptor : Interfaces.C.int;
-      Length     : Interfaces.Integer_64) return Interfaces.C.int;
+     (Descriptor : Interfaces.C.int; Length : Interfaces.Integer_64) return Interfaces.C.int;
    pragma Import (C, C_Ftruncate, "ftruncate");
 
    --  pwrite carries its own offset, so publishing never depends on where
@@ -83,8 +77,8 @@ package body Flyology_Bench.Host_Lock is
 
    Content_Limit : constant := 4_096;
 
-   function Trimmed (Value : String) return String is
-     (Ada.Strings.Fixed.Trim (Value, Ada.Strings.Both));
+   function Trimmed (Value : String) return String
+   is (Ada.Strings.Fixed.Trim (Value, Ada.Strings.Both));
 
    function Resolved_Path return String is
    begin
@@ -107,11 +101,9 @@ package body Flyology_Bench.Host_Lock is
       Number : constant String := Trimmed (Natural'Image (CPU));
    begin
       if Machine'Length > Suffix'Length
-        and then Machine (Machine'Last - Suffix'Length + 1 .. Machine'Last)
-          = Suffix
+        and then Machine (Machine'Last - Suffix'Length + 1 .. Machine'Last) = Suffix
       then
-         return Machine (Machine'First .. Machine'Last - Suffix'Length)
-           & "." & Number & Suffix;
+         return Machine (Machine'First .. Machine'Last - Suffix'Length) & "." & Number & Suffix;
       end if;
       return Machine & "." & Number;
    end CPU_Path;
@@ -123,10 +115,17 @@ package body Flyology_Bench.Host_Lock is
    begin
       for Item of Value loop
          case Item is
-            when ASCII.CR => Append (Result, "%0D");
-            when ASCII.LF => Append (Result, "%0A");
-            when '%'      => Append (Result, "%25");
-            when others   => Append (Result, Item);
+            when ASCII.CR =>
+               Append (Result, "%0D");
+
+            when ASCII.LF =>
+               Append (Result, "%0A");
+
+            when '%'      =>
+               Append (Result, "%25");
+
+            when others   =>
+               Append (Result, Item);
          end case;
       end loop;
       return To_String (Result);
@@ -141,10 +140,9 @@ package body Flyology_Bench.Host_Lock is
    end Working_Directory;
 
    function Acquisition_Timestamp return String is
-      Result : String := Ada.Calendar.Formatting.Image
-        (Date                  => Ada.Calendar.Clock,
-         Include_Time_Fraction => False,
-         Time_Zone             => 0);
+      Result : String :=
+        Ada.Calendar.Formatting.Image
+          (Date => Ada.Calendar.Clock, Include_Time_Fraction => False, Time_Zone => 0);
    begin
       for Index in Result'Range loop
          if Result (Index) = ' ' then
@@ -171,14 +169,28 @@ package body Flyology_Bench.Host_Lock is
 
    function Content (Tool : String; CPUs : CPU_List) return String is
    begin
-      return "convention=" & Convention & ASCII.LF
+      return
+        "convention="
+        & Convention
+        & ASCII.LF
         & "spec=https://github.com/flyology-ada/flyology/blob/main/docs/"
-        & "host-cpu-lock.md" & ASCII.LF
-        & "tool=" & Encoded (Tool) & ASCII.LF
-        & "pid=" & Trimmed (Interfaces.C.int'Image (C_Process_Id)) & ASCII.LF
-        & "started=" & Acquisition_Timestamp & ASCII.LF
-        & "claim=" & Claim_Description (CPUs) & ASCII.LF
-        & "cwd=" & Encoded (Working_Directory) & ASCII.LF;
+        & "host-cpu-lock.md"
+        & ASCII.LF
+        & "tool="
+        & Encoded (Tool)
+        & ASCII.LF
+        & "pid="
+        & Trimmed (Interfaces.C.int'Image (C_Process_Id))
+        & ASCII.LF
+        & "started="
+        & Acquisition_Timestamp
+        & ASCII.LF
+        & "claim="
+        & Claim_Description (CPUs)
+        & ASCII.LF
+        & "cwd="
+        & Encoded (Working_Directory)
+        & ASCII.LF;
    end Content;
 
    --  A restrictive umask in whichever process created the file first would
@@ -186,18 +198,17 @@ package body Flyology_Bench.Host_Lock is
    --  to open the file is indistinguishable from finding it free.
    function Open_Claim_File (Path : String) return Interfaces.C.int is
       use type Interfaces.C.unsigned;
-      Flags : constant Interfaces.C.int := Interfaces.C.int
-        (Interfaces.C.unsigned (Open_Read_Write)
-         or Interfaces.C.unsigned (Open_Create)
-         or Interfaces.C.unsigned (Open_Close_On_Exec)
-         or Interfaces.C.unsigned (Open_No_Follow));
-      Descriptor : constant Interfaces.C.int :=
-        C_Open (Interfaces.C.To_C (Path), Flags, Claim_File_Mode);
+      Flags      : constant Interfaces.C.int :=
+        Interfaces.C.int
+          (Interfaces.C.unsigned (Open_Read_Write)
+           or Interfaces.C.unsigned (Open_Create)
+           or Interfaces.C.unsigned (Open_Close_On_Exec)
+           or Interfaces.C.unsigned (Open_No_Follow));
+      Descriptor : constant Interfaces.C.int := C_Open (Interfaces.C.To_C (Path), Flags, Claim_File_Mode);
    begin
       if Descriptor >= 0 then
          declare
-            Ignored : constant Interfaces.C.int :=
-              C_Fchmod (Descriptor, Claim_File_Mode);
+            Ignored : constant Interfaces.C.int := C_Fchmod (Descriptor, Claim_File_Mode);
             pragma Unreferenced (Ignored);
          begin
             null;
@@ -220,10 +231,7 @@ package body Flyology_Bench.Host_Lock is
          return;
       end if;
       while Remaining > 0 loop
-         Written := C_Pwrite
-           (Descriptor,
-            Buffer (Interfaces.C.size_t (Offset))'Address,
-            Remaining, Offset);
+         Written := C_Pwrite (Descriptor, Buffer (Interfaces.C.size_t (Offset))'Address, Remaining, Offset);
          exit when Written <= 0;
          Remaining := Remaining - Interfaces.C.size_t (Written);
          Offset := Offset + Written;
@@ -260,17 +268,12 @@ package body Flyology_Bench.Host_Lock is
    begin
       if Mount_Point = "/" then
          return True;
-      elsif Mount_Point'Length = 0
-        or else Mount_Point'Length > Path'Length
-      then
+      elsif Mount_Point'Length = 0 or else Mount_Point'Length > Path'Length then
          return False;
-      elsif Path (Path'First .. Path'First + Mount_Point'Length - 1)
-        /= Mount_Point
-      then
+      elsif Path (Path'First .. Path'First + Mount_Point'Length - 1) /= Mount_Point then
          return False;
       end if;
-      return Path'Length = Mount_Point'Length
-        or else Path (Path'First + Mount_Point'Length) = '/';
+      return Path'Length = Mount_Point'Length or else Path (Path'First + Mount_Point'Length) = '/';
    end Covers;
 
    --  A mount whose root is a subtree rather than "/" is a bind mount of part
@@ -350,22 +353,19 @@ package body Flyology_Bench.Host_Lock is
       Object.Held_Value := False;
    end Release;
 
-   overriding procedure Finalize (Object : in out Claim) is
+   overriding
+   procedure Finalize (Object : in out Claim) is
    begin
       Release (Object);
    end Finalize;
 
    --  flock reports conflict and genuine failure the same way, and a caller
    --  that retries treats them the same way too.
-   function Locked
-     (Descriptor : Interfaces.C.int;
-      Exclusive  : Boolean) return Boolean
-   is
+   function Locked (Descriptor : Interfaces.C.int; Exclusive : Boolean) return Boolean is
       use type Interfaces.C.unsigned;
       Operation : constant Interfaces.C.int :=
         Interfaces.C.int
-          (Interfaces.C.unsigned
-             (if Exclusive then Lock_Exclusive else Lock_Shared)
+          (Interfaces.C.unsigned (if Exclusive then Lock_Exclusive else Lock_Shared)
            or Interfaces.C.unsigned (Lock_Nonblocking));
    begin
       return C_Flock (Descriptor, Operation) = 0;
@@ -378,15 +378,13 @@ package body Flyology_Bench.Host_Lock is
       Path    : String := "";
       Tool    : String := "flyology_bench")
    is
-      Machine : constant String :=
-        (if Path = "" then Resolved_Path else Path);
+      Machine : constant String := (if Path = "" then Resolved_Path else Path);
       Ordered : CPU_List (1 .. CPUs'Length);
    begin
       if Object.Held_Value then
          raise Program_Error with "host CPU claim is already held";
       elsif CPUs'Length > Maximum_Claimed_CPUs then
-         raise Program_Error with
-           "host CPU claim names more logical CPUs than the convention allows";
+         raise Program_Error with "host CPU claim names more logical CPUs than the convention allows";
       end if;
       Outcome := Path_Unusable;
       Object.Path_Value := To_Unbounded_String (Machine);
@@ -421,8 +419,7 @@ package body Flyology_Bench.Host_Lock is
 
       for Index in Ordered'Range loop
          declare
-            Descriptor : constant Interfaces.C.int :=
-              Open_Claim_File (CPU_Path (Machine, Ordered (Index)));
+            Descriptor : constant Interfaces.C.int := Open_Claim_File (CPU_Path (Machine, Ordered (Index)));
          begin
             if Descriptor < 0 then
                Outcome := Path_Unusable;
@@ -477,17 +474,17 @@ package body Flyology_Bench.Host_Lock is
       end loop;
    end Acquire;
 
-   function Held (Object : Claim) return Boolean is (Object.Held_Value);
+   function Held (Object : Claim) return Boolean
+   is (Object.Held_Value);
 
-   function Isolation (Object : Claim) return Path_Isolation is
-     (Object.Isolation_Value);
+   function Isolation (Object : Claim) return Path_Isolation
+   is (Object.Isolation_Value);
 
-   function Claim_Path (Object : Claim) return String is
-     (To_String (Object.Path_Value));
+   function Claim_Path (Object : Claim) return String
+   is (To_String (Object.Path_Value));
 
    function Read_Holder (Path : String := "") return Holder is
-      Target : constant String :=
-        (if Path = "" then Resolved_Path else Path);
+      Target : constant String := (if Path = "" then Resolved_Path else Path);
       File   : Ada.Text_IO.File_Type;
       Result : Holder;
       Read   : Natural := 0;
@@ -502,9 +499,7 @@ package body Flyology_Bench.Host_Lock is
          when others =>
             return Result;
       end;
-      while not Ada.Text_IO.End_Of_File (File)
-        and then Read < Content_Limit
-      loop
+      while not Ada.Text_IO.End_Of_File (File) and then Read < Content_Limit loop
          declare
             Line      : constant String := Ada.Text_IO.Get_Line (File);
             Separator : Natural := 0;
@@ -519,10 +514,8 @@ package body Flyology_Bench.Host_Lock is
             end loop;
             if Separator > 0 then
                declare
-                  Key   : constant String :=
-                    Line (Line'First .. Separator - 1);
-                  Value : constant String :=
-                    Line (Separator + 1 .. Line'Last);
+                  Key   : constant String := Line (Line'First .. Separator - 1);
+                  Value : constant String := Line (Separator + 1 .. Line'Last);
                begin
                   --  Unknown keys are ignored so that a later revision of the
                   --  convention stays readable by this parser.

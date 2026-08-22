@@ -8,6 +8,7 @@
 --  the one Linux uses.  This crate is published for Linux and macOS, and a
 --  host with no way to ask for pages at all would fail to link rather than
 --  reach this.
+
 private package Flyology_NUMA.Map_Flags is
 
    --  Memory backed by nothing but itself.  Linux and macOS agree on every

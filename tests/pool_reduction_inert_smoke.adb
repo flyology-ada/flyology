@@ -49,7 +49,8 @@ procedure Pool_Reduction_Inert_Smoke is
          Released := True;
       end Release;
 
-      function Passed return Boolean is (Correct);
+      function Passed return Boolean
+      is (Correct);
    end Control;
 
    task type Explicit_Worker with CPU => 2 is
@@ -74,8 +75,7 @@ begin
       raise Program_Error with "pool reduction inertness precondition failed";
    end if;
 
-   if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started
-   then
+   if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started then
       raise Program_Error with "dormant reduction did not start";
    end if;
    Status := Groups.Pool_Reduction;
@@ -85,8 +85,7 @@ begin
      or else Status.Placement_Claims /= 0
      or else Lifecycle.State /= Lifecycle.Dormant
      or else Lifecycle.Created_Groups /= 0
-     or else Flyology.Observability.Snapshot
-       (Groups.Default_Group, Sample)
+     or else Flyology.Observability.Snapshot (Groups.Default_Group, Sample)
    then
       raise Program_Error with "dormant reduction started event machinery";
    end if;
@@ -99,16 +98,13 @@ begin
       Control.Wait_Ready;
       if not Control.Passed
         or else Lifecycle.Created_Groups /= 1
-        or else Flyology.Observability.Snapshot
-          (Groups.Default_Group, Sample)
+        or else Flyology.Observability.Snapshot (Groups.Default_Group, Sample)
       then
          Control.Release;
          raise Program_Error with "explicit worker started the wrong group";
       end if;
 
-      if Groups.Request_Pool_Reduction (Target_Size) /=
-        Groups.Reduction_Started
-      then
+      if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started then
          raise Program_Error with "explicit-only reduction did not start";
       end if;
       Status := Groups.Pool_Reduction;
@@ -116,12 +112,10 @@ begin
         or else Status.Automatic_Tasks /= 0
         or else Status.Explicit_Tasks /= 1
         or else Lifecycle.Created_Groups /= 1
-        or else Flyology.Observability.Snapshot
-          (Groups.Default_Group, Sample)
+        or else Flyology.Observability.Snapshot (Groups.Default_Group, Sample)
       then
          Control.Release;
-         raise Program_Error with
-           "explicit-only reduction started a drainage group";
+         raise Program_Error with "explicit-only reduction started a drainage group";
       end if;
       Control.Release;
    end;

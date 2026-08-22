@@ -9,6 +9,7 @@
 --  Channel, or propagate exceptions.
 --  @formal Element_Type Value transferred by the channel
 --  @formal Empty_Value Value assigned after dequeue to release slot storage
+
 generic
    type Element_Type is private;
    Empty_Value : Element_Type;
@@ -25,10 +26,7 @@ package Flyology.Bounded_Channels is
    --  @param Item Channel
    --  @param Value Value to enqueue
    --  @param Accepted False only when closed
-   procedure Send
-     (Item     : in out Channel;
-      Value    : Element_Type;
-      Accepted : out Boolean);
+   procedure Send (Item : in out Channel; Value : Element_Type; Accepted : out Boolean);
 
    --  Wait for a value. Values queued before Close remain receivable;
    --  Available is false once the closed channel is empty. Value is defined
@@ -36,10 +34,7 @@ package Flyology.Bounded_Channels is
    --  @param Item Channel
    --  @param Value Received value when Available
    --  @param Available Whether a value was returned
-   procedure Receive
-     (Item      : in out Channel;
-      Value     : out Element_Type;
-      Available : out Boolean);
+   procedure Receive (Item : in out Channel; Value : out Element_Type; Available : out Boolean);
 
    --  Wait for a value for at most Timeout seconds. A negative timeout waits
    --  without a deadline; zero is an immediate attempt. Timed_Out
@@ -62,10 +57,7 @@ package Flyology.Bounded_Channels is
    --  @param Item Channel
    --  @param Value Value to enqueue
    --  @param Accepted True only when open space was available
-   procedure Try_Send
-     (Item     : in out Channel;
-      Value    : Element_Type;
-      Accepted : out Boolean);
+   procedure Try_Send (Item : in out Channel; Value : Element_Type; Accepted : out Boolean);
 
    --  Wait for space for at most Timeout seconds. A negative timeout waits
    --  without a deadline; zero is an immediate attempt. Closing the channel
@@ -88,10 +80,7 @@ package Flyology.Bounded_Channels is
    --  @param Item Channel
    --  @param Value Received value when Available
    --  @param Available True only when a queued value was available
-   procedure Try_Receive
-     (Item      : in out Channel;
-      Value     : out Element_Type;
-      Available : out Boolean);
+   procedure Try_Receive (Item : in out Channel; Value : out Element_Type; Available : out Boolean);
 
    --  Idempotently close the channel and wake blocked callers.
    --  @param Item Channel
@@ -114,8 +103,7 @@ private
       entry Send (Value : Element_Type; Accepted : out Boolean);
       entry Receive (Value : out Element_Type; Available : out Boolean);
       procedure Try_Send (Value : Element_Type; Accepted : out Boolean);
-      procedure Try_Receive
-        (Value : out Element_Type; Available : out Boolean);
+      procedure Try_Receive (Value : out Element_Type; Available : out Boolean);
       procedure Close;
       function Is_Closed return Boolean;
       function Length return Natural;

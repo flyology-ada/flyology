@@ -15,34 +15,30 @@ procedure Basic is
 
    Reference_Value : Interfaces.Unsigned_32 := 1;
    Contender_Value : Interfaces.Unsigned_32 := 1;
-   Third_Value : Interfaces.Unsigned_32 := 1;
-   Noisy_Value : Interfaces.Unsigned_32 := 1;
-   Memory_Value : Interfaces.Unsigned_32 := 1;
+   Third_Value     : Interfaces.Unsigned_32 := 1;
+   Noisy_Value     : Interfaces.Unsigned_32 := 1;
+   Memory_Value    : Interfaces.Unsigned_32 := 1;
 
    type Mix_Case is
-     (One_Mix, Two_Mixes, Three_Mixes, Noisy_One_Mix,
-      Parallel_CPU_Burn, Memory_Hungry, Aggregated_Wait);
+     (One_Mix, Two_Mixes, Three_Mixes, Noisy_One_Mix, Parallel_CPU_Burn, Memory_Hungry, Aggregated_Wait);
 
    subtype Worker_Slot is Positive range 1 .. 4;
-   type Worker_Result_Array is array (Worker_Slot) of Interfaces.Unsigned_32
-     with Volatile_Components;
+   type Worker_Result_Array is array (Worker_Slot) of Interfaces.Unsigned_32 with Volatile_Components;
    Worker_Results : Worker_Result_Array := (others => 1);
 
-   Chunk_Bytes : constant := 2 * 1_024 * 1_024;
+   Chunk_Bytes            : constant := 2 * 1_024 * 1_024;
    Maximum_Retained_Bytes : constant := 128 * 1_024 * 1_024;
-   type Byte_Array is array (Natural range 0 .. Chunk_Bytes - 1)
-     of Interfaces.Unsigned_8;
+   type Byte_Array is array (Natural range 0 .. Chunk_Bytes - 1) of Interfaces.Unsigned_8;
    type Memory_Chunk;
    type Memory_Chunk_Access is access Memory_Chunk;
    type Memory_Chunk is record
       Data : Byte_Array;
       Next : Memory_Chunk_Access;
    end record;
-   Retained_Chunks : Memory_Chunk_Access := null;
-   Retained_Bytes : Natural := 0;
+   Retained_Chunks        : Memory_Chunk_Access := null;
+   Retained_Bytes         : Natural := 0;
 
-   procedure Keep is new
-     Flyology_Bench.Do_Not_Optimize (Interfaces.Unsigned_32);
+   procedure Keep is new Flyology_Bench.Do_Not_Optimize (Interfaces.Unsigned_32);
 
    procedure Integer_Mix is
    begin
@@ -81,9 +77,7 @@ procedure Basic is
       end if;
    end Integer_Mix_Noisy;
 
-   procedure Parallel_Batch
-     (Iterations : Flyology_Bench.Iteration_Count)
-   is
+   procedure Parallel_Batch (Iterations : Flyology_Bench.Iteration_Count) is
       task type Burner
         (Count : Flyology_Bench.Iteration_Count;
          Slot  : Worker_Slot);
@@ -107,15 +101,12 @@ procedure Basic is
       null;
    end Parallel_Batch;
 
-   procedure Memory_Batch
-     (Iterations : Flyology_Bench.Iteration_Count) is
+   procedure Memory_Batch (Iterations : Flyology_Bench.Iteration_Count) is
    begin
       if Retained_Bytes < Maximum_Retained_Bytes then
          Retained_Chunks :=
            new Memory_Chunk'
-             (Data =>
-                (others => Interfaces.Unsigned_8 (Retained_Bytes mod 251)),
-              Next => Retained_Chunks);
+             (Data => (others => Interfaces.Unsigned_8 (Retained_Bytes mod 251)), Next => Retained_Chunks);
          Retained_Bytes := Retained_Bytes + Chunk_Bytes;
       end if;
       for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
@@ -123,8 +114,7 @@ procedure Basic is
       end loop;
    end Memory_Batch;
 
-   procedure Wait_Batch
-     (Iterations : Flyology_Bench.Iteration_Count) is
+   procedure Wait_Batch (Iterations : Flyology_Bench.Iteration_Count) is
    begin
       --  Model two nanoseconds of elapsed waiting per logical operation while
       --  consuming almost no CPU in the aggregate wait.
@@ -133,51 +123,48 @@ procedure Basic is
 
    procedure Run is new Flyology_Bench.Measure (Integer_Mix);
 
-   procedure Mix_Batch
-     (Which      : Mix_Case;
-      Iterations : Flyology_Bench.Iteration_Count) is
+   procedure Mix_Batch (Which : Mix_Case; Iterations : Flyology_Bench.Iteration_Count) is
    begin
       case Which is
-         when One_Mix =>
+         when One_Mix           =>
             for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
                Integer_Mix;
             end loop;
-         when Two_Mixes =>
+
+         when Two_Mixes         =>
             for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
                Integer_Mix_Contender;
             end loop;
-         when Three_Mixes =>
+
+         when Three_Mixes       =>
             for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
                Integer_Mix_Third;
             end loop;
-         when Noisy_One_Mix =>
+
+         when Noisy_One_Mix     =>
             for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
                Integer_Mix_Noisy;
             end loop;
+
          when Parallel_CPU_Burn =>
             Parallel_Batch (Iterations);
-         when Memory_Hungry =>
+
+         when Memory_Hungry     =>
             Memory_Batch (Iterations);
-         when Aggregated_Wait =>
+
+         when Aggregated_Wait   =>
             Wait_Batch (Iterations);
       end case;
    end Mix_Batch;
 
-   procedure Compare_All is new Flyology_Bench.Compare_Many
-     (Case_Id => Mix_Case, Batch => Mix_Batch);
+   procedure Compare_All is new Flyology_Bench.Compare_Many (Case_Id => Mix_Case, Batch => Mix_Batch);
 
-   procedure Put_Table is new
-     Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Mix_Case);
-   procedure Put_CSV is new
-     Flyology_Bench.Reporters.Put_Multi_Comparison_CSV (Mix_Case);
-   procedure Put_Metrics_CSV is new
-     Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV (Mix_Case);
-   procedure Put_JSON is new
-     Flyology_Bench.Reporters.Put_Multi_Comparison_JSON (Mix_Case);
+   procedure Put_Table is new Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Mix_Case);
+   procedure Put_CSV is new Flyology_Bench.Reporters.Put_Multi_Comparison_CSV (Mix_Case);
+   procedure Put_Metrics_CSV is new Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV (Mix_Case);
+   procedure Put_JSON is new Flyology_Bench.Reporters.Put_Multi_Comparison_JSON (Mix_Case);
 
-   Usage : constant String :=
-     "usage: basic [--metrics=all|--metrics=perf] "
-     & "[--require-perf[=core|all]]";
+   Usage : constant String := "usage: basic [--metrics=all|--metrics=perf] " & "[--require-perf[=core|all]]";
 
    --  Which hardware axes a strict run insists on. All_Axes keeps the strong
    --  reading that every selected PMU axis must be collected. Core_Axes is
@@ -186,16 +173,14 @@ procedure Basic is
    type Perf_Requirement is (No_Requirement, Core_Axes, All_Axes);
 
    function Metrics_From_Arguments return Flyology_Bench.Metric_Set is
-      Result : Flyology_Bench.Metric_Set :=
-        Flyology_Bench.All_Builtin_Metrics;
+      Result : Flyology_Bench.Metric_Set := Flyology_Bench.All_Builtin_Metrics;
    begin
       for Index in 1 .. Ada.Command_Line.Argument_Count loop
          declare
             Argument : constant String := Ada.Command_Line.Argument (Index);
          begin
             if Argument = "--metrics=perf" then
-               Result := Flyology_Bench.Time_Metrics
-                 or Flyology_Bench.Linux_Hardware_Metrics;
+               Result := Flyology_Bench.Time_Metrics or Flyology_Bench.Linux_Hardware_Metrics;
             elsif Argument = "--metrics=all"
               or else Argument = "--require-perf"
               or else Argument = "--require-perf=all"
@@ -217,9 +202,7 @@ procedure Basic is
          declare
             Argument : constant String := Ada.Command_Line.Argument (Index);
          begin
-            if Argument = "--require-perf"
-              or else Argument = "--require-perf=all"
-            then
+            if Argument = "--require-perf" or else Argument = "--require-perf=all" then
                Result := All_Axes;
             elsif Argument = "--require-perf=core" then
                Result := Core_Axes;
@@ -229,20 +212,16 @@ procedure Basic is
       return Result;
    end Requirement_From_Arguments;
 
-   Result : Flyology_Bench.Measurement;
-   Multi_Result : Flyology_Bench.Multi_Comparison;
-   Output_Mode : constant String :=
-     Ada.Environment_Variables.Value
-       ("FLYOLOGY_BENCH_OUTPUT", Default => "terminal");
+   Result             : Flyology_Bench.Measurement;
+   Multi_Result       : Flyology_Bench.Multi_Comparison;
+   Output_Mode        : constant String :=
+     Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_OUTPUT", Default => "terminal");
    Wait_For_Quiet_CPU : constant Boolean :=
-     Ada.Environment_Variables.Value
-       ("FLYOLOGY_BENCH_QUIESCENCE", Default => "0") = "1";
+     Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_QUIESCENCE", Default => "0") = "1";
    Watch_Interference : constant Boolean :=
-     Ada.Environment_Variables.Value
-       ("FLYOLOGY_BENCH_INTERFERENCE", Default => "0") = "1";
-   Selected_Metrics : constant Flyology_Bench.Metric_Set :=
-     Metrics_From_Arguments;
-   Require_Perf : constant Perf_Requirement := Requirement_From_Arguments;
+     Ada.Environment_Variables.Value ("FLYOLOGY_BENCH_INTERFERENCE", Default => "0") = "1";
+   Selected_Metrics   : constant Flyology_Bench.Metric_Set := Metrics_From_Arguments;
+   Require_Perf       : constant Perf_Requirement := Requirement_From_Arguments;
    --  A policy's settings exist only while it is enabled, so a run-time
    --  switch selects between two aggregates rather than filling one in.
    --
@@ -255,61 +234,59 @@ procedure Basic is
    --  naming every component instead of using a box, and qualifying the
    --  conditional as CPU_Quiescence_Policy'(if ...), are the others. Hoisting
    --  is used here because it also reads better than either. See issue #55.
-   Quiescence_Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
+   Quiescence_Gate    : constant Flyology_Bench.CPU_Quiescence_Policy :=
      (if Wait_For_Quiet_CPU
-      then (Enabled                     => True,
-            Maximum_Average_CPU_Percent => 20.0,
-            Maximum_Core_CPU_Percent    => 50.0,
-            Stable_Time                 => 0.500,
-            Poll_Interval               => 0.100,
-            Timeout                     => 10.0)
+      then
+        (Enabled                     => True,
+         Maximum_Average_CPU_Percent => 20.0,
+         Maximum_Core_CPU_Percent    => 50.0,
+         Stable_Time                 => 0.500,
+         Poll_Interval               => 0.100,
+         Timeout                     => 10.0)
       else (Enabled => False));
    Interference_Watch : constant Flyology_Bench.Interference_Policy :=
      (if Watch_Interference
-      then (Enabled  => True,
-            Response => Flyology_Bench.Retake,
-            others   => <>)
+      then (Enabled => True, Response => Flyology_Bench.Retake, others => <>)
       else (Enabled => False, Response => Flyology_Bench.Observe));
    Single_Base_Config : constant Flyology_Bench.Configuration :=
-     (Warmup_Time                  => 0.200,
-      Measurement_Time             => 1.000,
-      Maximum_Sampling_Time        => 1.500,
-      Samples                      => 60,
-      Minimum_Sample_Time          => 0.001,
-      Maximum_Iterations           => Flyology_Bench.Iteration_Count'Last,
-      Comparison_Batching          => Flyology_Bench.Equal_Time,
-      Shootout_Scheduling          => Flyology_Bench.Balanced_Rounds,
-      Subtract_Timer_Cost          => False,
+     (Warmup_Time                 => 0.200,
+      Measurement_Time            => 1.000,
+      Maximum_Sampling_Time       => 1.500,
+      Samples                     => 60,
+      Minimum_Sample_Time         => 0.001,
+      Maximum_Iterations          => Flyology_Bench.Iteration_Count'Last,
+      Comparison_Batching         => Flyology_Bench.Equal_Time,
+      Shootout_Scheduling         => Flyology_Bench.Balanced_Rounds,
+      Subtract_Timer_Cost         => False,
       Practical_Threshold_Percent => 1.0,
-      Confidence_Level_Percent     => 95.0,
-      Bootstrap_Resamples          => 2_000,
-      Random_Seed                  => 42,
-      Metrics                      => Selected_Metrics,
-      Scheduler_Probe              => null,
-      Custom_Metrics               => <>,
-      CPU_Quiescence               => Quiescence_Gate,
-      Interference                 => Interference_Watch,
-      Placement                    => (others => <>),
-      Host_Lock                    => (others => <>),
-      Collect_Process_Telemetry    => False,
-      Progress                     => null,
-      Progress_Name                => <>);
-   Multi_Base_Config : constant Flyology_Bench.Configuration :=
-     (Single_Base_Config with delta
-        Warmup_Time => 0.100,
-        Measurement_Time => 3.000,
+      Confidence_Level_Percent    => 95.0,
+      Bootstrap_Resamples         => 2_000,
+      Random_Seed                 => 42,
+      Metrics                     => Selected_Metrics,
+      Scheduler_Probe             => null,
+      Custom_Metrics              => <>,
+      CPU_Quiescence              => Quiescence_Gate,
+      Interference                => Interference_Watch,
+      Placement                   => (others => <>),
+      Host_Lock                   => (others => <>),
+      Collect_Process_Telemetry   => False,
+      Progress                    => null,
+      Progress_Name               => <>);
+   Multi_Base_Config  : constant Flyology_Bench.Configuration :=
+     (Single_Base_Config
+      with delta
+        Warmup_Time           => 0.100,
+        Measurement_Time      => 3.000,
         Maximum_Sampling_Time => 2.000,
-        Minimum_Sample_Time => 0.000_200,
-        Shootout_Scheduling => Flyology_Bench.Sequential_Cases);
-   Single_Config : constant Flyology_Bench.Configuration :=
+        Minimum_Sample_Time   => 0.000_200,
+        Shootout_Scheduling   => Flyology_Bench.Sequential_Cases);
+   Single_Config      : constant Flyology_Bench.Configuration :=
      (if Output_Mode = "terminal"
-      then Flyology_Bench.Reporters.Terminal_Mode
-        (Single_Base_Config, "integer mix")
+      then Flyology_Bench.Reporters.Terminal_Mode (Single_Base_Config, "integer mix")
       else Single_Base_Config);
-   Multi_Config : constant Flyology_Bench.Configuration :=
+   Multi_Config       : constant Flyology_Bench.Configuration :=
      (if Output_Mode = "terminal"
-      then Flyology_Bench.Reporters.Terminal_Mode
-        (Multi_Base_Config, "mix shootout")
+      then Flyology_Bench.Reporters.Terminal_Mode (Multi_Base_Config, "mix shootout")
       else Multi_Base_Config);
 begin
    Keep (Reference_Value);
@@ -329,28 +306,27 @@ begin
            (if Require_Perf = Core_Axes
             then Flyology_Bench.Instructions_Per_Cycle
             else Flyology_Bench.Branch_Misses);
-         Missing : Ada.Strings.Unbounded.Unbounded_String;
+         Missing       : Ada.Strings.Unbounded.Unbounded_String;
       begin
          for Axis in Flyology_Bench.CPU_Cycles .. Last_Required loop
-            if Selected_Metrics (Axis)
-              and then not Flyology_Bench.Metric_Available (Result, Axis)
-            then
+            if Selected_Metrics (Axis) and then not Flyology_Bench.Metric_Available (Result, Axis) then
                if Missing /= Ada.Strings.Unbounded.Null_Unbounded_String then
                   Ada.Strings.Unbounded.Append (Missing, "; ");
                end if;
                Ada.Strings.Unbounded.Append
                  (Missing,
-                  Flyology_Bench.Metric_Name (Axis) & " unavailable: "
-                  & Flyology_Bench.Metric_Availability'Image
-                      (Flyology_Bench.Metric_Status (Result, Axis)));
+                  Flyology_Bench.Metric_Name (Axis)
+                  & " unavailable: "
+                  & Flyology_Bench.Metric_Availability'Image (Flyology_Bench.Metric_Status (Result, Axis)));
             end if;
          end loop;
          if Missing /= Ada.Strings.Unbounded.Null_Unbounded_String then
-            raise Program_Error with
-              (if Require_Perf = Core_Axes
-               then "required core hardware metrics: "
-               else "required hardware metrics: ")
-              & Ada.Strings.Unbounded.To_String (Missing);
+            raise Program_Error
+              with
+                (if Require_Perf = Core_Axes
+                 then "required core hardware metrics: "
+                 else "required hardware metrics: ")
+                & Ada.Strings.Unbounded.To_String (Missing);
          end if;
       end;
    end if;
@@ -376,7 +352,6 @@ begin
    elsif Output_Mode = "json" then
       Put_JSON (Multi_Result);
    else
-      raise Constraint_Error with
-        "FLYOLOGY_BENCH_OUTPUT must be terminal, csv, or json";
+      raise Constraint_Error with "FLYOLOGY_BENCH_OUTPUT must be terminal, csv, or json";
    end if;
 end Basic;

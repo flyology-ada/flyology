@@ -4,15 +4,11 @@
 package body Flyology_Debug.Internal.Ring_Policy
   with SPARK_Mode => On
 is
-   function Next_Index
-     (Value : Positive; Capacity : Positive) return Positive
+   function Next_Index (Value : Positive; Capacity : Positive) return Positive
    is (if Value = Capacity then 1 else Value + 1)
-     with Pre  => Value <= Capacity,
-          Post => Next_Index'Result <= Capacity;
+   with Pre => Value <= Capacity, Post => Next_Index'Result <= Capacity;
 
-   function Insertion_Index
-     (Value : State; Capacity : Positive) return Positive
-   is
+   function Insertion_Index (Value : State; Capacity : Positive) return Positive is
    begin
       if Value.Count = Capacity then
          return Value.Head;
@@ -23,11 +19,7 @@ is
       end if;
    end Insertion_Index;
 
-   procedure Append
-     (Value      : in out State;
-      Capacity   : Positive;
-      Overwrote  : out Boolean)
-   is
+   procedure Append (Value : in out State; Capacity : Positive; Overwrote : out Boolean) is
    begin
       if Value.Count = Capacity then
          Value.Head := Next_Index (Value.Head, Capacity);
@@ -43,9 +35,7 @@ is
       Value := Initial_State;
    end Clear;
 
-   function Saturating_Increment
-     (Value : Interfaces.Unsigned_64) return Interfaces.Unsigned_64
-   is
+   function Saturating_Increment (Value : Interfaces.Unsigned_64) return Interfaces.Unsigned_64 is
    begin
       if Value = Interfaces.Unsigned_64'Last then
          return Value;

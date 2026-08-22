@@ -24,14 +24,16 @@ with System;
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Native operation implementation
+
 generic
    type Input_Type is private;
    type Result_Type is private;
-   with procedure Execute
-     (Input    : Input_Type;
-      Token    : access Flyology.Cancellation.Token;
-      Deadline : Ada.Real_Time.Time;
-      Result   : out Result_Type);
+   with
+     procedure Execute
+       (Input    : Input_Type;
+        Token    : access Flyology.Cancellation.Token;
+        Deadline : Ada.Real_Time.Time;
+        Result   : out Result_Type);
 package Flyology.Native_Executors is
 
    --  Raised for a stale, rejected, or already consumed operation handle.
@@ -42,8 +44,8 @@ package Flyology.Native_Executors is
    --  operations.
    type Executor
      (Workers  : Positive;
-      Capacity : Positive) is
-     limited new Ada.Finalization.Limited_Controlled with private;
+      Capacity : Positive)
+   is limited new Ada.Finalization.Limited_Controlled with private;
 
    --  Point-in-time executor counters. Cumulative counters wrap modulo
    --  2**64. Outstanding includes queued, running, and completed results that
@@ -73,8 +75,7 @@ package Flyology.Native_Executors is
    --  makes Ada reject a handle whose lifetime could exceed its executor. An
    --  inactive handle may be reused for another Submit to the same executor.
    --  @field Owner Borrowed executor that must outlive the handle
-   type Operation_Handle
-     (Owner : not null access Executor) is limited private;
+   type Operation_Handle (Owner : not null access Executor) is limited private;
 
    --  Activate the fixed worker pool before concurrent submissions. Start is
    --  idempotent while the executor remains open and must be called by the
@@ -149,10 +150,10 @@ package Flyology.Native_Executors is
    --     completion readiness polling fails
    --  @exception Program_Error A completion or cancellation wake source fails
    procedure Await
-     (Item   : aliased in out Executor;
-      Handle : in out Operation_Handle;
-      Result : out Result_Type;
-      Token  : access Flyology.Cancellation.Token := null;
+     (Item     : aliased in out Executor;
+      Handle   : in out Operation_Handle;
+      Result   : out Result_Type;
+      Token    : access Flyology.Cancellation.Token := null;
       Deadline : Ada.Real_Time.Time := Ada.Real_Time.Time_Last);
 
    --  Relinquish one accepted result and request cooperative cancellation.
@@ -164,8 +165,7 @@ package Flyology.Native_Executors is
    --     another executor
    --  @exception Program_Error The operation's cancellation wake cannot be
    --     signalled; the handle is still consumed
-   procedure Abandon
-     (Item : aliased in out Executor; Handle : in out Operation_Handle);
+   procedure Abandon (Item : aliased in out Executor; Handle : in out Operation_Handle);
 
    --  Read executor admission, execution, and occupancy counters atomically.
    --  This is an observability operation; it does not wait for work or change
@@ -186,47 +186,42 @@ private
    type Result_Array is array (Positive range <>) of Result_Type;
    type Token_Access is access all Flyology.Cancellation.Token;
    type Token_Array is array (Positive range <>) of Token_Access;
-   type Token_Owner is
-     new Ada.Finalization.Limited_Controlled with record
-        Value : Token_Access := null;
+   type Token_Owner is new Ada.Finalization.Limited_Controlled with record
+      Value : Token_Access := null;
    end record;
    --  @exclude
    --  @param Owner Token holder being finalized
-   overriding procedure Finalize (Owner : in out Token_Owner);
+   overriding
+   procedure Finalize (Owner : in out Token_Owner);
    --  Zero remains the invalid-handle sentinel; modular increment keeps a
    --  heavily reused slot from becoming permanently unavailable.
    subtype Generation_Number is Interfaces.Unsigned_64;
    type Generation_Array is array (Positive range <>) of Generation_Number;
-   type Wake_Array is array (Positive range <>) of
-     Flyology.Wake_Sources.Source;
+   type Wake_Array is array (Positive range <>) of Flyology.Wake_Sources.Source;
    type Time_Array is array (Positive range <>) of Ada.Real_Time.Time;
    type Natural_Array is array (Positive range <>) of Natural;
    type Boolean_Array is array (Positive range <>) of Boolean;
    type Status_Array is array (Positive range <>) of Slot_Status;
-   type Exception_Id_Array is array (Positive range <>) of
-     Ada.Exceptions.Exception_Id;
-   type Message_Array is array (Positive range <>) of
-     Ada.Strings.Unbounded.Unbounded_String;
+   type Exception_Id_Array is array (Positive range <>) of Ada.Exceptions.Exception_Id;
+   type Message_Array is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
 
    protected type Shared_State (Capacity : Positive) is
       procedure Submit
-        (Input      : Input_Type;
-         Token      : Token_Access;
-         Deadline   : Ada.Real_Time.Time;
-         Slot       : out Positive;
-         Generation : out Generation_Number;
+        (Input          : Input_Type;
+         Token          : Token_Access;
+         Deadline       : Ada.Real_Time.Time;
+         Slot           : out Positive;
+         Generation     : out Generation_Number;
          Replaced_Token : out Token_Access;
-         Accepted   : out Boolean);
-      entry Next
-        (Slot : out Positive; Stop : out Boolean);
+         Accepted       : out Boolean);
+      entry Next (Slot : out Positive; Stop : out Boolean);
       procedure Operation_Data
         (Slot     : Positive;
          Input    : out Input_Type;
          Token    : out Token_Access;
          Deadline : out Ada.Real_Time.Time);
       procedure Complete (Slot : Positive; Result : Result_Type);
-      procedure Fail
-        (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence);
+      procedure Fail (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence);
       procedure Try_Await
         (Slot       : Positive;
          Generation : Generation_Number;
@@ -239,9 +234,7 @@ private
          Generation : Generation_Number;
          FD         : out Flyology.IO.Descriptor;
          Ready      : out Boolean);
-      procedure Abandon
-        (Slot       : Positive;
-         Generation : Generation_Number);
+      procedure Abandon (Slot : Positive; Generation : Generation_Number);
       --  Elect one cleanup owner; later callers wait for Complete_Shutdown.
       procedure Begin_Shutdown (Owner : out Boolean);
       procedure Signal_Shutdown_Completion (Slot : Positive);
@@ -249,37 +242,34 @@ private
       procedure Set_Expected_Workers (Count : Natural);
       procedure Worker_Stopped;
       entry Await_Stopped;
-      procedure Take_Token
-        (Slot : Positive; Owner : not null access Token_Owner);
+      procedure Take_Token (Slot : Positive; Owner : not null access Token_Owner);
       procedure Complete_Shutdown;
       entry Await_Shutdown;
       function Shutdown_Started return Boolean;
       function Statistics return Executor_Statistics;
    private
-      Inputs      : Input_Array (1 .. Capacity);
-      Results     : Result_Array (1 .. Capacity);
-      Tokens      : Token_Array (1 .. Capacity) := (others => null);
-      Deadlines   : Time_Array (1 .. Capacity) :=
-        (others => Ada.Real_Time.Time_Last);
-      Generations : Generation_Array (1 .. Capacity) := (others => 0);
-      Status      : Status_Array (1 .. Capacity) := (others => Free);
-      Detached    : Boolean_Array (1 .. Capacity) := (others => False);
-      Error_Ids   : Exception_Id_Array (1 .. Capacity) :=
-        (others => Ada.Exceptions.Null_Id);
-      Messages    : Message_Array (1 .. Capacity);
-      Wakes       : Wake_Array (1 .. Capacity);
-      Wake_Armed  : Boolean_Array (1 .. Capacity) := (others => False);
-      Wake_Pending : Boolean_Array (1 .. Capacity) := (others => False);
-      Queue       : Natural_Array (1 .. Capacity) := (others => 0);
-      Head        : Positive := 1;
-      Tail        : Positive := 1;
-      Queue_Count : Natural := 0;
-      Stopping    : Boolean := False;
-      Stopped_Workers : Natural := 0;
-      Expected_Workers : Natural := 0;
+      Inputs               : Input_Array (1 .. Capacity);
+      Results              : Result_Array (1 .. Capacity);
+      Tokens               : Token_Array (1 .. Capacity) := (others => null);
+      Deadlines            : Time_Array (1 .. Capacity) := (others => Ada.Real_Time.Time_Last);
+      Generations          : Generation_Array (1 .. Capacity) := (others => 0);
+      Status               : Status_Array (1 .. Capacity) := (others => Free);
+      Detached             : Boolean_Array (1 .. Capacity) := (others => False);
+      Error_Ids            : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
+      Messages             : Message_Array (1 .. Capacity);
+      Wakes                : Wake_Array (1 .. Capacity);
+      Wake_Armed           : Boolean_Array (1 .. Capacity) := (others => False);
+      Wake_Pending         : Boolean_Array (1 .. Capacity) := (others => False);
+      Queue                : Natural_Array (1 .. Capacity) := (others => 0);
+      Head                 : Positive := 1;
+      Tail                 : Positive := 1;
+      Queue_Count          : Natural := 0;
+      Stopping             : Boolean := False;
+      Stopped_Workers      : Natural := 0;
+      Expected_Workers     : Natural := 0;
       Expected_Workers_Set : Boolean := False;
-      Shutdown_Complete : Boolean := False;
-      Counters : Executor_Statistics;
+      Shutdown_Complete    : Boolean := False;
+      Counters             : Executor_Statistics;
    end Shared_State;
 
    type Shared_State_Access is access all Shared_State;
@@ -292,10 +282,10 @@ private
 
    --  @exclude
    --  @param Item Automatically abandoned operation handle
-   overriding procedure Finalize (Item : in out Handle_Guard);
+   overriding
+   procedure Finalize (Item : in out Handle_Guard);
 
-   type Operation_Handle
-     (Owner : not null access Executor) is limited record
+   type Operation_Handle (Owner : not null access Executor) is limited record
       Guard : Handle_Guard;
    end record;
 
@@ -309,19 +299,21 @@ private
 
    type Executor
      (Workers  : Positive;
-      Capacity : Positive) is
-     limited new Ada.Finalization.Limited_Controlled with record
-      State : aliased Shared_State (Capacity);
-      Pool  : Worker_Array_Access;
-      Started : Boolean := False;
+      Capacity : Positive)
+   is limited new Ada.Finalization.Limited_Controlled with record
+      State             : aliased Shared_State (Capacity);
+      Pool              : Worker_Array_Access;
+      Started           : Boolean := False;
       Activated_Workers : Natural := 0;
    end record;
 
    --  @exclude
    --  @param Item Executor being initialized
-   overriding procedure Initialize (Item : in out Executor);
+   overriding
+   procedure Initialize (Item : in out Executor);
    --  @exclude
    --  @param Item Executor being finalized
-   overriding procedure Finalize (Item : in out Executor);
+   overriding
+   procedure Finalize (Item : in out Executor);
 
 end Flyology.Native_Executors;

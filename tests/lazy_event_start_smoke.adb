@@ -15,10 +15,7 @@ procedure Lazy_Event_Start_Smoke is
    Environment_Thread : constant System.Address := Current_Thread;
 
    protected Observation is
-      procedure Report
-        (Lightweight : Boolean;
-         Group   : Groups.Group_Id;
-         Thread  : System.Address);
+      procedure Report (Lightweight : Boolean; Group : Groups.Group_Id; Thread : System.Address);
       entry Wait;
       function Passed return Boolean;
    private
@@ -27,15 +24,9 @@ procedure Lazy_Event_Start_Smoke is
    end Observation;
 
    protected body Observation is
-      procedure Report
-        (Lightweight : Boolean;
-         Group   : Groups.Group_Id;
-         Thread  : System.Address)
-      is
+      procedure Report (Lightweight : Boolean; Group : Groups.Group_Id; Thread : System.Address) is
       begin
-         OK := Lightweight
-           and then Group = Groups.Default_Group
-           and then Thread /= Environment_Thread;
+         OK := Lightweight and then Group = Groups.Default_Group and then Thread /= Environment_Thread;
          Done := True;
       end Report;
 
@@ -44,7 +35,8 @@ procedure Lazy_Event_Start_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Observation;
 
    task type Lightweight_Worker is
@@ -53,10 +45,7 @@ procedure Lazy_Event_Start_Smoke is
 
    task body Lightweight_Worker is
    begin
-      Observation.Report
-        (Flyology.IO.Is_Lightweight_Task,
-         Groups.Current,
-         Current_Thread);
+      Observation.Report (Flyology.IO.Is_Lightweight_Task, Groups.Current, Current_Thread);
    end Lightweight_Worker;
 
    type Lightweight_Worker_Access is access Lightweight_Worker;

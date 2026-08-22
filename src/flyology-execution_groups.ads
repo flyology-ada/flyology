@@ -6,7 +6,10 @@ with System.Multiprocessors;
 --  Example:
 --
 --     Flyology.Execution_Groups.Migrate (1);
-package Flyology.Execution_Groups with Preelaborate is
+
+package Flyology.Execution_Groups
+  with Preelaborate
+is
 
    --  Identifier of one permanent event-loop execution group.
    type Group_Id is range 0 .. 255;
@@ -24,8 +27,7 @@ package Flyology.Execution_Groups with Preelaborate is
    --  value 0 is excluded because Ada defines it as Not_A_Specific_CPU, which
    --  requests automatic placement rather than Default_Group.
    subtype Group_Selecting_CPU is
-     System.Multiprocessors.CPU_Range range
-       1 .. System.Multiprocessors.CPU_Range (Shared_Group_Id'Last);
+     System.Multiprocessors.CPU_Range range 1 .. System.Multiprocessors.CPU_Range (Shared_Group_Id'Last);
 
    --  Number of shared groups participating in automatic placement.
    subtype Loop_Pool_Size is Positive range 1 .. 128;
@@ -39,8 +41,7 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @enum Already_At_Or_Below The current ceiling already satisfies the
    --     request
    --  @enum Reduction_In_Progress A previous reduction must finish first
-   type Pool_Reduction_Request_Result is
-     (Reduction_Started, Already_At_Or_Below, Reduction_In_Progress);
+   type Pool_Reduction_Request_Result is (Reduction_Started, Already_At_Or_Below, Reduction_In_Progress);
    --  Lifecycle of the most recent automatic-pool reduction.
    --  @enum No_Reduction No reduction is active or retained for observation
    --  @enum Draining New placement uses Target_Size while eligible tasks move
@@ -58,13 +59,13 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @field Placement_Claims Creations that selected an above-target group
    --     before the reduction cutover and have not registered yet
    type Pool_Reduction_Status is record
-      Phase                    : Pool_Reduction_Phase := No_Reduction;
-      Target_Size              : Loop_Pool_Size := Loop_Pool_Size'First;
-      Automatic_Tasks          : Natural := 0;
-      Pinned_Automatic_Tasks   : Natural := 0;
-      Waiting_Automatic_Tasks  : Natural := 0;
-      Explicit_Tasks           : Natural := 0;
-      Placement_Claims         : Natural := 0;
+      Phase                   : Pool_Reduction_Phase := No_Reduction;
+      Target_Size             : Loop_Pool_Size := Loop_Pool_Size'First;
+      Automatic_Tasks         : Natural := 0;
+      Pinned_Automatic_Tasks  : Natural := 0;
+      Waiting_Automatic_Tasks : Natural := 0;
+      Explicit_Tasks          : Natural := 0;
+      Placement_Claims        : Natural := 0;
    end record;
 
    --  Optional placement of an execution group's scheduler thread. This is
@@ -72,8 +73,7 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @enum No_Placement Do not request host placement
    --  @enum Strict_CPU Bind to one Linux logical CPU; unsupported on Darwin
    --  @enum Advisory_Tag Apply a Darwin cache-locality tag, not a CPU number
-   type Loop_Thread_Placement is
-     (No_Placement, Strict_CPU, Advisory_Tag);
+   type Loop_Thread_Placement is (No_Placement, Strict_CPU, Advisory_Tag);
    --  Host placement value: zero-based Linux CPU or positive Darwin tag.
    subtype Placement_Value is Natural range 0 .. 2_147_483_647;
    --  Result of a loop-thread configuration request.
@@ -86,20 +86,14 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @enum Runtime_Unavailable Runtime lifecycle does not permit
    --     configuration
    type Placement_Configuration_Result is
-     (Configured,
-      Unchanged,
-      Unsupported,
-      Invalid_Value,
-      Group_Already_Started,
-      Runtime_Unavailable);
+     (Configured, Unchanged, Unsupported, Invalid_Value, Group_Already_Started, Runtime_Unavailable);
    --  Observed application state of a placement request.
    --  @enum Not_Requested No placement was configured
    --  @enum Pending_Startup The request is stored for lazy group startup
    --  @enum Applied The group thread applied the request
    --  @enum Failed The host call failed; inspect Error_Code
    --  @enum Unavailable The requested mechanism is unavailable
-   type Placement_State is
-     (Not_Requested, Pending_Startup, Applied, Failed, Unavailable);
+   type Placement_State is (Not_Requested, Pending_Startup, Applied, Failed, Unavailable);
    --  Current loop-thread placement status.
    --  @field Kind Requested host placement mechanism
    --  @field Value Requested CPU or advisory tag
@@ -187,8 +181,7 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @param Maximum_Size New automatic-placement ceiling
    --  @return Whether reduction started, was already satisfied, or is busy
    --  @exception Group_Error The runtime lifecycle rejects the request
-   function Request_Pool_Reduction
-     (Maximum_Size : Loop_Pool_Size) return Pool_Reduction_Request_Result;
+   function Request_Pool_Reduction (Maximum_Size : Loop_Pool_Size) return Pool_Reduction_Request_Result;
 
    --  Return a momentary reduction-progress snapshot without waiting. Calling
    --  this function also recognizes completion after the final task or
@@ -217,9 +210,8 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @return Explicit configuration result; this starts no group
    --  @exception Group_Error The runtime returns an unknown result
    function Configure_Loop_Thread
-     (Group : Group_Id;
-      Kind  : Loop_Thread_Placement;
-      Value : Placement_Value := 0) return Placement_Configuration_Result;
+     (Group : Group_Id; Kind : Loop_Thread_Placement; Value : Placement_Value := 0)
+      return Placement_Configuration_Result;
 
    --  Test whether the host supports Kind without starting a group.
    --  @param Kind Placement mechanism to test
@@ -230,9 +222,7 @@ package Flyology.Execution_Groups with Preelaborate is
    --  @param Kind Placement mechanism
    --  @param Value Candidate CPU or advisory tag
    --  @return True when the host can accept the value
-   function Placement_Value_Available
-     (Kind  : Loop_Thread_Placement;
-      Value : Placement_Value) return Boolean;
+   function Placement_Value_Available (Kind : Loop_Thread_Placement; Value : Placement_Value) return Boolean;
    --  Observe Group's placement request without starting it.
    --  @param Group Execution group to inspect
    --  @return Current placement status
@@ -274,6 +264,7 @@ private
 
    --  Release Object's pin level on its acquiring task.
    --  @param Object Pin guard leaving scope
-   overriding procedure Finalize (Object : in out Thread_Pin);
+   overriding
+   procedure Finalize (Object : in out Thread_Pin);
 
 end Flyology.Execution_Groups;

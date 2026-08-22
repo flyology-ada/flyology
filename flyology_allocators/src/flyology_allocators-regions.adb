@@ -6,11 +6,7 @@ package body Flyology_Allocators.Regions is
    use type Storage.Integer_Address;
    use type System.Address;
 
-   procedure Attach
-     (Item   : in out View;
-      Base   : System.Address;
-      Length : Byte_Count)
-   is
+   procedure Attach (Item : in out View; Base : System.Address; Length : Byte_Count) is
       Base_Value : Storage.Integer_Address;
    begin
       if Base = System.Null_Address then
@@ -22,9 +18,7 @@ package body Flyology_Allocators.Regions is
       end if;
 
       Base_Value := Storage.To_Integer (Base);
-      if Length - 1 >
-        Byte_Count (Storage.Integer_Address'Last - Base_Value)
-      then
+      if Length - 1 > Byte_Count (Storage.Integer_Address'Last - Base_Value) then
          raise Region_Error with "backing-region address range overflows";
       end if;
 
@@ -40,10 +34,11 @@ package body Flyology_Allocators.Regions is
       Item.Attached := False;
    end Detach;
 
-   function Is_Attached (Item : View) return Boolean is (Item.Attached);
+   function Is_Attached (Item : View) return Boolean
+   is (Item.Attached);
 
-   function Length (Item : View) return Byte_Count is
-     (if Item.Attached then Item.Length_Value else 0);
+   function Length (Item : View) return Byte_Count
+   is (if Item.Attached then Item.Length_Value else 0);
 
    function Base_Address (Item : View) return System.Address is
    begin
@@ -54,21 +49,15 @@ package body Flyology_Allocators.Regions is
    end Base_Address;
 
    function Address_At
-     (Item      : View;
-      Offset    : Byte_Count;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count := 1) return System.Address is
+     (Item : View; Offset : Byte_Count; Extent : Byte_Count; Alignment : Byte_Count := 1)
+      return System.Address is
    begin
-      return Checked_Address
-        (Item.Base, Item.Length_Value, Item.Attached,
-         Region_Offset (Offset), Extent, Alignment);
+      return
+        Checked_Address
+          (Item.Base, Item.Length_Value, Item.Attached, Region_Offset (Offset), Extent, Alignment);
    end Address_At;
 
-   procedure Validate
-     (Item      : View;
-      Offset    : Region_Offset;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count := 1)
+   procedure Validate (Item : View; Offset : Region_Offset; Extent : Byte_Count; Alignment : Byte_Count := 1)
    is
       Address : System.Address;
       pragma Unreferenced (Address);
@@ -76,9 +65,7 @@ package body Flyology_Allocators.Regions is
       if Offset = Null_Offset then
          raise Region_Error with "null backing-region offset";
       end if;
-      Address := Checked_Address
-        (Item.Base, Item.Length_Value, Item.Attached,
-         Offset, Extent, Alignment);
+      Address := Checked_Address (Item.Base, Item.Length_Value, Item.Attached, Offset, Extent, Alignment);
    end Validate;
 
 end Flyology_Allocators.Regions;

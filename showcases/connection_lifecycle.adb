@@ -11,8 +11,7 @@ procedure Connection_Lifecycle is
    Worker_Count : constant := 5;
    Capacity     : constant := 2;
 
-   type Socket_Array is
-     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+   type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
    Servers : Socket_Array (1 .. Worker_Count);
    Peers   : Socket_Array (1 .. Worker_Count);
    Manager : aliased Connections.Server (Capacity => Capacity);
@@ -28,10 +27,10 @@ procedure Connection_Lifecycle is
       function Cancelled_Count return Natural;
       function Rejected_Count return Natural;
    private
-      Admissions   : Natural := 0;
+      Admissions    : Natural := 0;
       Cancellations : Natural := 0;
-      Rejections   : Natural := 0;
-      Completions  : Natural := 0;
+      Rejections    : Natural := 0;
+      Completions   : Natural := 0;
    end State;
 
    protected body State is
@@ -65,15 +64,17 @@ procedure Connection_Lifecycle is
          null;
       end Wait_All;
 
-      function Admitted_Count return Natural is (Admissions);
-      function Cancelled_Count return Natural is (Cancellations);
-      function Rejected_Count return Natural is (Rejections);
+      function Admitted_Count return Natural
+      is (Admissions);
+      function Cancelled_Count return Natural
+      is (Cancellations);
+      function Rejected_Count return Natural
+      is (Rejections);
    end State;
 
 begin
    for Index in Servers'Range loop
-      Flyology.IO.Sockets.Create_Socket_Pair
-        (Servers (Index), Peers (Index));
+      Flyology.IO.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
    end loop;
 
    declare
@@ -89,8 +90,7 @@ begin
             Connections.Take (Manager, Servers (Index), Owned);
             State.Admitted;
             begin
-               Owned.Receive_Exactly
-                 (Incoming, Cancellation_Quantum => 0.010);
+               Owned.Receive_Exactly (Incoming, Cancellation_Quantum => 0.010);
             exception
                when Connections.Operation_Cancelled =>
                   State.Cancelled;
@@ -112,20 +112,27 @@ begin
       State.Wait_At_Capacity;
       delay 0.020;
       Put_Line
-        ("bounded server: capacity=" & Capacity'Image
-         & " active=" & Manager.Active'Image
-         & " waiting=" & Manager.Waiting'Image);
+        ("bounded server: capacity="
+         & Capacity'Image
+         & " active="
+         & Manager.Active'Image
+         & " waiting="
+         & Manager.Waiting'Image);
 
       Manager.Request_Shutdown;
       Manager.Await_Drained;
       State.Wait_All;
 
       Put_Line
-        ("graceful shutdown: admitted=" & State.Admitted_Count'Image
-         & " cancelled=" & State.Cancelled_Count'Image
-         & " rejected_before_accept=" & State.Rejected_Count'Image);
+        ("graceful shutdown: admitted="
+         & State.Admitted_Count'Image
+         & " cancelled="
+         & State.Cancelled_Count'Image
+         & " rejected_before_accept="
+         & State.Rejected_Count'Image);
       Put_Line
-        ("drained active=" & Manager.Active'Image
+        ("drained active="
+         & Manager.Active'Image
          & "; limited connection owners closed every admitted socket");
    end;
 

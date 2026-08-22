@@ -8,11 +8,13 @@ with Interfaces;
 --  corresponding endpoint state.
 --  @formal Service_Kind Application enumeration of published services
 --  @formal Logical_Id Stable child identity associated with each service
+
 generic
    type Service_Kind is (<>);
    with function Logical_Id (Service : Service_Kind) return Child_Id;
 
-package Flyology.Supervision.Service_Slots is
+package Flyology.Supervision.Service_Slots
+is
 
    --  Raised when two service kinds use the same logical child identity.
    Configuration_Error : exception;
@@ -33,12 +35,11 @@ package Flyology.Supervision.Service_Slots is
    --  Atomic fixed service lookup.
    --  @field Status Whether a generation was published
    --  @field Lease Exact published generation when Status is Available
-   type Service_Observation
-     (Status : Availability_Status := Unavailable)
-   is record
+   type Service_Observation (Status : Availability_Status := Unavailable) is record
       case Status is
          when Unavailable =>
             null;
+
          when Available =>
             Lease : Service_Lease;
       end case;
@@ -63,9 +64,7 @@ package Flyology.Supervision.Service_Slots is
    --     child, Service already has a live publication, or readiness was
    --     already reported or stopping began
    procedure Publish_Ready
-     (Item    : in out Publication;
-      Service : Service_Kind;
-      Control : in out Generation_Control);
+     (Item : in out Publication; Service : Service_Kind; Control : in out Generation_Control);
 
    --  Revoke Item's exact publication. This is idempotent and cannot revoke a
    --  later publication. Call it before releasing the service resources when
@@ -82,9 +81,7 @@ package Flyology.Supervision.Service_Slots is
    --  @param From Directory to inspect
    --  @param Service Typed service to acquire
    --  @return Available with an exact lease, or Unavailable
-   function Acquire
-     (From    : Directory;
-      Service : Service_Kind) return Service_Observation;
+   function Acquire (From : Directory; Service : Service_Kind) return Service_Observation;
 
    --  Check whether Lease remains the exact publication for its service.
    --  This is useful for observation and routing. It is not a substitute for
@@ -93,9 +90,7 @@ package Flyology.Supervision.Service_Slots is
    --  @param From Directory that issued Lease
    --  @param Lease Exact service lease to validate
    --  @return True only while the same publication remains current
-   function Current
-     (From  : Directory;
-      Lease : Service_Lease) return Boolean;
+   function Current (From : Directory; Lease : Service_Lease) return Boolean;
 
    --  Return the typed service represented by Lease.
    --  @param Lease Published service lease
@@ -122,25 +117,16 @@ private
    protected type Directory_State is
       procedure Next_Token (Value : out Publication_Token);
       procedure Reserve
-        (Kind     : Service_Kind;
-         Value    : Child_Handle;
-         Token    : Publication_Token;
-         Accepted : out Boolean);
-      procedure Activate
-        (Kind  : Service_Kind;
-         Value : Child_Handle;
-         Token : Publication_Token);
-      procedure Revoke
-        (Kind  : Service_Kind;
-         Value : Child_Handle;
-         Token : Publication_Token);
+        (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token; Accepted : out Boolean);
+      procedure Activate (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token);
+      procedure Revoke (Kind : Service_Kind; Value : Child_Handle; Token : Publication_Token);
       function Acquire (Kind : Service_Kind) return Service_Observation;
       function Current (Lease : Service_Lease) return Boolean;
    private
-      Published : Published_Array := (others => False);
-      Claimed   : Published_Array := (others => False);
-      Handles   : Handle_Array;
-      Tokens    : Token_Array := (others => 0);
+      Published  : Published_Array := (others => False);
+      Claimed    : Published_Array := (others => False);
+      Handles    : Handle_Array;
+      Tokens     : Token_Array := (others => 0);
       Last_Token : Publication_Token := 0;
    end Directory_State;
 
@@ -148,16 +134,17 @@ private
       State : aliased Directory_State;
    end record;
 
-   type Publication (From : not null access Directory) is
-     limited new Ada.Finalization.Limited_Controlled with record
-      Kind   : Service_Kind := Service_Kind'First;
-      Value  : Child_Handle;
-      Token  : Publication_Token := 0;
-      Owned  : Boolean := False;
+   type Publication (From : not null access Directory) is limited new Ada.Finalization.Limited_Controlled
+   with record
+      Kind  : Service_Kind := Service_Kind'First;
+      Value : Child_Handle;
+      Token : Publication_Token := 0;
+      Owned : Boolean := False;
    end record;
 
    --  @exclude
    --  @param Item Publication finalized during normal or exceptional cleanup
-   overriding procedure Finalize (Item : in out Publication);
+   overriding
+   procedure Finalize (Item : in out Publication);
 
 end Flyology.Supervision.Service_Slots;

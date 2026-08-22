@@ -5,6 +5,7 @@ with Ada.Finalization;
 --  Example:
 --
 --     Flyology.Observability.Stall_Watchdogs.Start (Monitor);
+
 package Flyology.Observability.Stall_Watchdogs is
 
    --  Periodic sampling configuration for one execution group.
@@ -86,9 +87,7 @@ package Flyology.Observability.Stall_Watchdogs is
    --  @exception Program_Error Object is already running
    --  @exception Storage_Error Monitor state or task allocation fails
    --  @exception Tasking_Error Native monitor task activation fails
-   procedure Start
-     (Object : in out Watchdog;
-      Config : Watchdog_Config := (others => <>));
+   procedure Start (Object : in out Watchdog; Config : Watchdog_Config := (others => <>));
 
    --  Stop and join the native monitor task. The final Monitor_Stopped report
    --  remains queryable. Calling before Start or after Stop is harmless.
@@ -105,8 +104,7 @@ package Flyology.Observability.Stall_Watchdogs is
    --  Stall_Episodes increments once per observed episode.
    --  @param Object Watchdog to inspect
    --  @return Latest report, or default Not_Started report before Start
-   function Latest_Report
-     (Object : Watchdog) return Watchdog_Report;
+   function Latest_Report (Object : Watchdog) return Watchdog_Report;
 
 private
    type Watchdog_State;
@@ -122,6 +120,7 @@ private
    --  Stop Object and free its protected state without propagating cleanup
    --  errors.
    --  @param Object Watchdog being finalized
-   overriding procedure Finalize (Object : in out Watchdog);
+   overriding
+   procedure Finalize (Object : in out Watchdog);
 
 end Flyology.Observability.Stall_Watchdogs;

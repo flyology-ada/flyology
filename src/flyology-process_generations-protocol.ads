@@ -3,9 +3,9 @@ with Interfaces;
 --  Bounded compiler-independent wire representation for process-generation
 --  control messages. The package performs no I/O and raises no exception for
 --  malformed input; callers decide transport and failure policy.
+
 package Flyology.Process_Generations.Protocol
-  with Preelaborate,
-       SPARK_Mode
+  with Preelaborate, SPARK_Mode
 is
    use type Interfaces.Unsigned_64;
 
@@ -116,15 +116,14 @@ is
    --  Return the exact wire extent for Item.
    --  @param Item Decoded frame
    --  @return Header and significant payload size in bytes
-   function Encoded_Length (Item : Frame) return Positive is
-     (Header_Length + Item.Length);
+   function Encoded_Length (Item : Frame) return Positive
+   is (Header_Length + Item.Length);
 
    --  Encode one frame into an exact-sized caller buffer.
    --  @param Item Frame to encode
    --  @param Output Exact-sized destination bytes
    procedure Encode (Item : Frame; Output : out Octet_Array)
-   with Global => null,
-        Pre    => Output'Length = Encoded_Length (Item);
+   with Global => null, Pre => Output'Length = Encoded_Length (Item);
 
    --  Validate one exact header and return its declared payload size. Decoded
    --  means the header is structurally valid even when a payload must still be
@@ -132,12 +131,8 @@ is
    --  @param Input Candidate header bytes
    --  @param Length Declared payload length, or zero on failure
    --  @param Status Header classification
-   procedure Inspect_Header
-     (Input  : Octet_Array;
-      Length : out Payload_Length;
-      Status : out Decode_Status)
-   with Global => null,
-        Post => (if Status /= Decoded then Length = 0);
+   procedure Inspect_Header (Input : Octet_Array; Length : out Payload_Length; Status : out Decode_Status)
+   with Global => null, Post => (if Status /= Decoded then Length = 0);
 
    --  Decode one complete frame. Need_More_Data reports an incomplete header
    --  or payload; Wrong_Length reports bytes after one complete frame. Item is
@@ -145,14 +140,9 @@ is
    --  @param Input Candidate complete-frame bytes
    --  @param Item Decoded frame, or a harmless initialized value on failure
    --  @param Status Decode classification
-   procedure Decode
-     (Input  : Octet_Array;
-      Item   : out Frame;
-      Status : out Decode_Status)
-   with Global => null,
-        Post   =>
-          (if Status = Decoded then
-             Input'Length = Encoded_Length (Item)
-             and then Item.Sequence > 0);
+   procedure Decode (Input : Octet_Array; Item : out Frame; Status : out Decode_Status)
+   with
+     Global => null,
+     Post   => (if Status = Decoded then Input'Length = Encoded_Length (Item) and then Item.Sequence > 0);
 
 end Flyology.Process_Generations.Protocol;

@@ -5,7 +5,10 @@ with Interfaces.C;
 --  task's stack, and either arms its next source or publishes a terminal
 --  outcome. These calls create no task, stack, callback thread, or heap
 --  object.
-package Flyology.Operations.Drivers with Preelaborate is
+
+package Flyology.Operations.Drivers
+  with Preelaborate
+is
 
    --  One descriptor interest retained by an operation while it is pending.
    --  @field Descriptor Valid borrowed operating-system descriptor
@@ -16,8 +19,7 @@ package Flyology.Operations.Drivers with Preelaborate is
    end record;
 
    --  Bounded descriptor set armed as one operation source.
-   type Readiness_Source_Array is
-     array (Positive range <>) of Readiness_Source;
+   type Readiness_Source_Array is array (Positive range <>) of Readiness_Source;
 
    --  Reserve the operation's stable slot and mark it pending. Call this once
    --  before the provider's first Drive event.
@@ -40,9 +42,7 @@ package Flyology.Operations.Drivers with Preelaborate is
    --  @param For_Write True for write readiness; False for read readiness
    --  @exception Operation_Error Item is stale, terminal, or already armed
    procedure Arm_Readiness
-     (Item       : in out Operation'Class;
-      Descriptor : Interfaces.C.int;
-      For_Write  : Boolean);
+     (Item : in out Operation'Class; Descriptor : Interfaces.C.int; For_Write : Boolean);
 
    --  Arm several descriptor interests for one operation. Readiness of any
    --  source invokes Drive once; the driver must rearm its next complete set.
@@ -52,21 +52,15 @@ package Flyology.Operations.Drivers with Preelaborate is
    --  @param Sources Nonempty bounded descriptor interests
    --  @exception Operation_Error Item is stale, terminal, already armed, a
    --     descriptor is invalid, or the source bound is exceeded
-   procedure Arm_Readiness
-     (Item    : in out Operation'Class;
-      Sources : Readiness_Source_Array)
-     with Pre =>
-       Sources'Length in
-         1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+   procedure Arm_Readiness (Item : in out Operation'Class; Sources : Readiness_Source_Array)
+   with Pre => Sources'Length in 1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Set or replace one operation deadline. A nonpositive interval is due on
    --  the next completion-set drive. A deadline can coexist with readiness.
    --  @param Item Pending operation whose deadline changes
    --  @param Interval Relative monotonic interval in seconds
    --  @exception Operation_Error Item is stale or terminal
-   procedure Arm_Deadline
-     (Item     : in out Operation'Class;
-      Interval : Duration);
+   procedure Arm_Deadline (Item : in out Operation'Class; Interval : Duration);
 
    --  Remove one pending operation's deadline.
    --  @param Item Pending operation whose deadline is removed
@@ -104,8 +98,6 @@ package Flyology.Operations.Drivers with Preelaborate is
    --  @param Item Pending operation to terminalize
    --  @param Result Retained outcome interpreted by provider-specific Finish
    --  @exception Operation_Error Item is stale or not pending
-   procedure Complete
-     (Item   : in out Operation'Class;
-      Result : Terminal_Outcome);
+   procedure Complete (Item : in out Operation'Class; Result : Terminal_Outcome);
 
 end Flyology.Operations.Drivers;

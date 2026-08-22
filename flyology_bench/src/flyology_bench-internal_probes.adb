@@ -23,7 +23,7 @@ package body Flyology_Bench.Internal_Probes is
    use type Interfaces.Unsigned_32;
    use type Interfaces.Unsigned_64;
 
-   Nanoseconds_Per_Second : constant := 1_000_000_000;
+   Nanoseconds_Per_Second      : constant := 1_000_000_000;
    Nanoseconds_Per_Microsecond : constant := 1_000;
 
    ---------------------------------------------------------------------
@@ -34,12 +34,10 @@ package body Flyology_Bench.Internal_Probes is
    pragma Import (C, Native_OS, "flyology_bench_platform_os");
 
    Native_Architecture : constant C.int;
-   pragma Import
-     (C, Native_Architecture, "flyology_bench_platform_architecture");
+   pragma Import (C, Native_Architecture, "flyology_bench_platform_architecture");
 
    Native_Monotonic_Clock : constant C.int;
-   pragma Import
-     (C, Native_Monotonic_Clock, "flyology_bench_monotonic_clock");
+   pragma Import (C, Native_Monotonic_Clock, "flyology_bench_monotonic_clock");
 
    Native_CPU_Limit : constant C.int;
    pragma Import (C, Native_CPU_Limit, "flyology_bench_cpu_limit");
@@ -57,9 +55,7 @@ package body Flyology_Bench.Internal_Probes is
    pragma Import (C, Native_Rusage_Bytes, "flyology_bench_rusage_bytes");
 
    Native_Rusage_Counters_Offset : constant C.size_t;
-   pragma Import
-     (C, Native_Rusage_Counters_Offset,
-      "flyology_bench_rusage_counters_offset");
+   pragma Import (C, Native_Rusage_Counters_Offset, "flyology_bench_rusage_counters_offset");
 
    ---------------------------------------------------------------------
    --  Entry points that exist on one platform only                    --
@@ -69,18 +65,14 @@ package body Flyology_Bench.Internal_Probes is
    pragma Import (C, Mach_Ticks, "flyology_bench_mach_ticks");
 
    function Mach_Timebase
-     (Numerator   : access Interfaces.Unsigned_32;
-      Denominator : access Interfaces.Unsigned_32) return C.int;
+     (Numerator : access Interfaces.Unsigned_32; Denominator : access Interfaces.Unsigned_32) return C.int;
    pragma Import (C, Mach_Timebase, "flyology_bench_mach_timebase");
 
-   function Mach_Resident_Bytes
-     (Bytes : access Interfaces.Unsigned_64) return C.int;
-   pragma Import
-     (C, Mach_Resident_Bytes, "flyology_bench_mach_resident_bytes");
+   function Mach_Resident_Bytes (Bytes : access Interfaces.Unsigned_64) return C.int;
+   pragma Import (C, Mach_Resident_Bytes, "flyology_bench_mach_resident_bytes");
 
    function Mach_Disk_IO
-     (Read_Bytes    : access Interfaces.Unsigned_64;
-      Written_Bytes : access Interfaces.Unsigned_64) return C.int;
+     (Read_Bytes : access Interfaces.Unsigned_64; Written_Bytes : access Interfaces.Unsigned_64) return C.int;
    pragma Import (C, Mach_Disk_IO, "flyology_bench_mach_disk_io");
 
    function Mach_CPU_Ticks
@@ -91,8 +83,7 @@ package body Flyology_Bench.Internal_Probes is
    pragma Import (C, Mach_CPU_Ticks, "flyology_bench_mach_cpu_ticks");
 
    function Native_Thread_Identifier return Interfaces.Unsigned_64;
-   pragma Import
-     (C, Native_Thread_Identifier, "flyology_bench_native_thread_id");
+   pragma Import (C, Native_Thread_Identifier, "flyology_bench_native_thread_id");
 
    function Native_Bind_Thread (CPU : C.unsigned) return C.int;
    pragma Import (C, Native_Bind_Thread, "flyology_bench_bind_thread");
@@ -103,34 +94,30 @@ package body Flyology_Bench.Internal_Probes is
 
    --  The two time structures differ between the platforms only in the
    --  width of their sub-second field, which the runtime already records.
-   Seconds_Bits : constant := OSC.SIZEOF_tv_sec * 8;
+   Seconds_Bits      : constant := OSC.SIZEOF_tv_sec * 8;
    Microseconds_Bits : constant := OSC.SIZEOF_tv_usec * 8;
-   Nanoseconds_Bits : constant := OSC.SIZEOF_tv_nsec * 8;
+   Nanoseconds_Bits  : constant := OSC.SIZEOF_tv_nsec * 8;
 
-   type Seconds_Field is
-     range -(2 ** (Seconds_Bits - 1)) .. 2 ** (Seconds_Bits - 1) - 1;
+   type Seconds_Field is range -(2**(Seconds_Bits - 1)) .. 2**(Seconds_Bits - 1) - 1;
    for Seconds_Field'Size use Seconds_Bits;
 
-   type Microseconds_Field is
-     range -(2 ** (Microseconds_Bits - 1))
-       .. 2 ** (Microseconds_Bits - 1) - 1;
+   type Microseconds_Field is range -(2**(Microseconds_Bits - 1)) .. 2**(Microseconds_Bits - 1) - 1;
    for Microseconds_Field'Size use Microseconds_Bits;
 
-   type Nanoseconds_Field is
-     range -(2 ** (Nanoseconds_Bits - 1)) .. 2 ** (Nanoseconds_Bits - 1) - 1;
+   type Nanoseconds_Field is range -(2**(Nanoseconds_Bits - 1)) .. 2**(Nanoseconds_Bits - 1) - 1;
    for Nanoseconds_Field'Size use Nanoseconds_Bits;
 
    type Timeval is record
       Seconds      : Seconds_Field := 0;
       Microseconds : Microseconds_Field := 0;
    end record
-     with Convention => C;
+   with Convention => C;
 
    type Timespec is record
       Seconds     : Seconds_Field := 0;
       Nanoseconds : Nanoseconds_Field := 0;
    end record
-     with Convention => C;
+   with Convention => C;
 
    --  struct rusage carries two time values and then fourteen longs on both
    --  supported platforms. tests/flyology_bench_abi_probe.c checks this
@@ -153,20 +140,17 @@ package body Flyology_Bench.Internal_Probes is
       Voluntary_Switches   : C.long := 0;
       Involuntary_Switches : C.long := 0;
    end record
-     with Convention => C;
+   with Convention => C;
 
    Rusage_Self : constant C.int := 0;
 
-   function Get_Resource_Usage
-     (Who : C.int; Usage : access Resource_Usage) return C.int;
+   function Get_Resource_Usage (Who : C.int; Usage : access Resource_Usage) return C.int;
    pragma Import (C, Get_Resource_Usage, "getrusage");
 
-   function Clock_Gettime
-     (Clock : C.int; Value : access Timespec) return C.int;
+   function Clock_Gettime (Clock : C.int; Value : access Timespec) return C.int;
    pragma Import (C, Clock_Gettime, "clock_gettime");
 
-   function Clock_Getres
-     (Clock : C.int; Value : access Timespec) return C.int;
+   function Clock_Getres (Clock : C.int; Value : access Timespec) return C.int;
    pragma Import (C, Clock_Getres, "clock_getres");
 
    function Sysconf (Name : C.int) return C.long;
@@ -176,9 +160,9 @@ package body Flyology_Bench.Internal_Probes is
    --  Cached platform facts                                           --
    ---------------------------------------------------------------------
 
-   Timebase_Numerator : Interfaces.Unsigned_32 := 0;
+   Timebase_Numerator   : Interfaces.Unsigned_32 := 0;
    Timebase_Denominator : Interfaces.Unsigned_32 := 0;
-   Timebase_Known : Boolean := False;
+   Timebase_Known       : Boolean := False;
 
    Page_Bytes : Interfaces.Unsigned_64 := 0;
 
@@ -189,37 +173,43 @@ package body Flyology_Bench.Internal_Probes is
    function Operating_System return Host_System is
    begin
       case Native_OS is
-         when 1 => return Darwin;
-         when 2 => return Linux;
-         when others => return Unknown_System;
+         when 1      =>
+            return Darwin;
+
+         when 2      =>
+            return Linux;
+
+         when others =>
+            return Unknown_System;
       end case;
    end Operating_System;
 
    function Architecture return Host_Architecture is
    begin
       case Native_Architecture is
-         when 1 => return AArch64;
-         when 2 => return X86_64;
-         when others => return Unknown_Architecture;
+         when 1      =>
+            return AArch64;
+
+         when 2      =>
+            return X86_64;
+
+         when others =>
+            return Unknown_Architecture;
       end case;
    end Architecture;
 
-   function Clock_Backend return Natural is
-     (if Operating_System = Darwin
-      then Mach_Clock_Backend
-      else Monotonic_Raw_Backend);
+   function Clock_Backend return Natural
+   is (if Operating_System = Darwin then Mach_Clock_Backend else Monotonic_Raw_Backend);
 
    ---------------------------------------------------------------------
    --  Bit masks                                                       --
    ---------------------------------------------------------------------
 
-   function Mask_Bit (Bit : Natural) return Interfaces.Unsigned_64 is
-     (Interfaces.Shift_Left (Interfaces.Unsigned_64'(1), Bit));
+   function Mask_Bit (Bit : Natural) return Interfaces.Unsigned_64
+   is (Interfaces.Shift_Left (Interfaces.Unsigned_64'(1), Bit));
 
-   function Mask_Has
-     (Mask : Interfaces.Unsigned_64;
-      Bit  : Natural) return Boolean is
-     ((Mask and Mask_Bit (Bit)) /= 0);
+   function Mask_Has (Mask : Interfaces.Unsigned_64; Bit : Natural) return Boolean
+   is ((Mask and Mask_Bit (Bit)) /= 0);
 
    procedure Mark (Mask : in out Interfaces.Unsigned_64; Bit : Natural) is
    begin
@@ -232,28 +222,23 @@ package body Flyology_Bench.Internal_Probes is
 
    --  A kernel counter is never negative. Reporting zero rather than
    --  wrapping keeps one implausible field from becoming an enormous one.
-   function Counted (Value : C.long) return Interfaces.Unsigned_64 is
-     (if Value <= 0 then 0 else Interfaces.Unsigned_64 (Value));
+   function Counted (Value : C.long) return Interfaces.Unsigned_64
+   is (if Value <= 0 then 0 else Interfaces.Unsigned_64 (Value));
 
    function Nanoseconds_Of (Value : Timeval) return Interfaces.Unsigned_64 is
-      Seconds : constant Interfaces.Unsigned_64 :=
-        (if Value.Seconds <= 0 then 0
-         else Interfaces.Unsigned_64 (Value.Seconds));
+      Seconds      : constant Interfaces.Unsigned_64 :=
+        (if Value.Seconds <= 0 then 0 else Interfaces.Unsigned_64 (Value.Seconds));
       Microseconds : constant Interfaces.Unsigned_64 :=
-        (if Value.Microseconds <= 0 then 0
-         else Interfaces.Unsigned_64 (Value.Microseconds));
+        (if Value.Microseconds <= 0 then 0 else Interfaces.Unsigned_64 (Value.Microseconds));
    begin
-      return Seconds * Nanoseconds_Per_Second
-        + Microseconds * Nanoseconds_Per_Microsecond;
+      return Seconds * Nanoseconds_Per_Second + Microseconds * Nanoseconds_Per_Microsecond;
    end Nanoseconds_Of;
 
    function Nanoseconds_Of (Value : Timespec) return Interfaces.Unsigned_64 is
-      Seconds : constant Interfaces.Unsigned_64 :=
-        (if Value.Seconds <= 0 then 0
-         else Interfaces.Unsigned_64 (Value.Seconds));
+      Seconds     : constant Interfaces.Unsigned_64 :=
+        (if Value.Seconds <= 0 then 0 else Interfaces.Unsigned_64 (Value.Seconds));
       Nanoseconds : constant Interfaces.Unsigned_64 :=
-        (if Value.Nanoseconds <= 0 then 0
-         else Interfaces.Unsigned_64 (Value.Nanoseconds));
+        (if Value.Nanoseconds <= 0 then 0 else Interfaces.Unsigned_64 (Value.Nanoseconds));
    begin
       return Seconds * Nanoseconds_Per_Second + Nanoseconds;
    end Nanoseconds_Of;
@@ -266,16 +251,12 @@ package body Flyology_Bench.Internal_Probes is
    --  the denominator keeps the exact product within 64 bits for every
    --  timebase a host can report, so no wider arithmetic is needed.
    procedure Scaled_Ticks
-     (Ticks       : Interfaces.Unsigned_64;
-      Nanoseconds : out Interfaces.Unsigned_64;
-      Fits        : out Boolean)
+     (Ticks : Interfaces.Unsigned_64; Nanoseconds : out Interfaces.Unsigned_64; Fits : out Boolean)
    is
-      Numerator : constant Interfaces.Unsigned_64 :=
-        Interfaces.Unsigned_64 (Timebase_Numerator);
-      Denominator : constant Interfaces.Unsigned_64 :=
-        Interfaces.Unsigned_64 (Timebase_Denominator);
-      Whole     : Interfaces.Unsigned_64;
-      Remainder : Interfaces.Unsigned_64;
+      Numerator   : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Timebase_Numerator);
+      Denominator : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Timebase_Denominator);
+      Whole       : Interfaces.Unsigned_64;
+      Remainder   : Interfaces.Unsigned_64;
    begin
       Nanoseconds := 0;
       Fits := False;
@@ -296,10 +277,7 @@ package body Flyology_Bench.Internal_Probes is
       Fits := True;
    end Scaled_Ticks;
 
-   procedure Read_Clock
-     (Nanoseconds : out Interfaces.Unsigned_64;
-      Available   : out Boolean)
-   is
+   procedure Read_Clock (Nanoseconds : out Interfaces.Unsigned_64; Available : out Boolean) is
       Sample : aliased Timespec;
    begin
       if Operating_System = Darwin then
@@ -324,10 +302,7 @@ package body Flyology_Bench.Internal_Probes is
       return Value;
    end Clock_Now;
 
-   procedure Read_Clock_Resolution
-     (Nanoseconds : out Interfaces.Unsigned_64;
-      Available   : out Boolean)
-   is
+   procedure Read_Clock_Resolution (Nanoseconds : out Interfaces.Unsigned_64; Available : out Boolean) is
       Sample : aliased Timespec;
    begin
       Nanoseconds := 0;
@@ -339,8 +314,7 @@ package body Flyology_Bench.Internal_Probes is
          --  One tick rounded up to whole nanoseconds, and never zero: a
          --  sub-nanosecond tick still resolves to at least one nanosecond.
          Nanoseconds :=
-           (Interfaces.Unsigned_64 (Timebase_Numerator)
-            + Interfaces.Unsigned_64 (Timebase_Denominator) - 1)
+           (Interfaces.Unsigned_64 (Timebase_Numerator) + Interfaces.Unsigned_64 (Timebase_Denominator) - 1)
            / Interfaces.Unsigned_64 (Timebase_Denominator);
          if Nanoseconds = 0 then
             Nanoseconds := 1;
@@ -358,8 +332,8 @@ package body Flyology_Bench.Internal_Probes is
    --  Threads                                                         --
    ---------------------------------------------------------------------
 
-   function Native_Thread_Id return Interfaces.Unsigned_64 is
-     (Native_Thread_Identifier);
+   function Native_Thread_Id return Interfaces.Unsigned_64
+   is (Native_Thread_Identifier);
 
    function Place_Current_Thread (CPU : Natural) return Placement_Outcome is
    begin
@@ -370,10 +344,7 @@ package body Flyology_Bench.Internal_Probes is
       end if;
       --  A Darwin affinity tag only asks the scheduler to keep tagged
       --  threads together, while a Linux mask is binding.
-      return
-        (if Operating_System = Darwin
-         then Advisory_Placement
-         else Strict_Placement);
+      return (if Operating_System = Darwin then Advisory_Placement else Strict_Placement);
    end Place_Current_Thread;
 
    ---------------------------------------------------------------------
@@ -385,10 +356,7 @@ package body Flyology_Bench.Internal_Probes is
    --  Scans the next whitespace-separated unsigned value at or after From,
    --  leaving From just past it.
    procedure Scan_Unsigned
-     (Text  : String;
-      From  : in out Natural;
-      Value : out Interfaces.Unsigned_64;
-      Found : out Boolean)
+     (Text : String; From : in out Natural; Value : out Interfaces.Unsigned_64; Found : out Boolean)
    is
       Digits_Seen : Natural := 0;
    begin
@@ -405,25 +373,19 @@ package body Flyology_Bench.Internal_Probes is
             Found := False;
             return;
          end if;
-         Value := Value * 10
-           + Interfaces.Unsigned_64
-               (Character'Pos (Text (From)) - Character'Pos ('0'));
+         Value := Value * 10 + Interfaces.Unsigned_64 (Character'Pos (Text (From)) - Character'Pos ('0'));
          Digits_Seen := Digits_Seen + 1;
          From := From + 1;
       end loop;
       Found := Digits_Seen > 0;
    end Scan_Unsigned;
 
-   function Starts_With (Text : String; Prefix : String) return Boolean is
-     (Text'Length >= Prefix'Length
-      and then Text (Text'First .. Text'First + Prefix'Length - 1) = Prefix);
+   function Starts_With (Text : String; Prefix : String) return Boolean
+   is (Text'Length >= Prefix'Length and then Text (Text'First .. Text'First + Prefix'Length - 1) = Prefix);
 
    --  Resident set size from /proc/self/statm, whose second field counts
    --  resident pages.
-   procedure Read_Proc_Resident
-     (Bytes     : out Interfaces.Unsigned_64;
-      Available : out Boolean)
-   is
+   procedure Read_Proc_Resident (Bytes : out Interfaces.Unsigned_64; Available : out Boolean) is
       File   : Ada.Text_IO.File_Type;
       Line   : String (1 .. Line_Limit);
       Last   : Natural;
@@ -449,9 +411,7 @@ package body Flyology_Bench.Internal_Probes is
          Scan_Unsigned (Line (Line'First .. Last), Cursor, Total, Found);
          if Found then
             Scan_Unsigned (Line (Line'First .. Last), Cursor, Pages, Found);
-            if Found
-              and then Pages <= Interfaces.Unsigned_64'Last / Page_Bytes
-            then
+            if Found and then Pages <= Interfaces.Unsigned_64'Last / Page_Bytes then
                Bytes := Pages * Page_Bytes;
                Available := True;
             end if;
@@ -477,12 +437,12 @@ package body Flyology_Bench.Internal_Probes is
    is
       Read_Key  : constant String := "read_bytes:";
       Write_Key : constant String := "write_bytes:";
-      File   : Ada.Text_IO.File_Type;
-      Line   : String (1 .. Line_Limit);
-      Last   : Natural;
-      Cursor : Natural;
-      Value  : Interfaces.Unsigned_64;
-      Found  : Boolean;
+      File      : Ada.Text_IO.File_Type;
+      Line      : String (1 .. Line_Limit);
+      Last      : Natural;
+      Cursor    : Natural;
+      Value     : Interfaces.Unsigned_64;
+      Found     : Boolean;
    begin
       Read_Bytes := 0;
       Read_Available := False;
@@ -563,8 +523,7 @@ package body Flyology_Bench.Internal_Probes is
             Cursor : Natural;
             Index  : Interfaces.Unsigned_64;
             Found  : Boolean;
-            Ticks  : array (1 .. 8) of Interfaces.Unsigned_64 :=
-              [others => 0];
+            Ticks  : array (1 .. 8) of Interfaces.Unsigned_64 := [others => 0];
          begin
             exit Reading when not Starts_With (Text, Prefix);
             Cursor := Text'First + Prefix'Length;
@@ -572,8 +531,7 @@ package body Flyology_Bench.Internal_Probes is
             --  line puts its number. A value scan would step over that
             --  whitespace and take the summary's first tick total for a CPU
             --  number, so the digit is required to be immediately here.
-            Found := Cursor <= Text'Last
-              and then Text (Cursor) in '0' .. '9';
+            Found := Cursor <= Text'Last and then Text (Cursor) in '0' .. '9';
             if Found then
                Scan_Unsigned (Text, Cursor, Index, Found);
             end if;
@@ -595,8 +553,7 @@ package body Flyology_Bench.Internal_Probes is
                begin
                   --  user, nice, system, irq, softirq, and steal are busy;
                   --  idle and iowait are not.
-                  Busy (Slot) := Ticks (1) + Ticks (2) + Ticks (3)
-                    + Ticks (6) + Ticks (7) + Ticks (8);
+                  Busy (Slot) := Ticks (1) + Ticks (2) + Ticks (3) + Ticks (6) + Ticks (7) + Ticks (8);
                   Total (Slot) := Busy (Slot) + Ticks (4) + Ticks (5);
                   --  An offline CPU has no line at all, so its row stays
                   --  zero and every reader skips it for having no elapsed
@@ -627,10 +584,7 @@ package body Flyology_Bench.Internal_Probes is
    --  Process usage                                                   --
    ---------------------------------------------------------------------
 
-   procedure Read_Resident_Bytes
-     (Bytes     : out Interfaces.Unsigned_64;
-      Available : out Boolean)
-   is
+   procedure Read_Resident_Bytes (Bytes : out Interfaces.Unsigned_64; Available : out Boolean) is
       Value : aliased Interfaces.Unsigned_64 := 0;
    begin
       if Operating_System = Darwin then
@@ -657,8 +611,7 @@ package body Flyology_Bench.Internal_Probes is
       if Get_Resource_Usage (Rusage_Self, Usage'Access) /= 0 then
          return;
       end if;
-      CPU_Nanoseconds := Nanoseconds_Of (Usage.User_Time)
-        + Nanoseconds_Of (Usage.System_Time);
+      CPU_Nanoseconds := Nanoseconds_Of (Usage.User_Time) + Nanoseconds_Of (Usage.System_Time);
       Read_Resident_Bytes (Resident_Bytes, Available);
    end Read_Process_Usage;
 
@@ -667,9 +620,7 @@ package body Flyology_Bench.Internal_Probes is
    ---------------------------------------------------------------------
 
    procedure Read_Resource_Snapshot
-     (Values    : out Resource_Values;
-      Mask      : out Interfaces.Unsigned_64;
-      Available : out Boolean)
+     (Values : out Resource_Values; Mask : out Interfaces.Unsigned_64; Available : out Boolean)
    is
       Usage   : aliased Resource_Usage;
       Sample  : aliased Timespec;
@@ -682,13 +633,11 @@ package body Flyology_Bench.Internal_Probes is
       if Get_Resource_Usage (Rusage_Self, Usage'Access) /= 0 then
          return;
       end if;
-      Values (Process_CPU_Index) := Nanoseconds_Of (Usage.User_Time)
-        + Nanoseconds_Of (Usage.System_Time);
+      Values (Process_CPU_Index) := Nanoseconds_Of (Usage.User_Time) + Nanoseconds_Of (Usage.System_Time);
       Values (Minor_Faults_Index) := Counted (Usage.Minor_Faults);
       Values (Major_Faults_Index) := Counted (Usage.Major_Faults);
       Values (Voluntary_Switches_Index) := Counted (Usage.Voluntary_Switches);
-      Values (Involuntary_Switches_Index) :=
-        Counted (Usage.Involuntary_Switches);
+      Values (Involuntary_Switches_Index) := Counted (Usage.Involuntary_Switches);
       Values (Input_Operations_Index) := Counted (Usage.Block_Input);
       Values (Output_Operations_Index) := Counted (Usage.Block_Output);
       Mark (Mask, Process_CPU_Index);
@@ -699,9 +648,7 @@ package body Flyology_Bench.Internal_Probes is
       Mark (Mask, Input_Operations_Index);
       Mark (Mask, Output_Operations_Index);
 
-      if Clock_Gettime (C.int (OSC.CLOCK_THREAD_CPUTIME_ID), Sample'Access)
-        = 0
-      then
+      if Clock_Gettime (C.int (OSC.CLOCK_THREAD_CPUTIME_ID), Sample'Access) = 0 then
          Values (Thread_CPU_Index) := Nanoseconds_Of (Sample);
          Mark (Mask, Thread_CPU_Index);
       end if;
@@ -731,8 +678,7 @@ package body Flyology_Bench.Internal_Probes is
             Written_Bytes   : Interfaces.Unsigned_64;
             Written_Present : Boolean;
          begin
-            Read_Proc_Disk_IO
-              (Read_Bytes, Read_Present, Written_Bytes, Written_Present);
+            Read_Proc_Disk_IO (Read_Bytes, Read_Present, Written_Bytes, Written_Present);
             if Read_Present then
                Values (Disk_Read_Bytes_Index) := Read_Bytes;
                Mark (Mask, Disk_Read_Bytes_Index);
@@ -765,11 +711,10 @@ package body Flyology_Bench.Internal_Probes is
       Busy := [others => 0];
       Total := [others => 0];
       CPU_Count := 0;
-      Available := Mach_CPU_Ticks
-        (Busy (Busy'First)'Address,
-         Total (Total'First)'Address,
-         C.size_t (Maximum_Host_CPUs),
-         Count'Access) = 0
+      Available :=
+        Mach_CPU_Ticks
+          (Busy (Busy'First)'Address, Total (Total'First)'Address, C.size_t (Maximum_Host_CPUs), Count'Access)
+        = 0
         and then Count > 0
         and then Count <= C.size_t (Maximum_Host_CPUs);
       if Available then
@@ -784,31 +729,24 @@ package body Flyology_Bench.Internal_Probes is
    procedure Escape (Value : System.Address) is
    begin
       System.Machine_Code.Asm
-        ("",
-         Inputs   => System.Address'Asm_Input ("r", Value),
-         Clobber  => "memory",
-         Volatile => True);
+        ("", Inputs => System.Address'Asm_Input ("r", Value), Clobber => "memory", Volatile => True);
    end Escape;
 
    procedure Clobber_Memory is
    begin
-      System.Machine_Code.Asm
-        ("", Clobber => "memory", Volatile => True);
+      System.Machine_Code.Asm ("", Clobber => "memory", Volatile => True);
    end Clobber_Memory;
 
 begin
    --  The structures above are derived rather than transcribed, so the
    --  derivation is checked against the headers before anything reads one.
    if C.size_t (Timeval'Max_Size_In_Storage_Elements) /= Native_Timeval_Bytes
-     or else C.size_t (Timespec'Max_Size_In_Storage_Elements)
-       /= Native_Timespec_Bytes
-     or else C.size_t (Resource_Usage'Max_Size_In_Storage_Elements)
-       /= Native_Rusage_Bytes
+     or else C.size_t (Timespec'Max_Size_In_Storage_Elements) /= Native_Timespec_Bytes
+     or else C.size_t (Resource_Usage'Max_Size_In_Storage_Elements) /= Native_Rusage_Bytes
      or else 2 * Native_Timeval_Bytes /= Native_Rusage_Counters_Offset
    then
-      raise Program_Error with
-        "platform time or resource-usage layout is not the one this crate "
-        & "derives";
+      raise Program_Error
+        with "platform time or resource-usage layout is not the one this crate " & "derives";
    end if;
 
    if Operating_System = Darwin then

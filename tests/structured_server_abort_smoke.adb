@@ -17,32 +17,19 @@ procedure Structured_Server_Abort_Smoke is
    use type Test_Control.Barrier_Point;
 
    function Open_FD_Count return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
    function FD_Is_Open (FD : Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_fd_is_open";
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_open";
 
    procedure Open_Listener (Listener : in out Sockets.Socket_Type) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option
-        (Listener,
-         Sockets.Socket_Level,
-         (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 4);
    end Open_Listener;
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint)
-   is
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Open_Listener (Listener);
       Address := Sockets.Get_Socket_Name (Listener);
@@ -58,10 +45,10 @@ procedure Structured_Server_Abort_Smoke is
    end Assert_Descriptor_Reused;
 
    generic
-      Caller_Model  : Flyology.Execution_Model;
-      Caller_CPU    : System.Multiprocessors.CPU_Range;
+      Caller_Model : Flyology.Execution_Model;
+      Caller_CPU : System.Multiprocessors.CPU_Range;
       Handler_Model : Flyology.Execution_Model;
-      Handler_CPU   : System.Multiprocessors.CPU_Range;
+      Handler_CPU : System.Multiprocessors.CPU_Range;
    procedure Run_Lane;
 
    procedure Run_Lane is
@@ -122,17 +109,17 @@ procedure Structured_Server_Abort_Smoke is
       begin
          State.Gate.Enter (Block);
          if not Block then
-            raise Program_Error with
-              "abort ownership test unexpectedly admitted a connection";
+            raise Program_Error with "abort ownership test unexpectedly admitted a connection";
          end if;
          State.Gate.Await_Release;
       end Handle;
 
-      package Structured is new Flyology.IO.Structured_Servers
-         (Handler_Context => Context,
-         Handle          => Handle,
-         Handler_Model   => Handler_Model,
-         Handler_CPU     => Handler_CPU);
+      package Structured is new
+        Flyology.IO.Structured_Servers
+          (Handler_Context => Context,
+           Handle          => Handle,
+           Handler_Model   => Handler_Model,
+           Handler_CPU     => Handler_CPU);
 
       procedure Warm_Runtime is
          Item     : aliased Structured.Server (Capacity => 2);
@@ -145,9 +132,7 @@ procedure Structured_Server_Abort_Smoke is
          pragma Assert (not Sockets.Is_Open (Listener));
       end Warm_Runtime;
 
-      procedure Assert_Terminal_One_Shot
-        (Item : aliased in out Structured.Server)
-      is
+      procedure Assert_Terminal_One_Shot (Item : aliased in out Structured.Server) is
          Retry    : Sockets.Socket_Type;
          State    : aliased Context;
          Rejected : Boolean := False;
@@ -179,17 +164,18 @@ procedure Structured_Server_Abort_Smoke is
          declare
             Item       : aliased Structured.Server (Capacity => 2);
             State      : aliased Context;
-            Unexpected : Boolean := False with Atomic;
+            Unexpected : Boolean := False
+            with Atomic;
          begin
             declare
-               task Runner with CPU => Caller_CPU is
+               task Runner
+                 with CPU => Caller_CPU is
                   pragma Task_Info (Caller_Model);
                end Runner;
 
                task body Runner is
                begin
-                  Structured.Serve
-                    (Item, Listener, State, Drain_Timeout => 0.1);
+                  Structured.Serve (Item, Listener, State, Drain_Timeout => 0.1);
                   Unexpected := True;
                exception
                   when others =>
@@ -216,30 +202,23 @@ procedure Structured_Server_Abort_Smoke is
             pragma Assert (not Unexpected);
             if Point = Test_Control.Before_Acquisition then
                pragma Assert (Sockets.Is_Open (Listener));
-               pragma Assert
-                 (Fault_Control.Calls
-                    (Fault_Control.Structured_Listener_Close) = 0);
+               pragma Assert (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) = 0);
 
                --  Abort before controlled acquisition does not consume the
                --  server's one permitted Serve call or the caller's handle.
                Structured.Request_Shutdown (Item);
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.1);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.1);
                pragma Assert (not Sockets.Is_Open (Listener));
             else
                pragma Assert (not Sockets.Is_Open (Listener));
                pragma Assert (not Structured.Current (Item).Running);
-               pragma Assert
-                 (Structured.Current (Item).Active_Handlers = 0);
+               pragma Assert (Structured.Current (Item).Active_Handlers = 0);
                Assert_Terminal_One_Shot (Item);
             end if;
          end;
 
-         pragma Assert
-           (Fault_Control.Calls
-              (Fault_Control.Structured_Listener_Close) = 1);
-         pragma Assert
-           (FD_Is_Open (Interfaces.C.int (Old_FD)) = 0);
+         pragma Assert (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) = 1);
+         pragma Assert (FD_Is_Open (Interfaces.C.int (Old_FD)) = 0);
          Assert_Descriptor_Reused (Old_FD);
          pragma Assert (Open_FD_Count = Before_FDs);
          Test_Control.Reset;
@@ -272,8 +251,7 @@ procedure Structured_Server_Abort_Smoke is
             State : aliased Context;
          begin
             begin
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.1);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.1);
             exception
                when Tasking_Error =>
                   Failed := True;
@@ -286,9 +264,7 @@ procedure Structured_Server_Abort_Smoke is
             Assert_Terminal_One_Shot (Item);
          end;
 
-         pragma Assert
-           (Fault_Control.Calls
-              (Fault_Control.Structured_Listener_Close) = 1);
+         pragma Assert (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) = 1);
          pragma Assert (FD_Is_Open (Interfaces.C.int (Old_FD)) = 0);
          Assert_Descriptor_Reused (Old_FD);
          pragma Assert (Open_FD_Count = Before_FDs);
@@ -310,7 +286,8 @@ procedure Structured_Server_Abort_Smoke is
          Address    : Sockets.Endpoint;
          Client     : Sockets.Socket_Type;
          Old_FD     : Flyology.IO.Descriptor;
-         Unexpected : Boolean := False with Atomic;
+         Unexpected : Boolean := False
+         with Atomic;
       begin
          Fault_Control.Reset;
          Test_Control.Reset;
@@ -324,14 +301,14 @@ procedure Structured_Server_Abort_Smoke is
          begin
             State.Gate.Enable;
             declare
-               task Runner with CPU => Caller_CPU is
+               task Runner
+                 with CPU => Caller_CPU is
                   pragma Task_Info (Caller_Model);
                end Runner;
 
                task body Runner is
                begin
-                  Structured.Serve
-                    (Item, Listener, State, Drain_Timeout => 0.1);
+                  Structured.Serve (Item, Listener, State, Drain_Timeout => 0.1);
                   Unexpected := True;
                exception
                   when others =>
@@ -347,10 +324,8 @@ procedure Structured_Server_Abort_Smoke is
                Sockets.Create_Socket (Client);
                Sockets.Connect (Client, Address, Timeout => 1.0);
                State.Gate.Await_Entered;
-               pragma Assert
-                 (Structured.Current (Item).Active_Handlers = 1);
-               pragma Assert
-                 (Structured.Current (Item).Accepted_Connections = 1);
+               pragma Assert (Structured.Current (Item).Active_Handlers = 1);
+               pragma Assert (Structured.Current (Item).Accepted_Connections = 1);
                abort Runner;
                State.Gate.Release;
             exception
@@ -367,9 +342,7 @@ procedure Structured_Server_Abort_Smoke is
          end;
 
          pragma Assert (not Sockets.Is_Open (Listener));
-         pragma Assert
-           (Fault_Control.Calls
-              (Fault_Control.Structured_Listener_Close) = 1);
+         pragma Assert (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) = 1);
          pragma Assert (FD_Is_Open (Interfaces.C.int (Old_FD)) = 0);
          Sockets.Close_Socket (Client);
          Assert_Descriptor_Reused (Old_FD);
@@ -393,7 +366,8 @@ procedure Structured_Server_Abort_Smoke is
          Before_FDs : constant Interfaces.C.int := Open_FD_Count;
          Listener   : Sockets.Socket_Type;
          Old_FD     : Flyology.IO.Descriptor;
-         Unexpected : Boolean := False with Atomic;
+         Unexpected : Boolean := False
+         with Atomic;
 
          protected Start_Control is
             procedure Start_Shutdown;
@@ -425,15 +399,15 @@ procedure Structured_Server_Abort_Smoke is
             Item  : aliased Structured.Server (Capacity => 2);
             State : aliased Context;
 
-            task Runner with CPU => Caller_CPU is
+            task Runner
+              with CPU => Caller_CPU is
                pragma Task_Info (Caller_Model);
             end Runner;
             task Stopper;
 
             task body Runner is
             begin
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.1);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.1);
                Unexpected := True;
             exception
                when others =>
@@ -468,9 +442,7 @@ procedure Structured_Server_Abort_Smoke is
          --  Item. Finalization must observe terminal state and not retry close.
          pragma Assert (not Unexpected);
          pragma Assert (not Sockets.Is_Open (Listener));
-         pragma Assert
-           (Fault_Control.Calls
-              (Fault_Control.Structured_Listener_Close) = 1);
+         pragma Assert (Fault_Control.Calls (Fault_Control.Structured_Listener_Close) = 1);
          pragma Assert (FD_Is_Open (Interfaces.C.int (Old_FD)) = 0);
          Assert_Descriptor_Reused (Old_FD);
          pragma Assert (Open_FD_Count = Before_FDs);
@@ -502,30 +474,33 @@ procedure Structured_Server_Abort_Smoke is
       Run_Abort_During_Close;
    end Run_Lane;
 
-   procedure Run_Lightweight_Lightweight is new Run_Lane
-     (Caller_Model  => Flyology.Lightweight_Task,
-      Caller_CPU    => 1,
-      Handler_Model => Flyology.Lightweight_Task,
-      Handler_CPU   => 1);
-   procedure Run_Lightweight_Native is new Run_Lane
-     (Caller_Model  => Flyology.Lightweight_Task,
-      Caller_CPU    => 1,
-      Handler_Model => Flyology.Native_Task,
-      Handler_CPU   => System.Multiprocessors.Not_A_Specific_CPU);
-   procedure Run_Native_Lightweight is new Run_Lane
-     (Caller_Model  => Flyology.Native_Task,
-      Caller_CPU    => System.Multiprocessors.Not_A_Specific_CPU,
-      Handler_Model => Flyology.Lightweight_Task,
-      Handler_CPU   => 1);
-   procedure Run_Native_Native is new Run_Lane
-     (Caller_Model  => Flyology.Native_Task,
-      Caller_CPU    => System.Multiprocessors.Not_A_Specific_CPU,
-      Handler_Model => Flyology.Native_Task,
-      Handler_CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Run_Lightweight_Lightweight is new
+     Run_Lane
+       (Caller_Model  => Flyology.Lightweight_Task,
+        Caller_CPU    => 1,
+        Handler_Model => Flyology.Lightweight_Task,
+        Handler_CPU   => 1);
+   procedure Run_Lightweight_Native is new
+     Run_Lane
+       (Caller_Model  => Flyology.Lightweight_Task,
+        Caller_CPU    => 1,
+        Handler_Model => Flyology.Native_Task,
+        Handler_CPU   => System.Multiprocessors.Not_A_Specific_CPU);
+   procedure Run_Native_Lightweight is new
+     Run_Lane
+       (Caller_Model  => Flyology.Native_Task,
+        Caller_CPU    => System.Multiprocessors.Not_A_Specific_CPU,
+        Handler_Model => Flyology.Lightweight_Task,
+        Handler_CPU   => 1);
+   procedure Run_Native_Native is new
+     Run_Lane
+       (Caller_Model  => Flyology.Native_Task,
+        Caller_CPU    => System.Multiprocessors.Not_A_Specific_CPU,
+        Handler_Model => Flyology.Native_Task,
+        Handler_CPU   => System.Multiprocessors.Not_A_Specific_CPU);
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "structured server abort test requires a fault-enabled runtime";
+      raise Program_Error with "structured server abort test requires a fault-enabled runtime";
    end if;
    Run_Lightweight_Lightweight;
    Run_Lightweight_Native;

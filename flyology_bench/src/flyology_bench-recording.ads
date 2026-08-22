@@ -7,6 +7,7 @@ with Interfaces;
 --  Records benchmark boundaries supplied by an application instead of
 --  invoking the measured operation itself. Recording is intended for servers,
 --  load tests, and other externally controlled workloads.
+
 package Flyology_Bench.Recording is
    --  Maximum supported registered identities in one recording session.
    subtype Benchmark_Capacity is Positive range 1 .. 256;
@@ -40,13 +41,13 @@ package Flyology_Bench.Recording is
    --  @field Bootstrap_Resamples Number of bootstrap distributions drawn for
    --  every analyzed metric.
    type Configuration is record
-      Metrics              : Metric_Set := Process_Resource_Metrics;
-      Scheduler_Probe      : Flyology_Scheduler_Probe := null;
-      Retention            : Retention_Policy := Reservoir;
-      Random_Seed          : Long_Long_Integer := 1;
+      Metrics                     : Metric_Set := Process_Resource_Metrics;
+      Scheduler_Probe             : Flyology_Scheduler_Probe := null;
+      Retention                   : Retention_Policy := Reservoir;
+      Random_Seed                 : Long_Long_Integer := 1;
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Confidence_Level_Percent : Confidence_Percentage := 95.0;
-      Bootstrap_Resamples  : Bootstrap_Resample_Count := 2_000;
+      Confidence_Level_Percent    : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples         : Bootstrap_Resample_Count := 2_000;
    end record;
 
    --  Default policy for externally recorded spans.
@@ -59,7 +60,9 @@ package Flyology_Bench.Recording is
    --  @field Retained_Samples Bounded raw sample capacity for each identity.
    type Recorder
      (Maximum_Benchmarks : Benchmark_Capacity;
-      Retained_Samples   : Retained_Capacity) is limited private;
+      Retained_Samples   : Retained_Capacity)
+   is
+     limited private;
 
    --  Stable, opaque identity registered before a session starts. It avoids
    --  string lookup and allocation in request paths.
@@ -98,19 +101,14 @@ package Flyology_Bench.Recording is
    --  @param Item Returned hot-path handle.
    --  @exception Registration_Closed Registration is already frozen.
    --  @exception Too_Many_Benchmarks Capacity has been reached.
-   procedure Register
-     (Object : in out Recorder;
-      Name   : String;
-      Item   : out Benchmark);
+   procedure Register (Object : in out Recorder; Name : String; Item : out Benchmark);
 
    --  Freeze registration and begin accepting spans.
    --  @param Object Recorder to start.
    --  @param Config Frozen recording and metric policy.
    --  @exception Recording_Already_Started The one-shot session already ran.
    --  @exception Invalid_Benchmark No benchmark identity was registered.
-   procedure Start
-     (Object : in out Recorder;
-      Config : Configuration := Default_Configuration);
+   procedure Start (Object : in out Recorder; Config : Configuration := Default_Configuration);
 
    --  Stop accepting new spans. Already active spans may still finish; their
    --  count remains visible until they do.
@@ -124,10 +122,7 @@ package Flyology_Bench.Recording is
    --  @exception Invalid_Benchmark Item does not belong to Object.
    --  @exception Recording_Not_Started Object is not running.
    --  @exception Span_Already_Active Value already marks an active span.
-   procedure Begin_Sample
-     (Object : in out Recorder;
-      Item   : Benchmark;
-      Value  : in out Span);
+   procedure Begin_Sample (Object : in out Recorder; Item : Benchmark; Value : in out Span);
 
    --  Finish a span and retain or aggregate its measurements. End probes run
    --  before bounded-store synchronization, keeping recorder storage work out
@@ -135,9 +130,7 @@ package Flyology_Bench.Recording is
    --  @param Value Active span to finish.
    --  @param Outcome Application result counted for this span.
    --  @exception Span_Already_Finished Value is not active.
-   procedure Finish
-     (Value   : in out Span;
-      Outcome : Sample_Outcome := Success);
+   procedure Finish (Value : in out Span; Outcome : Sample_Outcome := Success);
 
    --  Return a stable name for a registered benchmark.
    --  @param Item Registered identity.
@@ -152,10 +145,7 @@ package Flyology_Bench.Recording is
    --  @exception Invalid_Benchmark Item does not belong to Object.
    --  @exception Constraint_Error Retained data requests more than the bounded
    --  bootstrap analysis work.
-   procedure Snapshot
-     (Object : Recorder;
-      Item   : Benchmark;
-      Result : out Recorded_Measurement);
+   procedure Snapshot (Object : Recorder; Item : Benchmark; Result : out Recorded_Measurement);
 
    --  Start an ANSI dashboard on standard output. The display refreshes in
    --  place until Stop_Live_Terminal is called; it is not an event log.
@@ -164,9 +154,7 @@ package Flyology_Bench.Recording is
    --  @param ANSI Whether to emit color and cursor-control sequences.
    --  @exception Recording_Already_Started A dashboard is already active.
    procedure Start_Live_Terminal
-     (Object           : in out Recorder;
-      Refresh_Interval : Duration := 0.250;
-      ANSI             : Boolean := True);
+     (Object : in out Recorder; Refresh_Interval : Duration := 0.250; ANSI : Boolean := True);
 
    --  Stop the dashboard, wait for its task, and leave the cursor below the
    --  final display.
@@ -202,9 +190,7 @@ package Flyology_Bench.Recording is
    --  @param Result Recorded snapshot.
    --  @param Outcome Outcome to count.
    --  @return Completed spans with Outcome.
-   function Outcomes
-     (Result  : Recorded_Measurement;
-      Outcome : Sample_Outcome) return Natural;
+   function Outcomes (Result : Recorded_Measurement; Outcome : Sample_Outcome) return Natural;
    --  Elapsed wall time covered by the recording session snapshot.
    --  @param Result Recorded snapshot.
    --  @return Session wall time through Stop or Snapshot.
@@ -218,57 +204,43 @@ package Flyology_Bench.Recording is
    --  @param Result Recorded snapshot.
    --  @param Axis Requested metric axis.
    --  @return Summary over valid retained samples.
-   function Metric_Statistics
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Metric_Summary;
+   function Metric_Statistics (Result : Recorded_Measurement; Axis : Metric_Axis) return Metric_Summary;
    --  Return the confidence level used to analyze this snapshot.
    --  @param Result Recorded snapshot.
    --  @return Central bootstrap interval coverage in percent.
-   function Confidence_Level_Percent
-     (Result : Recorded_Measurement) return Confidence_Percentage;
+   function Confidence_Level_Percent (Result : Recorded_Measurement) return Confidence_Percentage;
    --  Return the bootstrap resample count used to analyze this snapshot.
    --  @param Result Recorded snapshot.
    --  @return Number of bootstrap distributions drawn per interval.
-   function Bootstrap_Resamples
-     (Result : Recorded_Measurement) return Bootstrap_Resample_Count;
+   function Bootstrap_Resamples (Result : Recorded_Measurement) return Bootstrap_Resample_Count;
    --  Return collection status for an axis. Metric_Collected means every
    --  retained span has a value; Metric_Partially_Collected means only a
    --  subset does.
    --  @param Result Recorded snapshot.
    --  @param Axis Metric axis.
    --  @return Collected, unavailable, or not-requested status.
-   function Metric_Status
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Metric_Availability;
+   function Metric_Status (Result : Recorded_Measurement; Axis : Metric_Axis) return Metric_Availability;
    --  Return attribution quality for an axis.
    --  @param Result Recorded snapshot.
    --  @param Axis Metric axis.
    --  @return Boundary and ownership quality for Axis.
-   function Attribution
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Metric_Attribution;
+   function Attribution (Result : Recorded_Measurement; Axis : Metric_Axis) return Metric_Attribution;
    --  Return valid retained value count for an axis.
    --  @param Result Recorded snapshot.
    --  @param Axis Metric axis.
    --  @return Valid retained values for Axis.
-   function Metric_Samples
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Natural;
+   function Metric_Samples (Result : Recorded_Measurement; Axis : Metric_Axis) return Natural;
    --  Return samples excluded because their native execution scope changed.
    --  @param Result Recorded snapshot.
    --  @param Axis Thread-scoped metric axis.
    --  @return Excluded scope-changing sample count.
-   function Scope_Changed_Samples
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Natural;
+   function Scope_Changed_Samples (Result : Recorded_Measurement; Axis : Metric_Axis) return Natural;
    --  Return retained samples without a valid value for an axis, including
    --  scope changes and probe failures.
    --  @param Result Recorded snapshot.
    --  @param Axis Metric axis.
    --  @return Retained samples lacking Axis.
-   function Unavailable_Metric_Samples
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis) return Natural;
+   function Unavailable_Metric_Samples (Result : Recorded_Measurement; Axis : Metric_Axis) return Natural;
    --  Return one retained metric value in Metric_Unit units.
    --  @param Result Recorded snapshot.
    --  @param Axis Requested metric axis.
@@ -276,9 +248,7 @@ package Flyology_Bench.Recording is
    --  @return Retained sample value.
    --  @exception Constraint_Error Axis is unavailable or Index is out of range.
    function Metric_Sample
-     (Result : Recorded_Measurement;
-      Axis   : Metric_Axis;
-      Index  : Positive) return Long_Float;
+     (Result : Recorded_Measurement; Axis : Metric_Axis; Index : Positive) return Long_Float;
 
    --  Return the monotonic observation number of one retained span. Reservoir
    --  storage does not imply observation order; use this value as its identity.
@@ -286,17 +256,13 @@ package Flyology_Bench.Recording is
    --  @param Index One-based retained row index.
    --  @return Observation number assigned when the span finished.
    --  @exception Constraint_Error Index is out of range.
-   function Observation_Id
-     (Result : Recorded_Measurement;
-      Index  : Positive) return Natural;
+   function Observation_Id (Result : Recorded_Measurement; Index : Positive) return Natural;
    --  Return the application outcome attached to one retained span.
    --  @param Result Recorded snapshot.
    --  @param Index One-based retained row index.
    --  @return Recorded outcome.
    --  @exception Constraint_Error Index is out of range.
-   function Outcome_At
-     (Result : Recorded_Measurement;
-      Index  : Positive) return Sample_Outcome;
+   function Outcome_At (Result : Recorded_Measurement; Index : Positive) return Sample_Outcome;
    --  Return collection status for one axis of one retained span.
    --  @param Result Recorded snapshot.
    --  @param Index One-based retained row index.
@@ -304,9 +270,7 @@ package Flyology_Bench.Recording is
    --  @return Per-span collection status.
    --  @exception Constraint_Error Index is out of range.
    function Sample_Metric_Status
-     (Result : Recorded_Measurement;
-      Index  : Positive;
-      Axis   : Metric_Axis) return Metric_Availability;
+     (Result : Recorded_Measurement; Index : Positive; Axis : Metric_Axis) return Metric_Availability;
    --  Return one axis value from one retained span without losing cross-axis
    --  alignment.
    --  @param Result Recorded snapshot.
@@ -315,9 +279,7 @@ package Flyology_Bench.Recording is
    --  @return Per-span value in Metric_Unit units.
    --  @exception Constraint_Error Index is out of range or Axis has no value.
    function Sample_Metric_Value
-     (Result : Recorded_Measurement;
-      Index  : Positive;
-      Axis   : Metric_Axis) return Long_Float;
+     (Result : Recorded_Measurement; Index : Positive; Axis : Metric_Axis) return Long_Float;
 
    --  Compare independently collected distributions. Unlike Compare, this
    --  does not assume adjacent or correlated sample pairs.
@@ -332,13 +294,13 @@ package Flyology_Bench.Recording is
    --  the retained distributions request more than the bounded bootstrap
    --  analysis work.
    procedure Compare_Independent
-     (Reference : Recorded_Measurement;
-      Contender : Recorded_Measurement;
-      Result    : out Recorded_Comparison;
+     (Reference                   : Recorded_Measurement;
+      Contender                   : Recorded_Measurement;
+      Result                      : out Recorded_Comparison;
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1;
-      Confidence_Level_Percent : Confidence_Percentage := 95.0;
-      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000);
+      Random_Seed                 : Long_Long_Integer := 1;
+      Confidence_Level_Percent    : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples         : Bootstrap_Resample_Count := 2_000);
 
    --  Return the reference identity.
    --  @param Result Independent comparison.
@@ -351,13 +313,11 @@ package Flyology_Bench.Recording is
    --  Return the confidence level used for this comparison.
    --  @param Result Independent comparison.
    --  @return Central bootstrap interval coverage in percent.
-   function Confidence_Level_Percent
-     (Result : Recorded_Comparison) return Confidence_Percentage;
+   function Confidence_Level_Percent (Result : Recorded_Comparison) return Confidence_Percentage;
    --  Return the bootstrap resample count used for this comparison.
    --  @param Result Independent comparison.
    --  @return Number of bootstrap distributions drawn per interval.
-   function Bootstrap_Resamples
-     (Result : Recorded_Comparison) return Bootstrap_Resample_Count;
+   function Bootstrap_Resamples (Result : Recorded_Comparison) return Bootstrap_Resample_Count;
    --  Return reference median divided by contender median.
    --  @param Result Independent comparison.
    --  @return Speedup, greater than one when the contender is faster.
@@ -367,68 +327,56 @@ package Flyology_Bench.Recording is
    --  @param Result Independent comparison.
    --  @return Lower configured-confidence endpoint.
    --  @exception Constraint_Error Wall comparison is unavailable.
-   function Speedup_Confidence_Low
-     (Result : Recorded_Comparison) return Long_Float;
+   function Speedup_Confidence_Low (Result : Recorded_Comparison) return Long_Float;
    --  Return the upper bootstrap speedup endpoint.
    --  @param Result Independent comparison.
    --  @return Upper configured-confidence endpoint.
    --  @exception Constraint_Error Wall comparison is unavailable.
-   function Speedup_Confidence_High
-     (Result : Recorded_Comparison) return Long_Float;
+   function Speedup_Confidence_High (Result : Recorded_Comparison) return Long_Float;
    --  Return contender median change relative to reference.
    --  @param Result Independent comparison.
    --  @return Percent change, negative when contender wall time is lower.
    --  @exception Constraint_Error Wall comparison is unavailable.
-   function Relative_Change_Percent
-     (Result : Recorded_Comparison) return Long_Float;
+   function Relative_Change_Percent (Result : Recorded_Comparison) return Long_Float;
    --  Return the lower relative-change endpoint.
    --  @param Result Independent comparison.
    --  @return Lower configured-confidence endpoint in percent.
    --  @exception Constraint_Error Wall comparison is unavailable.
-   function Relative_Change_Confidence_Low
-     (Result : Recorded_Comparison) return Long_Float;
+   function Relative_Change_Confidence_Low (Result : Recorded_Comparison) return Long_Float;
    --  Return the upper relative-change endpoint.
    --  @param Result Independent comparison.
    --  @return Upper configured-confidence endpoint in percent.
    --  @exception Constraint_Error Wall comparison is unavailable.
-   function Relative_Change_Confidence_High
-     (Result : Recorded_Comparison) return Long_Float;
+   function Relative_Change_Confidence_High (Result : Recorded_Comparison) return Long_Float;
    --  Return the practical independent-comparison verdict.
    --  @param Result Independent comparison.
    --  @return Faster, equivalent, or inconclusive verdict.
-   function Verdict
-     (Result : Recorded_Comparison) return Comparison_Verdict;
+   function Verdict (Result : Recorded_Comparison) return Comparison_Verdict;
    --  Report whether wall-derived speedup and relative-change values exist.
    --  @param Result Independent comparison.
    --  @return True when both sides supplied positive, complete wall samples.
-   function Wall_Comparison_Available
-     (Result : Recorded_Comparison) return Boolean;
+   function Wall_Comparison_Available (Result : Recorded_Comparison) return Boolean;
    --  Return the reference collection status retained by the comparison.
    --  @param Result Independent comparison.
    --  @param Axis Metric axis.
    --  @return Reference status.
    function Reference_Metric_Status
-     (Result : Recorded_Comparison;
-      Axis   : Metric_Axis) return Metric_Availability;
+     (Result : Recorded_Comparison; Axis : Metric_Axis) return Metric_Availability;
    --  Return the contender collection status retained by the comparison.
    --  @param Result Independent comparison.
    --  @param Axis Metric axis.
    --  @return Contender status.
    function Contender_Metric_Status
-     (Result : Recorded_Comparison;
-      Axis   : Metric_Axis) return Metric_Availability;
+     (Result : Recorded_Comparison; Axis : Metric_Axis) return Metric_Availability;
    --  Return one independently resampled metric comparison.
    --  @param Result Independent comparison.
    --  @param Axis Metric axis.
    --  @return Available or unavailable metric comparison.
-   function Compare_Metric
-     (Result : Recorded_Comparison;
-      Axis   : Metric_Axis) return Metric_Comparison_Result;
+   function Compare_Metric (Result : Recorded_Comparison; Axis : Metric_Axis) return Metric_Comparison_Result;
 
 private
    Maximum_Name_Length : constant := 96;
-   type Name_Buffer is array (Positive range 1 .. Maximum_Name_Length)
-     of Character;
+   type Name_Buffer is array (Positive range 1 .. Maximum_Name_Length) of Character;
    type Fixed_Name is record
       Length : Natural range 0 .. Maximum_Name_Length := 0;
       Data   : Name_Buffer := [others => ' '];
@@ -462,7 +410,8 @@ private
    end record;
    --  @exclude Internal abandoned-span guard.
    --  @param Object Internal span.
-   overriding procedure Finalize (Object : in out Span);
+   overriding
+   procedure Finalize (Object : in out Span);
 
    type Metric_Value_Array is array (Positive range <>) of Long_Float;
    type Metric_Value_Array_Access is access Metric_Value_Array;
@@ -481,8 +430,7 @@ private
       Outcome       : Sample_Outcome := Success;
       Values        : Sample_Value_Vector := [others => 0.0];
       Valid         : Sample_Validity_Vector := [others => False];
-      Status        : Sample_Status_Vector :=
-        [others => Metric_Not_Requested];
+      Status        : Sample_Status_Vector := [others => Metric_Not_Requested];
       Scope_Changed : Sample_Scope_Changed_Vector := [others => False];
       Overlapped    : Boolean := False;
    end record;
@@ -490,53 +438,52 @@ private
    type Recorded_Sample_Array_Access is access Recorded_Sample_Array;
 
    type Recorded_Measurement is new Ada.Finalization.Controlled with record
-      Label          : Fixed_Name;
-      Observed_Total : Natural := 0;
-      Retained_Total : Natural := 0;
-      Dropped_Total  : Natural := 0;
-      In_Flight_Total : Natural := 0;
-      Abandoned_Total : Natural := 0;
-      Outcome_Totals : Outcome_Array := [others => 0];
-      Elapsed_NS     : Interfaces.Unsigned_64 := 0;
-      Requested      : Metric_Set := [others => False];
-      Statuses       : Availability_Array := [others => Metric_Not_Requested];
-      Attributions   : Attribution_Array := [others => Unattributable];
-      Valid_Counts   : Natural_Axis_Array := [others => 0];
-      Invalid_Counts : Natural_Axis_Array := [others => 0];
-      Scope_Changed  : Natural_Axis_Array := [others => 0];
-      Values         : Metric_Value_Store := [others => null];
-      Samples        : Recorded_Sample_Array_Access := null;
-      Summaries      : Summary_Array := [others => (others => <>)];
-      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Label                    : Fixed_Name;
+      Observed_Total           : Natural := 0;
+      Retained_Total           : Natural := 0;
+      Dropped_Total            : Natural := 0;
+      In_Flight_Total          : Natural := 0;
+      Abandoned_Total          : Natural := 0;
+      Outcome_Totals           : Outcome_Array := [others => 0];
+      Elapsed_NS               : Interfaces.Unsigned_64 := 0;
+      Requested                : Metric_Set := [others => False];
+      Statuses                 : Availability_Array := [others => Metric_Not_Requested];
+      Attributions             : Attribution_Array := [others => Unattributable];
+      Valid_Counts             : Natural_Axis_Array := [others => 0];
+      Invalid_Counts           : Natural_Axis_Array := [others => 0];
+      Scope_Changed            : Natural_Axis_Array := [others => 0];
+      Values                   : Metric_Value_Store := [others => null];
+      Samples                  : Recorded_Sample_Array_Access := null;
+      Summaries                : Summary_Array := [others => (others => <>)];
+      Confidence_Level_Value   : Confidence_Percentage := 95.0;
       Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
    end record;
    --  @exclude Internal deep-copy hook.
    --  @param Object Internal result.
-   overriding procedure Adjust (Object : in out Recorded_Measurement);
+   overriding
+   procedure Adjust (Object : in out Recorded_Measurement);
    --  @exclude Internal deep-result cleanup hook.
    --  @param Object Internal result.
-   overriding procedure Finalize (Object : in out Recorded_Measurement);
+   overriding
+   procedure Finalize (Object : in out Recorded_Measurement);
 
-   type Metric_Comparison_Array is
-     array (Metric_Axis) of Metric_Comparison_Result;
+   type Metric_Comparison_Array is array (Metric_Axis) of Metric_Comparison_Result;
    type Recorded_Comparison is record
-      Reference_Label : Fixed_Name;
-      Contender_Label : Fixed_Name;
-      Speedup_Value   : Long_Float := 1.0;
-      Speedup_Low     : Long_Float := 1.0;
-      Speedup_High    : Long_Float := 1.0;
-      Change_Value    : Long_Float := 0.0;
-      Change_Low      : Long_Float := 0.0;
-      Change_High     : Long_Float := 0.0;
-      Verdict_Value   : Comparison_Verdict := Inconclusive;
-      Wall_Available  : Boolean := False;
-      Confidence_Level_Value : Confidence_Percentage := 95.0;
+      Reference_Label          : Fixed_Name;
+      Contender_Label          : Fixed_Name;
+      Speedup_Value            : Long_Float := 1.0;
+      Speedup_Low              : Long_Float := 1.0;
+      Speedup_High             : Long_Float := 1.0;
+      Change_Value             : Long_Float := 0.0;
+      Change_Low               : Long_Float := 0.0;
+      Change_High              : Long_Float := 0.0;
+      Verdict_Value            : Comparison_Verdict := Inconclusive;
+      Wall_Available           : Boolean := False;
+      Confidence_Level_Value   : Confidence_Percentage := 95.0;
       Bootstrap_Resample_Total : Bootstrap_Resample_Count := 2_000;
-      Reference_Statuses : Availability_Array :=
-        [others => Metric_Not_Requested];
-      Contender_Statuses : Availability_Array :=
-        [others => Metric_Not_Requested];
-      Metrics         : Metric_Comparison_Array := [others => (others => <>)];
+      Reference_Statuses       : Availability_Array := [others => Metric_Not_Requested];
+      Contender_Statuses       : Availability_Array := [others => Metric_Not_Requested];
+      Metrics                  : Metric_Comparison_Array := [others => (others => <>)];
    end record;
 
    type Recorder_Guard
@@ -548,14 +495,17 @@ private
    end record;
    --  @exclude Internal recorder allocation hook.
    --  @param Object Internal recorder guard.
-   overriding procedure Initialize (Object : in out Recorder_Guard);
+   overriding
+   procedure Initialize (Object : in out Recorder_Guard);
    --  @exclude Internal recorder cleanup hook.
    --  @param Object Internal recorder guard.
-   overriding procedure Finalize (Object : in out Recorder_Guard);
+   overriding
+   procedure Finalize (Object : in out Recorder_Guard);
 
    type Recorder
      (Maximum_Benchmarks : Benchmark_Capacity;
-      Retained_Samples   : Retained_Capacity) is limited record
+      Retained_Samples   : Retained_Capacity)
+   is limited record
       Guard : Recorder_Guard (Maximum_Benchmarks, Retained_Samples);
    end record;
 end Flyology_Bench.Recording;

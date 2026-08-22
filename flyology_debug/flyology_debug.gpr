@@ -9,8 +9,17 @@ project Flyology_Debug is
 
    package Compiler is
       for Default_Switches ("Ada") use
-        ("-O3", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa");
+        ("-O3", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa", "-gnatyM110");
       for Default_Switches ("C") use
         ("-O3", "-std=c11", "-Wall", "-Wextra", "-Werror");
    end Compiler;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
 end Flyology_Debug;

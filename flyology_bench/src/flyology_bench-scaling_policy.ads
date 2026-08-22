@@ -4,6 +4,7 @@
 with Flyology_Bench.Sweeps;
 
 --  Exact, proved classification used before floating-point model fitting.
+
 private package Flyology_Bench.Scaling_Policy
   with SPARK_Mode => On
 is
@@ -11,12 +12,9 @@ is
 
    --  Report whether the inclusive positive input range spans less than a
    --  factor of two. Division avoids overflow at the Exact_Value upper bound.
-   function Range_Is_Degenerate
-     (Minimum : Sweeps.Exact_Value;
-      Maximum : Sweeps.Exact_Value) return Boolean
-   with Pre  => Minimum <= Maximum,
-        Post =>
-          Range_Is_Degenerate'Result =
-            (Minimum > Sweeps.Exact_Value'Last / 2
-             or else Maximum < Minimum * 2);
+   function Range_Is_Degenerate (Minimum : Sweeps.Exact_Value; Maximum : Sweeps.Exact_Value) return Boolean
+   with
+     Pre  => Minimum <= Maximum,
+     Post =>
+       Range_Is_Degenerate'Result = (Minimum > Sweeps.Exact_Value'Last / 2 or else Maximum < Minimum * 2);
 end Flyology_Bench.Scaling_Policy;

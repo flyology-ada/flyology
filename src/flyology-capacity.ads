@@ -8,6 +8,7 @@ with Interfaces.C;
 --  while native tasks block through GNARL. Shutdown is terminal: it rejects
 --  new acquisitions, releases queued callers, and permits existing holders to
 --  drain.
+
 package Flyology.Capacity is
 
    --  Result of a nonblocking or timed acquisition.
@@ -15,8 +16,7 @@ package Flyology.Capacity is
    --  @enum Gate_Full A nonblocking attempt found no capacity
    --  @enum Gate_Closed Shutdown rejected the acquisition
    --  @enum Acquire_Timed_Out A timed attempt reached its deadline
-   type Acquire_Result is
-     (Permit_Acquired, Gate_Full, Gate_Closed, Acquire_Timed_Out);
+   type Acquire_Result is (Permit_Acquired, Gate_Full, Gate_Closed, Acquire_Timed_Out);
 
    --  Thread-safe bounded admission controller. The object must outlive every
    --  holder that has successfully acquired a permit. The optional
@@ -40,9 +40,7 @@ package Flyology.Capacity is
       --     transfer that obligation.
       --  @exception Program_Error Cleanup_Armed designates True on call, or a
       --     pending admission readiness signal cannot be consumed
-      entry Acquire
-        (Accepted      : out Boolean;
-         Cleanup_Armed : access Boolean := null);
+      entry Acquire (Accepted : out Boolean; Cleanup_Armed : access Boolean := null);
 
       --  Attempt to acquire without waiting.
       --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
@@ -53,9 +51,7 @@ package Flyology.Capacity is
       --     atomically transfer that obligation.
       --  @exception Program_Error Cleanup_Armed designates True on call, or a
       --     pending admission readiness signal cannot be consumed
-      procedure Try_Acquire
-        (Result        : out Acquire_Result;
-         Cleanup_Armed : access Boolean := null);
+      procedure Try_Acquire (Result : out Acquire_Result; Cleanup_Armed : access Boolean := null);
 
       --  Release one acquired permit. If an Acquire_Wait_Source has been
       --  borrowed, releasing the permit also wakes its waiters.
@@ -89,9 +85,7 @@ package Flyology.Capacity is
       --  @param FD Borrowed descriptor, or -1 after shutdown
       --  @param Already_Requested Whether shutdown already started
       --  @exception Program_Error Wake descriptor creation fails
-      procedure Wait_Source
-        (FD                : out Interfaces.C.int;
-         Already_Requested : out Boolean);
+      procedure Wait_Source (FD : out Interfaces.C.int; Already_Requested : out Boolean);
 
       --  Borrow a descriptor for composing nonblocking Try_Acquire with an
       --  interruptible wait. When Can_Acquire is False, FD becomes readable
@@ -101,14 +95,12 @@ package Flyology.Capacity is
       --  @param FD Borrowed readiness descriptor, or -1 when a retry is ready
       --  @param Can_Acquire Whether Try_Acquire can make progress immediately
       --  @exception Program_Error Wake descriptor creation fails
-      procedure Acquire_Wait_Source
-        (FD          : out Interfaces.C.int;
-         Can_Acquire : out Boolean);
+      procedure Acquire_Wait_Source (FD : out Interfaces.C.int; Can_Acquire : out Boolean);
    private
-      Active_Count : Natural := 0;  --  Currently held permits
-      Stopping     : Boolean := False;  --  Terminal shutdown state
-      Shutdown_Wake : Flyology.Wake_Sources.Source;  --  Terminal wake source
-      Acquire_Wake  : Flyology.Wake_Sources.Source;  --  Permit-state wake
+      Active_Count      : Natural := 0;  --  Currently held permits
+      Stopping          : Boolean := False;  --  Terminal shutdown state
+      Shutdown_Wake     : Flyology.Wake_Sources.Source;  --  Terminal wake source
+      Acquire_Wake      : Flyology.Wake_Sources.Source;  --  Permit-state wake
       Acquire_Signalled : Boolean := False;  --  Pending permit-state signal
    end Gate;
 

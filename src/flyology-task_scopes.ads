@@ -14,14 +14,16 @@ with System;
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Child operation implementation
+
 generic
    type Input_Type is private;
    type Result_Type is private;
-   with procedure Execute
-     (Input    : Input_Type;
-      Token    : access Flyology.Cancellation.Token;
-      Deadline : Ada.Real_Time.Time;
-      Result   : out Result_Type);
+   with
+     procedure Execute
+       (Input    : Input_Type;
+        Token    : access Flyology.Cancellation.Token;
+        Deadline : Ada.Real_Time.Time;
+        Result   : out Result_Type);
 package Flyology.Task_Scopes is
 
    --  Raised when a handle does not identify a spawned operation.
@@ -41,8 +43,8 @@ package Flyology.Task_Scopes is
    --  reported only after every worker has been joined and released.
    type Scope
      (Capacity : Positive;
-      Parent   : access Flyology.Cancellation.Token) is
-     limited new Ada.Finalization.Limited_Controlled with private;
+      Parent   : access Flyology.Cancellation.Token)
+   is limited new Ada.Finalization.Limited_Controlled with private;
 
    --  Install inherited cancellation and an absolute monotonic deadline before
    --  Spawn. Ada.Real_Time.Time_Last means no deadline. Children always
@@ -62,9 +64,7 @@ package Flyology.Task_Scopes is
    --  @exception Storage_Error Worker or cancellation-monitor allocation fails
    --  @exception Tasking_Error Worker or cancellation-monitor activation fails
    procedure Configure
-     (Item       : in out Scope;
-      Deadline   : Ada.Real_Time.Time;
-      Cancel_Siblings_On_Failure : Boolean := True);
+     (Item : in out Scope; Deadline : Ada.Real_Time.Time; Cancel_Siblings_On_Failure : Boolean := True);
 
    --  Submit one operation without exceeding Capacity. Input is copied before
    --  admission is committed; an exception from that copy propagates without
@@ -77,10 +77,7 @@ package Flyology.Task_Scopes is
    --  @param Handle Stable result handle
    --  @exception Program_Error Item is not configured or admission was closed
    --  @exception Constraint_Error Capacity operations were already accepted
-   procedure Spawn
-     (Item   : in out Scope;
-      Input  : Input_Type;
-      Handle : out Operation_Handle);
+   procedure Spawn (Item : in out Scope; Input : Input_Type; Handle : out Operation_Handle);
 
    --  Close admission and wait for every submitted operation and worker.
    --  Exceptions are retained per operation and re-raised by Result. A second
@@ -99,9 +96,7 @@ package Flyology.Task_Scopes is
    --  @exception Program_Error Join has not completed
    --  @exception Invalid_Handle Handle belongs to another scope or does not
    --     identify a submitted operation
-   function Succeeded
-     (Item   : Scope;
-      Handle : Operation_Handle) return Boolean;
+   function Succeeded (Item : Scope; Handle : Operation_Handle) return Boolean;
 
    --  Return an operation result or re-raise its captured exception with the
    --  original exception identity and retained message. Join must have
@@ -112,38 +107,29 @@ package Flyology.Task_Scopes is
    --  @exception Program_Error Join has not completed
    --  @exception Invalid_Handle Handle belongs to another scope or does not
    --     identify a submitted operation
-   function Result
-     (Item   : Scope;
-      Handle : Operation_Handle) return Result_Type;
+   function Result (Item : Scope; Handle : Operation_Handle) return Result_Type;
 
 private
    type Input_Array is array (Positive range <>) of Input_Type;
    type Result_Array is array (Positive range <>) of Result_Type;
    type Boolean_Array is array (Positive range <>) of Boolean;
-   type Exception_Id_Array is array (Positive range <>) of
-     Ada.Exceptions.Exception_Id;
-   type Exception_Message_Array is array (Positive range <>) of
-     Ada.Strings.Unbounded.Unbounded_String;
+   type Exception_Id_Array is array (Positive range <>) of Ada.Exceptions.Exception_Id;
+   type Exception_Message_Array is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
    type Cancellation_Access is access all Flyology.Cancellation.Token;
 
    protected type Shared_State (Capacity : Positive) is
       procedure Configure
-        (Token      : Cancellation_Access;
-         Deadline   : Ada.Real_Time.Time;
-         Cancel_On_Failure : Boolean);
+        (Token : Cancellation_Access; Deadline : Ada.Real_Time.Time; Cancel_On_Failure : Boolean);
       procedure Submit (Input : Input_Type; Index : out Positive);
-      entry Next
-        (Index : out Positive; Stop : out Boolean);
+      entry Next (Index : out Positive; Stop : out Boolean);
       procedure Operation_Context
-        (Index    : Positive;
-         Token    : out Cancellation_Access;
-         Deadline : out Ada.Real_Time.Time;
+        (Index             : Positive;
+         Token             : out Cancellation_Access;
+         Deadline          : out Ada.Real_Time.Time;
          Cancel_On_Failure : out Boolean);
-      procedure Operation_Input
-        (Index : Positive; Input : out Input_Type);
+      procedure Operation_Input (Index : Positive; Input : out Input_Type);
       procedure Complete (Index : Positive; Value : Result_Type);
-      procedure Fail
-        (Index : Positive; Occurrence : Ada.Exceptions.Exception_Occurrence);
+      procedure Fail (Index : Positive; Occurrence : Ada.Exceptions.Exception_Occurrence);
       procedure Close_Admission;
       entry Await_All;
       procedure Shutdown;
@@ -153,29 +139,26 @@ private
       function Submitted_Count return Natural;
       function Was_Successful (Index : Positive) return Boolean;
       function Result_Value (Index : Positive) return Result_Type;
-      function Failure_Id
-        (Index : Positive) return Ada.Exceptions.Exception_Id;
-      function Failure_Message
-        (Index : Positive) return Ada.Strings.Unbounded.Unbounded_String;
+      function Failure_Id (Index : Positive) return Ada.Exceptions.Exception_Id;
+      function Failure_Message (Index : Positive) return Ada.Strings.Unbounded.Unbounded_String;
    private
-      Inputs      : Input_Array (1 .. Capacity);
-      Results     : Result_Array (1 .. Capacity);
-      Successes   : Boolean_Array (1 .. Capacity) := (others => False);
-      Failure_Ids : Exception_Id_Array (1 .. Capacity) :=
-        (others => Ada.Exceptions.Null_Id);
-      Failure_Messages : Exception_Message_Array (1 .. Capacity);
-      Submitted   : Natural := 0;
-      Next_Index  : Natural := 1;
-      Completed   : Natural := 0;
-      Closed      : Boolean := False;
-      Stopping    : Boolean := False;
-      Configured  : Boolean := False;
-      Parent_Stop : Cancellation_Access;
-      End_Time    : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
+      Inputs                  : Input_Array (1 .. Capacity);
+      Results                 : Result_Array (1 .. Capacity);
+      Successes               : Boolean_Array (1 .. Capacity) := (others => False);
+      Failure_Ids             : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
+      Failure_Messages        : Exception_Message_Array (1 .. Capacity);
+      Submitted               : Natural := 0;
+      Next_Index              : Natural := 1;
+      Completed               : Natural := 0;
+      Closed                  : Boolean := False;
+      Stopping                : Boolean := False;
+      Configured              : Boolean := False;
+      Parent_Stop             : Cancellation_Access;
+      End_Time                : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
       Cancel_On_Failure_Value : Boolean := True;
-      Stopped_Workers : Natural := 0;
-      Expected_Workers : Natural := 0;
-      Expected_Workers_Set : Boolean := False;
+      Stopped_Workers         : Natural := 0;
+      Expected_Workers        : Natural := 0;
+      Expected_Workers_Set    : Boolean := False;
    end Shared_State;
 
    task type Worker is
@@ -195,33 +178,30 @@ private
       pragma Task_Info (Flyology.Lightweight_Task);
       --  Release is the scope-owned one-shot signal that ends the wait on
       --  Parent; Stop is the rendezvous that acknowledges it.
-      entry Start
-        (Parent  : Cancellation_Access;
-         Child   : Cancellation_Access;
-         Release : Cancellation_Access);
+      entry Start (Parent : Cancellation_Access; Child : Cancellation_Access; Release : Cancellation_Access);
       entry Stop;
    end Cancellation_Monitor;
    type Cancellation_Monitor_Access is access Cancellation_Monitor;
 
    type Scope
      (Capacity : Positive;
-      Parent   : access Flyology.Cancellation.Token) is
-     limited new Ada.Finalization.Limited_Controlled with record
-      State       : aliased Shared_State (Capacity);
-      Workers     : Worker_Array_Access;
-      Monitor     : Cancellation_Monitor_Access;
-      Local_Stop  : aliased Flyology.Cancellation.Token;
+      Parent   : access Flyology.Cancellation.Token)
+   is limited new Ada.Finalization.Limited_Controlled with record
+      State             : aliased Shared_State (Capacity);
+      Workers           : Worker_Array_Access;
+      Monitor           : Cancellation_Monitor_Access;
+      Local_Stop        : aliased Flyology.Cancellation.Token;
       --  One-shot release signal for the cancellation monitor. No operation
       --  ever borrows its wake descriptor, so requesting it cannot fail.
-      Monitor_Release : aliased Flyology.Cancellation.Token;
-      Token       : Cancellation_Access;
-      Is_Configured : Boolean := False;
-      Cleanup_Required : Boolean := False;
-      Is_Joined     : Boolean := False;
-      Monitor_Stopped : Boolean := False;
-      Created_Workers : Natural := 0;    --  Workers allocated and activated
+      Monitor_Release   : aliased Flyology.Cancellation.Token;
+      Token             : Cancellation_Access;
+      Is_Configured     : Boolean := False;
+      Cleanup_Required  : Boolean := False;
+      Is_Joined         : Boolean := False;
+      Monitor_Stopped   : Boolean := False;
+      Created_Workers   : Natural := 0;    --  Workers allocated and activated
       Activated_Workers : Natural := 0;  --  Workers that accepted Start
-      Identity : Interfaces.Unsigned_64 := 0;
+      Identity          : Interfaces.Unsigned_64 := 0;
    end record;
 
    type Operation_Handle is record
@@ -231,6 +211,7 @@ private
 
    --  @exclude
    --  @param Item Task scope being finalized
-   overriding procedure Finalize (Item : in out Scope);
+   overriding
+   procedure Finalize (Item : in out Scope);
 
 end Flyology.Task_Scopes;

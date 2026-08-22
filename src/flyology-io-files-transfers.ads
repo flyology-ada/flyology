@@ -3,6 +3,7 @@ with Flyology.IO.Sockets;
 with Interfaces.C;
 
 --  Transfers positional regular-file regions to connected stream sockets.
+
 package Flyology.IO.Files.Transfers is
 
    --  Nonnegative number of file bytes requested or transferred.
@@ -47,7 +48,8 @@ package Flyology.IO.Files.Transfers is
       Sent    : out Byte_Count;
       Timeout : Duration := Infinite;
       Token   : access Cancellation_Token := null)
-     with Pre => Flyology.Buffers.Has_Buffer (Scratch),
-          Post => Sent <= Count and then (if Count = 0 then Sent = 0);
+   with
+     Pre  => Flyology.Buffers.Has_Buffer (Scratch),
+     Post => Sent <= Count and then (if Count = 0 then Sent = 0);
 
 end Flyology.IO.Files.Transfers;

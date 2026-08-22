@@ -15,12 +15,9 @@ procedure Connection_Admission_Smoke is
    use type Interfaces.C.int;
 
    function Open_FD_Count return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
 
-   type Admission_Result is
-     (Pending, Accepted, Timed_Out, Cancelled, Closed, Failed);
+   type Admission_Result is (Pending, Accepted, Timed_Out, Cancelled, Closed, Failed);
 
    protected type Result_Box is
       procedure Set (Value : Admission_Result);
@@ -51,25 +48,15 @@ procedure Connection_Admission_Smoke is
          null;
    end Close_If_Open;
 
-   procedure Open_Listener
-     (Listener : in out Sockets.Socket_Type;
-      Address  : out Sockets.Endpoint)
-   is
+   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 8);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
 
-   procedure Await_Result
-     (Box      : in out Result_Box;
-      Expected : Admission_Result;
-      Label    : String)
-   is
+   procedure Await_Result (Box : in out Result_Box; Expected : Admission_Result; Label : String) is
       Actual : Admission_Result;
    begin
       select
@@ -79,31 +66,26 @@ procedure Connection_Admission_Smoke is
          raise Program_Error with Label & " did not finish";
       end select;
       if Actual /= Expected then
-         raise Program_Error with
-           Label & " returned " & Actual'Image & " instead of "
-           & Expected'Image;
+         raise Program_Error with Label & " returned " & Actual'Image & " instead of " & Expected'Image;
       end if;
    end Await_Result;
 
    type Wait_Trigger is (Deadline, Token_Request, Manager_Shutdown, Permit);
 
-   procedure Run_Full_Capacity
-     (Model   : Flyology.Execution_Model;
-      Trigger : Wait_Trigger)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Token   : aliased Connections.Cancellation_Token;
-      Held    : Connections.Connection;
+   procedure Run_Full_Capacity (Model : Flyology.Execution_Model; Trigger : Wait_Trigger) is
+      Manager                : aliased Connections.Server (Capacity => 1);
+      Token                  : aliased Connections.Cancellation_Token;
+      Held                   : Connections.Connection;
       Held_Socket, Held_Peer : Sockets.Socket_Type;
-      Listener, Client : Sockets.Socket_Type;
-      Listener_Address : Sockets.Endpoint;
-      Result : Result_Box;
-      Expected : constant Admission_Result :=
+      Listener, Client       : Sockets.Socket_Type;
+      Listener_Address       : Sockets.Endpoint;
+      Result                 : Result_Box;
+      Expected               : constant Admission_Result :=
         (case Trigger is
-            when Deadline         => Timed_Out,
-            when Token_Request    => Cancelled,
-            when Manager_Shutdown => Closed,
-            when Permit           => Accepted);
+           when Deadline         => Timed_Out,
+           when Token_Request    => Cancelled,
+           when Manager_Shutdown => Closed,
+           when Permit           => Accepted);
    begin
       Sockets.Create_Socket_Pair (Held_Socket, Held_Peer);
       Connections.Take (Manager, Held_Socket, Held);
@@ -147,26 +129,26 @@ procedure Connection_Admission_Smoke is
       begin
          Testing.Wait_Reached (Testing.Admission_Wait_Armed);
          if Manager.Active /= 1 then
-            raise Program_Error with
-              "full-capacity admission changed permit ownership";
+            raise Program_Error with "full-capacity admission changed permit ownership";
          end if;
 
          case Trigger is
-            when Deadline =>
+            when Deadline         =>
                Testing.Release (Testing.Admission_Wait_Armed);
-            when Token_Request =>
+
+            when Token_Request    =>
                Token.Request;
                Testing.Release (Testing.Admission_Wait_Armed);
+
             when Manager_Shutdown =>
                Manager.Request_Shutdown;
                Testing.Release (Testing.Admission_Wait_Armed);
-            when Permit =>
+
+            when Permit           =>
                Held.Close;
                Testing.Release (Testing.Admission_Wait_Armed);
          end case;
-         Await_Result
-           (Result, Expected,
-            "full-capacity " & Trigger'Image & "/" & Model'Image);
+         Await_Result (Result, Expected, "full-capacity " & Trigger'Image & "/" & Model'Image);
       exception
          when others =>
             Testing.Release (Testing.Admission_Wait_Armed);
@@ -179,8 +161,7 @@ procedure Connection_Admission_Smoke is
          Manager.Await_Drained;
       end if;
       if Manager.Active /= 0 then
-         raise Program_Error with
-           "full-capacity path leaked an admission permit";
+         raise Program_Error with "full-capacity path leaked an admission permit";
       end if;
       Close_If_Open (Client);
       Close_If_Open (Listener);
@@ -202,21 +183,18 @@ procedure Connection_Admission_Smoke is
          raise;
    end Run_Full_Capacity;
 
-   procedure Run_Acquired_Boundary
-     (Model   : Flyology.Execution_Model;
-      Trigger : Wait_Trigger)
-   is
-      Manager : aliased Connections.Server (Capacity => 1);
-      Token   : aliased Connections.Cancellation_Token;
-      Listener : Sockets.Socket_Type;
+   procedure Run_Acquired_Boundary (Model : Flyology.Execution_Model; Trigger : Wait_Trigger) is
+      Manager          : aliased Connections.Server (Capacity => 1);
+      Token            : aliased Connections.Cancellation_Token;
+      Listener         : Sockets.Socket_Type;
       Listener_Address : Sockets.Endpoint;
-      Result : Result_Box;
-      Expected : constant Admission_Result :=
+      Result           : Result_Box;
+      Expected         : constant Admission_Result :=
         (case Trigger is
-            when Deadline         => Timed_Out,
-            when Token_Request    => Cancelled,
-            when Manager_Shutdown => Cancelled,
-            when Permit           => Failed);
+           when Deadline         => Timed_Out,
+           when Token_Request    => Cancelled,
+           when Manager_Shutdown => Cancelled,
+           when Permit           => Failed);
    begin
       if Trigger = Permit then
          raise Program_Error with "invalid acquired-boundary trigger";
@@ -256,23 +234,23 @@ procedure Connection_Admission_Smoke is
       begin
          Testing.Wait_Reached (Testing.Admission_Acquired);
          if Manager.Active /= 1 then
-            raise Program_Error with
-              "acquired-boundary test did not own one permit";
+            raise Program_Error with "acquired-boundary test did not own one permit";
          end if;
          case Trigger is
-            when Deadline =>
+            when Deadline         =>
                delay 0.075;
-            when Token_Request =>
+
+            when Token_Request    =>
                Token.Request;
+
             when Manager_Shutdown =>
                Manager.Request_Shutdown;
-            when Permit =>
+
+            when Permit           =>
                null;
          end case;
          Testing.Release (Testing.Admission_Acquired);
-         Await_Result
-           (Result, Expected,
-            "acquired boundary " & Trigger'Image & "/" & Model'Image);
+         Await_Result (Result, Expected, "acquired boundary " & Trigger'Image & "/" & Model'Image);
       exception
          when others =>
             Testing.Release (Testing.Admission_Acquired);
@@ -284,8 +262,7 @@ procedure Connection_Admission_Smoke is
          Manager.Await_Drained;
       end if;
       if Manager.Active /= 0 then
-         raise Program_Error with
-           "acquired-boundary path leaked an admission permit";
+         raise Program_Error with "acquired-boundary path leaked an admission permit";
       end if;
       Close_If_Open (Listener);
       Testing.Reset_Barriers;
@@ -310,28 +287,23 @@ procedure Connection_Admission_Smoke is
    type Abort_Boundary is (Permit_Boundary, Adopt_Boundary);
 
    procedure Run_Abort_Boundary
-     (Model    : Flyology.Execution_Model;
-      Path     : Abort_Path;
-      Boundary : Abort_Boundary;
-      Shutdown : Boolean)
+     (Model : Flyology.Execution_Model; Path : Abort_Path; Boundary : Abort_Boundary; Shutdown : Boolean)
    is
       Before : constant Interfaces.C.int := Open_FD_Count;
    begin
       declare
-         Manager : aliased Connections.Server (Capacity => 1);
-         Listener, Client : Sockets.Socket_Type;
-         Listener_Address : Sockets.Endpoint;
+         Manager           : aliased Connections.Server (Capacity => 1);
+         Listener, Client  : Sockets.Socket_Type;
+         Listener_Address  : Sockets.Endpoint;
          Taken, Taken_Peer : Sockets.Socket_Type;
-         Point : constant Testing.Barrier_Point :=
+         Point             : constant Testing.Barrier_Point :=
            (case Path is
-               when Accept_Path =>
-                 (if Boundary = Permit_Boundary
-                  then Testing.Admission_Acquired
-                  else Testing.Accept_Adopted),
-               when Take_Path =>
-                 (if Boundary = Permit_Boundary
-                  then Testing.Take_Admission_Acquired
-                  else Testing.Take_Adopted));
+              when Accept_Path =>
+                (if Boundary = Permit_Boundary then Testing.Admission_Acquired else Testing.Accept_Adopted),
+              when Take_Path   =>
+                (if Boundary = Permit_Boundary
+                 then Testing.Take_Admission_Acquired
+                 else Testing.Take_Adopted));
       begin
          if Path = Accept_Path then
             Open_Listener (Listener, Listener_Address);
@@ -355,8 +327,7 @@ procedure Connection_Admission_Smoke is
                Peer : Sockets.Endpoint;
             begin
                if Path = Accept_Path then
-                  Connections.Accept_Connection
-                    (Manager, Listener, Item, Peer, Token => null);
+                  Connections.Accept_Connection (Manager, Listener, Item, Peer, Token => null);
                else
                   Connections.Take (Manager, Taken, Item);
                end if;
@@ -364,8 +335,7 @@ procedure Connection_Admission_Smoke is
          begin
             Testing.Wait_Reached (Point);
             if Manager.Active /= 1 then
-               raise Program_Error with
-                 "abort seam did not hold exactly one permit";
+               raise Program_Error with "abort seam did not hold exactly one permit";
             end if;
             if Shutdown then
                Manager.Request_Shutdown;
@@ -391,8 +361,7 @@ procedure Connection_Admission_Smoke is
             begin
                Manager.Try_Acquire (Result);
                if Result /= Flyology.Capacity.Permit_Acquired then
-                  raise Program_Error with
-                    "abort seam did not restore admission capacity";
+                  raise Program_Error with "abort seam did not restore admission capacity";
                end if;
                Manager.Release;
             end;
@@ -413,9 +382,8 @@ procedure Connection_Admission_Smoke is
             raise;
       end;
       if Open_FD_Count /= Before then
-         raise Program_Error with
-           "abort seam leaked a descriptor on " & Path'Image & "/"
-           & Boundary'Image & "/" & Model'Image;
+         raise Program_Error
+           with "abort seam leaked a descriptor on " & Path'Image & "/" & Boundary'Image & "/" & Model'Image;
       end if;
    end Run_Abort_Boundary;
 
@@ -431,11 +399,10 @@ procedure Connection_Admission_Smoke is
 
    procedure Run_Raw_Accept_Abort (Model : Flyology.Execution_Model) is
       Before : constant Interfaces.C.int := Open_FD_Count;
-      Point  : constant Testing.Barrier_Point :=
-        Testing.Raw_Accept_Returned;
+      Point  : constant Testing.Barrier_Point := Testing.Raw_Accept_Returned;
    begin
       declare
-         Manager : aliased Connections.Server (Capacity => 1);
+         Manager          : aliased Connections.Server (Capacity => 1);
          Listener, Client : Sockets.Socket_Type;
          Listener_Address : Sockets.Endpoint;
       begin
@@ -453,14 +420,12 @@ procedure Connection_Admission_Smoke is
                Item : Connections.Connection;
                Peer : Sockets.Endpoint;
             begin
-               Connections.Accept_Connection
-                 (Manager, Listener, Item, Peer, Token => null);
+               Connections.Accept_Connection (Manager, Listener, Item, Peer, Token => null);
             end Worker;
          begin
             Testing.Wait_Reached (Point);
             if Manager.Active /= 1 then
-               raise Program_Error with
-                 "raw accept boundary did not hold one permit";
+               raise Program_Error with "raw accept boundary did not hold one permit";
             end if;
             abort Worker;
             Testing.Release (Point);
@@ -472,8 +437,7 @@ procedure Connection_Admission_Smoke is
          end;
 
          if Manager.Active /= 0 then
-            raise Program_Error with
-              "raw accept boundary leaked an admission permit";
+            raise Program_Error with "raw accept boundary leaked an admission permit";
          end if;
          declare
             Result : Flyology.Capacity.Acquire_Result;
@@ -493,18 +457,16 @@ procedure Connection_Admission_Smoke is
             raise;
       end;
       if Open_FD_Count /= Before then
-         raise Program_Error with
-           "raw accept boundary leaked a descriptor in " & Model'Image;
+         raise Program_Error with "raw accept boundary leaked a descriptor in " & Model'Image;
       end if;
    end Run_Raw_Accept_Abort;
 
    procedure Run_Release_Wake_Failure (Model : Flyology.Execution_Model) is
       Before : constant Interfaces.C.int := Open_FD_Count;
-      Point  : constant Testing.Barrier_Point :=
-        Testing.Accept_Socket_Owned;
+      Point  : constant Testing.Barrier_Point := Testing.Accept_Socket_Owned;
    begin
       declare
-         Manager : aliased Connections.Server (Capacity => 1);
+         Manager          : aliased Connections.Server (Capacity => 1);
          Listener, Client : Sockets.Socket_Type;
          Listener_Address : Sockets.Endpoint;
       begin
@@ -522,8 +484,7 @@ procedure Connection_Admission_Smoke is
                Item : Connections.Connection;
                Peer : Sockets.Endpoint;
             begin
-               Connections.Accept_Connection
-                 (Manager, Listener, Item, Peer, Token => null);
+               Connections.Accept_Connection (Manager, Listener, Item, Peer, Token => null);
             end Worker;
          begin
             Testing.Wait_Reached (Point);
@@ -545,8 +506,7 @@ procedure Connection_Admission_Smoke is
          end;
 
          if Manager.Active /= 0 then
-            raise Program_Error with
-              "release-wake failure leaked an admission permit";
+            raise Program_Error with "release-wake failure leaked an admission permit";
          end if;
          declare
             Result : Flyology.Capacity.Acquire_Result;
@@ -566,9 +526,7 @@ procedure Connection_Admission_Smoke is
             raise;
       end;
       if Open_FD_Count /= Before then
-         raise Program_Error with
-           "release-wake failure skipped accepted socket close in "
-           & Model'Image;
+         raise Program_Error with "release-wake failure skipped accepted socket close in " & Model'Image;
       end if;
    end Run_Release_Wake_Failure;
 

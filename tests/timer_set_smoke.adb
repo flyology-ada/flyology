@@ -32,7 +32,8 @@ procedure Timer_Set_Smoke is
          null;
       end Await;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Results;
 
    procedure Exercise is
@@ -56,16 +57,13 @@ procedure Timer_Set_Smoke is
       Timers.Sleep_For (0.060);
       Timers.Wait_Next (Small, Small_Batch);
       if Small_Batch.Count /= 2
-        or else
-          not ((Small_Batch.Ids (1) = 2 and Small_Batch.Ids (2) = 3)
-               or else
-                 (Small_Batch.Ids (1) = 3 and Small_Batch.Ids (2) = 2))
+        or else not ((Small_Batch.Ids (1) = 2 and Small_Batch.Ids (2) = 3)
+                     or else (Small_Batch.Ids (1) = 3 and Small_Batch.Ids (2) = 2))
         or else Timers.Is_Armed (Small, 2)
         or else Timers.Is_Armed (Small, 3)
         or else not Timers.Is_Armed (Small, 4)
       then
-         raise Program_Error with
-           "processing-time timer activations were lost or repeated";
+         raise Program_Error with "processing-time timer activations were lost or repeated";
       end if;
 
       --  Arm replaces an existing deadline and Cancel is idempotent.
@@ -74,27 +72,24 @@ procedure Timer_Set_Smoke is
       Timers.Cancel (Small, 4);
       Timers.Cancel (Small, 4);
       Timers.Wait_Next (Small, Small_Batch);
-      if Small_Batch.Count /= 1
-        or else Small_Batch.Ids (1) /= 5
-        or else Timers.Armed_Count (Small) /= 0
-      then
+      if Small_Batch.Count /= 1 or else Small_Batch.Ids (1) /= 5 or else Timers.Armed_Count (Small) /= 0 then
          raise Program_Error with "reschedule or cancellation state failed";
       end if;
 
       --  A bounded wait leaves later timers armed, while a due timer wins over
       --  a simultaneous zero-time poll and is still delivered exactly once.
       Timers.Arm (Small, 6, RT.Time_Last);
-      Timers.Wait_Next
-        (Small, Small_Batch, Timeout => 0.010, Outcome => Outcome);
-      if Outcome /= Timers.Wait_Timed_Out or else Small_Batch.Count /= 0
+      Timers.Wait_Next (Small, Small_Batch, Timeout => 0.010, Outcome => Outcome);
+      if Outcome /= Timers.Wait_Timed_Out
+        or else Small_Batch.Count /= 0
         or else not Timers.Is_Armed (Small, 6)
       then
          raise Program_Error with "bounded timer wait did not time out cleanly";
       end if;
       Timers.Arm (Small, 6, RT.Clock - RT.Milliseconds (1));
-      Timers.Wait_Next
-        (Small, Small_Batch, Timeout => 0.0, Outcome => Outcome);
-      if Outcome /= Timers.Timers_Activated or else Small_Batch.Count /= 1
+      Timers.Wait_Next (Small, Small_Batch, Timeout => 0.0, Outcome => Outcome);
+      if Outcome /= Timers.Timers_Activated
+        or else Small_Batch.Count /= 1
         or else Small_Batch.Ids (1) /= 6
         or else Timers.Is_Armed (Small, 6)
       then
@@ -107,15 +102,12 @@ procedure Timer_Set_Smoke is
          Started   : constant RT.Time := RT.Clock;
       begin
          for Id in Deadlines'Range loop
-            Deadlines (Id) :=
-              Started + RT.Milliseconds ((Id * 7) mod 13 + 1);
+            Deadlines (Id) := Started + RT.Milliseconds ((Id * 7) mod 13 + 1);
          end loop;
          Timers.Replace (Small, Deadlines);
          Timers.Sleep_Until (Started + RT.Milliseconds (20));
          Timers.Wait_Next (Small, Small_Batch);
-         if Small_Batch.Count /= Deadlines'Length
-           or else Timers.Armed_Count (Small) /= 0
-         then
+         if Small_Batch.Count /= Deadlines'Length or else Timers.Armed_Count (Small) /= 0 then
             raise Program_Error with "replacement batch omitted a timer";
          end if;
       end;
@@ -131,8 +123,7 @@ procedure Timer_Set_Smoke is
          Started   : constant RT.Time := RT.Clock;
       begin
          for Id in Deadlines'Range loop
-            Deadlines (Id) :=
-              Started + RT.Milliseconds ((Id * 17) mod 31 + 1);
+            Deadlines (Id) := Started + RT.Milliseconds ((Id * 17) mod 31 + 1);
          end loop;
          Timers.Replace (Many, Deadlines);
          --  Re-arming an existing id remains valid when every slot is full.
@@ -170,8 +161,10 @@ procedure Timer_Set_Smoke is
       when Error : others =>
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
-            "timer set " & Flyology.Execution_Model'Image (Model)
-            & " failed: " & Ada.Exceptions.Exception_Information (Error));
+            "timer set "
+            & Flyology.Execution_Model'Image (Model)
+            & " failed: "
+            & Ada.Exceptions.Exception_Information (Error));
          Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
          Results.Finish (False);
    end Worker;

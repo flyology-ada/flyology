@@ -13,8 +13,7 @@ procedure Loop_Pool_Smoke is
 
    Worker_Count : constant := 6;
    Pool_Size    : constant := 3;
-   type Group_Counts is
-     array (Groups.Group_Id range 0 .. Pool_Size - 1) of Natural;
+   type Group_Counts is array (Groups.Group_Id range 0 .. Pool_Size - 1) of Natural;
 
    protected Results is
       procedure Report_Native (Passed : Boolean);
@@ -73,7 +72,8 @@ procedure Loop_Pool_Smoke is
          end loop;
       end Wait_All;
 
-      function Passed return Boolean is (Native_OK and All_OK);
+      function Passed return Boolean
+      is (Native_OK and All_OK);
    end Results;
 
    task type Native_Worker with CPU => 1 is
@@ -94,8 +94,7 @@ procedure Loop_Pool_Smoke is
          when Groups.Group_Error =>
             Current_Rejected := True;
       end;
-      Results.Report_Native
-        (not Flyology.IO.Is_Lightweight_Task and then Current_Rejected);
+      Results.Report_Native (not Flyology.IO.Is_Lightweight_Task and then Current_Rejected);
    exception
       when others =>
          Results.Report_Native (False);
@@ -116,9 +115,7 @@ procedure Loop_Pool_Smoke is
    --  Ada reserves CPU value 0 for Not_A_Specific_CPU, so an explicit
    --  CPU => 0 aspect names no group and must take an automatic placement
    --  ticket rather than selecting the first shared group.
-   task type Reserved_CPU_Worker
-     with CPU => System.Multiprocessors.Not_A_Specific_CPU
-   is
+   task type Reserved_CPU_Worker with CPU => System.Multiprocessors.Not_A_Specific_CPU is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Reserved_CPU_Worker;
 
@@ -184,9 +181,7 @@ procedure Loop_Pool_Smoke is
 
       Dedicated := Groups.Create_Dedicated;
       Groups.Migrate (Dedicated);
-      OK := OK
-        and Groups.Is_Dedicated (Groups.Current)
-        and not Groups.In_Configured_Pool (Groups.Current);
+      OK := OK and Groups.Is_Dedicated (Groups.Current) and not Groups.In_Configured_Pool (Groups.Current);
       Groups.Migrate (Home);
       OK := OK and Groups.Current = Home;
       Results.Report_Pin (OK);

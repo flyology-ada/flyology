@@ -12,7 +12,8 @@ package body Flyology.Supervision.Adapters is
    is
       Item : Service := Create (Context'Access);
 
-      task Service_Owner with CPU => Generation_CPU is
+      task Service_Owner
+        with CPU => Generation_CPU is
          pragma Task_Info (Generation_Model);
       end Service_Owner;
 
@@ -24,9 +25,9 @@ package body Flyology.Supervision.Adapters is
       Stop_Forwarded  : Boolean := False;
       Ready_Published : Boolean := False;
       Abort_Forwarded : Boolean := False;
-      Observation : Flyology.Task_Results.Task_Observation;
-      Reported : Boolean;
-      Summary  : Termination_Summary;
+      Observation     : Flyology.Task_Results.Task_Observation;
+      Reported        : Boolean;
+      Summary         : Termination_Summary;
 
       procedure Forward_Stop is
       begin
@@ -37,8 +38,7 @@ package body Flyology.Supervision.Adapters is
       end Forward_Stop;
    begin
       loop
-         Observation := Flyology.Task_Results.Wait
-           (Service_Owner'Identity, Timeout => Poll_Interval);
+         Observation := Flyology.Task_Results.Wait (Service_Owner'Identity, Timeout => Poll_Interval);
          exit when Observation.Status = Flyology.Task_Results.Terminal;
 
          if not Ready_Published and then Ready (Item) then
@@ -56,8 +56,7 @@ package body Flyology.Supervision.Adapters is
 
       Read_Termination (Control, Reported, Summary);
       if not Reported then
-         Summary := From_Task_Result
-           (Control, Service_Owner'Identity, Observation.Result);
+         Summary := From_Task_Result (Control, Service_Owner'Identity, Observation.Result);
       end if;
       if Summary.Task_Id = Ada.Task_Identification.Null_Task_Id then
          Summary.Task_Id := Service_Owner'Identity;
@@ -78,13 +77,9 @@ package body Flyology.Supervision.Adapters is
    end Run;
 
 begin
-   if Generation_Model not in
-     Flyology.Lightweight_Task | Flyology.Native_Task
-   then
-      raise Program_Error with
-        "supervision adapter requires a concrete execution model";
+   if Generation_Model not in Flyology.Lightweight_Task | Flyology.Native_Task then
+      raise Program_Error with "supervision adapter requires a concrete execution model";
    elsif Poll_Interval <= 0.0 then
-      raise Program_Error with
-        "supervision adapter poll interval must be positive";
+      raise Program_Error with "supervision adapter poll interval must be positive";
    end if;
 end Flyology.Supervision.Adapters;

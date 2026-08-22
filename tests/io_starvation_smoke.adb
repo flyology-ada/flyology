@@ -43,13 +43,14 @@ procedure IO_Starvation_Smoke is
          null;
       end Wait;
 
-      function Stop_Spinner return Boolean is (Reader_Done);
-      function Passed return Boolean is (Reader_OK and Writer_OK);
+      function Stop_Spinner return Boolean
+      is (Reader_Done);
+      function Passed return Boolean
+      is (Reader_OK and Writer_OK);
    end Results;
 
 begin
-   Flyology.IO.Sockets.Create_Socket_Pair
-     (Reader_Socket, Writer_Socket);
+   Flyology.IO.Sockets.Create_Socket_Pair (Reader_Socket, Writer_Socket);
 
    declare
       task Spinner is
@@ -75,11 +76,9 @@ begin
          Started  : constant Time := Clock;
          Elapsed  : Duration;
       begin
-         Flyology.IO.Sockets.Receive_Exactly
-           (Reader_Socket, Incoming, Timeout => 1.0);
+         Flyology.IO.Sockets.Receive_Exactly (Reader_Socket, Incoming, Timeout => 1.0);
          Elapsed := To_Duration (Clock - Started);
-         Results.Reader_Finished
-           (Incoming = Payload and then Elapsed < 0.5);
+         Results.Reader_Finished (Incoming = Payload and then Elapsed < 0.5);
       exception
          when others =>
             Results.Reader_Finished (False);
@@ -88,8 +87,7 @@ begin
       task body Writer is
       begin
          Flyology.IO.Timers.Sleep_For (0.050);
-         Flyology.IO.Sockets.Send_All
-           (Writer_Socket, Payload, Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Writer_Socket, Payload, Timeout => 1.0);
          Results.Writer_Finished (True);
       exception
          when others =>
@@ -103,7 +101,6 @@ begin
    Flyology.IO.Sockets.Close_Socket (Writer_Socket);
 
    if not Results.Passed then
-      raise Program_Error with
-        "descriptor readiness was starved by a yielding ready task";
+      raise Program_Error with "descriptor readiness was starved by a yielding ready task";
    end if;
 end IO_Starvation_Smoke;

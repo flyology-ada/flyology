@@ -67,7 +67,8 @@ procedure IO_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (Event_OK and Native_OK);
+      function Passed return Boolean
+      is (Event_OK and Native_OK);
    end Results;
 
    protected body Duplex_Results is
@@ -88,7 +89,8 @@ procedure IO_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (Reader_OK and Writer_OK);
+      function Passed return Boolean
+      is (Reader_OK and Writer_OK);
    end Duplex_Results;
 
    protected body Fanout_Results is
@@ -113,7 +115,8 @@ procedure IO_Smoke is
          null;
       end Wait_Until_Finished;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Fanout_Results;
 
 begin
@@ -131,8 +134,7 @@ begin
       pragma Assert (not Flyology.IO.Sockets.Is_Open (Alias));
    end;
 
-   Flyology.IO.Sockets.Create_Socket_Pair
-     (Event_Socket, Native_Socket);
+   Flyology.IO.Sockets.Create_Socket_Pair (Event_Socket, Native_Socket);
    declare
       Receiver : Flyology.IO.Sockets.Socket_Type;
       Sender   : Flyology.IO.Sockets.Socket_Type;
@@ -141,8 +143,7 @@ begin
       Last     : Stream_Element_Offset;
       From     : Flyology.IO.Sockets.Endpoint;
    begin
-      Flyology.IO.Sockets.Create_Socket_Pair
-        (Receiver, Sender, Flyology.IO.Sockets.Socket_Datagram);
+      Flyology.IO.Sockets.Create_Socket_Pair (Receiver, Sender, Flyology.IO.Sockets.Socket_Datagram);
       Flyology.IO.Sockets.Send_Socket (Sender, Payload, Last);
       pragma Assert (Last = Payload'Last);
       Flyology.IO.Sockets.Receive_Socket (Receiver, Incoming, Last, From);
@@ -154,31 +155,25 @@ begin
    end;
    declare
       Released : Flyology.IO.Descriptor;
-      Original : constant Flyology.IO.Descriptor :=
-        Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
+      Original : constant Flyology.IO.Descriptor := Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
    begin
       Flyology.IO.Sockets.Release (Event_Socket, Released);
       pragma Assert (not Flyology.IO.Sockets.Is_Open (Event_Socket));
       pragma Assert (Released = Original);
       Flyology.IO.Sockets.Adopt (Released, Event_Socket);
       pragma Assert (Released = Flyology.IO.Invalid_Descriptor);
-      pragma Assert
-        (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
+      pragma Assert (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
    end;
    declare
       GNAT_Socket : GNAT.Sockets.Socket_Type := GNAT.Sockets.No_Socket;
-      Original    : constant Flyology.IO.Descriptor :=
-        Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
+      Original    : constant Flyology.IO.Descriptor := Flyology.IO.Sockets.Native_Descriptor (Event_Socket);
    begin
-      Flyology.IO.Sockets.GNAT_Adapters.Release
-        (Event_Socket, GNAT_Socket);
+      Flyology.IO.Sockets.GNAT_Adapters.Release (Event_Socket, GNAT_Socket);
       pragma Assert (not Flyology.IO.Sockets.Is_Open (Event_Socket));
       pragma Assert (GNAT.Sockets.To_C (GNAT_Socket) = Integer (Original));
-      Flyology.IO.Sockets.GNAT_Adapters.Adopt
-        (GNAT_Socket, Event_Socket);
+      Flyology.IO.Sockets.GNAT_Adapters.Adopt (GNAT_Socket, Event_Socket);
       pragma Assert (GNAT.Sockets.To_C (GNAT_Socket) < 0);
-      pragma Assert
-        (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
+      pragma Assert (Flyology.IO.Sockets.Native_Descriptor (Event_Socket) = Original);
    end;
 
    declare
@@ -193,33 +188,27 @@ begin
       task body Lightweight is
          Incoming : Stream_Element_Array (Native_To_Event'Range);
       begin
-         Flyology.IO.Sockets.Receive_Exactly
-           (Event_Socket, Incoming, Timeout => 1.0);
-         Flyology.IO.Sockets.Send_All
-           (Event_Socket, Event_To_Native, Timeout => 1.0);
+         Flyology.IO.Sockets.Receive_Exactly (Event_Socket, Incoming, Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Event_Socket, Event_To_Native, Timeout => 1.0);
          Results.Event_Passed (Incoming = Native_To_Event);
       end Lightweight;
 
       task body Native is
-         Incoming : Stream_Element_Array (Event_To_Native'Range);
-         Probe    : Stream_Element_Array (1 .. 1);
-         Last     : Stream_Element_Offset;
+         Incoming  : Stream_Element_Array (Event_To_Native'Range);
+         Probe     : Stream_Element_Array (1 .. 1);
+         Last      : Stream_Element_Offset;
          Timed_Out : Boolean := False;
       begin
          Flyology.IO.Timers.Sleep_For (0.020);
-         Flyology.IO.Sockets.Send_All
-           (Native_Socket, Native_To_Event, Timeout => 1.0);
-         Flyology.IO.Sockets.Receive_Exactly
-           (Native_Socket, Incoming, Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Native_Socket, Native_To_Event, Timeout => 1.0);
+         Flyology.IO.Sockets.Receive_Exactly (Native_Socket, Incoming, Timeout => 1.0);
          begin
-            Flyology.IO.Sockets.Receive
-              (Native_Socket, Probe, Last, Timeout => 0.010);
+            Flyology.IO.Sockets.Receive (Native_Socket, Probe, Last, Timeout => 0.010);
          exception
             when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
          end;
-         Results.Native_Passed
-           (Incoming = Event_To_Native and then Timed_Out);
+         Results.Native_Passed (Incoming = Event_To_Native and then Timed_Out);
       end Native;
    begin
       Results.Wait;
@@ -241,12 +230,9 @@ begin
          Incoming : Stream_Element_Array (1 .. 1);
       begin
          if Flyology.IO.Wait
-           (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
-            Flyology.IO.For_Read,
-            Timeout => 1.0)
+              (Flyology.IO.Sockets.Native_Descriptor (Event_Socket), Flyology.IO.For_Read, Timeout => 1.0)
          then
-            Flyology.IO.Sockets.Receive_Exactly
-              (Event_Socket, Incoming, Timeout => 1.0);
+            Flyology.IO.Sockets.Receive_Exactly (Event_Socket, Incoming, Timeout => 1.0);
             Duplex_Results.Reader_Passed (Incoming (1) = 42);
          else
             Duplex_Results.Reader_Passed (False);
@@ -257,16 +243,13 @@ begin
       begin
          Duplex_Results.Writer_Passed
            (Flyology.IO.Wait
-              (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
-               Flyology.IO.For_Write,
-               Timeout => 1.0));
+              (Flyology.IO.Sockets.Native_Descriptor (Event_Socket), Flyology.IO.For_Write, Timeout => 1.0));
       end Write_Waiter;
 
       task body Native_Sender is
       begin
          Flyology.IO.Timers.Sleep_For (0.020);
-         Flyology.IO.Sockets.Send_All
-           (Native_Socket, [1 => 42], Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Native_Socket, [1 => 42], Timeout => 1.0);
       end Native_Sender;
    begin
       Duplex_Results.Wait;
@@ -290,9 +273,7 @@ begin
          Fanout_Results.Started;
          Ready :=
            Flyology.IO.Wait
-             (Flyology.IO.Sockets.Native_Descriptor (Event_Socket),
-              Flyology.IO.For_Read,
-              Timeout => 1.0);
+             (Flyology.IO.Sockets.Native_Descriptor (Event_Socket), Flyology.IO.For_Read, Timeout => 1.0);
          Fanout_Results.Finished (Ready);
       exception
          when others =>
@@ -302,17 +283,15 @@ begin
       task body Sender is
       begin
          Fanout_Results.Wait_Until_Started;
-         Flyology.IO.Sockets.Send_All
-           (Native_Socket, [1 => 43], Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Native_Socket, [1 => 43], Timeout => 1.0);
       end Sender;
 
       Waiters : array (1 .. 2) of Read_Waiter;
       pragma Unreferenced (Waiters);
-      Probe : Stream_Element_Array (1 .. 1);
+      Probe   : Stream_Element_Array (1 .. 1);
    begin
       Fanout_Results.Wait_Until_Finished;
-      Flyology.IO.Sockets.Receive_Exactly
-        (Event_Socket, Probe, Timeout => 1.0);
+      Flyology.IO.Sockets.Receive_Exactly (Event_Socket, Probe, Timeout => 1.0);
       if not Fanout_Results.Passed or else Probe (1) /= 43 then
          raise Program_Error with "same-direction descriptor fanout failed";
       end if;
@@ -330,13 +309,11 @@ begin
       task body Delayed_Sender is
       begin
          Flyology.IO.Timers.Sleep_For (0.050);
-         Flyology.IO.Sockets.Send_All
-           (Native_Socket, [1 => 44], Timeout => 1.0);
+         Flyology.IO.Sockets.Send_All (Native_Socket, [1 => 44], Timeout => 1.0);
       end Delayed_Sender;
    begin
       begin
-         Flyology.IO.Sockets.Receive
-           (Event_Socket, Probe, Last, Timeout => 0.010);
+         Flyology.IO.Sockets.Receive (Event_Socket, Probe, Last, Timeout => 0.010);
       exception
          when Flyology.IO.Timeout_Error =>
             Timed_Out := True;
@@ -345,8 +322,7 @@ begin
          raise Program_Error with "lightweight socket timeout did not fire";
       end if;
 
-      Flyology.IO.Sockets.Receive_Exactly
-        (Event_Socket, Probe, Timeout => 1.0);
+      Flyology.IO.Sockets.Receive_Exactly (Event_Socket, Probe, Timeout => 1.0);
       if Probe (1) /= 44 then
          raise Program_Error with "descriptor wait did not rearm after timeout";
       end if;

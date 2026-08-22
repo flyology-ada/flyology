@@ -4,12 +4,12 @@
 package body Flyology_NUMA.Bits is
 
    --  Return the word holding Member.
-   function Word_Of (Member : Natural) return Natural is
-     (Member / Bits_Per_Word);
+   function Word_Of (Member : Natural) return Natural
+   is (Member / Bits_Per_Word);
 
    --  Return a word with only Member's bit set.
-   function Single_Bit (Member : Natural) return Word is
-     (Word (2) ** (Member mod Bits_Per_Word));
+   function Single_Bit (Member : Natural) return Word
+   is (Word (2)**(Member mod Bits_Per_Word));
 
    --  Return the number of set bits in Value.
    function Population (Value : Word) return Natural;
@@ -34,14 +34,11 @@ package body Flyology_NUMA.Bits is
    -- Contains --
    --------------
 
-   function Contains (Set : Node_Set; Node : Node_Id) return Boolean is
-     ((Set.Bits (Word_Of (Natural (Node))) and Single_Bit (Natural (Node)))
-      /= 0);
+   function Contains (Set : Node_Set; Node : Node_Id) return Boolean
+   is ((Set.Bits (Word_Of (Natural (Node))) and Single_Bit (Natural (Node))) /= 0);
 
-   function Contains
-     (Set : Processor_Set; Processor : Processor_Id) return Boolean is
-     ((Set.Bits (Word_Of (Natural (Processor)))
-       and Single_Bit (Natural (Processor))) /= 0);
+   function Contains (Set : Processor_Set; Processor : Processor_Id) return Boolean
+   is ((Set.Bits (Word_Of (Natural (Processor))) and Single_Bit (Natural (Processor))) /= 0);
 
    -----------
    -- Count --
@@ -77,24 +74,21 @@ package body Flyology_NUMA.Bits is
       Set.Bits (Index) := Set.Bits (Index) or Single_Bit (Natural (Node));
    end Include;
 
-   procedure Include
-     (Set : in out Processor_Set; Processor : Processor_Id)
-   is
+   procedure Include (Set : in out Processor_Set; Processor : Processor_Id) is
       Index : constant Natural := Word_Of (Natural (Processor));
    begin
-      Set.Bits (Index) :=
-        Set.Bits (Index) or Single_Bit (Natural (Processor));
+      Set.Bits (Index) := Set.Bits (Index) or Single_Bit (Natural (Processor));
    end Include;
 
    --------------
    -- Is_Empty --
    --------------
 
-   function Is_Empty (Set : Node_Set) return Boolean is
-     (for all Value of Set.Bits => Value = 0);
+   function Is_Empty (Set : Node_Set) return Boolean
+   is (for all Value of Set.Bits => Value = 0);
 
-   function Is_Empty (Set : Processor_Set) return Boolean is
-     (for all Value of Set.Bits => Value = 0);
+   function Is_Empty (Set : Processor_Set) return Boolean
+   is (for all Value of Set.Bits => Value = 0);
 
    -----------------
    -- Restrict_To --
@@ -111,9 +105,8 @@ package body Flyology_NUMA.Bits is
    -- Within --
    ------------
 
-   function Within (Subset : Node_Set; Superset : Node_Set) return Boolean is
-     (for all Index in Subset.Bits'Range =>
-        (Subset.Bits (Index) and not Superset.Bits (Index)) = 0);
+   function Within (Subset : Node_Set; Superset : Node_Set) return Boolean
+   is (for all Index in Subset.Bits'Range => (Subset.Bits (Index) and not Superset.Bits (Index)) = 0);
 
    -----------
    -- First --
@@ -145,8 +138,7 @@ package body Flyology_NUMA.Bits is
    -- Next --
    ----------
 
-   function Next
-     (Set : Node_Set; Position : Node_Cursor) return Node_Cursor is
+   function Next (Set : Node_Set; Position : Node_Cursor) return Node_Cursor is
    begin
       for Index in Position + 1 .. Max_Node loop
          if Contains (Set, Node_Id (Index)) then
@@ -157,9 +149,7 @@ package body Flyology_NUMA.Bits is
       return Max_Node + 1;
    end Next;
 
-   function Next
-     (Set : Processor_Set; Position : Processor_Cursor)
-      return Processor_Cursor is
+   function Next (Set : Processor_Set; Position : Processor_Cursor) return Processor_Cursor is
    begin
       for Index in Position + 1 .. Max_Processor loop
          if Contains (Set, Processor_Id (Index)) then
@@ -174,14 +164,11 @@ package body Flyology_NUMA.Bits is
    -- Has_Element --
    -----------------
 
-   function Has_Element
-     (Set : Node_Set; Position : Node_Cursor) return Boolean is
-     (Position <= Max_Node and then Contains (Set, Node_Id (Position)));
+   function Has_Element (Set : Node_Set; Position : Node_Cursor) return Boolean
+   is (Position <= Max_Node and then Contains (Set, Node_Id (Position)));
 
-   function Has_Element
-     (Set : Processor_Set; Position : Processor_Cursor) return Boolean is
-     (Position <= Max_Processor
-      and then Contains (Set, Processor_Id (Position)));
+   function Has_Element (Set : Processor_Set; Position : Processor_Cursor) return Boolean
+   is (Position <= Max_Processor and then Contains (Set, Processor_Id (Position)));
 
    -------------
    -- Element --
@@ -193,8 +180,7 @@ package body Flyology_NUMA.Bits is
       return Node_Id (Position);
    end Element;
 
-   function Element
-     (Set : Processor_Set; Position : Processor_Cursor) return Processor_Id is
+   function Element (Set : Processor_Set; Position : Processor_Cursor) return Processor_Id is
       pragma Unreferenced (Set);
    begin
       return Processor_Id (Position);

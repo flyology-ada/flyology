@@ -9,6 +9,7 @@
 --  boundaries and scales the difference. Workers are identified by a token
 --  the platform releases when the thread ends, rather than by a thread
 --  identifier that a later thread could reuse.
+
 package Flyology_Bench.Internal_Probes.Sessions is
 
    subtype Identifier is Interfaces.Unsigned_64;
@@ -18,8 +19,7 @@ package Flyology_Bench.Internal_Probes.Sessions is
 
    --  Opens a session for the named counters. Returns No_Session when the
    --  request is empty or the registry is unusable.
-   function Start
-     (Requested_Mask : Interfaces.Unsigned_64) return Identifier;
+   function Start (Requested_Mask : Interfaces.Unsigned_64) return Identifier;
 
    --  Closes every worker's counters and forgets the session. Naming an
    --  unknown session does nothing.

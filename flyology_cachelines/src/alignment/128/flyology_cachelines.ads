@@ -3,6 +3,7 @@
 --  The compile-time spacing policy is independent of runtime cache queries.
 --  Storage wrappers use Destructive_Interference_Size; query functions report
 --  host information when the operating system makes it available.
+
 package Flyology_Cachelines is
 
    --  Spacing in storage elements used to prevent false sharing.
@@ -22,6 +23,7 @@ package Flyology_Cachelines is
       case Available is
          when True =>
             Value : Natural;
+
          when False =>
             null;
       end case;
@@ -78,8 +80,7 @@ package Flyology_Cachelines is
    --  Return the number of physical cores in a core class.
    --  @param Class The core class to describe.
    --  @return The detected core count, or Unavailable.
-   function Core_Class_Cores
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function Core_Class_Cores (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return the number of logical CPUs in a core class.
    --
@@ -87,8 +88,7 @@ package Flyology_Cachelines is
    --  where sibling CPUs share one core's L1 data cache.
    --  @param Class The core class to describe.
    --  @return The detected CPU count, or Unavailable.
-   function Core_Class_CPUs
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function Core_Class_CPUs (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return the L1 data-cache capacity in bytes for a core class.
    --
@@ -99,16 +99,14 @@ package Flyology_Cachelines is
    --  an efficiency core's.
    --  @param Class The core class to describe.
    --  @return The detected capacity in bytes, or Unavailable.
-   function L1_Data_Cache_Size
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function L1_Data_Cache_Size (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return the number of destructive-interference-sized slots in L1.
    --  These are spacing-policy slots, not physical cache lines.  The count
    --  divides L1_Data_Cache_Size and describes the same core class.
    --  @param Class The core class to describe.
    --  @return The derived slot count, or Unavailable.
-   function L1_Data_Cache_Slots
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function L1_Data_Cache_Slots (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return the L2 cache capacity in bytes for a core class.
    --
@@ -117,8 +115,7 @@ package Flyology_Cachelines is
    --  per-core working set against it.
    --  @param Class The core class to describe.
    --  @return The detected capacity in bytes, or Unavailable.
-   function L2_Cache_Size
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function L2_Cache_Size (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Return how many cores share one L2 cache in a core class.
    --
@@ -126,15 +123,12 @@ package Flyology_Cachelines is
    --  L2_Cache_Size reports is divided among that many cores.
    --  @param Class The core class to describe.
    --  @return The detected core count, or Unavailable.
-   function L2_Sharing_Cores
-     (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
+   function L2_Sharing_Cores (Class : Core_Class := Fastest_Core_Class) return Cache_Query_Result;
 
    --  Explicitly choose a fallback for an unavailable query result.
    --  @param Result The cache query result to inspect.
    --  @param Fallback The value to return when Result is unavailable.
    --  @return Result.Value when available, otherwise Fallback.
-   function Value_Or
-     (Result   : Cache_Query_Result;
-      Fallback : Natural) return Natural;
+   function Value_Or (Result : Cache_Query_Result; Fallback : Natural) return Natural;
 
 end Flyology_Cachelines;

@@ -21,23 +21,18 @@ package body Flyology_Bench.Suites is
 
    type Index_Array is array (Case_Index) of Case_Index;
 
-   function Lower (Value : String) return String is
-     (Ada.Characters.Handling.To_Lower (Value));
+   function Lower (Value : String) return String
+   is (Ada.Characters.Handling.To_Lower (Value));
 
-   function Image (Value : Natural) return String is
-     (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
+   function Image (Value : Natural) return String
+   is (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Both));
 
    function Valid_Segment (Value : String) return Boolean is
-      function Initial (Item : Character) return Boolean is
-        ((Item in 'a' .. 'z')
-         or else (Item in 'A' .. 'Z')
-         or else (Item in '0' .. '9'));
+      function Initial (Item : Character) return Boolean
+      is ((Item in 'a' .. 'z') or else (Item in 'A' .. 'Z') or else (Item in '0' .. '9'));
 
-      function Rest (Item : Character) return Boolean is
-        (Initial (Item)
-         or else Item = '.'
-         or else Item = '_'
-         or else Item = '-');
+      function Rest (Item : Character) return Boolean
+      is (Initial (Item) or else Item = '.' or else Item = '_' or else Item = '-');
    begin
       if Value'Length = 0 or else not Initial (Value (Value'First)) then
          return False;
@@ -58,30 +53,21 @@ package body Flyology_Bench.Suites is
       end if;
       for Index in Tags'Range loop
          if Tags (Index) = ',' then
-            if Index = First or else not Valid_Segment (Tags (First .. Index - 1))
-            then
-               raise Registration_Error with
-                 "tags must be comma-separated identity segments";
+            if Index = First or else not Valid_Segment (Tags (First .. Index - 1)) then
+               raise Registration_Error with "tags must be comma-separated identity segments";
             end if;
             First := Index + 1;
          end if;
       end loop;
-      if First > Tags'Last or else not Valid_Segment (Tags (First .. Tags'Last))
-      then
-         raise Registration_Error with
-           "tags must be comma-separated identity segments";
+      if First > Tags'Last or else not Valid_Segment (Tags (First .. Tags'Last)) then
+         raise Registration_Error with "tags must be comma-separated identity segments";
       end if;
    end Validate_Tags;
 
-   function Join_Name (Group, Name : String) return String is
-     (if Group'Length = 0 then Name else Group & "/" & Name);
+   function Join_Name (Group, Name : String) return String
+   is (if Group'Length = 0 then Name else Group & "/" & Name);
 
-   procedure Check_Registration
-     (Target : Suite;
-      Name   : String;
-      Group  : String;
-      Tags   : String)
-   is
+   procedure Check_Registration (Target : Suite; Name : String; Group : String; Tags : String) is
       Full : constant String := Join_Name (Group, Name);
    begin
       if not Valid_Segment (Name) then
@@ -96,8 +82,7 @@ package body Flyology_Bench.Suites is
       end if;
       for Index in 1 .. Target.Count loop
          if To_String (Target.Cases (Index).Full) = Full then
-            raise Registration_Error with
-              "duplicate benchmark identity: " & Full;
+            raise Registration_Error with "duplicate benchmark identity: " & Full;
          end if;
       end loop;
    end Check_Registration;
@@ -112,17 +97,16 @@ package body Flyology_Bench.Suites is
       Check_Registration (Target, Name, Group, Tags);
       Target.Count := Target.Count + 1;
       Target.Cases (Target.Count) :=
-        (Result          => Ordinary_Measurement,
-         Name            => To_Unbounded_String (Name),
-         Group           => To_Unbounded_String (Group),
-         Tags            => To_Unbounded_String (Tags),
-         Full            => To_Unbounded_String (Join_Name (Group, Name)),
-         Measurement_Run => Run,
-         Gate_Enabled    => False,
-         Gate_Path       => Null_Unbounded_String,
+        (Result           => Ordinary_Measurement,
+         Name             => To_Unbounded_String (Name),
+         Group            => To_Unbounded_String (Group),
+         Tags             => To_Unbounded_String (Tags),
+         Full             => To_Unbounded_String (Join_Name (Group, Name)),
+         Measurement_Run  => Run,
+         Gate_Enabled     => False,
+         Gate_Path        => Null_Unbounded_String,
          Gate_Fingerprint => Null_Unbounded_String,
-         Gate_Policy     =>
-           Flyology_Bench.Baselines.Fail_Closed_Gate_Policy);
+         Gate_Policy      => Flyology_Bench.Baselines.Fail_Closed_Gate_Policy);
    end Register;
 
    procedure Register_Gated
@@ -164,11 +148,8 @@ package body Flyology_Bench.Suites is
       Tags           : String := "") is
    begin
       Check_Registration (Target, Name, Group, Tags);
-      if not Valid_Segment (Reference_Name)
-        or else not Valid_Segment (Contender_Name)
-      then
-         raise Registration_Error with
-           "paired reporter labels must be identity segments";
+      if not Valid_Segment (Reference_Name) or else not Valid_Segment (Contender_Name) then
+         raise Registration_Error with "paired reporter labels must be identity segments";
       end if;
       Target.Count := Target.Count + 1;
       Target.Cases (Target.Count) :=
@@ -183,28 +164,18 @@ package body Flyology_Bench.Suites is
    end Register_Paired;
 
    package body Multi_Way_Registration is
-      procedure Put_Console is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Case_Id);
-      procedure Put_CSV is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_CSV_With_Context
-          (Case_Id);
+      procedure Put_Console is new Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Case_Id);
+      procedure Put_CSV is new Flyology_Bench.Reporters.Put_Multi_Comparison_CSV_With_Context (Case_Id);
       procedure Put_Metrics_CSV is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV_With_Context
-          (Case_Id);
-      procedure Put_JSON is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_JSON_With_Context
-          (Case_Id);
+        Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV_With_Context (Case_Id);
+      procedure Put_JSON is new Flyology_Bench.Reporters.Put_Multi_Comparison_JSON_With_Context (Case_Id);
 
-      procedure Invoke
-        (Config : Configuration;
-         Result : out Multi_Comparison) is
+      procedure Invoke (Config : Configuration; Result : out Multi_Comparison) is
       begin
          Run (Config, Result);
       end Invoke;
 
-      procedure Report_Console
-        (Result : Multi_Comparison;
-         File   : Ada.Text_IO.File_Type) is
+      procedure Report_Console (Result : Multi_Comparison; File : Ada.Text_IO.File_Type) is
       begin
          Put_Console (Result, File, Flyology_Bench.Reporters.Plain);
       end Report_Console;
@@ -215,8 +186,7 @@ package body Flyology_Bench.Suites is
          Context : Flyology_Bench.Reporters.Machine_Context) is
       begin
          Put_CSV (Result, File, Context);
-         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header
-           (File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header (File, Context);
          Put_Metrics_CSV (Result, File, Context);
       end Report_CSV;
 
@@ -228,11 +198,7 @@ package body Flyology_Bench.Suites is
          Put_JSON (Result, File, Context);
       end Report_JSON;
 
-      procedure Register
-        (Target : in out Suite;
-         Name   : String;
-         Group  : String := "";
-         Tags   : String := "") is
+      procedure Register (Target : in out Suite; Name : String; Group : String := ""; Tags : String := "") is
       begin
          Check_Registration (Target, Name, Group, Tags);
          Target.Count := Target.Count + 1;
@@ -249,7 +215,8 @@ package body Flyology_Bench.Suites is
       end Register;
    end Multi_Way_Registration;
 
-   function Length (Target : Suite) return Natural is (Target.Count);
+   function Length (Target : Suite) return Natural
+   is (Target.Count);
 
    procedure Check_Index (Target : Suite; Index : Case_Index) is
    begin
@@ -271,52 +238,41 @@ package body Flyology_Bench.Suites is
    end Kind;
 
    procedure Execute_One
-     (Target    : Suite;
-      Full_Name : String;
-      Config    : Configuration;
-      Result    : out Registered_Result)
-   is
+     (Target : Suite; Full_Name : String; Config : Configuration; Result : out Registered_Result) is
    begin
       for Index in 1 .. Target.Count loop
          if To_String (Target.Cases (Index).Full) = Full_Name then
             case Target.Cases (Index).Result is
                when Ordinary_Measurement =>
                   Result := (Result => Ordinary_Measurement, others => <>);
-                  Target.Cases (Index).Measurement_Run
-                    (Config, Result.Measured);
-               when Paired_Comparison =>
+                  Target.Cases (Index).Measurement_Run (Config, Result.Measured);
+
+               when Paired_Comparison    =>
                   Result := (Result => Paired_Comparison, others => <>);
-                  Target.Cases (Index).Comparison_Run
-                    (Config, Result.Compared);
+                  Target.Cases (Index).Comparison_Run (Config, Result.Compared);
+
                when Multi_Way_Comparison =>
-                  raise Constraint_Error with
-                    "multi-way registration requires Execute_One_Multi";
+                  raise Constraint_Error with "multi-way registration requires Execute_One_Multi";
             end case;
             return;
          end if;
       end loop;
-      raise Constraint_Error with
-        "benchmark identity is not registered: " & Full_Name;
+      raise Constraint_Error with "benchmark identity is not registered: " & Full_Name;
    end Execute_One;
 
    procedure Execute_One_Multi
-     (Target    : Suite;
-      Full_Name : String;
-      Config    : Configuration;
-      Result    : out Multi_Comparison) is
+     (Target : Suite; Full_Name : String; Config : Configuration; Result : out Multi_Comparison) is
    begin
       for Index in 1 .. Target.Count loop
          if To_String (Target.Cases (Index).Full) = Full_Name then
             if Target.Cases (Index).Result /= Multi_Way_Comparison then
-               raise Constraint_Error with
-                 "registered result is not a multi-way comparison";
+               raise Constraint_Error with "registered result is not a multi-way comparison";
             end if;
             Target.Cases (Index).Multi_Run (Config, Result);
             return;
          end if;
       end loop;
-      raise Constraint_Error with
-        "benchmark identity is not registered: " & Full_Name;
+      raise Constraint_Error with "benchmark identity is not registered: " & Full_Name;
    end Execute_One_Multi;
 
    procedure Execute_Worker_Request
@@ -324,9 +280,8 @@ package body Flyology_Bench.Suites is
       Request  : Flyology_Bench.Workers.Worker_Request;
       Template : Configuration := Default_Configuration)
    is
-      Identity : constant String :=
-        Flyology_Bench.Workers.Requested_Identity (Request);
-      Found : Natural := 0;
+      Identity : constant String := Flyology_Bench.Workers.Requested_Identity (Request);
+      Found    : Natural := 0;
    begin
       for Index in 1 .. Target.Count loop
          if To_String (Target.Cases (Index).Full) = Identity then
@@ -335,50 +290,43 @@ package body Flyology_Bench.Suites is
          end if;
       end loop;
       if Found = 0 then
-         raise Constraint_Error with
-           "benchmark identity is not registered: " & Identity;
+         raise Constraint_Error with "benchmark identity is not registered: " & Identity;
       end if;
       case Flyology_Bench.Workers.Requested_Kind (Request) is
          when Flyology_Bench.Workers.Ordinary_Measurement =>
             if Target.Cases (Found).Result /= Ordinary_Measurement then
-               raise Constraint_Error with
-                 "worker result kind does not match registered case: "
-                 & Identity;
+               raise Constraint_Error with "worker result kind does not match registered case: " & Identity;
             end if;
-         when Flyology_Bench.Workers.Paired_Comparison =>
+
+         when Flyology_Bench.Workers.Paired_Comparison    =>
             if Target.Cases (Found).Result /= Paired_Comparison then
-               raise Constraint_Error with
-                 "worker result kind does not match registered case: "
-                 & Identity;
+               raise Constraint_Error with "worker result kind does not match registered case: " & Identity;
             end if;
       end case;
       declare
          Config : constant Configuration :=
-           Flyology_Bench.Workers.Requested_Configuration
-             (Request, Template);
+           Flyology_Bench.Workers.Requested_Configuration (Request, Template);
          Result : Registered_Result;
       begin
          Flyology_Bench.Workers.Announce_Ready (Request);
          Execute_One (Target, Identity, Config, Result);
          case Result.Result is
             when Ordinary_Measurement =>
-               Flyology_Bench.Workers.Return_Result
-                 (Request, Result.Measured);
-            when Paired_Comparison =>
-               Flyology_Bench.Workers.Return_Result
-                 (Request, Result.Compared);
+               Flyology_Bench.Workers.Return_Result (Request, Result.Measured);
+
+            when Paired_Comparison    =>
+               Flyology_Bench.Workers.Return_Result (Request, Result.Compared);
+
             when Multi_Way_Comparison =>
-               raise Program_Error with
-                 "multi-way result entered the worker protocol";
+               raise Program_Error with "multi-way result entered the worker protocol";
          end case;
       end;
    end Execute_Worker_Request;
 
-   function Kind (Result : Registered_Result) return Result_Kind is
-     (Result.Result);
+   function Kind (Result : Registered_Result) return Result_Kind
+   is (Result.Result);
 
-   function Measurement_Value
-     (Result : Registered_Result) return Measurement is
+   function Measurement_Value (Result : Registered_Result) return Measurement is
    begin
       if Result.Result /= Ordinary_Measurement then
          raise Constraint_Error with "registered result is not a measurement";
@@ -386,8 +334,7 @@ package body Flyology_Bench.Suites is
       return Result.Measured;
    end Measurement_Value;
 
-   function Comparison_Value
-     (Result : Registered_Result) return Comparison is
+   function Comparison_Value (Result : Registered_Result) return Comparison is
    begin
       if Result.Result /= Paired_Comparison then
          raise Constraint_Error with "registered result is not a comparison";
@@ -395,9 +342,9 @@ package body Flyology_Bench.Suites is
       return Result.Compared;
    end Comparison_Value;
 
-   function Starts_With (Value, Prefix : String) return Boolean is
-     (Value'Length >= Prefix'Length
-      and then Value (Value'First .. Value'First + Prefix'Length - 1) = Prefix);
+   function Starts_With (Value, Prefix : String) return Boolean
+   is (Value'Length >= Prefix'Length
+       and then Value (Value'First .. Value'First + Prefix'Length - 1) = Prefix);
 
    function Parse_Decimal (Value, Option : String) return Long_Float is
       Saw_Digit : Boolean := False;
@@ -426,35 +373,24 @@ package body Flyology_Bench.Suites is
          raise Option_Error with Option & " is out of range: " & Value;
    end Parse_Decimal;
 
-   function Parse_Duration
-     (Value    : String;
-      Option   : String;
-      Positive : Boolean) return Duration
-   is
+   function Parse_Duration (Value : String; Option : String; Positive : Boolean) return Duration is
       Suffix_Length : Natural;
       Scale         : Long_Float;
    begin
-      if Value'Length >= 2
-        and then Value (Value'Last - 1 .. Value'Last) = "ns"
-      then
+      if Value'Length >= 2 and then Value (Value'Last - 1 .. Value'Last) = "ns" then
          Suffix_Length := 2;
          Scale := 1.0E-9;
-      elsif Value'Length >= 2
-        and then Value (Value'Last - 1 .. Value'Last) = "us"
-      then
+      elsif Value'Length >= 2 and then Value (Value'Last - 1 .. Value'Last) = "us" then
          Suffix_Length := 2;
          Scale := 1.0E-6;
-      elsif Value'Length >= 2
-        and then Value (Value'Last - 1 .. Value'Last) = "ms"
-      then
+      elsif Value'Length >= 2 and then Value (Value'Last - 1 .. Value'Last) = "ms" then
          Suffix_Length := 2;
          Scale := 1.0E-3;
       elsif Value'Length >= 1 and then Value (Value'Last) = 's' then
          Suffix_Length := 1;
          Scale := 1.0;
       else
-         raise Option_Error with
-           Option & " requires a duration ending in ns, us, ms, or s";
+         raise Option_Error with Option & " requires a duration ending in ns, us, ms, or s";
       end if;
       declare
          Last_Number : constant Integer := Value'Last - Suffix_Length;
@@ -463,19 +399,17 @@ package body Flyology_Bench.Suites is
             raise Option_Error with Option & " requires a numeric duration";
          end if;
          declare
-            Parsed : constant Long_Float :=
+            Parsed    : constant Long_Float :=
               Parse_Decimal (Value (Value'First .. Last_Number), Option) * Scale;
             Converted : Duration;
          begin
             if Parsed < 0.0 or else (Positive and then Parsed = 0.0) then
-               raise Option_Error with
-                 Option & (if Positive then " must be positive"
-                           else " must be nonnegative");
+               raise Option_Error
+                 with Option & (if Positive then " must be positive" else " must be nonnegative");
             end if;
             Converted := Duration (Parsed);
             if Positive and then Converted = 0.0 then
-               raise Option_Error with
-                 Option & " is below the minimum positive duration";
+               raise Option_Error with Option & " is below the minimum positive duration";
             end if;
             return Converted;
          exception
@@ -502,15 +436,16 @@ package body Flyology_Bench.Suites is
       when Option_Error =>
          raise;
       when others =>
-         raise Option_Error with
-           Option & " must be in"
-           & Sample_Count'Image (Sample_Count'First) & " .."
-           & Sample_Count'Image (Sample_Count'Last);
+         raise Option_Error
+           with
+             Option
+             & " must be in"
+             & Sample_Count'Image (Sample_Count'First)
+             & " .."
+             & Sample_Count'Image (Sample_Count'Last);
    end Parse_Count;
 
-   function Parse_Threshold (Value, Option : String)
-      return Threshold_Percentage
-   is
+   function Parse_Threshold (Value, Option : String) return Threshold_Percentage is
       Parsed : constant Long_Float := Parse_Decimal (Value, Option);
    begin
       if Parsed < 0.0 or else Parsed >= 100.0 then
@@ -545,13 +480,11 @@ package body Flyology_Bench.Suites is
    end Parse_Seed;
 
    function Parse
-     (Arguments   : Argument_List;
-      Base_Config : Configuration := Default_Configuration)
-      return Runner_Options
+     (Arguments : Argument_List; Base_Config : Configuration := Default_Configuration) return Runner_Options
    is
-      Result : Runner_Options;
-      Index  : Integer := Arguments'First;
-      Saw_Help : Boolean := False;
+      Result        : Runner_Options;
+      Index         : Integer := Arguments'First;
+      Saw_Help      : Boolean := False;
       Saw_Fail_Fast : Boolean := False;
       Saw_Continue  : Boolean := False;
 
@@ -562,8 +495,7 @@ package body Flyology_Bench.Suites is
             if Argument'Length = Prefix'Length then
                raise Option_Error with Option & " requires a value";
             end if;
-            return Argument
-              (Argument'First + Prefix'Length .. Argument'Last);
+            return Argument (Argument'First + Prefix'Length .. Argument'Last);
          end if;
          if Argument = Option then
             Index := Index + 1;
@@ -575,11 +507,8 @@ package body Flyology_Bench.Suites is
          raise Program_Error;
       end Take_Value;
 
-      procedure Append
-        (Values : in out String_Array;
-         Count  : in out Natural;
-         Value  : String;
-         Option : String) is
+      procedure Append (Values : in out String_Array; Count : in out Natural; Value : String; Option : String)
+      is
       begin
          if Value'Length = 0 then
             raise Option_Error with Option & " requires a nonempty value";
@@ -601,21 +530,11 @@ package body Flyology_Bench.Suites is
                Result.Requested_Action := Show_Help;
             elsif Argument = "--list" then
                Result.Requested_Action := List_Selected;
-            elsif Starts_With (Argument, "--filter=")
-              or else Argument = "--filter"
-            then
-               Append
-                 (Result.Filters, Result.Filter_Count,
-                  Take_Value ("--filter", Argument), "--filter");
-            elsif Starts_With (Argument, "--skip=")
-              or else Argument = "--skip"
-            then
-               Append
-                 (Result.Skips, Result.Skip_Count,
-                  Take_Value ("--skip", Argument), "--skip");
-            elsif Starts_With (Argument, "--tag=")
-              or else Argument = "--tag"
-            then
+            elsif Starts_With (Argument, "--filter=") or else Argument = "--filter" then
+               Append (Result.Filters, Result.Filter_Count, Take_Value ("--filter", Argument), "--filter");
+            elsif Starts_With (Argument, "--skip=") or else Argument = "--skip" then
+               Append (Result.Skips, Result.Skip_Count, Take_Value ("--skip", Argument), "--skip");
+            elsif Starts_With (Argument, "--tag=") or else Argument = "--tag" then
                declare
                   Value : constant String := Take_Value ("--tag", Argument);
                begin
@@ -624,9 +543,7 @@ package body Flyology_Bench.Suites is
                   end if;
                   Append (Result.Tags, Result.Tag_Count, Value, "--tag");
                end;
-            elsif Starts_With (Argument, "--exact=")
-              or else Argument = "--exact"
-            then
+            elsif Starts_With (Argument, "--exact=") or else Argument = "--exact" then
                if Length (Result.Exact) > 0 then
                   raise Option_Error with "--exact may be specified only once";
                end if;
@@ -638,9 +555,7 @@ package body Flyology_Bench.Suites is
                   end if;
                   Result.Exact := To_Unbounded_String (Value);
                end;
-            elsif Starts_With (Argument, "--group=")
-              or else Argument = "--group"
-            then
+            elsif Starts_With (Argument, "--group=") or else Argument = "--group" then
                if Length (Result.Group) > 0 then
                   raise Option_Error with "--group may be specified only once";
                end if;
@@ -648,14 +563,11 @@ package body Flyology_Bench.Suites is
                   Value : constant String := Take_Value ("--group", Argument);
                begin
                   if not Valid_Segment (Value) then
-                     raise Option_Error with
-                       "--group requires an identity segment";
+                     raise Option_Error with "--group requires an identity segment";
                   end if;
                   Result.Group := To_Unbounded_String (Value);
                end;
-            elsif Starts_With (Argument, "--order=")
-              or else Argument = "--order"
-            then
+            elsif Starts_With (Argument, "--order=") or else Argument = "--order" then
                declare
                   Value : constant String := Take_Value ("--order", Argument);
                begin
@@ -664,16 +576,12 @@ package body Flyology_Bench.Suites is
                   elsif Value = "name" then
                      Result.Order := Name_Order;
                   else
-                     raise Option_Error with
-                       "--order must be registration or name";
+                     raise Option_Error with "--order must be registration or name";
                   end if;
                end;
-            elsif Starts_With (Argument, "--output-style=")
-              or else Argument = "--output-style"
-            then
+            elsif Starts_With (Argument, "--output-style=") or else Argument = "--output-style" then
                declare
-                  Value : constant String :=
-                    Take_Value ("--output-style", Argument);
+                  Value : constant String := Take_Value ("--output-style", Argument);
                begin
                   if Value = "human" then
                      Result.Output_Format := Human;
@@ -682,13 +590,10 @@ package body Flyology_Bench.Suites is
                   elsif Value = "json" then
                      Result.Output_Format := JSON;
                   else
-                     raise Option_Error with
-                       "--output-style must be human, csv, or json";
+                     raise Option_Error with "--output-style must be human, csv, or json";
                   end if;
                end;
-            elsif Starts_With (Argument, "--output=")
-              or else Argument = "--output"
-            then
+            elsif Starts_With (Argument, "--output=") or else Argument = "--output" then
                if Length (Result.Path) > 0 then
                   raise Option_Error with "--output may be specified only once";
                end if;
@@ -700,51 +605,35 @@ package body Flyology_Bench.Suites is
                   end if;
                   Result.Path := To_Unbounded_String (Value);
                end;
-            elsif Starts_With (Argument, "--warmup=")
-              or else Argument = "--warmup"
-            then
-               Result.Config.Warmup_Time := Nonnegative_Duration
-                 (Parse_Duration
-                    (Take_Value ("--warmup", Argument), "--warmup", False));
-            elsif Starts_With (Argument, "--measurement-time=")
-              or else Argument = "--measurement-time"
-            then
-               Result.Config.Measurement_Time := Positive_Duration
-                 (Parse_Duration
-                    (Take_Value ("--measurement-time", Argument),
-                     "--measurement-time", True));
+            elsif Starts_With (Argument, "--warmup=") or else Argument = "--warmup" then
+               Result.Config.Warmup_Time :=
+                 Nonnegative_Duration (Parse_Duration (Take_Value ("--warmup", Argument), "--warmup", False));
+            elsif Starts_With (Argument, "--measurement-time=") or else Argument = "--measurement-time" then
+               Result.Config.Measurement_Time :=
+                 Positive_Duration
+                   (Parse_Duration (Take_Value ("--measurement-time", Argument), "--measurement-time", True));
             elsif Starts_With (Argument, "--maximum-sampling-time=")
               or else Argument = "--maximum-sampling-time"
             then
-               Result.Config.Maximum_Sampling_Time := Nonnegative_Duration
-                 (Parse_Duration
-                    (Take_Value ("--maximum-sampling-time", Argument),
-                     "--maximum-sampling-time", False));
-            elsif Starts_With (Argument, "--samples=")
-              or else Argument = "--samples"
+               Result.Config.Maximum_Sampling_Time :=
+                 Nonnegative_Duration
+                   (Parse_Duration
+                      (Take_Value ("--maximum-sampling-time", Argument), "--maximum-sampling-time", False));
+            elsif Starts_With (Argument, "--samples=") or else Argument = "--samples" then
+               Result.Config.Samples := Parse_Count (Take_Value ("--samples", Argument), "--samples");
+            elsif Starts_With (Argument, "--minimum-sample-time=") or else Argument = "--minimum-sample-time"
             then
-               Result.Config.Samples :=
-                 Parse_Count (Take_Value ("--samples", Argument), "--samples");
-            elsif Starts_With (Argument, "--minimum-sample-time=")
-              or else Argument = "--minimum-sample-time"
-            then
-               Result.Config.Minimum_Sample_Time := Positive_Duration
-                 (Parse_Duration
-                    (Take_Value ("--minimum-sample-time", Argument),
-                     "--minimum-sample-time", True));
-            elsif Starts_With (Argument, "--practical-threshold=")
-              or else Argument = "--practical-threshold"
+               Result.Config.Minimum_Sample_Time :=
+                 Positive_Duration
+                   (Parse_Duration
+                      (Take_Value ("--minimum-sample-time", Argument), "--minimum-sample-time", True));
+            elsif Starts_With (Argument, "--practical-threshold=") or else Argument = "--practical-threshold"
             then
                Result.Config.Practical_Threshold_Percent :=
-                 Parse_Threshold
-                   (Take_Value ("--practical-threshold", Argument),
-                    "--practical-threshold");
-            elsif Starts_With (Argument, "--random-seed=")
-              or else Argument = "--random-seed"
-            then
+                 Parse_Threshold (Take_Value ("--practical-threshold", Argument), "--practical-threshold");
+            elsif Starts_With (Argument, "--random-seed=") or else Argument = "--random-seed" then
                Result.Config.Random_Seed :=
-                 Parse_Seed
-                   (Take_Value ("--random-seed", Argument), "--random-seed");
+                 Parse_Seed (Take_Value ("--random-seed", Argument), "--random-seed");
             elsif Argument = "--dry-run" then
                Result.Dry := True;
             elsif Argument = "--fail-fast" then
@@ -764,55 +653,46 @@ package body Flyology_Bench.Suites is
          Index := Index + 1;
       end loop;
 
-      if Saw_Help and then Arguments'Length /= 1
-      then
+      if Saw_Help and then Arguments'Length /= 1 then
          raise Option_Error with "--help cannot be combined with other options";
       end if;
       if Result.Requested_Action = List_Selected and then Result.Dry then
          raise Option_Error with "--list and --dry-run cannot be combined";
       end if;
       if Saw_Fail_Fast and then Saw_Continue then
-         raise Option_Error with
-           "--fail-fast and --continue-on-error cannot be combined";
+         raise Option_Error with "--fail-fast and --continue-on-error cannot be combined";
       end if;
       if Length (Result.Exact) > 0
-        and then (Result.Filter_Count > 0
-                  or else Length (Result.Group) > 0
-                  or else Result.Tag_Count > 0)
+        and then (Result.Filter_Count > 0 or else Length (Result.Group) > 0 or else Result.Tag_Count > 0)
       then
-         raise Option_Error with
-           "--exact cannot be combined with --filter, --group, or --tag";
+         raise Option_Error with "--exact cannot be combined with --filter, --group, or --tag";
       end if;
       return Result;
    end Parse;
 
-   function Parse_Command_Line
-     (Base_Config : Configuration := Default_Configuration)
-      return Runner_Options
-   is
+   function Parse_Command_Line (Base_Config : Configuration := Default_Configuration) return Runner_Options is
       Arguments : Argument_List (1 .. Ada.Command_Line.Argument_Count);
    begin
       for Index in Arguments'Range loop
-         Arguments (Index) :=
-           To_Unbounded_String (Ada.Command_Line.Argument (Index));
+         Arguments (Index) := To_Unbounded_String (Ada.Command_Line.Argument (Index));
       end loop;
       return Parse (Arguments, Base_Config);
    end Parse_Command_Line;
 
-   function Action (Options : Runner_Options) return Runner_Action is
-     (Options.Requested_Action);
+   function Action (Options : Runner_Options) return Runner_Action
+   is (Options.Requested_Action);
 
-   function Effective_Configuration
-     (Options : Runner_Options) return Configuration is (Options.Config);
+   function Effective_Configuration (Options : Runner_Options) return Configuration
+   is (Options.Config);
 
-   function Format (Options : Runner_Options) return Output_Style is
-     (Options.Output_Format);
+   function Format (Options : Runner_Options) return Output_Style
+   is (Options.Output_Format);
 
-   function Output_Path (Options : Runner_Options) return String is
-     (To_String (Options.Path));
+   function Output_Path (Options : Runner_Options) return String
+   is (To_String (Options.Path));
 
-   function Is_Dry_Run (Options : Runner_Options) return Boolean is
-     (Options.Dry);
+   function Is_Dry_Run (Options : Runner_Options) return Boolean
+   is (Options.Dry);
 
    function Glob_Match (Pattern, Value : String) return Boolean is
       Pattern_Index : Integer := Pattern'First;
@@ -822,14 +702,11 @@ package body Flyology_Bench.Suites is
    begin
       while Value_Index <= Value'Last loop
          if Pattern_Index <= Pattern'Last
-           and then (Pattern (Pattern_Index) = '?'
-                     or else Pattern (Pattern_Index) = Value (Value_Index))
+           and then (Pattern (Pattern_Index) = '?' or else Pattern (Pattern_Index) = Value (Value_Index))
          then
             Pattern_Index := Pattern_Index + 1;
             Value_Index := Value_Index + 1;
-         elsif Pattern_Index <= Pattern'Last
-           and then Pattern (Pattern_Index) = '*'
-         then
+         elsif Pattern_Index <= Pattern'Last and then Pattern (Pattern_Index) = '*' then
             Star := Pattern_Index;
             Pattern_Index := Pattern_Index + 1;
             Retry := Value_Index;
@@ -841,9 +718,7 @@ package body Flyology_Bench.Suites is
             return False;
          end if;
       end loop;
-      while Pattern_Index <= Pattern'Last
-        and then Pattern (Pattern_Index) = '*'
-      loop
+      while Pattern_Index <= Pattern'Last and then Pattern (Pattern_Index) = '*' loop
          Pattern_Index := Pattern_Index + 1;
       end loop;
       return Pattern_Index > Pattern'Last;
@@ -851,9 +726,7 @@ package body Flyology_Bench.Suites is
 
    function Pattern_Match (Pattern, Value : String) return Boolean is
    begin
-      if Ada.Strings.Fixed.Index (Pattern, "*") = 0
-        and then Ada.Strings.Fixed.Index (Pattern, "?") = 0
-      then
+      if Ada.Strings.Fixed.Index (Pattern, "*") = 0 and then Ada.Strings.Fixed.Index (Pattern, "?") = 0 then
          return Ada.Strings.Fixed.Index (Value, Pattern) /= 0;
       end if;
       return Glob_Match (Pattern, Value);
@@ -876,37 +749,26 @@ package body Flyology_Bench.Suites is
       return Tags (First .. Tags'Last) = Wanted;
    end Has_Tag;
 
-   function Is_Selected
-     (Target  : Suite;
-      Options : Runner_Options;
-      Index   : Case_Index) return Boolean
-   is
-      Item : Descriptor renames Target.Cases (Index);
-      Full : constant String := To_String (Item.Full);
+   function Is_Selected (Target : Suite; Options : Runner_Options; Index : Case_Index) return Boolean is
+      Item       : Descriptor renames Target.Cases (Index);
+      Full       : constant String := To_String (Item.Full);
       Any_Filter : Boolean := Options.Filter_Count = 0;
    begin
       Check_Index (Target, Index);
-      if Length (Options.Exact) > 0
-        and then Full /= To_String (Options.Exact)
-      then
+      if Length (Options.Exact) > 0 and then Full /= To_String (Options.Exact) then
          return False;
       end if;
-      if Length (Options.Group) > 0
-        and then To_String (Item.Group) /= To_String (Options.Group)
-      then
+      if Length (Options.Group) > 0 and then To_String (Item.Group) /= To_String (Options.Group) then
          return False;
       end if;
       for Filter_Index in 1 .. Options.Filter_Count loop
-         Any_Filter := Any_Filter or else Pattern_Match
-           (To_String (Options.Filters (Filter_Index)), Full);
+         Any_Filter := Any_Filter or else Pattern_Match (To_String (Options.Filters (Filter_Index)), Full);
       end loop;
       if not Any_Filter then
          return False;
       end if;
       for Tag_Index in 1 .. Options.Tag_Count loop
-         if not Has_Tag
-           (To_String (Item.Tags), To_String (Options.Tags (Tag_Index)))
-         then
+         if not Has_Tag (To_String (Item.Tags), To_String (Options.Tags (Tag_Index))) then
             return False;
          end if;
       end loop;
@@ -919,11 +781,7 @@ package body Flyology_Bench.Suites is
    end Is_Selected;
 
    procedure Selected_Indices
-     (Target  : Suite;
-      Options : Runner_Options;
-      Values  : out Index_Array;
-      Count   : out Natural)
-   is
+     (Target : Suite; Options : Runner_Options; Values : out Index_Array; Count : out Natural) is
    begin
       Count := 0;
       for Index in 1 .. Target.Count loop
@@ -951,14 +809,11 @@ package body Flyology_Bench.Suites is
       end if;
    end Selected_Indices;
 
-   function Successful (Summary : Run_Summary) return Boolean is
-     (Summary.Status = Succeeded);
+   function Successful (Summary : Run_Summary) return Boolean
+   is (Summary.Status = Succeeded);
 
    procedure Initialize_Summary
-     (Target   : Suite;
-      Options  : Runner_Options;
-      Selected : Natural;
-      Summary  : out Run_Summary) is
+     (Target : Suite; Options : Runner_Options; Selected : Natural; Summary : out Run_Summary) is
    begin
       Summary :=
         (Discovered => Target.Count,
@@ -983,8 +838,7 @@ package body Flyology_Bench.Suites is
       Selected_Indices (Target, Options, Values, Count);
       Initialize_Summary (Target, Options, Count, Summary);
       for Position in 1 .. Count loop
-         Ada.Text_IO.Put_Line
-           (Output, To_String (Target.Cases (Values (Position)).Full));
+         Ada.Text_IO.Put_Line (Output, To_String (Target.Cases (Values (Position)).Full));
       end loop;
    end List;
 
@@ -992,9 +846,12 @@ package body Flyology_Bench.Suites is
       Quoted : Boolean := False;
    begin
       for Character of Value loop
-         Quoted := Quoted
-           or else Character = ',' or else Character = '"'
-           or else Character = ASCII.LF or else Character = ASCII.CR;
+         Quoted :=
+           Quoted
+           or else Character = ','
+           or else Character = '"'
+           or else Character = ASCII.LF
+           or else Character = ASCII.CR;
       end loop;
       if not Quoted then
          return Value;
@@ -1014,9 +871,10 @@ package body Flyology_Bench.Suites is
       end;
    end CSV_String;
 
-   function Hex (Value : Natural) return Character is
-     (if Value < 10 then Character'Val (Character'Pos ('0') + Value)
-      else Character'Val (Character'Pos ('a') + Value - 10));
+   function Hex (Value : Natural) return Character
+   is (if Value < 10
+       then Character'Val (Character'Pos ('0') + Value)
+       else Character'Val (Character'Pos ('a') + Value - 10));
 
    function JSON_String (Value : String) return String is
       Result : Unbounded_String := To_Unbounded_String ("""");
@@ -1024,16 +882,24 @@ package body Flyology_Bench.Suites is
    begin
       for Character of Value loop
          case Character is
-            when '"' =>
+            when '"'      =>
                Append (Result, '\');
                Append (Result, '"');
-            when '\' =>
+
+            when '\'      =>
                Append (Result, '\');
                Append (Result, '\');
-            when ASCII.LF => Append (Result, "\n");
-            when ASCII.CR => Append (Result, "\r");
-            when ASCII.HT => Append (Result, "\t");
-            when others =>
+
+            when ASCII.LF =>
+               Append (Result, "\n");
+
+            when ASCII.CR =>
+               Append (Result, "\r");
+
+            when ASCII.HT =>
+               Append (Result, "\t");
+
+            when others   =>
                Code := Standard.Character'Pos (Character);
                if Code < 32 then
                   Append (Result, "\u00");
@@ -1048,8 +914,8 @@ package body Flyology_Bench.Suites is
       return To_String (Result);
    end JSON_String;
 
-   function Outcome_Name (Outcome : Case_Outcome) return String is
-     (case Outcome is
+   function Outcome_Name (Outcome : Case_Outcome) return String
+   is (case Outcome is
          when Completed_Outcome    => "completed",
          when Dry_Run_Outcome      => "dry_run",
          when Inconclusive_Outcome => "inconclusive",
@@ -1067,12 +933,12 @@ package body Flyology_Bench.Suites is
    end Put_Machine_Header;
 
    procedure Put_Machine
-     (File       : Ada.Text_IO.File_Type;
-      Style      : Output_Style;
-      Suite_Name : String;
-      Case_Name  : String;
-      Kind       : Result_Kind;
-      Outcome    : Case_Outcome;
+     (File        : Ada.Text_IO.File_Type;
+      Style       : Output_Style;
+      Suite_Name  : String;
+      Case_Name   : String;
+      Kind        : Result_Kind;
+      Outcome     : Case_Outcome;
       Dry         : Boolean;
       Median      : String := "";
       Mean        : String := "";
@@ -1088,22 +954,50 @@ package body Flyology_Bench.Suites is
          Put_Machine_Header (File);
          Ada.Text_IO.Put_Line
            (File,
-            CSV_String (Suite_Name) & ',' & CSV_String (Case_Name) & ','
-            & Lower (Result_Kind'Image (Kind)) & ',' & Outcome_Name (Outcome)
-            & ',' & Lower (Boolean'Image (Dry)) & ',' & Median & ',' & Mean
-            & ',' & Low & ',' & High & ',' & Change & ',' & Change_Low & ','
-            & Change_High & ',' & Verdict & ',' & CSV_String (Detail));
+            CSV_String (Suite_Name)
+            & ','
+            & CSV_String (Case_Name)
+            & ','
+            & Lower (Result_Kind'Image (Kind))
+            & ','
+            & Outcome_Name (Outcome)
+            & ','
+            & Lower (Boolean'Image (Dry))
+            & ','
+            & Median
+            & ','
+            & Mean
+            & ','
+            & Low
+            & ','
+            & High
+            & ','
+            & Change
+            & ','
+            & Change_Low
+            & ','
+            & Change_High
+            & ','
+            & Verdict
+            & ','
+            & CSV_String (Detail));
       else
          Ada.Text_IO.Put_Line
            (File,
-            "{""suite"":" & JSON_String (Suite_Name)
-            & ",""benchmark"":" & JSON_String (Case_Name)
+            "{""suite"":"
+            & JSON_String (Suite_Name)
+            & ",""benchmark"":"
+            & JSON_String (Case_Name)
             & ",""result_kind"":"
             & JSON_String (Lower (Result_Kind'Image (Kind)))
-            & ",""outcome"":" & JSON_String (Outcome_Name (Outcome))
-            & ",""dry_run"":" & Lower (Boolean'Image (Dry))
-            & ",""median_ns"":" & (if Median = "" then "null" else Median)
-            & ",""mean_ns"":" & (if Mean = "" then "null" else Mean)
+            & ",""outcome"":"
+            & JSON_String (Outcome_Name (Outcome))
+            & ",""dry_run"":"
+            & Lower (Boolean'Image (Dry))
+            & ",""median_ns"":"
+            & (if Median = "" then "null" else Median)
+            & ",""mean_ns"":"
+            & (if Mean = "" then "null" else Mean)
             & ",""confidence_low_ns"":"
             & (if Low = "" then "null" else Low)
             & ",""confidence_high_ns"":"
@@ -1116,48 +1010,47 @@ package body Flyology_Bench.Suites is
             & (if Change_High = "" then "null" else Change_High)
             & ",""verdict"":"
             & (if Verdict = "" then "null" else JSON_String (Verdict))
-            & ",""detail"":" & JSON_String (Detail) & "}");
+            & ",""detail"":"
+            & JSON_String (Detail)
+            & "}");
       end if;
    end Put_Machine;
 
-   function Has_Unavailable
-     (Result : Measurement;
-      Config : Configuration) return Boolean is
+   function Has_Unavailable (Result : Measurement; Config : Configuration) return Boolean is
    begin
       for Axis in Metric_Axis loop
-         if Config.Metrics (Axis)
-           and then Metric_Status (Result, Axis) /= Metric_Collected
-         then
+         if Config.Metrics (Axis) and then Metric_Status (Result, Axis) /= Metric_Collected then
             return True;
          end if;
       end loop;
       return False;
    end Has_Unavailable;
 
-   function Dry_Configuration (Base : Configuration) return Configuration is
-     (Base with delta
-        Warmup_Time => 0.0,
-        Measurement_Time => 0.000_010,
-        Maximum_Sampling_Time => 0.010,
-        Samples => Sample_Count'First,
-        Minimum_Sample_Time => 0.000_001,
-        Maximum_Iterations => 1_000,
-        Subtract_Timer_Cost => False,
-        Metrics => Time_Metrics,
-        Scheduler_Probe => null,
-        CPU_Quiescence => (Enabled => False),
-        Interference => (Enabled => False, Response => Observe),
-        Placement => (Enabled => False),
-        Host_Lock => (Enabled => False),
-        Collect_Process_Telemetry => False,
-        Progress => null);
+   function Dry_Configuration (Base : Configuration) return Configuration
+   is (Base
+       with delta
+         Warmup_Time               => 0.0,
+         Measurement_Time          => 0.000_010,
+         Maximum_Sampling_Time     => 0.010,
+         Samples                   => Sample_Count'First,
+         Minimum_Sample_Time       => 0.000_001,
+         Maximum_Iterations        => 1_000,
+         Subtract_Timer_Cost       => False,
+         Metrics                   => Time_Metrics,
+         Scheduler_Probe           => null,
+         CPU_Quiescence            => (Enabled => False),
+         Interference              => (Enabled => False, Response => Observe),
+         Placement                 => (Enabled => False),
+         Host_Lock                 => (Enabled => False),
+         Collect_Process_Telemetry => False,
+         Progress                  => null);
 
-   function Execution_Configuration
-     (Options : Runner_Options) return Configuration is
-     (if Options.Dry then Dry_Configuration (Options.Config)
-      elsif Options.Output_Format /= Human then
-        (Options.Config with delta Progress => null)
-      else Options.Config);
+   function Execution_Configuration (Options : Runner_Options) return Configuration
+   is (if Options.Dry
+       then Dry_Configuration (Options.Config)
+       elsif Options.Output_Format /= Human
+       then (Options.Config with delta Progress => null)
+       else Options.Config);
 
    function Multi_Inconclusive (Result : Multi_Comparison) return Boolean is
    begin
@@ -1169,9 +1062,7 @@ package body Flyology_Bench.Suites is
       return False;
    end Multi_Inconclusive;
 
-   function Multi_Has_Unavailable
-     (Result : Multi_Comparison;
-      Config : Configuration) return Boolean is
+   function Multi_Has_Unavailable (Result : Multi_Comparison; Config : Configuration) return Boolean is
    begin
       for Index in Comparison_Case_Index range 1 .. Cases (Result) loop
          if Has_Unavailable (Case_Measurement (Result, Index), Config) then
@@ -1186,11 +1077,9 @@ package body Flyology_Bench.Suites is
       Case_Name  : String;
       Kind       : Result_Kind;
       Outcome    : Case_Outcome;
-      Dry         : Boolean := False)
-      return Flyology_Bench.Reporters.Machine_Context is
-     (Flyology_Bench.Reporters.Make_Machine_Context
-        (Suite_Name, Case_Name, Lower (Result_Kind'Image (Kind)),
-         Outcome_Name (Outcome), Dry));
+      Dry        : Boolean := False) return Flyology_Bench.Reporters.Machine_Context
+   is (Flyology_Bench.Reporters.Make_Machine_Context
+         (Suite_Name, Case_Name, Lower (Result_Kind'Image (Kind)), Outcome_Name (Outcome), Dry));
 
    procedure Put_Measurement_Machine
      (File       : Ada.Text_IO.File_Type;
@@ -1201,34 +1090,30 @@ package body Flyology_Bench.Suites is
       Result     : Measurement)
    is
       Context : constant Flyology_Bench.Reporters.Machine_Context :=
-        Machine_Context
-          (Suite_Name, Case_Name, Ordinary_Measurement, Outcome);
+        Machine_Context (Suite_Name, Case_Name, Ordinary_Measurement, Outcome);
    begin
       if Style = CSV then
          Flyology_Bench.Reporters.Put_CSV_Header (File, Context);
          Flyology_Bench.Reporters.Put_CSV (Case_Name, Result, File, Context);
          Flyology_Bench.Reporters.Put_Metrics_CSV_Header (File, Context);
-         Flyology_Bench.Reporters.Put_Metrics_CSV
-           (Case_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_Metrics_CSV (Case_Name, Result, File, Context);
       else
-         Flyology_Bench.Reporters.Put_JSON
-           (Case_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_JSON (Case_Name, Result, File, Context);
       end if;
    end Put_Measurement_Machine;
 
    procedure Put_Gate_Result
-     (File   : Ada.Text_IO.File_Type;
-      Style  : Output_Style;
-      Result : Flyology_Bench.Baselines.Gate_Result) is
+     (File : Ada.Text_IO.File_Type; Style : Output_Style; Result : Flyology_Bench.Baselines.Gate_Result) is
    begin
       case Style is
          when Human =>
-            Flyology_Bench.Reporters.Put_Gate_Console
-              (Result, File, Flyology_Bench.Reporters.Plain);
-         when CSV =>
+            Flyology_Bench.Reporters.Put_Gate_Console (Result, File, Flyology_Bench.Reporters.Plain);
+
+         when CSV   =>
             Flyology_Bench.Reporters.Put_Gate_CSV_Header (File);
             Flyology_Bench.Reporters.Put_Gate_CSV (Result, File);
-         when JSON =>
+
+         when JSON  =>
             Flyology_Bench.Reporters.Put_Gate_JSON (Result, File);
       end case;
    end Put_Gate_Result;
@@ -1244,70 +1129,83 @@ package body Flyology_Bench.Suites is
       Result         : Comparison)
    is
       Context : constant Flyology_Bench.Reporters.Machine_Context :=
-        Machine_Context
-          (Suite_Name, Case_Name, Paired_Comparison, Outcome);
+        Machine_Context (Suite_Name, Case_Name, Paired_Comparison, Outcome);
    begin
       if Style = CSV then
          Flyology_Bench.Reporters.Put_Comparison_CSV_Header (File, Context);
-         Flyology_Bench.Reporters.Put_Comparison_CSV
-           (Reference_Name, Contender_Name, Result, File, Context);
-         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header
-           (File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_CSV (Reference_Name, Contender_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV_Header (File, Context);
          Flyology_Bench.Reporters.Put_Comparison_Metrics_CSV
            (Reference_Name, Contender_Name, Result, File, Context);
       else
-         Flyology_Bench.Reporters.Put_Comparison_JSON
-           (Reference_Name, Contender_Name, Result, File, Context);
+         Flyology_Bench.Reporters.Put_Comparison_JSON (Reference_Name, Contender_Name, Result, File, Context);
       end if;
    end Put_Comparison_Machine;
 
    procedure Put_Summary
-     (File       : Ada.Text_IO.File_Type;
-      Suite_Name : String;
-      Style      : Output_Style;
-      Summary    : Run_Summary)
+     (File : Ada.Text_IO.File_Type; Suite_Name : String; Style : Output_Style; Summary : Run_Summary)
    is
       Detail : constant String :=
-        "discovered=" & Image (Summary.Discovered)
-        & " selected=" & Image (Summary.Selected)
-        & " completed=" & Image (Summary.Completed)
-        & " skipped=" & Image (Summary.Skipped)
-        & " failed=" & Image (Summary.Failed)
-        & " inconclusive=" & Image (Summary.Inconclusive)
-        & " unavailable=" & Image (Summary.Unavailable)
-        & " rejected=" & Image (Summary.Rejected);
+        "discovered="
+        & Image (Summary.Discovered)
+        & " selected="
+        & Image (Summary.Selected)
+        & " completed="
+        & Image (Summary.Completed)
+        & " skipped="
+        & Image (Summary.Skipped)
+        & " failed="
+        & Image (Summary.Failed)
+        & " inconclusive="
+        & Image (Summary.Inconclusive)
+        & " unavailable="
+        & Image (Summary.Unavailable)
+        & " rejected="
+        & Image (Summary.Rejected);
    begin
       if Style = Human then
          Ada.Text_IO.Put_Line
            (File,
-            "suite " & Suite_Name & ": " & Detail & " status="
-            & Lower (Final_Status'Image (Summary.Status)));
+            "suite " & Suite_Name & ": " & Detail & " status=" & Lower (Final_Status'Image (Summary.Status)));
       elsif Style = CSV then
          Put_Machine_Header (File);
          Ada.Text_IO.Put_Line
            (File,
-            CSV_String (Suite_Name) & ",,summary,"
+            CSV_String (Suite_Name)
+            & ",,summary,"
             & (if Successful (Summary) then "completed" else "failed")
-            & ',' & Lower (Boolean'Image (Summary.Dry_Run))
-            & ",,,,,,,,," & CSV_String (Detail));
+            & ','
+            & Lower (Boolean'Image (Summary.Dry_Run))
+            & ",,,,,,,,,"
+            & CSV_String (Detail));
       else
          Ada.Text_IO.Put_Line
            (File,
-            "{""suite"":" & JSON_String (Suite_Name)
+            "{""suite"":"
+            & JSON_String (Suite_Name)
             & ",""benchmark"":null,""result_kind"":""summary"",""outcome"":"
-            & JSON_String
-                ((if Successful (Summary) then "completed" else "failed"))
-            & ",""dry_run"":" & Lower (Boolean'Image (Summary.Dry_Run))
-            & ",""discovered"":" & Image (Summary.Discovered)
-            & ",""selected"":" & Image (Summary.Selected)
-            & ",""completed"":" & Image (Summary.Completed)
-            & ",""skipped"":" & Image (Summary.Skipped)
-            & ",""failed"":" & Image (Summary.Failed)
-            & ",""inconclusive"":" & Image (Summary.Inconclusive)
-            & ",""unavailable"":" & Image (Summary.Unavailable)
-            & ",""rejected"":" & Image (Summary.Rejected)
+            & JSON_String ((if Successful (Summary) then "completed" else "failed"))
+            & ",""dry_run"":"
+            & Lower (Boolean'Image (Summary.Dry_Run))
+            & ",""discovered"":"
+            & Image (Summary.Discovered)
+            & ",""selected"":"
+            & Image (Summary.Selected)
+            & ",""completed"":"
+            & Image (Summary.Completed)
+            & ",""skipped"":"
+            & Image (Summary.Skipped)
+            & ",""failed"":"
+            & Image (Summary.Failed)
+            & ",""inconclusive"":"
+            & Image (Summary.Inconclusive)
+            & ",""unavailable"":"
+            & Image (Summary.Unavailable)
+            & ",""rejected"":"
+            & Image (Summary.Rejected)
             & ",""status"":"
-            & JSON_String (Lower (Final_Status'Image (Summary.Status))) & "}");
+            & JSON_String (Lower (Final_Status'Image (Summary.Status)))
+            & "}");
       end if;
    end Put_Summary;
 
@@ -1324,28 +1222,29 @@ package body Flyology_Bench.Suites is
 
       procedure Run_To (File : Ada.Text_IO.File_Type) is
          Config : constant Configuration := Execution_Configuration (Options);
-         Stop : Boolean := False;
+         Stop   : Boolean := False;
 
          procedure Report_Callback_Failure
-           (Name  : String;
-            Kind  : Result_Kind;
-            Error : Ada.Exceptions.Exception_Occurrence)
+           (Name : String; Kind : Result_Kind; Error : Ada.Exceptions.Exception_Occurrence)
          is
             Detail : constant String :=
-              Ada.Exceptions.Exception_Name (Error) & ": "
-              & Ada.Exceptions.Exception_Message (Error);
+              Ada.Exceptions.Exception_Name (Error) & ": " & Ada.Exceptions.Exception_Message (Error);
          begin
             Summary.Failed := Summary.Failed + 1;
             if Options.Output_Format = Human then
-               Ada.Text_IO.Put_Line
-                 (File, "case " & Name & ": failed: " & Detail);
+               Ada.Text_IO.Put_Line (File, "case " & Name & ": failed: " & Detail);
             else
                Put_Machine
-                 (File, Options.Output_Format, Suite_Name, Name, Kind,
-                  Failed_Outcome, Options.Dry, Detail => Detail);
+                 (File,
+                  Options.Output_Format,
+                  Suite_Name,
+                  Name,
+                  Kind,
+                  Failed_Outcome,
+                  Options.Dry,
+                  Detail => Detail);
             end if;
-            Ada.Text_IO.Put_Line
-              (Progress, "benchmark " & Name & " failed: " & Detail);
+            Ada.Text_IO.Put_Line (Progress, "benchmark " & Name & " failed: " & Detail);
             Stop := Options.Errors = Fail_Fast;
          end Report_Callback_Failure;
       begin
@@ -1356,8 +1255,7 @@ package body Flyology_Bench.Suites is
          elsif Options.Requested_Action = List_Selected then
             List (Target, Options, Summary, File);
             if Summary.Selected = 0 and then not Options.Allow_Empty then
-               Ada.Text_IO.Put_Line
-                 (Progress, "no benchmark cases matched the selection");
+               Ada.Text_IO.Put_Line (Progress, "no benchmark cases matched the selection");
             end if;
             return;
          end if;
@@ -1366,16 +1264,19 @@ package body Flyology_Bench.Suites is
          if Options.Output_Format = Human then
             Ada.Text_IO.Put_Line
               (File,
-               "suite " & Suite_Name & ": selected " & Image (Count)
-               & " of " & Image (Target.Count)
+               "suite "
+               & Suite_Name
+               & ": selected "
+               & Image (Count)
+               & " of "
+               & Image (Target.Count)
                & (if Options.Dry then " [DRY RUN]" else ""));
          end if;
 
          if Count = 0 then
             Put_Summary (File, Suite_Name, Options.Output_Format, Summary);
             if not Options.Allow_Empty then
-               Ada.Text_IO.Put_Line
-                 (Progress, "no benchmark cases matched the selection");
+               Ada.Text_IO.Put_Line (Progress, "no benchmark cases matched the selection");
             end if;
             return;
          end if;
@@ -1388,16 +1289,14 @@ package body Flyology_Bench.Suites is
                Name  : constant String := To_String (Item.Full);
             begin
                Ada.Text_IO.Put_Line
-                 (Progress,
-                  "running " & Name
-                  & (if Options.Dry then " [DRY RUN]" else ""));
+                 (Progress, "running " & Name & (if Options.Dry then " [DRY RUN]" else ""));
                case Item.Result is
                   when Ordinary_Measurement =>
                      declare
-                        Result  : Measurement;
-                        Outcome : Case_Outcome := Completed_Outcome;
-                        Returned : Boolean := False;
-                        Gate : Flyology_Bench.Baselines.Gate_Result;
+                        Result         : Measurement;
+                        Outcome        : Case_Outcome := Completed_Outcome;
+                        Returned       : Boolean := False;
+                        Gate           : Flyology_Bench.Baselines.Gate_Result;
                         Gate_Evaluated : Boolean := False;
                      begin
                         begin
@@ -1405,32 +1304,27 @@ package body Flyology_Bench.Suites is
                            Returned := True;
                         exception
                            when Error : others =>
-                              Report_Callback_Failure
-                                (Name, Item.Result, Error);
+                              Report_Callback_Failure (Name, Item.Result, Error);
                         end;
                         if Returned then
                            Summary.Completed := Summary.Completed + 1;
                            if Options.Dry then
                               Outcome := Dry_Run_Outcome;
-                           elsif Options.Require_Metrics
-                             and then Has_Unavailable (Result, Config)
-                           then
+                           elsif Options.Require_Metrics and then Has_Unavailable (Result, Config) then
                               Outcome := Unavailable_Outcome;
                               Summary.Unavailable := Summary.Unavailable + 1;
                            end if;
                            if not Options.Dry and then Item.Gate_Enabled then
-                              Gate := Flyology_Bench.Baselines.Evaluate_Gate
-                                (Path => To_String (Item.Gate_Path),
-                                 Current_Name => Name,
-                                 Current => Result,
-                                 Fingerprint =>
-                                   To_String (Item.Gate_Fingerprint),
-                                 Policy => Item.Gate_Policy,
-                                 Random_Seed => Config.Random_Seed,
-                                 Confidence_Level_Percent =>
-                                   Config.Confidence_Level_Percent,
-                                 Bootstrap_Resamples =>
-                                   Config.Bootstrap_Resamples);
+                              Gate :=
+                                Flyology_Bench.Baselines.Evaluate_Gate
+                                  (Path                     => To_String (Item.Gate_Path),
+                                   Current_Name             => Name,
+                                   Current                  => Result,
+                                   Fingerprint              => To_String (Item.Gate_Fingerprint),
+                                   Policy                   => Item.Gate_Policy,
+                                   Random_Seed              => Config.Random_Seed,
+                                   Confidence_Level_Percent => Config.Confidence_Level_Percent,
+                                   Bootstrap_Resamples      => Config.Bootstrap_Resamples);
                               Gate_Evaluated := True;
                               if Flyology_Bench.Baselines.Rejected (Gate) then
                                  Outcome := Rejected_Outcome;
@@ -1438,47 +1332,45 @@ package body Flyology_Bench.Suites is
                               end if;
                            end if;
                            if Options.Output_Format = Human then
-                              Ada.Text_IO.Put_Line
-                                (File, "case " & Name & ": "
-                                 & Outcome_Name (Outcome));
+                              Ada.Text_IO.Put_Line (File, "case " & Name & ": " & Outcome_Name (Outcome));
                               if not Options.Dry then
                                  Flyology_Bench.Reporters.Put_Console
-                                   (Name, Result, File,
-                                    Style => Flyology_Bench.Reporters.Plain);
+                                   (Name, Result, File, Style => Flyology_Bench.Reporters.Plain);
                               end if;
                            elsif Options.Dry then
                               Put_Machine
-                                (File, Options.Output_Format, Suite_Name, Name,
-                                 Item.Result, Outcome, True,
-                                 Detail =>
-                                   "validation only; not performance data");
+                                (File,
+                                 Options.Output_Format,
+                                 Suite_Name,
+                                 Name,
+                                 Item.Result,
+                                 Outcome,
+                                 True,
+                                 Detail => "validation only; not performance data");
                            else
                               Put_Measurement_Machine
-                                (File, Options.Output_Format, Suite_Name, Name,
-                                 Outcome, Result);
+                                (File, Options.Output_Format, Suite_Name, Name, Outcome, Result);
                            end if;
                            if Gate_Evaluated then
-                              Put_Gate_Result
-                                (File, Options.Output_Format, Gate);
+                              Put_Gate_Result (File, Options.Output_Format, Gate);
                            end if;
                         end if;
                      end;
 
-                  when Paired_Comparison =>
+                  when Paired_Comparison    =>
                      declare
-                        Result  : Comparison;
-                        Outcome : Case_Outcome := Completed_Outcome;
+                        Result    : Comparison;
+                        Outcome   : Case_Outcome := Completed_Outcome;
                         Reference : Measurement;
                         Contender : Measurement;
-                        Returned : Boolean := False;
+                        Returned  : Boolean := False;
                      begin
                         begin
                            Item.Comparison_Run (Config, Result);
                            Returned := True;
                         exception
                            when Error : others =>
-                              Report_Callback_Failure
-                                (Name, Item.Result, Error);
+                              Report_Callback_Failure (Name, Item.Result, Error);
                         end;
                         if Returned then
                            Summary.Completed := Summary.Completed + 1;
@@ -1489,40 +1381,46 @@ package body Flyology_Bench.Suites is
                            else
                               if Verdict (Result) = Inconclusive then
                                  Outcome := Inconclusive_Outcome;
-                                 Summary.Inconclusive :=
-                                   Summary.Inconclusive + 1;
+                                 Summary.Inconclusive := Summary.Inconclusive + 1;
                               end if;
                               if Options.Require_Metrics
-                                and then
-                                  (Has_Unavailable (Reference, Config)
-                                   or else Has_Unavailable (Contender, Config))
+                                and then (Has_Unavailable (Reference, Config)
+                                          or else Has_Unavailable (Contender, Config))
                               then
                                  Outcome := Unavailable_Outcome;
                                  Summary.Unavailable := Summary.Unavailable + 1;
                               end if;
                            end if;
                            if Options.Output_Format = Human then
-                              Ada.Text_IO.Put_Line
-                                (File, "case " & Name & ": "
-                                 & Outcome_Name (Outcome));
+                              Ada.Text_IO.Put_Line (File, "case " & Name & ": " & Outcome_Name (Outcome));
                               if not Options.Dry then
                                  Flyology_Bench.Reporters.Put_Comparison_Console
                                    (To_String (Item.Reference_Name),
-                                    To_String (Item.Contender_Name), Result,
+                                    To_String (Item.Contender_Name),
+                                    Result,
                                     File,
                                     Style => Flyology_Bench.Reporters.Plain);
                               end if;
                            elsif Options.Dry then
                               Put_Machine
-                                (File, Options.Output_Format, Suite_Name, Name,
-                                 Item.Result, Outcome, True,
-                                 Detail =>
-                                   "validation only; not performance data");
+                                (File,
+                                 Options.Output_Format,
+                                 Suite_Name,
+                                 Name,
+                                 Item.Result,
+                                 Outcome,
+                                 True,
+                                 Detail => "validation only; not performance data");
                            else
                               Put_Comparison_Machine
-                                (File, Options.Output_Format, Suite_Name, Name,
-                                 Outcome, To_String (Item.Reference_Name),
-                                 To_String (Item.Contender_Name), Result);
+                                (File,
+                                 Options.Output_Format,
+                                 Suite_Name,
+                                 Name,
+                                 Outcome,
+                                 To_String (Item.Reference_Name),
+                                 To_String (Item.Contender_Name),
+                                 Result);
                            end if;
                         end if;
                      end;
@@ -1538,8 +1436,7 @@ package body Flyology_Bench.Suites is
                            Returned := True;
                         exception
                            when Error : others =>
-                              Report_Callback_Failure
-                                (Name, Item.Result, Error);
+                              Report_Callback_Failure (Name, Item.Result, Error);
                         end;
                         if Returned then
                            Summary.Completed := Summary.Completed + 1;
@@ -1548,40 +1445,35 @@ package body Flyology_Bench.Suites is
                            else
                               if Multi_Inconclusive (Result) then
                                  Outcome := Inconclusive_Outcome;
-                                 Summary.Inconclusive :=
-                                   Summary.Inconclusive + 1;
+                                 Summary.Inconclusive := Summary.Inconclusive + 1;
                               end if;
-                              if Options.Require_Metrics
-                                and then Multi_Has_Unavailable (Result, Config)
-                              then
+                              if Options.Require_Metrics and then Multi_Has_Unavailable (Result, Config) then
                                  Outcome := Unavailable_Outcome;
                                  Summary.Unavailable := Summary.Unavailable + 1;
                               end if;
                            end if;
                            if Options.Output_Format = Human then
-                              Ada.Text_IO.Put_Line
-                                (File, "case " & Name & ": "
-                                 & Outcome_Name (Outcome));
+                              Ada.Text_IO.Put_Line (File, "case " & Name & ": " & Outcome_Name (Outcome));
                               if not Options.Dry then
                                  Item.Multi_Console (Result, File);
                               end if;
                            elsif Options.Dry then
                               Put_Machine
-                                (File, Options.Output_Format, Suite_Name, Name,
-                                 Item.Result, Outcome, True,
-                                 Detail =>
-                                   "validation only; not performance data");
+                                (File,
+                                 Options.Output_Format,
+                                 Suite_Name,
+                                 Name,
+                                 Item.Result,
+                                 Outcome,
+                                 True,
+                                 Detail => "validation only; not performance data");
                            else
                               declare
-                                 Context : constant
-                                   Flyology_Bench.Reporters.Machine_Context :=
-                                     Machine_Context
-                                       (Suite_Name, Name, Item.Result, Outcome);
+                                 Context : constant Flyology_Bench.Reporters.Machine_Context :=
+                                   Machine_Context (Suite_Name, Name, Item.Result, Outcome);
                               begin
                                  if Options.Output_Format = CSV then
-                                    Flyology_Bench.Reporters
-                                      .Put_Multi_Comparison_CSV_Header
-                                        (File, Context);
+                                    Flyology_Bench.Reporters.Put_Multi_Comparison_CSV_Header (File, Context);
                                     Item.Multi_CSV (Result, File, Context);
                                  else
                                     Item.Multi_JSON (Result, File, Context);
@@ -1595,8 +1487,7 @@ package body Flyology_Bench.Suites is
          end loop;
 
          if Stop then
-            Summary.Skipped :=
-              Summary.Skipped + Count - Summary.Completed - Summary.Failed;
+            Summary.Skipped := Summary.Skipped + Count - Summary.Completed - Summary.Failed;
          end if;
          if Summary.Rejected > 0 then
             Summary.Status := Regression_Rejected;
@@ -1631,8 +1522,7 @@ package body Flyology_Bench.Suites is
       end if;
    end Execute;
 
-   procedure Put_Help
-     (Output : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
+   procedure Put_Help (Output : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output) is
    begin
       Ada.Text_IO.Put_Line (Output, "Flyology_Bench suite options:");
       Ada.Text_IO.Put_Line (Output, "  --list                      list selected identities");
@@ -1656,7 +1546,6 @@ package body Flyology_Bench.Suites is
       Ada.Text_IO.Put_Line (Output, "  --require-metrics           fail on unavailable requested axes");
       Ada.Text_IO.Put_Line (Output, "  --allow-empty               make no-match successful");
       Ada.Text_IO.Put_Line (Output, "  --help                      show this help");
-      Ada.Text_IO.Put_Line
-        (Output, "Durations are strict decimal values with ns, us, ms, or s.");
+      Ada.Text_IO.Put_Line (Output, "Durations are strict decimal values with ns, us, ms, or s.");
    end Put_Help;
 end Flyology_Bench.Suites;

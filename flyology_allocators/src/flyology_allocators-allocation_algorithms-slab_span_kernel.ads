@@ -7,6 +7,7 @@ private with System;
 --  contiguous runs. Stored metadata contains only fixed-width values. One
 --  persisted nonblocking guard serializes metadata mutation across views.
 --  @exclude
+
 package Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
 
    Minimum_Block_Limit : constant Positive := 16;
@@ -21,15 +22,14 @@ package Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Run_Size           : Positive;
    end record;
 
-   function Configuration_Usable_Capacity
-     (Value : Configuration) return Positive is (Value.Usable_Capacity);
-   function Configuration_Minimum_Block_Size
-     (Value : Configuration) return Positive is (Value.Minimum_Block_Size);
+   function Configuration_Usable_Capacity (Value : Configuration) return Positive
+   is (Value.Usable_Capacity);
+   function Configuration_Minimum_Block_Size (Value : Configuration) return Positive
+   is (Value.Minimum_Block_Size);
 
    type View is limited private;
 
-   function Required_Storage
-     (Configuration : Slab_Span_Kernel.Configuration) return Byte_Count;
+   function Required_Storage (Configuration : Slab_Span_Kernel.Configuration) return Byte_Count;
 
    procedure Initialize
      (Item          : out View;
@@ -73,18 +73,11 @@ package Flyology_Allocators.Allocation_Algorithms.Slab_Span_Kernel is
       Result         : out Allocation_Result);
 
    procedure Release (Item : in out View; Value : Allocation_Handle);
-   procedure Release
-     (Item    : in out View;
-      Value   : Allocation_Handle;
-      Timeout : Wait_Timeout);
+   procedure Release (Item : in out View; Value : Allocation_Handle; Timeout : Wait_Timeout);
 
-   function Block_Capacity
-     (Item : View; Value : Allocation_Handle) return Byte_Count;
+   function Block_Capacity (Item : View; Value : Allocation_Handle) return Byte_Count;
 
-   procedure Attach_Allocation
-     (Region : in out Region_View;
-      Item   : View;
-      Value  : Allocation_Handle);
+   procedure Attach_Allocation (Region : in out Region_View; Item : View; Value : Allocation_Handle);
 
    procedure Copy
      (Item          : View;

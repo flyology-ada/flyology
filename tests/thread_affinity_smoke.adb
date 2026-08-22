@@ -30,8 +30,7 @@ procedure Thread_Affinity_Smoke is
    protected Observations is
       procedure Group_One_Seeded (Thread : System.Address);
       procedure Group_Two_Seeded (Thread : System.Address);
-      entry Wait_For_Seeds
-        (One : out System.Address; Two : out System.Address);
+      entry Wait_For_Seeds (One : out System.Address; Two : out System.Address);
       procedure Finished (Passed : Boolean);
       entry Wait_For_Results;
       function Passed return Boolean;
@@ -56,10 +55,7 @@ procedure Thread_Affinity_Smoke is
          Seed_Count := Seed_Count + 1;
       end Group_Two_Seeded;
 
-      entry Wait_For_Seeds
-        (One : out System.Address; Two : out System.Address)
-        when Seed_Count = 2
-      is
+      entry Wait_For_Seeds (One : out System.Address; Two : out System.Address) when Seed_Count = 2 is
       begin
          One := One_Thread;
          Two := Two_Thread;
@@ -76,22 +72,27 @@ procedure Thread_Affinity_Smoke is
          null;
       end Wait_For_Results;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Observations;
 
-   task Group_One_Seeder with CPU => 11 is
+   task Group_One_Seeder
+     with CPU => 11 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Seeder;
 
-   task Group_One_Observer with CPU => 11 is
+   task Group_One_Observer
+     with CPU => 11 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Observer;
 
-   task Group_Two_Seeder with CPU => 12 is
+   task Group_Two_Seeder
+     with CPU => 12 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two_Seeder;
 
-   task Migrator with CPU => 11 is
+   task Migrator
+     with CPU => 11 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
 
@@ -116,10 +117,7 @@ procedure Thread_Affinity_Smoke is
       Two : System.Address;
    begin
       Observations.Wait_For_Seeds (One, Two);
-      Observations.Finished
-        (Current_Thread = One
-         and then One /= Two
-         and then TLS_Get = Group_One_Value);
+      Observations.Finished (Current_Thread = One and then One /= Two and then TLS_Get = Group_One_Value);
    exception
       when others =>
          Observations.Finished (False);
@@ -233,10 +231,7 @@ procedure Thread_Affinity_Smoke is
    begin
       TLS_Set (Native_Value);
       delay 0.001;
-      OK :=
-        Groups.Is_Thread_Pinned
-        and then Current_Thread = Thread
-        and then TLS_Get = Native_Value;
+      OK := Groups.Is_Thread_Pinned and then Current_Thread = Thread and then TLS_Get = Native_Value;
       declare
          Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
          pragma Unreferenced (Pin);

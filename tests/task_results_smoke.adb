@@ -38,15 +38,12 @@ procedure Task_Results_Smoke is
          null;
       end Wait;
 
-      function Is_Set return Boolean is (Raised);
+      function Is_Set return Boolean
+      is (Raised);
    end Signal;
 
-   function Await_Task
-     (T       : Task_Ids.Task_Id;
-      Context : String) return Results.Task_Result
-   is
-      Observation : constant Results.Task_Observation :=
-        Results.Wait (T, Timeout => 2.0);
+   function Await_Task (T : Task_Ids.Task_Id; Context : String) return Results.Task_Result is
+      Observation : constant Results.Task_Observation := Results.Wait (T, Timeout => 2.0);
    begin
       if Observation.Status /= Results.Terminal then
          raise Program_Error with Context & " result was not published";
@@ -62,8 +59,7 @@ procedure Task_Results_Smoke is
    procedure Run_Lane is
       Failure            : exception;
       Activation_Failure : exception;
-      Long_Message : constant String
-        (1 .. Results.Exception_Message_Capacity + 19) := (others => 'M');
+      Long_Message       : constant String (1 .. Results.Exception_Message_Capacity + 19) := (others => 'M');
 
       task type Fast_Task is
          pragma Task_Info (Model);
@@ -75,8 +71,7 @@ procedure Task_Results_Smoke is
       end Fast_Task;
 
       type Fast_Access is access Fast_Task;
-      procedure Free_Fast is new Ada.Unchecked_Deallocation
-        (Fast_Task, Fast_Access);
+      procedure Free_Fast is new Ada.Unchecked_Deallocation (Fast_Task, Fast_Access);
 
       task type Failure_Task is
          pragma Task_Info (Model);
@@ -88,8 +83,7 @@ procedure Task_Results_Smoke is
       end Failure_Task;
 
       type Failure_Access is access Failure_Task;
-      procedure Free_Failure is new Ada.Unchecked_Deallocation
-        (Failure_Task, Failure_Access);
+      procedure Free_Failure is new Ada.Unchecked_Deallocation (Failure_Task, Failure_Access);
 
       Started : Signal;
       Gate    : STC.Suspension_Object;
@@ -105,14 +99,13 @@ procedure Task_Results_Smoke is
       end Abort_Task;
 
       type Abort_Access is access Abort_Task;
-      procedure Free_Abort is new Ada.Unchecked_Deallocation
-        (Abort_Task, Abort_Access);
+      procedure Free_Abort is new Ada.Unchecked_Deallocation (Abort_Task, Abort_Access);
 
       Finalized : Signal;
 
-      type Finalization_Probe is
-        new Ada.Finalization.Limited_Controlled with null record;
-      overriding procedure Finalize (Item : in out Finalization_Probe);
+      type Finalization_Probe is new Ada.Finalization.Limited_Controlled with null record;
+      overriding
+      procedure Finalize (Item : in out Finalization_Probe);
 
       procedure Finalize (Item : in out Finalization_Probe) is
          pragma Unreferenced (Item);
@@ -132,13 +125,11 @@ procedure Task_Results_Smoke is
       end Finalizing_Task;
 
       type Finalizing_Access is access Finalizing_Task;
-      procedure Free_Finalizing is new Ada.Unchecked_Deallocation
-        (Finalizing_Task, Finalizing_Access);
+      procedure Free_Finalizing is new Ada.Unchecked_Deallocation (Finalizing_Task, Finalizing_Access);
 
       function Fail_Activation return Boolean is
       begin
-         raise Activation_Failure with
-           "activation failed before allocator return";
+         raise Activation_Failure with "activation failed before allocator return";
          return False;
       end Fail_Activation;
 
@@ -173,9 +164,9 @@ procedure Task_Results_Smoke is
       --  owned task object is reclaimed. They do not retain or address the
       --  task itself and detach independently.
       declare
-         Subject : Fast_Access := new Fast_Task;
-         First   : Results.Monitor;
-         Second  : Results.Monitor;
+         Subject            : Fast_Access := new Fast_Task;
+         First              : Results.Monitor;
+         Second             : Results.Monitor;
          First_Observation  : Results.Task_Observation;
          Second_Observation : Results.Task_Observation;
       begin
@@ -191,11 +182,9 @@ procedure Task_Results_Smoke is
          Free_Fast (Subject);
          Second_Observation := Results.Observe (Second);
          if Second_Observation.Status /= Results.Terminal
-           or else
-             Second_Observation.Result.Cause /= Results.Normal_Completion
+           or else Second_Observation.Result.Cause /= Results.Normal_Completion
          then
-            raise Program_Error with
-              Label & " monitor did not survive task-object reclamation";
+            raise Program_Error with Label & " monitor did not survive task-object reclamation";
          end if;
          Results.Detach (First);
          Results.Detach (First);
@@ -220,14 +209,12 @@ procedure Task_Results_Smoke is
       begin
          Item := Await_Task (Subject.all'Identity, Label & " failed task");
          if Item.Cause /= Results.Unhandled_Exception
-           or else Ada.Strings.Fixed.Index
-             (Results.Text (Item.Exception_Name), "FAILURE") = 0
+           or else Ada.Strings.Fixed.Index (Results.Text (Item.Exception_Name), "FAILURE") = 0
            or else Item.Exception_Name.Truncated
            or else not Item.Exception_Message.Truncated
-           or else Item.Exception_Message.Length /=
-             Results.Exception_Message_Capacity
-           or else Results.Text (Item.Exception_Message) /=
-             Long_Message (1 .. Results.Exception_Message_Capacity)
+           or else Item.Exception_Message.Length /= Results.Exception_Message_Capacity
+           or else Results.Text (Item.Exception_Message)
+                   /= Long_Message (1 .. Results.Exception_Message_Capacity)
          then
             raise Program_Error with Label & " exception result mismatch";
          end if;
@@ -271,8 +258,7 @@ procedure Task_Results_Smoke is
          end Timeout_Task;
 
          type Timeout_Access is access Timeout_Task;
-         procedure Free_Timeout is new Ada.Unchecked_Deallocation
-           (Timeout_Task, Timeout_Access);
+         procedure Free_Timeout is new Ada.Unchecked_Deallocation (Timeout_Task, Timeout_Access);
 
          Subject     : Timeout_Access := new Timeout_Task;
          Watch       : Results.Monitor;
@@ -323,10 +309,8 @@ procedure Task_Results_Smoke is
       Ada.Text_IO.Put_Line ("task results: " & Label & " lane passed");
    end Run_Lane;
 
-   procedure Run_Native is new Run_Lane
-     (Label => "native", Model => Flyology.Native_Task);
-   procedure Run_Lightweight is new Run_Lane
-     (Label => "lightweight", Model => Flyology.Lightweight_Task);
+   procedure Run_Native is new Run_Lane (Label => "native", Model => Flyology.Native_Task);
+   procedure Run_Lightweight is new Run_Lane (Label => "lightweight", Model => Flyology.Lightweight_Task);
 
    generic
       Label : String;
@@ -346,8 +330,7 @@ procedure Task_Results_Smoke is
       end Publisher;
 
       type Publisher_Access is access Publisher;
-      procedure Free_Publisher is new Ada.Unchecked_Deallocation
-        (Publisher, Publisher_Access);
+      procedure Free_Publisher is new Ada.Unchecked_Deallocation (Publisher, Publisher_Access);
 
       Subject : Publisher_Access := new Publisher;
 
@@ -365,8 +348,7 @@ procedure Task_Results_Smoke is
       task body Native_Waiter is
       begin
          Native_Started.Set;
-         Native_Observation :=
-           Results.Wait (Subject.all'Identity, Timeout => 2.0);
+         Native_Observation := Results.Wait (Subject.all'Identity, Timeout => 2.0);
          Native_Done.Set;
       end Native_Waiter;
 
@@ -377,8 +359,7 @@ procedure Task_Results_Smoke is
       task body Lightweight_Waiter is
       begin
          Lightweight_Started.Set;
-         Light_Observation :=
-           Results.Wait (Subject.all'Identity, Timeout => 2.0);
+         Light_Observation := Results.Wait (Subject.all'Identity, Timeout => 2.0);
          Lightweight_Done.Set;
       end Lightweight_Waiter;
    begin
@@ -397,16 +378,15 @@ procedure Task_Results_Smoke is
       Free_Publisher (Subject);
    end Check_Direct_Waiters;
 
-   procedure Check_Native_Direct_Waiters is new Check_Direct_Waiters
-     (Label => "native publication", Publisher_Model => Flyology.Native_Task);
-   procedure Check_Lightweight_Direct_Waiters is new Check_Direct_Waiters
-     (Label => "lightweight publication",
-      Publisher_Model => Flyology.Lightweight_Task);
+   procedure Check_Native_Direct_Waiters is new
+     Check_Direct_Waiters (Label => "native publication", Publisher_Model => Flyology.Native_Task);
+   procedure Check_Lightweight_Direct_Waiters is new
+     Check_Direct_Waiters (Label => "lightweight publication", Publisher_Model => Flyology.Lightweight_Task);
 
    procedure Check_Abortable_Direct_Wait is
-      Subject_Started : Signal;
-      Subject_Gate    : STC.Suspension_Object;
-      Waiter_Started  : Signal;
+      Subject_Started        : Signal;
+      Subject_Gate           : STC.Suspension_Object;
+      Waiter_Started         : Signal;
       Monitor_Waiter_Started : Signal;
 
       task type Subject_Task is
@@ -420,8 +400,7 @@ procedure Task_Results_Smoke is
       end Subject_Task;
 
       type Subject_Access is access Subject_Task;
-      procedure Free_Subject is new Ada.Unchecked_Deallocation
-        (Subject_Task, Subject_Access);
+      procedure Free_Subject is new Ada.Unchecked_Deallocation (Subject_Task, Subject_Access);
 
       Subject : Subject_Access := new Subject_Task;
 
@@ -476,8 +455,7 @@ procedure Task_Results_Smoke is
       if Item.Cause /= Results.Abnormal_Completion then
          raise Program_Error with "direct wait swallowed task abort";
       end if;
-      Item := Await_Task
-        (Monitor_Waiter'Identity, "aborted monitor waiter");
+      Item := Await_Task (Monitor_Waiter'Identity, "aborted monitor waiter");
       if Item.Cause /= Results.Abnormal_Completion then
          raise Program_Error with "monitor wait swallowed task abort";
       end if;
@@ -523,8 +501,7 @@ procedure Task_Results_Smoke is
    begin
       begin
          declare
-            Observation : constant Results.Task_Observation :=
-              Results.Observe (Task_Ids.Null_Task_Id);
+            Observation : constant Results.Task_Observation := Results.Observe (Task_Ids.Null_Task_Id);
             pragma Unreferenced (Observation);
          begin
             null;

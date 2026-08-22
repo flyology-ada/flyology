@@ -68,30 +68,33 @@ procedure Execution_Groups is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Completion;
 
    procedure Show (Label : String) is
    begin
       Ada.Text_IO.Put_Line
-        (Label
-         & " group=" & Groups.Current'Image
-         & " pthread=" & Showcase_Support.Thread_Image);
+        (Label & " group=" & Groups.Current'Image & " pthread=" & Showcase_Support.Thread_Image);
    end Show;
 
-   task Group_One_Peer with CPU => 1 is
+   task Group_One_Peer
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_One_Peer;
 
-   task Group_Two_Peer with CPU => 2 is
+   task Group_Two_Peer
+     with CPU => 2 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Group_Two_Peer;
 
-   task Heartbeat with CPU => 2 is
+   task Heartbeat
+     with CPU => 2 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Heartbeat;
 
-   task Migrator with CPU => 1 is
+   task Migrator
+     with CPU => 1 is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Migrator;
    task Native_Task is
@@ -123,8 +126,7 @@ procedure Execution_Groups is
          delay 0.015;
          Demo.Tick;
          Ada.Text_IO.Put_Line
-           ("shared loop stayed live: tick" & Tick'Image
-            & " pthread=" & Showcase_Support.Thread_Image);
+           ("shared loop stayed live: tick" & Tick'Image & " pthread=" & Showcase_Support.Thread_Image);
       end loop;
       Completion.Finished (Groups.Current = 2);
    exception
@@ -149,8 +151,7 @@ procedure Execution_Groups is
       Show ("dedicated lane   ");
       OK := OK and Groups.Is_Dedicated (Groups.Current);
 
-      Ada.Text_IO.Put_Line
-        ("dedicated lane performs a blocking 100 ms foreign call");
+      Ada.Text_IO.Put_Line ("dedicated lane performs a blocking 100 ms foreign call");
       Demo.Blocking_Started;
       Result := C_Usleep (100_000);
       OK := OK and Result = 0;
@@ -163,25 +164,21 @@ procedure Execution_Groups is
    exception
       when Occurrence : others =>
          Demo.Blocking_Started;
-         Ada.Text_IO.Put_Line
-           ("migrator failed: "
-            & Ada.Exceptions.Exception_Information (Occurrence));
+         Ada.Text_IO.Put_Line ("migrator failed: " & Ada.Exceptions.Exception_Information (Occurrence));
          Completion.Finished (False);
    end Migrator;
 
    task body Native_Task is
       Rejected : Boolean := False;
    begin
-      Ada.Text_IO.Put_Line
-        ("stock Native_Task pthread=" & Showcase_Support.Thread_Image);
+      Ada.Text_IO.Put_Line ("stock Native_Task pthread=" & Showcase_Support.Thread_Image);
       begin
          Groups.Migrate (Groups.Default_Group);
       exception
          when Groups.Migration_Error =>
             Rejected := True;
       end;
-      Ada.Text_IO.Put_Line
-        ("live stock-native conversion rejected (creation-time lane)");
+      Ada.Text_IO.Put_Line ("live stock-native conversion rejected (creation-time lane)");
       Completion.Finished (Rejected);
    exception
       when others =>
@@ -190,13 +187,11 @@ procedure Execution_Groups is
 
 begin
    Ada.Text_IO.Put_Line
-     ("execution groups: CPU aspects choose shared loops; migration changes "
-      & "loop threads");
+     ("execution groups: CPU aspects choose shared loops; migration changes " & "loop threads");
    Completion.Wait;
    if not Completion.Passed then
       raise Program_Error with "execution-group showcase failed";
    end if;
    Ada.Text_IO.Put_Line
-     ("shared groups, live migration, a dedicated thread, and native "
-      & "boundaries all passed");
+     ("shared groups, live migration, a dedicated thread, and native " & "boundaries all passed");
 end Execution_Groups;

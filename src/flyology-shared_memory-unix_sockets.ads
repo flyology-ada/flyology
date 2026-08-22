@@ -6,6 +6,7 @@ with Interfaces.C;
 --  and recvmsg calls and may block. Call them from a native task unless the
 --  application has independently established nonblocking readiness; this
 --  package does not hide socket work on an event-loop pthread.
+
 package Flyology.Shared_Memory.Unix_Sockets is
 
    --  Raised when the carrier byte, ancillary layout, descriptor count, or
@@ -53,9 +54,7 @@ package Flyology.Shared_Memory.Unix_Sockets is
    --  @exception Protocol_Error Socket is not connected AF_UNIX SOCK_STREAM
    --  @exception Operating_System_Error Descriptor inspection or setup fails
    procedure Adopt
-     (Item   : in out Handoff_Channel;
-      Socket : in out Socket_Descriptor;
-      Trust  : Peer_Trust := Trusted_Peer);
+     (Item : in out Handoff_Channel; Socket : in out Socket_Descriptor; Trust : Peer_Trust := Trusted_Peer);
 
    --  Explicitly close Item. This operation is idempotent and a non-raising
    --  finalization fallback also closes an owned endpoint.
@@ -94,9 +93,7 @@ package Flyology.Shared_Memory.Unix_Sockets is
    --  @exception Protocol_Error Socket is not connected AF_UNIX SOCK_STREAM
    --  @exception Operating_System_Error sendmsg or transfer close fails
    procedure Send
-     (Socket    : Socket_Descriptor;
-      Item      : in out Backing_Object;
-      Ownership : Send_Ownership := Borrow);
+     (Socket : Socket_Descriptor; Item : in out Backing_Object; Ownership : Send_Ownership := Borrow);
 
    --  Send exactly one backing descriptor through an owned dedicated channel.
    --  The operation fails immediately on concurrent channel use. A transport
@@ -112,9 +109,7 @@ package Flyology.Shared_Memory.Unix_Sockets is
    --  @exception Protocol_Error Channel protocol validation fails
    --  @exception Operating_System_Error sendmsg or close fails
    procedure Send
-     (Channel   : in out Handoff_Channel;
-      Item      : in out Backing_Object;
-      Ownership : Send_Ownership := Borrow);
+     (Channel : in out Handoff_Channel; Item : in out Backing_Object; Ownership : Send_Ownership := Borrow);
 
    --  Receive exactly one descriptor from a caller-owned raw socket, establish
    --  FD_CLOEXEC immediately, validate regular-file type and exact length, and
@@ -180,19 +175,11 @@ private
    type Begin_Result is (Acquired, Was_Closed, Was_Busy, Was_Poisoned);
 
    protected type Channel_Controller is
-      procedure Adopt
-        (Descriptor : C.int;
-         Trust      : Peer_Trust;
-         Accepted   : out Boolean);
-      procedure Try_Begin
-        (Descriptor : out C.int;
-         Trust      : out Peer_Trust;
-         Result     : out Begin_Result);
+      procedure Adopt (Descriptor : C.int; Trust : Peer_Trust; Accepted : out Boolean);
+      procedure Try_Begin (Descriptor : out C.int; Trust : out Peer_Trust; Result : out Begin_Result);
       procedure Finish;
       procedure Poison (Descriptor : out C.int);
-      procedure Take_For_Close
-        (Descriptor : out C.int;
-         Busy_Now   : out Boolean);
+      procedure Take_For_Close (Descriptor : out C.int; Busy_Now : out Boolean);
       function Open return Boolean;
       function Failed return Boolean;
       function Busy_Now return Boolean;
@@ -208,7 +195,8 @@ private
 
    --  @exclude Controlled finalization hook
    --  @param Item Channel owner finalized without raising
-   overriding procedure Finalize (Item : in out Channel_Owner);
+   overriding
+   procedure Finalize (Item : in out Channel_Owner);
 
    type Handoff_Channel is limited record
       Owner : Channel_Owner;

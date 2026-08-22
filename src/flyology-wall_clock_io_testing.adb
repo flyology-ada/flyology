@@ -5,10 +5,8 @@ package body Flyology.Wall_Clock_IO_Testing is
    package Atomics renames System.Atomic_Primitives;
    use type Atomics.uint32;
 
-   function To_Bits is new Ada.Unchecked_Conversion
-     (Interfaces.Integer_64, Atomics.uint64);
-   function To_Integer is new Ada.Unchecked_Conversion
-     (Atomics.uint64, Interfaces.Integer_64);
+   function To_Bits is new Ada.Unchecked_Conversion (Interfaces.Integer_64, Atomics.uint64);
+   function To_Integer is new Ada.Unchecked_Conversion (Atomics.uint64, Interfaces.Integer_64);
 
    Requested_Steady : aliased Atomics.uint64 := 0;
    Requested_Wall   : aliased Atomics.uint64 := 0;
@@ -17,16 +15,11 @@ package body Flyology.Wall_Clock_IO_Testing is
    Pending          : aliased Atomics.uint32 := 0;
    Count            : aliased Atomics.uint32 := 0;
 
-   procedure Configure
-     (Steady_Nanoseconds : Interfaces.Integer_64;
-      Wall_Nanoseconds   : Interfaces.Integer_64) is
+   procedure Configure (Steady_Nanoseconds : Interfaces.Integer_64; Wall_Nanoseconds : Interfaces.Integer_64)
+   is
    begin
-      Atomics.Atomic_Store_64
-        (Requested_Steady'Address,
-         To_Bits (Steady_Nanoseconds),
-         Atomics.Relaxed);
-      Atomics.Atomic_Store_64
-        (Requested_Wall'Address, To_Bits (Wall_Nanoseconds), Atomics.Relaxed);
+      Atomics.Atomic_Store_64 (Requested_Steady'Address, To_Bits (Steady_Nanoseconds), Atomics.Relaxed);
+      Atomics.Atomic_Store_64 (Requested_Wall'Address, To_Bits (Wall_Nanoseconds), Atomics.Relaxed);
       Atomics.Atomic_Store_64 (Current_Steady'Address, 0, Atomics.Relaxed);
       Atomics.Atomic_Store_64 (Current_Wall'Address, 0, Atomics.Relaxed);
       Atomics.Atomic_Store_32 (Count'Address, 0, Atomics.Relaxed);
@@ -40,16 +33,16 @@ package body Flyology.Wall_Clock_IO_Testing is
    end Reset;
 
    function Take_EINTR return Boolean is
-      Expected : aliased Atomics.uint32 := 1;
+      Expected      : aliased Atomics.uint32 := 1;
       Current_Count : aliased Atomics.uint32;
    begin
       if not Atomics.Atomic_Compare_Exchange_32
-        (Pending'Address,
-         Expected'Address,
-         0,
-         Weak          => False,
-         Success_Model => Atomics.Relaxed,
-         Failure_Model => Atomics.Relaxed)
+               (Pending'Address,
+                Expected'Address,
+                0,
+                Weak          => False,
+                Success_Model => Atomics.Relaxed,
+                Failure_Model => Atomics.Relaxed)
       then
          return False;
       end if;
@@ -63,25 +56,24 @@ package body Flyology.Wall_Clock_IO_Testing is
          Atomics.Relaxed);
       Current_Count := Atomics.Atomic_Load_32 (Count'Address, Atomics.Relaxed);
       loop
-         exit when Atomics.Atomic_Compare_Exchange_32
-           (Count'Address,
-            Current_Count'Address,
-            Current_Count + 1,
-            Weak          => True,
-            Success_Model => Atomics.Relaxed,
-            Failure_Model => Atomics.Relaxed);
+         exit when
+           Atomics.Atomic_Compare_Exchange_32
+             (Count'Address,
+              Current_Count'Address,
+              Current_Count + 1,
+              Weak          => True,
+              Success_Model => Atomics.Relaxed,
+              Failure_Model => Atomics.Relaxed);
       end loop;
       return True;
    end Take_EINTR;
 
-   function Steady_Adjustment return Interfaces.Integer_64 is
-     (To_Integer
-        (Atomics.Atomic_Load_64 (Current_Steady'Address, Atomics.Relaxed)));
+   function Steady_Adjustment return Interfaces.Integer_64
+   is (To_Integer (Atomics.Atomic_Load_64 (Current_Steady'Address, Atomics.Relaxed)));
 
-   function Wall_Adjustment return Interfaces.Integer_64 is
-     (To_Integer
-        (Atomics.Atomic_Load_64 (Current_Wall'Address, Atomics.Relaxed)));
+   function Wall_Adjustment return Interfaces.Integer_64
+   is (To_Integer (Atomics.Atomic_Load_64 (Current_Wall'Address, Atomics.Relaxed)));
 
-   function Retry_Count return Natural is
-     (Natural (Atomics.Atomic_Load_32 (Count'Address, Atomics.Relaxed)));
+   function Retry_Count return Natural
+   is (Natural (Atomics.Atomic_Load_32 (Count'Address, Atomics.Relaxed)));
 end Flyology.Wall_Clock_IO_Testing;

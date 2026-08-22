@@ -4,7 +4,10 @@
 --  Automatic producer-shard selection for an independently instantiated
 --  Flyology_Debug.Tracers package. This package does not make Flyology depend
 --  on Flyology_Debug; pass Choose as the tracer's Select_Producer actual.
-package Flyology.Debug_Producer_Selection with Preelaborate is
+
+package Flyology.Debug_Producer_Selection
+  with Preelaborate
+is
 
    --  Select a shard without allocation or locking. A lightweight task maps
    --  its current execution group modulo Producer_Count, so tasks that can run
@@ -15,5 +18,5 @@ package Flyology.Debug_Producer_Selection with Preelaborate is
    --  @param Producer_Count Number of configured producer shards
    --  @return Producer identifier in 1 .. Producer_Count
    function Choose (Producer_Count : Positive) return Positive
-     with Inline;
+   with Inline;
 end Flyology.Debug_Producer_Selection;

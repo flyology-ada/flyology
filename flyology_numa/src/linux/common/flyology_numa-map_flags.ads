@@ -2,6 +2,7 @@
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
 --  Mapping flags for Linux.
+
 private package Flyology_NUMA.Map_Flags is
 
    --  Memory backed by nothing but itself.  Linux and macOS agree on every

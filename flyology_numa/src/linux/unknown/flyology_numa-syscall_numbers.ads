@@ -7,6 +7,7 @@
 --  Calling by a number guessed from another architecture would reach a
 --  working but unrelated kernel service, so nothing is called at all and
 --  placement reports itself unsupported. The numbers below are never used.
+
 private package Flyology_NUMA.Syscall_Numbers is
 
    --  Whether this architecture's numbers are recorded here.

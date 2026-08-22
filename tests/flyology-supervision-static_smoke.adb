@@ -28,7 +28,8 @@ procedure Flyology.Supervision.Static_Smoke is
          Count := Count + 1;
       end Increment;
 
-      function Value return Natural is (Count);
+      function Value return Natural
+      is (Count);
    end Invocation_Count;
 
    type Configuration_Context is limited record
@@ -37,22 +38,20 @@ procedure Flyology.Supervision.Static_Smoke is
 
    type Configuration_Kind is (Configuration_Service);
 
-   Specification_Entered : Ada.Synchronous_Task_Control.Suspension_Object;
+   Specification_Entered  : Ada.Synchronous_Task_Control.Suspension_Object;
    Continue_Configuration : Ada.Synchronous_Task_Control.Suspension_Object;
 
-   function Configuration_Id
-     (Child : Configuration_Kind) return Flyology.Supervision.Child_Id is
-     (case Child is when Configuration_Service => 4_294_967_290);
+   function Configuration_Id (Child : Configuration_Kind) return Flyology.Supervision.Child_Id
+   is (case Child is
+         when Configuration_Service => 4_294_967_290);
 
    function Blocking_Specification
-     (Child : Configuration_Kind)
-      return Flyology.Supervision.Child_Specification
+     (Child : Configuration_Kind) return Flyology.Supervision.Child_Specification
    is
       pragma Unreferenced (Child);
    begin
       Ada.Synchronous_Task_Control.Set_True (Specification_Entered);
-      Ada.Synchronous_Task_Control.Suspend_Until_True
-        (Continue_Configuration);
+      Ada.Synchronous_Task_Control.Suspend_Until_True (Continue_Configuration);
       return
         (Restart           => Flyology.Supervision.Never,
          Impact            => Flyology.Supervision.Escalate,
@@ -65,9 +64,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Blocking_Specification;
 
-   function No_Configuration_Relationship
-     (Left, Right : Configuration_Kind) return Boolean
-   is
+   function No_Configuration_Relationship (Left, Right : Configuration_Kind) return Boolean is
       pragma Unreferenced (Left, Right);
    begin
       return False;
@@ -82,38 +79,32 @@ procedure Flyology.Supervision.Static_Smoke is
       pragma Unreferenced (Child, Control, Result);
    begin
       Context.Runs.Increment;
-      raise Test_Failure with
-        "generation started after preconfiguration shutdown";
+      raise Test_Failure with "generation started after preconfiguration shutdown";
    end Run_Configuration_Generation;
 
-   package Configuration_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind          => Configuration_Kind,
-      Application_Context => Configuration_Context,
-      Logical_Id          => Configuration_Id,
-      Specification       => Blocking_Specification,
-      Depends_On          => No_Configuration_Relationship,
-      Cohort_Member       => No_Configuration_Relationship,
-      Run_One_Generation  => Run_Configuration_Generation);
+   package Configuration_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Configuration_Kind,
+        Application_Context => Configuration_Context,
+        Logical_Id          => Configuration_Id,
+        Specification       => Blocking_Specification,
+        Depends_On          => No_Configuration_Relationship,
+        Cohort_Member       => No_Configuration_Relationship,
+        Run_One_Generation  => Run_Configuration_Generation);
 
    protected type Restart_State is
-      procedure Begin_Generation
-        (Attempt : out Positive;
-         Identity : Ada.Task_Identification.Task_Id);
+      procedure Begin_Generation (Attempt : out Positive; Identity : Ada.Task_Identification.Task_Id);
       function Attempts return Natural;
       function First_Task return Ada.Task_Identification.Task_Id;
       function Second_Task return Ada.Task_Identification.Task_Id;
    private
       Count  : Natural := 0;
-      First  : Ada.Task_Identification.Task_Id :=
-        Ada.Task_Identification.Null_Task_Id;
-      Second : Ada.Task_Identification.Task_Id :=
-        Ada.Task_Identification.Null_Task_Id;
+      First  : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
+      Second : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
    end Restart_State;
 
    protected body Restart_State is
-      procedure Begin_Generation
-        (Attempt : out Positive;
-         Identity : Ada.Task_Identification.Task_Id) is
+      procedure Begin_Generation (Attempt : out Positive; Identity : Ada.Task_Identification.Task_Id) is
       begin
          Count := Count + 1;
          Attempt := Count;
@@ -124,9 +115,12 @@ procedure Flyology.Supervision.Static_Smoke is
          end if;
       end Begin_Generation;
 
-      function Attempts return Natural is (Count);
-      function First_Task return Ada.Task_Identification.Task_Id is (First);
-      function Second_Task return Ada.Task_Identification.Task_Id is (Second);
+      function Attempts return Natural
+      is (Count);
+      function First_Task return Ada.Task_Identification.Task_Id
+      is (First);
+      function Second_Task return Ada.Task_Identification.Task_Id
+      is (Second);
    end Restart_State;
 
    type Restart_Context is limited record
@@ -134,13 +128,11 @@ procedure Flyology.Supervision.Static_Smoke is
    end record;
 
    procedure Execute_Restartable
-     (Context : in out Restart_Context;
-      Control : not null access Flyology.Supervision.Generation_Control)
+     (Context : in out Restart_Context; Control : not null access Flyology.Supervision.Generation_Control)
    is
       Attempt : Positive;
    begin
-      Context.State.Begin_Generation
-        (Attempt, Ada.Task_Identification.Current_Task);
+      Context.State.Begin_Generation (Attempt, Ada.Task_Identification.Current_Task);
       Flyology.Supervision.Mark_Ready (Control.all);
       if Attempt <= 2 then
          raise Test_Failure with "replacement generation fails";
@@ -156,7 +148,8 @@ procedure Flyology.Supervision.Static_Smoke is
    task type Restart_Task
      (State   : not null access Restart_Context;
       Control : not null access Flyology.Supervision.Generation_Control)
-   with CPU => System.Multiprocessors.Not_A_Specific_CPU is
+     with CPU => System.Multiprocessors.Not_A_Specific_CPU
+   is
       pragma Task_Info (Flyology.Native_Task);
       entry Start;
    end Restart_Task;
@@ -169,39 +162,35 @@ procedure Flyology.Supervision.Static_Smoke is
 
    function Create_Restart
      (State   : not null access Restart_Context;
-      Control : not null access Flyology.Supervision.Generation_Control)
-      return Restart_Task
-   is
+      Control : not null access Flyology.Supervision.Generation_Control) return Restart_Task is
    begin
       return Subject : Restart_Task (State, Control);
    end Create_Restart;
 
    procedure Initialize_Restart
-     (Subject : in out Restart_Task;
-      Control : aliased in out Flyology.Supervision.Generation_Control)
+     (Subject : in out Restart_Task; Control : aliased in out Flyology.Supervision.Generation_Control)
    is
       pragma Unreferenced (Control);
    begin
       Subject.Start;
    end Initialize_Restart;
 
-   function Restart_Identity
-     (Subject : in out Restart_Task)
-      return Ada.Task_Identification.Task_Id is
-     (Subject'Identity);
+   function Restart_Identity (Subject : in out Restart_Task) return Ada.Task_Identification.Task_Id
+   is (Subject'Identity);
 
    procedure Abort_Restart (Subject : in out Restart_Task) is
    begin
       abort Subject;
    end Abort_Restart;
 
-   package Restart_Child is new Flyology.Supervision.Task_Generations
-     (Application_Context => Restart_Context,
-      Generation_Task     => Restart_Task,
-      Create              => Create_Restart,
-      Initialize          => Initialize_Restart,
-      Task_Identity       => Restart_Identity,
-      Abort_Task          => Abort_Restart);
+   package Restart_Child is new
+     Flyology.Supervision.Task_Generations
+       (Application_Context => Restart_Context,
+        Generation_Task     => Restart_Task,
+        Create              => Create_Restart,
+        Initialize          => Initialize_Restart,
+        Task_Identity       => Restart_Identity,
+        Abort_Task          => Abort_Restart);
 
    type Restart_Kind is (Service);
 
@@ -214,14 +203,11 @@ procedure Flyology.Supervision.Static_Smoke is
       Stability_Reset   => Ada.Real_Time.Milliseconds (50),
       Recovery_Deadline => Ada.Real_Time.Milliseconds (100));
 
-   function Restart_Id
-     (Child : Restart_Kind) return Flyology.Supervision.Child_Id is
-     (case Child is when Service => 4_294_967_297);
+   function Restart_Id (Child : Restart_Kind) return Flyology.Supervision.Child_Id
+   is (case Child is
+         when Service => 4_294_967_297);
 
-   function Restart_Specification
-     (Child : Restart_Kind)
-      return Flyology.Supervision.Child_Specification
-   is
+   function Restart_Specification (Child : Restart_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -239,9 +225,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Restart_Specification;
 
-   function No_Restart_Dependency
-     (Child        : Restart_Kind;
-      Prerequisite : Restart_Kind) return Boolean is
+   function No_Restart_Dependency (Child : Restart_Kind; Prerequisite : Restart_Kind) return Boolean is
    begin
       pragma Unreferenced (Child, Prerequisite);
       return False;
@@ -258,25 +242,23 @@ procedure Flyology.Supervision.Static_Smoke is
       Restart_Child.Run (Context, Control, Result);
    end Run_Restart_Generation;
 
-   function Restart_Cohort
-     (Trigger : Restart_Kind;
-      Member  : Restart_Kind) return Boolean
-   is
+   function Restart_Cohort (Trigger : Restart_Kind; Member : Restart_Kind) return Boolean is
       pragma Unreferenced (Trigger, Member);
    begin
       return True;
    end Restart_Cohort;
 
-   package Restart_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Restart_Kind,
-      Application_Context => Restart_Context,
-      Logical_Id         => Restart_Id,
-      Specification      => Restart_Specification,
-      Depends_On         => No_Restart_Dependency,
-      Cohort_Member      => Restart_Cohort,
-      Run_One_Generation => Run_Restart_Generation,
-      Subtree_Recovery   => Restart_Recovery,
-      Monitor_Capacity   => 1);
+   package Restart_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Restart_Kind,
+        Application_Context => Restart_Context,
+        Logical_Id          => Restart_Id,
+        Specification       => Restart_Specification,
+        Depends_On          => No_Restart_Dependency,
+        Cohort_Member       => Restart_Cohort,
+        Run_One_Generation  => Run_Restart_Generation,
+        Subtree_Recovery    => Restart_Recovery,
+        Monitor_Capacity    => 1);
 
    Exhausted_Recovery : constant Flyology.Supervision.Recovery_Limits :=
      (Burst_Attempts    => 1,
@@ -287,27 +269,24 @@ procedure Flyology.Supervision.Static_Smoke is
       Stability_Reset   => Ada.Real_Time.Seconds (1),
       Recovery_Deadline => Ada.Real_Time.Seconds (1));
 
-   function Exhausted_Specification
-     (Child : Restart_Kind)
-      return Flyology.Supervision.Child_Specification
-   is
+   function Exhausted_Specification (Child : Restart_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
-      Value : Flyology.Supervision.Child_Specification :=
-        Restart_Specification (Service);
+      Value : Flyology.Supervision.Child_Specification := Restart_Specification (Service);
    begin
       Value.Recovery := Exhausted_Recovery;
       return Value;
    end Exhausted_Specification;
 
-   package Exhausted_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind          => Restart_Kind,
-      Application_Context => Restart_Context,
-      Logical_Id          => Restart_Id,
-      Specification       => Exhausted_Specification,
-      Depends_On          => No_Restart_Dependency,
-      Cohort_Member       => Restart_Cohort,
-      Run_One_Generation  => Run_Restart_Generation,
-      Subtree_Recovery    => Exhausted_Recovery);
+   package Exhausted_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Restart_Kind,
+        Application_Context => Restart_Context,
+        Logical_Id          => Restart_Id,
+        Specification       => Exhausted_Specification,
+        Depends_On          => No_Restart_Dependency,
+        Cohort_Member       => Restart_Cohort,
+        Run_One_Generation  => Run_Restart_Generation,
+        Subtree_Recovery    => Exhausted_Recovery);
 
    type Event_Array is array (Positive range 1 .. 16) of Positive;
 
@@ -327,10 +306,11 @@ procedure Flyology.Supervision.Static_Smoke is
          Events (Count) := Value;
       end Append;
 
-      function Length return Natural is (Count);
+      function Length return Natural
+      is (Count);
 
-      function Element (Index : Positive) return Positive is
-        (Events (Index));
+      function Element (Index : Positive) return Positive
+      is (Events (Index));
    end Event_Log;
 
    protected type Dependency_Fault is
@@ -354,7 +334,7 @@ procedure Flyology.Supervision.Static_Smoke is
    end Dependency_Fault;
 
    type Dependency_Context is limited record
-      Log : Event_Log;
+      Log   : Event_Log;
       Fault : Dependency_Fault;
    end record;
 
@@ -383,45 +363,41 @@ procedure Flyology.Supervision.Static_Smoke is
    end Run_Service;
 
    procedure Execute_Prerequisite
-     (Context : in out Dependency_Context;
-      Control : not null access Flyology.Supervision.Generation_Control) is
+     (Context : in out Dependency_Context; Control : not null access Flyology.Supervision.Generation_Control)
+   is
    begin
       Run_Service (Context, Control, 1);
    end Execute_Prerequisite;
 
    procedure Execute_Dependent
-     (Context : in out Dependency_Context;
-      Control : not null access Flyology.Supervision.Generation_Control) is
+     (Context : in out Dependency_Context; Control : not null access Flyology.Supervision.Generation_Control)
+   is
    begin
       Run_Service (Context, Control, 2);
    end Execute_Dependent;
 
-   package Prerequisite_Child is new Flyology.Supervision.Children
-     (Application_Context => Dependency_Context,
-      Execute             => Execute_Prerequisite,
-      Task_Model          => Flyology.Native_Task);
-   package Dependent_Child is new Flyology.Supervision.Children
-     (Application_Context => Dependency_Context,
-      Execute             => Execute_Dependent,
-      Task_Model          => Flyology.Native_Task);
+   package Prerequisite_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Dependency_Context,
+        Execute             => Execute_Prerequisite,
+        Task_Model          => Flyology.Native_Task);
+   package Dependent_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Dependency_Context,
+        Execute             => Execute_Dependent,
+        Task_Model          => Flyology.Native_Task);
 
    type Dependency_Kind is (Prerequisite, Dependent);
 
-   function Dependency_Id
-     (Child : Dependency_Kind) return Flyology.Supervision.Child_Id is
-     (Flyology.Supervision.Child_Id
-        (Dependency_Kind'Pos (Child) + 9_000_000_000));
+   function Dependency_Id (Child : Dependency_Kind) return Flyology.Supervision.Child_Id
+   is (Flyology.Supervision.Child_Id (Dependency_Kind'Pos (Child) + 9_000_000_000));
 
-   function Dependency_Specification
-     (Child : Dependency_Kind)
-      return Flyology.Supervision.Child_Specification
+   function Dependency_Specification (Child : Dependency_Kind) return Flyology.Supervision.Child_Specification
    is
    begin
       return
         (Restart           =>
-           (if Child = Prerequisite
-            then Flyology.Supervision.On_Failure
-            else Flyology.Supervision.Never),
+           (if Child = Prerequisite then Flyology.Supervision.On_Failure else Flyology.Supervision.Never),
          Impact            =>
            (if Child = Prerequisite
             then Flyology.Supervision.Restart_Dependents
@@ -435,10 +411,8 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Dependency_Specification;
 
-   function Dependency
-     (Child        : Dependency_Kind;
-      Prerequisite : Dependency_Kind) return Boolean is
-     (Child = Dependent and then Prerequisite = Dependency_Kind'First);
+   function Dependency (Child : Dependency_Kind; Prerequisite : Dependency_Kind) return Boolean
+   is (Child = Dependent and then Prerequisite = Dependency_Kind'First);
 
    procedure Run_Dependency_Generation
      (Context : aliased in out Dependency_Context;
@@ -449,32 +423,28 @@ procedure Flyology.Supervision.Static_Smoke is
       case Child is
          when Prerequisite =>
             Prerequisite_Child.Run (Context, Control, Result);
-         when Dependent =>
+
+         when Dependent    =>
             Dependent_Child.Run (Context, Control, Result);
       end case;
    end Run_Dependency_Generation;
 
-   function Dependency_Cohort
-     (Trigger : Dependency_Kind;
-      Member  : Dependency_Kind) return Boolean is
-     (Trigger = Member);
+   function Dependency_Cohort (Trigger : Dependency_Kind; Member : Dependency_Kind) return Boolean
+   is (Trigger = Member);
 
-   package Dependency_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Dependency_Kind,
-      Application_Context => Dependency_Context,
-      Logical_Id         => Dependency_Id,
-      Specification      => Dependency_Specification,
-      Depends_On         => Dependency,
-      Cohort_Member      => Dependency_Cohort,
-      Run_One_Generation => Run_Dependency_Generation,
-      Event_Capacity     => 16);
+   package Dependency_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Dependency_Kind,
+        Application_Context => Dependency_Context,
+        Logical_Id          => Dependency_Id,
+        Specification       => Dependency_Specification,
+        Depends_On          => Dependency,
+        Cohort_Member       => Dependency_Cohort,
+        Run_One_Generation  => Run_Dependency_Generation,
+        Event_Capacity      => 16);
 
-   function Cohort_Specification
-     (Child : Dependency_Kind)
-      return Flyology.Supervision.Child_Specification
-   is
-      Value : Flyology.Supervision.Child_Specification :=
-        Dependency_Specification (Child);
+   function Cohort_Specification (Child : Dependency_Kind) return Flyology.Supervision.Child_Specification is
+      Value : Flyology.Supervision.Child_Specification := Dependency_Specification (Child);
    begin
       if Child = Prerequisite then
          Value.Impact := Flyology.Supervision.Restart_Cohort;
@@ -482,30 +452,27 @@ procedure Flyology.Supervision.Static_Smoke is
       return Value;
    end Cohort_Specification;
 
-   function Whole_Cohort
-     (Trigger : Dependency_Kind;
-      Member  : Dependency_Kind) return Boolean
-   is
+   function Whole_Cohort (Trigger : Dependency_Kind; Member : Dependency_Kind) return Boolean is
       pragma Unreferenced (Trigger, Member);
    begin
       return True;
    end Whole_Cohort;
 
-   package Cohort_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Dependency_Kind,
-      Application_Context => Dependency_Context,
-      Logical_Id         => Dependency_Id,
-      Specification      => Cohort_Specification,
-      Depends_On         => Dependency,
-      Cohort_Member      => Whole_Cohort,
-      Run_One_Generation => Run_Dependency_Generation);
+   package Cohort_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Dependency_Kind,
+        Application_Context => Dependency_Context,
+        Logical_Id          => Dependency_Id,
+        Specification       => Cohort_Specification,
+        Depends_On          => Dependency,
+        Cohort_Member       => Whole_Cohort,
+        Run_One_Generation  => Run_Dependency_Generation);
 
    type Edge_Mode is (Readiness_Case, Stuck_Case);
    type Edge_Context (Mode : Edge_Mode) is limited null record;
 
    procedure Execute_Edge
-     (Context : in out Edge_Context;
-      Control : not null access Flyology.Supervision.Generation_Control) is
+     (Context : in out Edge_Context; Control : not null access Flyology.Supervision.Generation_Control) is
    begin
       case Context.Mode is
          when Readiness_Case =>
@@ -515,7 +482,8 @@ procedure Flyology.Supervision.Static_Smoke is
                end if;
                delay 0.001;
             end loop;
-         when Stuck_Case =>
+
+         when Stuck_Case     =>
             Flyology.Supervision.Mark_Ready (Control.all);
             --  Deliberately ignore cancellation longer than both diagnostic
             --  stop intervals, then return so the structured scope can join.
@@ -523,20 +491,19 @@ procedure Flyology.Supervision.Static_Smoke is
       end case;
    end Execute_Edge;
 
-   package Edge_Child is new Flyology.Supervision.Children
-     (Application_Context => Edge_Context,
-      Execute             => Execute_Edge,
-      Task_Model          => Flyology.Native_Task);
+   package Edge_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Edge_Context,
+        Execute             => Execute_Edge,
+        Task_Model          => Flyology.Native_Task);
 
    type Edge_Kind is (Edge_Service);
 
-   function Edge_Id
-     (Child : Edge_Kind) return Flyology.Supervision.Child_Id is
-     (case Child is when Edge_Service => 18_446_744_073_709_551_000);
+   function Edge_Id (Child : Edge_Kind) return Flyology.Supervision.Child_Id
+   is (case Child is
+         when Edge_Service => 18_446_744_073_709_551_000);
 
-   function Readiness_Specification
-     (Child : Edge_Kind) return Flyology.Supervision.Child_Specification
-   is
+   function Readiness_Specification (Child : Edge_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -551,9 +518,7 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Readiness_Specification;
 
-   function Stuck_Specification
-     (Child : Edge_Kind) return Flyology.Supervision.Child_Specification
-   is
+   function Stuck_Specification (Child : Edge_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -571,19 +536,14 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Stuck_Specification;
 
-   function Default_Model_Specification
-     (Child : Edge_Kind) return Flyology.Supervision.Child_Specification
-   is
-      Value : Flyology.Supervision.Child_Specification :=
-        Readiness_Specification (Child);
+   function Default_Model_Specification (Child : Edge_Kind) return Flyology.Supervision.Child_Specification is
+      Value : Flyology.Supervision.Child_Specification := Readiness_Specification (Child);
    begin
       Value.Task_Model := Flyology.Project_Default;
       return Value;
    end Default_Model_Specification;
 
-   function No_Edge_Dependency
-     (Child        : Edge_Kind;
-      Prerequisite : Edge_Kind) return Boolean is
+   function No_Edge_Dependency (Child : Edge_Kind; Prerequisite : Edge_Kind) return Boolean is
    begin
       pragma Unreferenced (Child, Prerequisite);
       return False;
@@ -600,41 +560,41 @@ procedure Flyology.Supervision.Static_Smoke is
       Edge_Child.Run (Context, Control, Result);
    end Run_Edge_Generation;
 
-   function Edge_Cohort
-     (Trigger : Edge_Kind;
-      Member  : Edge_Kind) return Boolean
-   is
+   function Edge_Cohort (Trigger : Edge_Kind; Member : Edge_Kind) return Boolean is
       pragma Unreferenced (Trigger, Member);
    begin
       return True;
    end Edge_Cohort;
 
-   package Readiness_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Edge_Kind,
-      Application_Context => Edge_Context,
-      Logical_Id         => Edge_Id,
-      Specification      => Readiness_Specification,
-      Depends_On         => No_Edge_Dependency,
-      Cohort_Member      => Edge_Cohort,
-      Run_One_Generation => Run_Edge_Generation);
+   package Readiness_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Edge_Kind,
+        Application_Context => Edge_Context,
+        Logical_Id          => Edge_Id,
+        Specification       => Readiness_Specification,
+        Depends_On          => No_Edge_Dependency,
+        Cohort_Member       => Edge_Cohort,
+        Run_One_Generation  => Run_Edge_Generation);
 
-   package Stuck_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Edge_Kind,
-      Application_Context => Edge_Context,
-      Logical_Id         => Edge_Id,
-      Specification      => Stuck_Specification,
-      Depends_On         => No_Edge_Dependency,
-      Cohort_Member      => Edge_Cohort,
-      Run_One_Generation => Run_Edge_Generation);
+   package Stuck_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Edge_Kind,
+        Application_Context => Edge_Context,
+        Logical_Id          => Edge_Id,
+        Specification       => Stuck_Specification,
+        Depends_On          => No_Edge_Dependency,
+        Cohort_Member       => Edge_Cohort,
+        Run_One_Generation  => Run_Edge_Generation);
 
-   package Default_Model_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Edge_Kind,
-      Application_Context => Edge_Context,
-      Logical_Id         => Edge_Id,
-      Specification      => Default_Model_Specification,
-      Depends_On         => No_Edge_Dependency,
-      Cohort_Member      => Edge_Cohort,
-      Run_One_Generation => Run_Edge_Generation);
+   package Default_Model_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Edge_Kind,
+        Application_Context => Edge_Context,
+        Logical_Id          => Edge_Id,
+        Specification       => Default_Model_Specification,
+        Depends_On          => No_Edge_Dependency,
+        Cohort_Member       => Edge_Cohort,
+        Run_One_Generation  => Run_Edge_Generation);
 
    procedure Run_Activation_Failure
      (Context : aliased in out Edge_Context;
@@ -647,14 +607,15 @@ procedure Flyology.Supervision.Static_Smoke is
       raise Tasking_Error with "injected generation activation failure";
    end Run_Activation_Failure;
 
-   package Activation_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Edge_Kind,
-      Application_Context => Edge_Context,
-      Logical_Id         => Edge_Id,
-      Specification      => Readiness_Specification,
-      Depends_On         => No_Edge_Dependency,
-      Cohort_Member      => Edge_Cohort,
-      Run_One_Generation => Run_Activation_Failure);
+   package Activation_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Edge_Kind,
+        Application_Context => Edge_Context,
+        Logical_Id          => Edge_Id,
+        Specification       => Readiness_Specification,
+        Depends_On          => No_Edge_Dependency,
+        Cohort_Member       => Edge_Cohort,
+        Run_One_Generation  => Run_Activation_Failure);
 
    type Inner_Context is limited record
       Runs : Invocation_Count;
@@ -664,13 +625,11 @@ procedure Flyology.Supervision.Static_Smoke is
    end record;
    type Nested_Kind is (Nested_Service);
 
-   function Nested_Id
-     (Child : Nested_Kind) return Flyology.Supervision.Child_Id is
-     (case Child is when Nested_Service => 12_000_000_001);
+   function Nested_Id (Child : Nested_Kind) return Flyology.Supervision.Child_Id
+   is (case Child is
+         when Nested_Service => 12_000_000_001);
 
-   function Nested_Specification
-     (Child : Nested_Kind) return Flyology.Supervision.Child_Specification
-   is
+   function Nested_Specification (Child : Nested_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -685,38 +644,31 @@ procedure Flyology.Supervision.Static_Smoke is
          Group             => 0);
    end Nested_Specification;
 
-   function No_Nested_Dependency
-     (Child        : Nested_Kind;
-      Prerequisite : Nested_Kind) return Boolean
-   is
+   function No_Nested_Dependency (Child : Nested_Kind; Prerequisite : Nested_Kind) return Boolean is
       pragma Unreferenced (Child, Prerequisite);
    begin
       return False;
    end No_Nested_Dependency;
 
-   function Nested_Cohort
-     (Trigger : Nested_Kind;
-      Member  : Nested_Kind) return Boolean
-   is
+   function Nested_Cohort (Trigger : Nested_Kind; Member : Nested_Kind) return Boolean is
       pragma Unreferenced (Trigger, Member);
    begin
       return True;
    end Nested_Cohort;
 
    procedure Execute_Inner_Failure
-     (Context : in out Inner_Context;
-      Control : not null access Flyology.Supervision.Generation_Control)
-   is
+     (Context : in out Inner_Context; Control : not null access Flyology.Supervision.Generation_Control) is
    begin
       Context.Runs.Increment;
       Flyology.Supervision.Mark_Ready (Control.all);
       raise Test_Failure with "nested child failure";
    end Execute_Inner_Failure;
 
-   package Inner_Child is new Flyology.Supervision.Children
-     (Application_Context => Inner_Context,
-      Execute             => Execute_Inner_Failure,
-      Task_Model          => Flyology.Native_Task);
+   package Inner_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Inner_Context,
+        Execute             => Execute_Inner_Failure,
+        Task_Model          => Flyology.Native_Task);
 
    procedure Run_Inner_Generation
      (Context : aliased in out Inner_Context;
@@ -729,32 +681,32 @@ procedure Flyology.Supervision.Static_Smoke is
       Inner_Child.Run (Context, Control, Result);
    end Run_Inner_Generation;
 
-   package Inner_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Nested_Kind,
-      Application_Context => Inner_Context,
-      Logical_Id         => Nested_Id,
-      Specification      => Nested_Specification,
-      Depends_On         => No_Nested_Dependency,
-      Cohort_Member      => Nested_Cohort,
-      Run_One_Generation => Run_Inner_Generation);
+   package Inner_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Nested_Kind,
+        Application_Context => Inner_Context,
+        Logical_Id          => Nested_Id,
+        Specification       => Nested_Specification,
+        Depends_On          => No_Nested_Dependency,
+        Cohort_Member       => Nested_Cohort,
+        Run_One_Generation  => Run_Inner_Generation);
 
    procedure Execute_Outer
-     (Context : in out Nested_Context;
-      Control : not null access Flyology.Supervision.Generation_Control)
+     (Context : in out Nested_Context; Control : not null access Flyology.Supervision.Generation_Control)
    is
       Item   : aliased Inner_Supervisors.Supervisor;
       Result : Flyology.Supervision.Supervisor_Result;
    begin
       Flyology.Supervision.Mark_Ready (Control.all);
-      Inner_Supervisors.Run_Nested
-        (Item, Context.Inner, Control.all, Result);
+      Inner_Supervisors.Run_Nested (Item, Context.Inner, Control.all, Result);
       raise Test_Failure with "nested supervisor escalated";
    end Execute_Outer;
 
-   package Outer_Child is new Flyology.Supervision.Children
-     (Application_Context => Nested_Context,
-      Execute             => Execute_Outer,
-      Task_Model          => Flyology.Native_Task);
+   package Outer_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Nested_Context,
+        Execute             => Execute_Outer,
+        Task_Model          => Flyology.Native_Task);
 
    procedure Run_Outer_Generation
      (Context : aliased in out Nested_Context;
@@ -767,14 +719,15 @@ procedure Flyology.Supervision.Static_Smoke is
       Outer_Child.Run (Context, Control, Result);
    end Run_Outer_Generation;
 
-   package Outer_Supervisors is new Flyology.Supervision.Static
-     (Child_Kind         => Nested_Kind,
-      Application_Context => Nested_Context,
-      Logical_Id         => Nested_Id,
-      Specification      => Nested_Specification,
-      Depends_On         => No_Nested_Dependency,
-      Cohort_Member      => Nested_Cohort,
-      Run_One_Generation => Run_Outer_Generation);
+   package Outer_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Nested_Kind,
+        Application_Context => Nested_Context,
+        Logical_Id          => Nested_Id,
+        Specification       => Nested_Specification,
+        Depends_On          => No_Nested_Dependency,
+        Cohort_Member       => Nested_Cohort,
+        Run_One_Generation  => Run_Outer_Generation);
 
 begin
    declare
@@ -795,14 +748,12 @@ begin
       end Owner;
    begin
       Owner.Start;
-      Ada.Synchronous_Task_Control.Suspend_Until_True
-        (Specification_Entered);
+      Ada.Synchronous_Task_Control.Suspend_Until_True (Specification_Entered);
       Configuration_Supervisors.Request_Shutdown (Item);
       Ada.Synchronous_Task_Control.Set_True (Continue_Configuration);
       Owner.Join;
       pragma Assert (Context.Runs.Value = 0);
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
    end;
 
    declare
@@ -822,56 +773,53 @@ begin
          accept Join;
       end Owner;
 
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
-      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
-      Cursor  : Flyology.Supervision.Event_Sequence := 0;
-      Count   : Natural;
-      Dropped : Flyology.Supervision.Event_Sequence;
-      Admitted : Natural := 0;
-      Saw_Direct_Start : Boolean := False;
-      Saw_Restarting : Boolean := False;
-      Recovery_Incident : Flyology.Supervision.Incident_Id :=
-        Flyology.Supervision.Incident_Id'First;
-      Stable_Handle : Flyology.Supervision.Child_Handle;
+      Deadline           : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events             : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor             : Flyology.Supervision.Event_Sequence := 0;
+      Count              : Natural;
+      Dropped            : Flyology.Supervision.Event_Sequence;
+      Admitted           : Natural := 0;
+      Saw_Direct_Start   : Boolean := False;
+      Saw_Restarting     : Boolean := False;
+      Recovery_Incident  : Flyology.Supervision.Incident_Id := Flyology.Supervision.Incident_Id'First;
+      Stable_Handle      : Flyology.Supervision.Child_Handle;
       Stable_Observation : Flyology.Supervision.Generation_Observation;
    begin
       Owner.Start;
       loop
-         exit when Restart_Supervisors.Current (Item, Service).Ready
-           and then
-             Restart_Supervisors.Current (Item, Service).Generation = 3;
+         exit when
+           Restart_Supervisors.Current (Item, Service).Ready
+           and then Restart_Supervisors.Current (Item, Service).Generation = 3;
          if Ada.Real_Time.Clock >= Deadline then
             Restart_Supervisors.Request_Shutdown (Item);
             Owner.Join;
-            raise Program_Error with
-              "restart supervisor did not publish generation three; attempts="
-              & Context.State.Attempts'Image
-              & ", generation="
-              & Restart_Supervisors.Current
-                  (Item, Service).Generation'Image
-              & ", state="
-              & Restart_Supervisors.Current (Item, Service).State'Image
-              & ", outcome=" & Result.Outcome'Image
-              & ", termination=" & Result.Termination.Kind'Image
-              & ", message="
-              & Result.Termination.Message
-                  (1 .. Result.Termination.Message_Length);
+            raise Program_Error
+              with
+                "restart supervisor did not publish generation three; attempts="
+                & Context.State.Attempts'Image
+                & ", generation="
+                & Restart_Supervisors.Current (Item, Service).Generation'Image
+                & ", state="
+                & Restart_Supervisors.Current (Item, Service).State'Image
+                & ", outcome="
+                & Result.Outcome'Image
+                & ", termination="
+                & Result.Termination.Kind'Image
+                & ", message="
+                & Result.Termination.Message (1 .. Result.Termination.Message_Length);
          end if;
          delay 0.001;
       end loop;
       delay 0.150;
       Stable_Handle := Restart_Supervisors.Latest (Item, Service);
-      Stable_Observation := Restart_Supervisors.Wait_Termination
-        (Item, Service, Stable_Handle, Timeout => 0.0);
-      pragma Assert
-        (Stable_Observation.Status =
-           Flyology.Supervision.Observation_Timed_Out);
+      Stable_Observation :=
+        Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert (Stable_Observation.Status = Flyology.Supervision.Observation_Timed_Out);
 
       --  Controller identity is part of authority. A handle with the same
       --  logical id and generation but a foreign controller is rejected.
       declare
-         Foreign : constant Flyology.Supervision.Child_Handle :=
+         Foreign  : constant Flyology.Supervision.Child_Handle :=
            (Controller => New_Controller,
             Id         => Child (Stable_Handle),
             Generation => Current_Generation (Stable_Handle));
@@ -879,8 +827,8 @@ begin
       begin
          pragma Assert (not Same_Controller (Stable_Handle, Foreign));
          begin
-            Stable_Observation := Restart_Supervisors.Wait_Termination
-              (Item, Service, Foreign, Timeout => 0.0);
+            Stable_Observation :=
+              Restart_Supervisors.Wait_Termination (Item, Service, Foreign, Timeout => 0.0);
          exception
             when Program_Error =>
                Rejected := True;
@@ -898,10 +846,8 @@ begin
             --  Begin the wait in the statement sequence so task activation
             --  completes before this deliberately blocking call.
             declare
-               Observation : constant
-                 Flyology.Supervision.Generation_Observation :=
-                   Restart_Supervisors.Wait_Termination
-                     (Item, Service, Stable_Handle);
+               Observation : constant Flyology.Supervision.Generation_Observation :=
+                 Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle);
                pragma Unreferenced (Observation);
             begin
                null;
@@ -912,8 +858,8 @@ begin
       begin
          while not Registered loop
             begin
-               Stable_Observation := Restart_Supervisors.Wait_Termination
-                 (Item, Service, Stable_Handle, Timeout => 0.0);
+               Stable_Observation :=
+                 Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
             exception
                when Constraint_Error =>
                   Registered := True;
@@ -923,97 +869,73 @@ begin
          end loop;
          abort Waiter;
       end;
-      Stable_Observation := Restart_Supervisors.Wait_Termination
-        (Item, Service, Stable_Handle, Timeout => 0.0);
-      pragma Assert
-        (Stable_Observation.Status =
-           Flyology.Supervision.Observation_Timed_Out);
+      Stable_Observation :=
+        Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert (Stable_Observation.Status = Flyology.Supervision.Observation_Timed_Out);
 
       Restart_Supervisors.Restart (Item, Service, Stable_Handle);
-      Stable_Observation := Restart_Supervisors.Wait_Termination
-        (Item, Service, Stable_Handle, Timeout => 2.0);
-      pragma Assert
-        (Stable_Observation.Status =
-           Flyology.Supervision.Generation_Terminated);
-      pragma Assert
-        (Stable_Observation.Snapshot.Generation = 3);
-      pragma Assert
-        (Stable_Observation.Snapshot.Termination.Kind =
-           Flyology.Supervision.Restart_Requested);
+      Stable_Observation :=
+        Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 2.0);
+      pragma Assert (Stable_Observation.Status = Flyology.Supervision.Generation_Terminated);
+      pragma Assert (Stable_Observation.Snapshot.Generation = 3);
+      pragma Assert (Stable_Observation.Snapshot.Termination.Kind = Flyology.Supervision.Restart_Requested);
       begin
          Restart_Supervisors.Restart (Item, Service, Stable_Handle);
          raise Program_Error with "stale static restart was accepted";
       exception
-         when Restart_Supervisors.Stale_Handle => null;
+         when Restart_Supervisors.Stale_Handle =>
+            null;
       end;
       loop
-         exit when Restart_Supervisors.Current (Item, Service).Ready
-           and then
-             Restart_Supervisors.Current (Item, Service).Generation = 4;
+         exit when
+           Restart_Supervisors.Current (Item, Service).Ready
+           and then Restart_Supervisors.Current (Item, Service).Generation = 4;
          if Ada.Real_Time.Clock >= Deadline then
             Restart_Supervisors.Request_Shutdown (Item);
             Owner.Join;
-            raise Program_Error with
-              "manual restart did not start a fresh incident";
+            raise Program_Error with "manual restart did not start a fresh incident";
          end if;
          delay 0.001;
       end loop;
-      Stable_Observation := Restart_Supervisors.Wait_Termination
-        (Item, Service, Stable_Handle, Timeout => 0.0);
-      pragma Assert
-        (Stable_Observation.Status = Flyology.Supervision.Generation_Replaced);
-      pragma Assert
-        (Stable_Observation.Snapshot.Generation = 4);
-      Restart_Supervisors.Read_Events
-        (Item, Cursor, Events, Count, Dropped);
+      Stable_Observation :=
+        Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
+      pragma Assert (Stable_Observation.Status = Flyology.Supervision.Generation_Replaced);
+      pragma Assert (Stable_Observation.Snapshot.Generation = 4);
+      Restart_Supervisors.Read_Events (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);
       for Index in 1 .. Count loop
-         pragma Assert
-           (Events (Index).Task_Model = Flyology.Native_Task);
+         pragma Assert (Events (Index).Task_Model = Flyology.Native_Task);
          if Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
            and then Events (Index).Before /= Events (Index).After
          then
-            Saw_Direct_Start := Saw_Direct_Start or else
-              (Events (Index).Before = Flyology.Supervision.Backing_Off
-               and then Events (Index).After = Flyology.Supervision.Starting);
-            Saw_Restarting := Saw_Restarting or else
-              Events (Index).After = Flyology.Supervision.Restarting;
+            Saw_Direct_Start :=
+              Saw_Direct_Start
+              or else (Events (Index).Before = Flyology.Supervision.Backing_Off
+                       and then Events (Index).After = Flyology.Supervision.Starting);
+            Saw_Restarting := Saw_Restarting or else Events (Index).After = Flyology.Supervision.Restarting;
          end if;
          if Events (Index).Kind = Flyology.Supervision.Restart_Admitted then
             Admitted := Admitted + 1;
             if Admitted = 1 then
-               Recovery_Incident :=
-                 Flyology.Supervision.Incident (Events (Index).Incident);
-               pragma Assert
-                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
+               Recovery_Incident := Flyology.Supervision.Incident (Events (Index).Incident);
+               pragma Assert (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
             elsif Admitted = 2 then
-               pragma Assert
-                 (Flyology.Supervision.Incident (Events (Index).Incident) =
-                    Recovery_Incident);
-               pragma Assert
-                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 2);
+               pragma Assert (Flyology.Supervision.Incident (Events (Index).Incident) = Recovery_Incident);
+               pragma Assert (Flyology.Supervision.Attempt (Events (Index).Incident) = 2);
             elsif Admitted = 3 then
-               pragma Assert
-                 (Flyology.Supervision.Incident (Events (Index).Incident) /=
-                    Recovery_Incident);
-               pragma Assert
-                 (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
+               pragma Assert (Flyology.Supervision.Incident (Events (Index).Incident) /= Recovery_Incident);
+               pragma Assert (Flyology.Supervision.Attempt (Events (Index).Incident) = 1);
             end if;
          end if;
       end loop;
       pragma Assert (Admitted = 3);
       Restart_Supervisors.Request_Shutdown (Item);
       Owner.Join;
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
       pragma Assert (Context.State.Attempts = 4);
-      pragma Assert
-        (Context.State.First_Task /= Ada.Task_Identification.Null_Task_Id);
-      pragma Assert
-        (Context.State.Second_Task /= Ada.Task_Identification.Null_Task_Id);
-      pragma Assert
-        (Restart_Supervisors.Current (Item, Service).State =
-           Flyology.Supervision.Joined);
+      pragma Assert (Context.State.First_Task /= Ada.Task_Identification.Null_Task_Id);
+      pragma Assert (Context.State.Second_Task /= Ada.Task_Identification.Null_Task_Id);
+      pragma Assert (Restart_Supervisors.Current (Item, Service).State = Flyology.Supervision.Joined);
       pragma Assert (not Saw_Direct_Start);
       pragma Assert (Saw_Restarting);
    end;
@@ -1026,18 +948,15 @@ begin
    begin
       Exhausted_Supervisors.Run (Item, Context, Result);
       Current := Exhausted_Supervisors.Current (Item, Service);
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Recovery_Exhausted);
-      pragma Assert
-        (Result.Termination.Kind = Flyology.Supervision.Policy_Exhaustion);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Recovery_Exhausted);
+      pragma Assert (Result.Termination.Kind = Flyology.Supervision.Policy_Exhaustion);
       pragma Assert (Flyology.Supervision.Active (Result.Incident));
-      pragma Assert
-        (Flyology.Supervision.Attempt (Result.Incident) = 2);
+      pragma Assert (Flyology.Supervision.Attempt (Result.Incident) = 2);
       pragma Assert (Context.State.Attempts = 2);
-      pragma Assert
-        (Current.State = Flyology.Supervision.Joined
-         and then Current.Termination.Kind =
-           Flyology.Supervision.Policy_Exhaustion);
+      pragma
+        Assert
+          (Current.State = Flyology.Supervision.Joined
+             and then Current.Termination.Kind = Flyology.Supervision.Policy_Exhaustion);
    end;
 
    declare
@@ -1057,12 +976,11 @@ begin
          accept Join;
       end Owner;
 
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
-      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 16);
-      Cursor  : Flyology.Supervision.Event_Sequence := 0;
-      Count   : Natural;
-      Dropped : Flyology.Supervision.Event_Sequence;
+      Deadline      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events        : Flyology.Supervision.Supervisor_Event_Array (1 .. 16);
+      Cursor        : Flyology.Supervision.Event_Sequence := 0;
+      Count         : Natural;
+      Dropped       : Flyology.Supervision.Event_Sequence;
       Saw_Admitted  : Boolean := False;
       Saw_Completed : Boolean := False;
    begin
@@ -1074,8 +992,7 @@ begin
          if Ada.Real_Time.Clock >= Deadline then
             Dependency_Supervisors.Request_Shutdown (Item);
             Owner.Join;
-            raise Program_Error with
-              "dependency supervisor did not complete startup";
+            raise Program_Error with "dependency supervisor did not complete startup";
          end if;
          delay 0.001;
       end loop;
@@ -1084,34 +1001,25 @@ begin
          exit when
            Dependency_Supervisors.Current (Item, Prerequisite).Ready
            and then Dependency_Supervisors.Current (Item, Dependent).Ready
-           and then
-             Dependency_Supervisors.Current (Item, Prerequisite).Generation = 2
-           and then
-             Dependency_Supervisors.Current (Item, Dependent).Generation = 2;
+           and then Dependency_Supervisors.Current (Item, Prerequisite).Generation = 2
+           and then Dependency_Supervisors.Current (Item, Dependent).Generation = 2;
          if Ada.Real_Time.Clock >= Deadline then
             Dependency_Supervisors.Request_Shutdown (Item);
             Owner.Join;
-            raise Program_Error with
-              "dependent recovery did not publish generation two";
+            raise Program_Error with "dependent recovery did not publish generation two";
          end if;
          delay 0.001;
       end loop;
-      Dependency_Supervisors.Read_Events
-        (Item, Cursor, Events, Count, Dropped);
+      Dependency_Supervisors.Read_Events (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);
       for Index in 1 .. Count loop
-         Saw_Admitted :=
-           Saw_Admitted or else
-             Events (Index).Kind = Flyology.Supervision.Restart_Admitted;
-         Saw_Completed :=
-           Saw_Completed or else
-             Events (Index).Kind = Flyology.Supervision.Restart_Completed;
+         Saw_Admitted := Saw_Admitted or else Events (Index).Kind = Flyology.Supervision.Restart_Admitted;
+         Saw_Completed := Saw_Completed or else Events (Index).Kind = Flyology.Supervision.Restart_Completed;
       end loop;
       pragma Assert (Saw_Admitted and then Saw_Completed);
       Dependency_Supervisors.Request_Shutdown (Item);
       Owner.Join;
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
       pragma Assert (Context.Log.Length = 7);
       pragma Assert (Context.Log.Element (1) = 1);
       pragma Assert (Context.Log.Element (2) = 2);
@@ -1139,12 +1047,12 @@ begin
          accept Join;
       end Owner;
 
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
    begin
       Owner.Start;
       loop
-         exit when Cohort_Supervisors.Current (Item, Prerequisite).Ready
+         exit when
+           Cohort_Supervisors.Current (Item, Prerequisite).Ready
            and then Cohort_Supervisors.Current (Item, Dependent).Ready;
          if Ada.Real_Time.Clock >= Deadline then
             Cohort_Supervisors.Request_Shutdown (Item);
@@ -1155,12 +1063,11 @@ begin
       end loop;
       Context.Fault.Request;
       loop
-         exit when Cohort_Supervisors.Current (Item, Prerequisite).Ready
+         exit when
+           Cohort_Supervisors.Current (Item, Prerequisite).Ready
            and then Cohort_Supervisors.Current (Item, Dependent).Ready
-           and then Cohort_Supervisors.Current
-             (Item, Prerequisite).Generation = 2
-           and then Cohort_Supervisors.Current
-             (Item, Dependent).Generation = 2;
+           and then Cohort_Supervisors.Current (Item, Prerequisite).Generation = 2
+           and then Cohort_Supervisors.Current (Item, Dependent).Generation = 2;
          if Ada.Real_Time.Clock >= Deadline then
             Cohort_Supervisors.Request_Shutdown (Item);
             Owner.Join;
@@ -1170,8 +1077,7 @@ begin
       end loop;
       Cohort_Supervisors.Request_Shutdown (Item);
       Owner.Join;
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
       pragma Assert (Context.Log.Length = 7);
       pragma Assert (Context.Log.Element (1) = 1);
       pragma Assert (Context.Log.Element (2) = 2);
@@ -1188,11 +1094,9 @@ begin
       Result  : Flyology.Supervision.Supervisor_Result;
    begin
       Outer_Supervisors.Run (Item, Context, Result);
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Failure_Escalated);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Failure_Escalated);
       pragma Assert (Flyology.Supervision.Active (Result.Incident));
-      pragma Assert
-        (Flyology.Supervision.Attempt (Result.Incident) = 1);
+      pragma Assert (Flyology.Supervision.Attempt (Result.Incident) = 1);
       pragma Assert (Context.Inner.Runs.Value = 1);
    end;
 
@@ -1206,7 +1110,8 @@ begin
          Inner_Supervisors.Run_Nested (Item, Context, Parent, Result);
          raise Program_Error with "inactive nested parent was accepted";
       exception
-         when Program_Error => null;
+         when Program_Error =>
+            null;
       end;
       pragma Assert (Context.Runs.Value = 0);
    end;
@@ -1217,16 +1122,10 @@ begin
       Result  : Flyology.Supervision.Supervisor_Result;
    begin
       Readiness_Supervisors.Run (Item, Context, Result);
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Startup_Failed);
-      pragma Assert
-        (Result.Termination.Kind = Flyology.Supervision.Readiness_Timeout);
-      pragma Assert
-        (Readiness_Supervisors.Current (Item, Edge_Service).State =
-           Flyology.Supervision.Joined);
-      pragma Assert
-        (Readiness_Supervisors.Current
-           (Item, Edge_Service).Task_Model = Flyology.Native_Task);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Startup_Failed);
+      pragma Assert (Result.Termination.Kind = Flyology.Supervision.Readiness_Timeout);
+      pragma Assert (Readiness_Supervisors.Current (Item, Edge_Service).State = Flyology.Supervision.Joined);
+      pragma Assert (Readiness_Supervisors.Current (Item, Edge_Service).Task_Model = Flyology.Native_Task);
    end;
 
    declare
@@ -1238,7 +1137,8 @@ begin
          Default_Model_Supervisors.Run (Item, Context, Result);
          raise Program_Error with "Project_Default task model was accepted";
       exception
-         when Default_Model_Supervisors.Configuration_Error => null;
+         when Default_Model_Supervisors.Configuration_Error =>
+            null;
       end;
    end;
 
@@ -1259,12 +1159,12 @@ begin
          accept Join;
       end Owner;
 
-      Deadline : constant Ada.Real_Time.Time :=
+      Deadline                    : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
-      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
-      Cursor  : Flyology.Supervision.Event_Sequence := 0;
-      Count   : Natural;
-      Dropped : Flyology.Supervision.Event_Sequence;
+      Events                      : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor                      : Flyology.Supervision.Event_Sequence := 0;
+      Count                       : Natural;
+      Dropped                     : Flyology.Supervision.Event_Sequence;
       Saw_Escalated_To_Terminated : Boolean := False;
    begin
       Owner.Start;
@@ -1279,25 +1179,21 @@ begin
       end loop;
       Stuck_Supervisors.Request_Shutdown (Item);
       Owner.Join;
-      Stuck_Supervisors.Read_Events
-        (Item, Cursor, Events, Count, Dropped);
+      Stuck_Supervisors.Read_Events (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);
       for Index in 1 .. Count loop
          if Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
            and then Events (Index).Before /= Events (Index).After
          then
             Saw_Escalated_To_Terminated :=
-              Saw_Escalated_To_Terminated or else
-                (Events (Index).Before = Flyology.Supervision.Failed_Escalated
-                 and then Events (Index).After =
-                   Flyology.Supervision.Terminated);
+              Saw_Escalated_To_Terminated
+              or else (Events (Index).Before = Flyology.Supervision.Failed_Escalated
+                       and then Events (Index).After = Flyology.Supervision.Terminated);
          end if;
       end loop;
       pragma Assert (Result.Outcome = Flyology.Supervision.Child_Stuck);
       pragma Assert (not Saw_Escalated_To_Terminated);
-      pragma Assert
-        (Stuck_Supervisors.Current (Item, Edge_Service).State =
-           Flyology.Supervision.Joined);
+      pragma Assert (Stuck_Supervisors.Current (Item, Edge_Service).State = Flyology.Supervision.Joined);
    end;
 
    declare
@@ -1306,9 +1202,7 @@ begin
       Result  : Flyology.Supervision.Supervisor_Result;
    begin
       Activation_Supervisors.Run (Item, Context, Result);
-      pragma Assert
-        (Result.Outcome = Flyology.Supervision.Startup_Failed);
-      pragma Assert
-        (Result.Termination.Kind = Flyology.Supervision.Activation_Failure);
+      pragma Assert (Result.Outcome = Flyology.Supervision.Startup_Failed);
+      pragma Assert (Result.Termination.Kind = Flyology.Supervision.Activation_Failure);
    end;
 end Flyology.Supervision.Static_Smoke;

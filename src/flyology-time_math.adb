@@ -1,10 +1,7 @@
 package body Flyology.Time_Math
   with SPARK_Mode
 is
-   function Remaining
-     (Timeout : Duration;
-      Elapsed : Duration) return Duration
-   is
+   function Remaining (Timeout : Duration; Elapsed : Duration) return Duration is
    begin
       if Timeout < 0.0 then
          return -1.0;
@@ -36,9 +33,7 @@ is
       if Nanoseconds >= Maximum_Poll_Nanoseconds then
          return C.int'Last;
       end if;
-      return C.int
-        ((Nanoseconds + Nanoseconds_Per_Millisecond - 1)
-         / Nanoseconds_Per_Millisecond);
+      return C.int ((Nanoseconds + Nanoseconds_Per_Millisecond - 1) / Nanoseconds_Per_Millisecond);
    end To_Milliseconds;
 
 end Flyology.Time_Math;

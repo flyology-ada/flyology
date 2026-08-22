@@ -23,8 +23,7 @@ begin
    Generation := Counters.Nonzero_Successor (0);
    pragma Assert (Generation = 1);
 
-   Generation :=
-     Counters.Nonzero_Successor (Interfaces.Unsigned_64'Last - 1);
+   Generation := Counters.Nonzero_Successor (Interfaces.Unsigned_64'Last - 1);
    pragma Assert (Generation = Interfaces.Unsigned_64'Last);
 
    Generation := Counters.Nonzero_Successor (Generation);

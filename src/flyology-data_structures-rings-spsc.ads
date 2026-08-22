@@ -16,9 +16,9 @@ use type Interfaces.Unsigned_64;
 --  Attach, Create_Or_Attach, Detach, Initialize, Destroy, and backing-lifetime
 --  changes must not race with any use of the same local View.
 --  @formal Element Immutable byte-backed element adapter stored by this ring
+
 generic
-   with package Element is new
-     Flyology.Data_Structures.Storage_Types.Elements (<>);
+   with package Element is new Flyology.Data_Structures.Storage_Types.Elements (<>);
 package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
 
    --  Eight-byte magic stored in every SPSC header.
@@ -26,15 +26,15 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
 
    --  Schema identifier for the current SPSC layout and memory ordering.
    Schema : constant Interfaces.Unsigned_64 :=
-     16#0001_5350_5343_0004# xor Element.Signature xor
-     Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
+     16#0001_5350_5343_0004#
+     xor Element.Signature
+     xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
    Layout_Version : constant Interfaces.Unsigned_32 := 4;
 
    --  Complete stable layout identity for envelope instances and tooling.
-   Identity : constant Layout_Identity :=
-     (Magic => Magic, Version => Layout_Version, Schema => Schema);
+   Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
 
    --  Process-local attached ring view.
    type View is limited private;
@@ -45,10 +45,10 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @field Element_Alignment Required element alignment
    --  @field Extent Complete stored layout size
    type Metadata is record
-      Capacity     : Interfaces.Unsigned_32;
-      Element_Size : Interfaces.Unsigned_32;
+      Capacity          : Interfaces.Unsigned_32;
+      Element_Size      : Interfaces.Unsigned_32;
       Element_Alignment : Interfaces.Unsigned_32;
-      Extent       : Byte_Count;
+      Extent            : Byte_Count;
    end record;
 
    --  Compute the complete SPSC layout extent. Capacity must be a power of
@@ -66,10 +66,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Location Nonzero eight-byte-aligned stored offset
    --  @param Capacity Power-of-two number of usable elements
    procedure Initialize
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive);
+     (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Atomically initialize a known-virgin zeroed extent or attach to a ready
    --  compatible ring. Only the exact zero lifecycle sentinel is eligible for
@@ -85,11 +82,11 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Result Whether this caller initialized, attached, or observed an
    --     initialization in progress
    procedure Create_Or_Attach
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive;
-      Result       : out Open_Result);
+     (Item     : out View;
+      Region   : Region_View;
+      Location : Region_Offset;
+      Capacity : Positive;
+      Result   : out Open_Result);
 
    --  Attach to a quiescent initialized ring and validate configuration and
    --  producer/consumer indices.
@@ -98,11 +95,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Location Stored ring offset
    --  @param Capacity Expected usable element count
    --  @exception Layout_Error Header, configuration, or indices are corrupt
-   procedure Attach
-     (Item         : out View;
-      Region       : Region_View;
-      Location     : Region_Offset;
-      Capacity     : Positive);
+   procedure Attach (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Poison a ready ring after independently establishing that its producer
    --  and consumer are dead or quiescent. Operations and attachment then fail
@@ -139,10 +132,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Data Application value accepted by the bound creator
    --  @param Pushed True only when the element was published
    --  @exception Layout_Error Stored indices are corrupt
-   procedure Try_Push
-     (Item   : in out View;
-      Data   : Element.Source;
-      Pushed : out Boolean);
+   procedure Try_Push (Item : in out View; Data : Element.Source; Pushed : out Boolean);
 
    --  Wait until Data is published or the monotonic timeout expires. The sole
    --  producer yields between full-ring observations.
@@ -150,10 +140,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Data Application value accepted by the bound creator
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error The ring remains full through the deadline
-   procedure Push
-     (Item    : in out View;
-      Data    : Element.Source;
-      Timeout : Wait_Timeout);
+   procedure Push (Item : in out View; Data : Element.Source; Timeout : Wait_Timeout);
 
    --  Acquire and observe the next element. The sole consumer calls
    --  this operation. An empty ring returns immediately with Popped false and
@@ -162,10 +149,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Data Observation assigned only on success
    --  @param Popped True only when an element was consumed
    --  @exception Layout_Error Stored indices are corrupt
-   procedure Try_Pop
-     (Item   : in out View;
-      Data   : out Element.Observed;
-      Popped : out Boolean);
+   procedure Try_Pop (Item : in out View; Data : out Element.Observed; Popped : out Boolean);
 
    --  Wait until one element is consumed or the monotonic timeout expires.
    --  The sole consumer yields between empty-ring observations.
@@ -173,10 +157,7 @@ package Flyology.Data_Structures.Rings.SPSC with Preelaborate is
    --  @param Data Observation assigned only on success
    --  @param Timeout Maximum wait; zero permits one immediate attempt
    --  @exception Timeout_Error The ring remains empty through the deadline
-   procedure Pop
-     (Item    : in out View;
-      Data    : out Element.Observed;
-      Timeout : Wait_Timeout);
+   procedure Pop (Item : in out View; Data : out Element.Observed; Timeout : Wait_Timeout);
 
    --  Invalidate an empty, quiescent ring and detach Item.
    --  @param Item Exclusively synchronized ring view

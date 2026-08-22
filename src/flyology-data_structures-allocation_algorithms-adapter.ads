@@ -8,27 +8,23 @@ private with Flyology_Allocators.Regions;
 --  policy around one standalone allocation algorithm. The nested allocator
 --  owns only allocation metadata and block selection.
 --  @exclude
+
 generic
-   Algorithm_Magic   : Interfaces.Unsigned_64;
+   Algorithm_Magic : Interfaces.Unsigned_64;
    Algorithm_Version : Interfaces.Unsigned_32;
-   Algorithm_Schema  : Interfaces.Unsigned_64;
-   with package Algorithm is new
-     Flyology_Allocators.Allocation_Algorithms.Contract (<>);
+   Algorithm_Schema : Interfaces.Unsigned_64;
+   with package Algorithm is new Flyology_Allocators.Allocation_Algorithms.Contract (<>);
 package Flyology.Data_Structures.Allocation_Algorithms.Adapter is
    --  @exclude
 
-   Identity : constant Layout_Identity :=
-     (Magic   => Algorithm_Magic,
-      Version => Algorithm_Version,
-      Schema  => Algorithm_Schema);
-   Minimum_Block_Limit : constant Positive :=
-     Algorithm.Minimum_Block_Limit;
+   Identity            : constant Layout_Identity :=
+     (Magic => Algorithm_Magic, Version => Algorithm_Version, Schema => Algorithm_Schema);
+   Minimum_Block_Limit : constant Positive := Algorithm.Minimum_Block_Limit;
 
    subtype Configuration is Algorithm.Configuration;
    type View is limited private;
 
-   function Required_Storage
-     (Configuration : Algorithm.Configuration) return Byte_Count;
+   function Required_Storage (Configuration : Algorithm.Configuration) return Byte_Count;
 
    procedure Initialize
      (Item          : out View;
@@ -73,18 +69,11 @@ package Flyology.Data_Structures.Allocation_Algorithms.Adapter is
 
    procedure Release (Item : in out View; Value : Allocation_Handle);
 
-   procedure Release
-     (Item    : in out View;
-      Value   : Allocation_Handle;
-      Timeout : Wait_Timeout);
+   procedure Release (Item : in out View; Value : Allocation_Handle; Timeout : Wait_Timeout);
 
-   function Block_Capacity
-     (Item : View; Value : Allocation_Handle) return Byte_Count;
+   function Block_Capacity (Item : View; Value : Allocation_Handle) return Byte_Count;
 
-   procedure Attach_Allocation
-     (Region : in out Region_View;
-      Item   : View;
-      Value  : Allocation_Handle);
+   procedure Attach_Allocation (Region : in out Region_View; Item : View; Value : Allocation_Handle);
 
    function Bind_Allocation
      (Item      : View;
@@ -103,10 +92,7 @@ package Flyology.Data_Structures.Allocation_Algorithms.Adapter is
       Data   : out Ada.Streams.Stream_Element_Array);
 
    procedure Write
-     (Item   : View;
-      Value  : Allocation_Handle;
-      Offset : Byte_Count;
-      Data   : Ada.Streams.Stream_Element_Array);
+     (Item : View; Value : Allocation_Handle; Offset : Byte_Count; Data : Ada.Streams.Stream_Element_Array);
 
    procedure Copy
      (Item          : View;

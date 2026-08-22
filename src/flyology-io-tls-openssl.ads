@@ -15,6 +15,7 @@ with System;
 --
 --     Initialize_Client (Backend);
 --     Take (Backend, Socket, Client, "example.com", Secure);
+
 package Flyology.IO.TLS.OpenSSL is
 
    --  OpenSSL configuration and session factory. Initialize once before use.
@@ -23,8 +24,7 @@ package Flyology.IO.TLS.OpenSSL is
    --  before starting event loops or from a native task. Do not start a new
    --  call on a provider after its finalization begins. Sessions already
    --  created remain usable after provider finalization.
-   type OpenSSL_Provider is
-     new Ada.Finalization.Limited_Controlled and ALPN.Provider with private;
+   type OpenSSL_Provider is new Ada.Finalization.Limited_Controlled and ALPN.Provider with private;
 
    --  Configure a client provider. An empty CA_File selects OpenSSL's default
    --  trust paths. Peer-chain and DNS hostname verification are always on;
@@ -38,9 +38,7 @@ package Flyology.IO.TLS.OpenSSL is
    --  @exception Program_Error Item is already initialized or a path contains
    --     an embedded NUL
    procedure Initialize_Client
-     (Item              : in out OpenSSL_Provider;
-      CA_File           : String := "";
-      Library_Directory : String := "");
+     (Item : in out OpenSSL_Provider; CA_File : String := ""; Library_Directory : String := "");
 
    --  Configure a server provider using PEM files. Library selection matches
    --  Initialize_Client. The key is read by OpenSSL and is never copied into
@@ -87,18 +85,19 @@ package Flyology.IO.TLS.OpenSSL is
    --  Return the stable adapter name used in diagnostics.
    --  @param Item Provider to identify
    --  @return `OpenSSL 3`
-   overriding function Name (Item : OpenSSL_Provider) return String;
+   overriding
+   function Name (Item : OpenSSL_Provider) return String;
    --  Report whether Item has an initialized OpenSSL context.
    --  @param Item Provider to inspect
    --  @return True after successful initialization and before finalization
-   overriding function Is_Available
-     (Item : OpenSSL_Provider) return Boolean;
+   overriding
+   function Is_Available (Item : OpenSSL_Provider) return Boolean;
    --  Retain the refcounted OpenSSL module and configured context.
    --  @param Item Initialized provider to retain
    --  @return Independently owned provider reference
    --  @exception TLS_Error Item is unavailable
-   overriding function Retain
-     (Item : in out OpenSSL_Provider) return Provider_Access;
+   overriding
+   function Retain (Item : in out OpenSSL_Provider) return Provider_Access;
    --  Allocate a nonblocking OpenSSL session borrowing FD. Side must match the
    --  provider configuration; clients apply Server_Name to SNI and hostname
    --  verification.
@@ -109,11 +108,10 @@ package Flyology.IO.TLS.OpenSSL is
    --  @return Provider session retained across readiness retries
    --  @exception TLS_Error OpenSSL session setup fails
    --  @exception Program_Error Server_Name contains an embedded NUL
-   overriding function Create_Session
-     (Item        : in out OpenSSL_Provider;
-      FD          : Descriptor;
-      Side        : Role;
-      Server_Name : String) return Session_Access;
+   overriding
+   function Create_Session
+     (Item : in out OpenSSL_Provider; FD : Descriptor; Side : Role; Server_Name : String)
+      return Session_Access;
 
    --  Allocate a nonblocking OpenSSL session and preserve the ordered client
    --  ALPN offer. Empty Protocols sends no ALPN extension. A server provider
@@ -128,7 +126,8 @@ package Flyology.IO.TLS.OpenSSL is
    --  @exception TLS_Error OpenSSL session setup fails
    --  @exception Program_Error Server_Name contains an embedded NUL or a
    --     server session receives a nonempty Protocols list
-   overriding function Create_Session
+   overriding
+   function Create_Session
      (Item        : in out OpenSSL_Provider;
       FD          : Descriptor;
       Side        : Role;
@@ -140,9 +139,7 @@ private
    --  and controlled finalization.
    protected type Provider_State is
       --  Publish a newly configured provider handle.
-      procedure Install
-        (Value : System.Address;
-         Side  : Role);
+      procedure Install (Value : System.Address; Side : Role);
       --  Remove and release the published provider handle.
       procedure Release;
       --  Copy the loaded provider version while retaining its handle.
@@ -151,32 +148,30 @@ private
       function Is_Available return Boolean;
       --  Create a C session while finalization is excluded by this monitor.
       procedure Create_Session
-        (FD          : Interfaces.C.int;
-         Side        : Role;
-         Server_Name : Interfaces.C.Strings.chars_ptr;
+        (FD              : Interfaces.C.int;
+         Side            : Role;
+         Server_Name     : Interfaces.C.Strings.chars_ptr;
          Protocols       : System.Address;
          Protocol_Length : Interfaces.C.unsigned;
-         Error       : System.Address;
-         Error_Size  : Interfaces.C.size_t;
-         Value       : out System.Address);
+         Error           : System.Address;
+         Error_Size      : Interfaces.C.size_t;
+         Value           : out System.Address);
       --  Retain the C provider handle while finalization is excluded.
-      procedure Retain
-        (Value : out System.Address;
-         Side  : out Role);
+      procedure Retain (Value : out System.Address; Side : out Role);
    private
       Handle : System.Address := System.Null_Address;
       Side   : Role := Client;
    end Provider_State;
 
    --  Controlled public provider state guarded by Provider_State.
-   type OpenSSL_Provider is
-     new Ada.Finalization.Limited_Controlled and ALPN.Provider with record
+   type OpenSSL_Provider is new Ada.Finalization.Limited_Controlled and ALPN.Provider with record
       State : Provider_State;
    end record;
 
    --  Release one provider reference during controlled cleanup.
    --  @param Item Provider being finalized
-   overriding procedure Finalize (Item : in out OpenSSL_Provider);
+   overriding
+   procedure Finalize (Item : in out OpenSSL_Provider);
 
    --  Owning handle for one C adapter session.
    type OpenSSL_Session is new Session and ALPN.Session with record
@@ -186,15 +181,16 @@ private
    --  Advance one OpenSSL handshake operation.
    --  @param Item Session to advance
    --  @return Nonblocking provider status
-   overriding function Handshake_Step
-     (Item : in out OpenSSL_Session) return Step_Status;
+   overriding
+   function Handshake_Step (Item : in out OpenSSL_Session) return Step_Status;
    --  Decrypt one available record fragment.
    --  @param Item Session to read
    --  @param Data Destination buffer
    --  @param Last Last element produced when Complete
    --  @return Nonblocking provider status
-   overriding function Receive_Step
-      (Item : in out OpenSSL_Session;
+   overriding
+   function Receive_Step
+     (Item : in out OpenSSL_Session;
       Data : out Ada.Streams.Stream_Element_Array;
       Last : in out Ada.Streams.Stream_Element_Offset) return Step_Status;
    --  Encrypt one available application-data fragment.
@@ -202,26 +198,29 @@ private
    --  @param Data Source buffer
    --  @param Last Last element consumed when Complete
    --  @return Nonblocking provider status
-   overriding function Send_Step
+   overriding
+   function Send_Step
      (Item : in out OpenSSL_Session;
       Data : Ada.Streams.Stream_Element_Array;
       Last : in out Ada.Streams.Stream_Element_Offset) return Step_Status;
    --  Advance the OpenSSL close_notify exchange.
    --  @param Item Session to shut down
    --  @return Nonblocking provider status
-   overriding function Shutdown_Step
-     (Item : in out OpenSSL_Session) return Step_Status;
+   overriding
+   function Shutdown_Step (Item : in out OpenSSL_Session) return Step_Status;
    --  Copy the last provider failure into Ada storage.
    --  @param Item Failed session
    --  @return Stable diagnostic copy
-   overriding function Error_Message (Item : OpenSSL_Session) return String;
+   overriding
+   function Error_Message (Item : OpenSSL_Session) return String;
    --  Copy OpenSSL's negotiated ALPN identifier after handshake.
    --  @param Item Handshaken session to inspect
    --  @return Selected opaque identifier or an empty String
-   overriding function Selected_Protocol
-     (Item : OpenSSL_Session) return String;
+   overriding
+   function Selected_Protocol (Item : OpenSSL_Session) return String;
    --  Release OpenSSL session state without closing its borrowed descriptor.
    --  @param Item Session being finalized
-   overriding procedure Finalize (Item : in out OpenSSL_Session);
+   overriding
+   procedure Finalize (Item : in out OpenSSL_Session);
 
 end Flyology.IO.TLS.OpenSSL;

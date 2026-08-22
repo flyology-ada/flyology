@@ -6,6 +6,7 @@
 --
 --  Note that get_mempolicy and set_mempolicy sit in the opposite order to
 --  the x86-64 table.
+
 private package Flyology_NUMA.Syscall_Numbers is
 
    --  Whether this architecture's numbers are recorded here.

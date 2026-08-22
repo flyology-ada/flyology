@@ -27,12 +27,11 @@ procedure Pool_Reduction_Claim_Smoke is
          Last_Group := Value;
       end Report;
 
-      function Group return Groups.Group_Id is (Last_Group);
+      function Group return Groups.Group_Id
+      is (Last_Group);
    end Seed_Result;
 
-   task type Seed_Worker
-     with CPU => System.Multiprocessors.Not_A_Specific_CPU
-   is
+   task type Seed_Worker with CPU => System.Multiprocessors.Not_A_Specific_CPU is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Seed_Worker;
 
@@ -47,8 +46,7 @@ procedure Pool_Reduction_Claim_Smoke is
    Racing_Group  : Integer := -1;
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error with
-        "pool reduction claim test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "pool reduction claim test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
 
    Groups.Grow_Configured_Pool (Grown_Size);
@@ -84,21 +82,16 @@ begin
       delay 0.001;
    end loop;
    if not Parked then
-      raise Program_Error with
-        "automatic creator never reached the placement-claim window";
+      raise Program_Error with "automatic creator never reached the placement-claim window";
    end if;
 
    Claimed_Group := Fault_Control.Automatic_Placement_Claim_Group;
-   if Claimed_Group < Integer (Target_Size)
-     or else Claimed_Group >= Integer (Grown_Size)
-   then
-      raise Program_Error with
-        "parked creator did not select a removed automatic group:"
-        & Integer'Image (Claimed_Group);
+   if Claimed_Group < Integer (Target_Size) or else Claimed_Group >= Integer (Grown_Size) then
+      raise Program_Error
+        with "parked creator did not select a removed automatic group:" & Integer'Image (Claimed_Group);
    end if;
 
-   if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started
-   then
+   if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started then
       raise Program_Error with "claim-bearing reduction did not start";
    end if;
    Status := Groups.Pool_Reduction;
@@ -107,12 +100,16 @@ begin
      or else Status.Placement_Claims /= 1
      or else not Fault_Control.Automatic_Placement_Parked
    then
-      raise Program_Error with
-        "pre-cutover placement claim was not retained: phase="
-        & Groups.Pool_Reduction_Phase'Image (Status.Phase)
-        & " automatic=" & Natural'Image (Status.Automatic_Tasks)
-        & " claims=" & Natural'Image (Status.Placement_Claims)
-        & " selected=" & Integer'Image (Claimed_Group);
+      raise Program_Error
+        with
+          "pre-cutover placement claim was not retained: phase="
+          & Groups.Pool_Reduction_Phase'Image (Status.Phase)
+          & " automatic="
+          & Natural'Image (Status.Automatic_Tasks)
+          & " claims="
+          & Natural'Image (Status.Placement_Claims)
+          & " selected="
+          & Integer'Image (Claimed_Group);
    end if;
 
    Fault_Control.Release_Automatic_Placement;

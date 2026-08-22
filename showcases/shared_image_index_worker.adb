@@ -46,26 +46,21 @@ procedure Shared_Image_Index_Worker is
    function Close_Descriptor (Descriptor : C.int) return C.int;
    pragma Import (C, Close_Descriptor, "close");
 
-   function Image (Value : Integer) return String is
-     (Ada.Strings.Fixed.Trim (Integer'Image (Value), Ada.Strings.Both));
+   function Image (Value : Integer) return String
+   is (Ada.Strings.Fixed.Trim (Integer'Image (Value), Ada.Strings.Both));
 
-   function To_Bytes (Value : String) return Ada.Streams.Stream_Element_Array
-   is
+   function To_Bytes (Value : String) return Ada.Streams.Stream_Element_Array is
       Result : Ada.Streams.Stream_Element_Array (1 .. Value'Length);
    begin
       for Index in Value'Range loop
-         Result
-           (Ada.Streams.Stream_Element_Offset (Index - Value'First + 1)) :=
-             Ada.Streams.Stream_Element (Character'Pos (Value (Index)));
+         Result (Ada.Streams.Stream_Element_Offset (Index - Value'First + 1)) :=
+           Ada.Streams.Stream_Element (Character'Pos (Value (Index)));
       end loop;
       return Result;
    end To_Bytes;
 
    procedure Resolve_Name
-     (Segment  : Segments.View;
-      Name     : String;
-      Location : out DS.Region_Offset;
-      Extent   : out DS.Byte_Count)
+     (Segment : Segments.View; Name : String; Location : out DS.Region_Offset; Extent : out DS.Byte_Count)
    is
       Handle  : Segments.Named_Handle;
       Outcome : Segments.Lookup_Result;
@@ -74,11 +69,8 @@ procedure Shared_Image_Index_Worker is
       loop
          Segments.Try_Find (Segment, Name, Handle, Outcome, Failure);
          exit when Outcome = Segments.Found;
-         if Outcome not in Segments.Registry_Busy |
-           Segments.Initialization_In_Progress
-         then
-            raise Program_Error with
-              "cannot resolve segment extent " & Name & ": " & Outcome'Image;
+         if Outcome not in Segments.Registry_Busy | Segments.Initialization_In_Progress then
+            raise Program_Error with "cannot resolve segment extent " & Name & ": " & Outcome'Image;
          end if;
          delay 0.0;
       end loop;
@@ -86,9 +78,7 @@ procedure Shared_Image_Index_Worker is
    end Resolve_Name;
 
    procedure Push_Result
-     (Ring    : in out Result_Rings.View;
-      Value   : Model.Image_Result;
-      Retries : in out Natural)
+     (Ring : in out Result_Rings.View; Value : Model.Image_Result; Retries : in out Natural)
    is
       Outcome : Result_Rings.Push_Result;
    begin
@@ -101,10 +91,7 @@ procedure Shared_Image_Index_Worker is
    end Push_Result;
 
    procedure Attach_Index
-     (Item     : out Image_Maps.View;
-      Region   : Regions.View;
-      Location : DS.Region_Offset;
-      Capacity : Positive)
+     (Item : out Image_Maps.View; Region : Regions.View; Location : DS.Region_Offset; Capacity : Positive)
    is
       Maximum_Attempts : constant Positive := 10_000;
    begin
@@ -120,69 +107,62 @@ procedure Shared_Image_Index_Worker is
          exception
             when DS.Busy_Error =>
                if Attempt = Maximum_Attempts then
-                  raise Program_Error with
-                    "hash map remained busy while worker was joining";
+                  raise Program_Error with "hash map remained busy while worker was joining";
                end if;
                delay 0.001;
          end;
       end loop;
    end Attach_Index;
 
-   Corpus         : constant String := CLI.Argument (2);
-   Worker_Id      : constant Positive := Positive'Value (CLI.Argument (3));
-   Mapping_Size   : constant DS.Byte_Count :=
-     DS.Byte_Count'Value (CLI.Argument (4));
-   Index_Capacity : constant Positive := Positive'Value (CLI.Argument (5));
-   Width          : constant Positive := Positive'Value (CLI.Argument (6));
-   Height         : constant Positive := Positive'Value (CLI.Argument (7));
-   Passes         : constant Positive := Positive'Value (CLI.Argument (8));
-   Index_Rounds   : constant Positive := Positive'Value (CLI.Argument (9));
-   Socket         : Unix.Socket_Descriptor := 3;
-   Backing        : Shared.Backing_Object;
-   Map            : Shared.Mapping;
-   Segment        : Segments.View;
-   Region         : Regions.View;
-   Segment_State  : Segments.Segment_Open_Result;
-   Jobs           : Job_Rings.View;
-   Results        : Result_Rings.View;
-   Index          : Image_Maps.View;
-   Gate           : Strings.View;
-   Race_Object    : Strings.View;
-   Location       : DS.Region_Offset;
-   Resolved_Length : DS.Byte_Count;
-   Gate_Length    : Natural;
-   Queue_Retries  : Natural := 0;
-   Index_Retries  : Natural := 0;
-   Registry_Retries : Natural := 0;
-   Images_Done    : Natural := 0;
+   Corpus            : constant String := CLI.Argument (2);
+   Worker_Id         : constant Positive := Positive'Value (CLI.Argument (3));
+   Mapping_Size      : constant DS.Byte_Count := DS.Byte_Count'Value (CLI.Argument (4));
+   Index_Capacity    : constant Positive := Positive'Value (CLI.Argument (5));
+   Width             : constant Positive := Positive'Value (CLI.Argument (6));
+   Height            : constant Positive := Positive'Value (CLI.Argument (7));
+   Passes            : constant Positive := Positive'Value (CLI.Argument (8));
+   Index_Rounds      : constant Positive := Positive'Value (CLI.Argument (9));
+   Socket            : Unix.Socket_Descriptor := 3;
+   Backing           : Shared.Backing_Object;
+   Map               : Shared.Mapping;
+   Segment           : Segments.View;
+   Region            : Regions.View;
+   Segment_State     : Segments.Segment_Open_Result;
+   Jobs              : Job_Rings.View;
+   Results           : Result_Rings.View;
+   Index             : Image_Maps.View;
+   Gate              : Strings.View;
+   Race_Object       : Strings.View;
+   Location          : DS.Region_Offset;
+   Resolved_Length   : DS.Byte_Count;
+   Gate_Length       : Natural;
+   Queue_Retries     : Natural := 0;
+   Index_Retries     : Natural := 0;
+   Registry_Retries  : Natural := 0;
+   Images_Done       : Natural := 0;
    Batch_Images_Done : Natural := 0;
-   Current_Batch  : Model.U64 := 0;
-   Retire         : Boolean := False;
-   Admitted       : Boolean := False;
-   Event          : Model.Image_Result;
+   Current_Batch     : Model.U64 := 0;
+   Retire            : Boolean := False;
+   Admitted          : Boolean := False;
+   Event             : Model.Image_Result;
 
-   procedure Read_Gate
-     (Batch        : out Model.U64;
-      Worker_Limit : out Natural)
-   is
+   procedure Read_Gate (Batch : out Model.U64; Worker_Limit : out Natural) is
       Data  : Ada.Streams.Stream_Element_Array (1 .. 16);
       Limit : Model.U64 := 0;
    begin
       Strings.Read (Gate, Data);
       Batch := 0;
       for Byte_Index in 0 .. 7 loop
-         Batch := Batch or Interfaces.Shift_Left
-           (Model.U64
-              (Data
-                 (Data'First + Ada.Streams.Stream_Element_Offset
-                    (Byte_Index))),
-            Byte_Index * 8);
-         Limit := Limit or Interfaces.Shift_Left
-           (Model.U64
-              (Data
-                 (Data'First + Ada.Streams.Stream_Element_Offset
-                    (Byte_Index + 8))),
-            Byte_Index * 8);
+         Batch :=
+           Batch
+           or Interfaces.Shift_Left
+                (Model.U64 (Data (Data'First + Ada.Streams.Stream_Element_Offset (Byte_Index))),
+                 Byte_Index * 8);
+         Limit :=
+           Limit
+           or Interfaces.Shift_Left
+                (Model.U64 (Data (Data'First + Ada.Streams.Stream_Element_Offset (Byte_Index + 8))),
+                 Byte_Index * 8);
       end loop;
       if Limit > Model.U64 (Positive'Last) then
          raise Constraint_Error with "gate worker limit is not representable";
@@ -206,49 +186,49 @@ begin
    end;
    Shared.Map (Map, Backing);
    Shared.Close (Backing);
-   Segments.Create_Or_Attach
-     (Segment, Map, Segment_Config, Segment_State);
+   Segments.Create_Or_Attach (Segment, Map, Segment_Config, Segment_State);
    if Segment_State /= Segments.Attached_Existing then
       raise Program_Error with "worker could not attach ready segment";
    end if;
    Segments.Attach_Region (Segment, Region);
 
-   Resolve_Name
-     (Segment, Model.Job_Ring_Name, Location, Resolved_Length);
+   Resolve_Name (Segment, Model.Job_Ring_Name, Location, Resolved_Length);
    Job_Rings.Attach (Jobs, Region, Location, Model.Job_Ring_Capacity);
-   Resolve_Name
-     (Segment, Model.Result_Ring_Name, Location, Resolved_Length);
-   Result_Rings.Attach
-     (Results, Region, Location, Model.Result_Ring_Capacity);
-   Resolve_Name
-     (Segment, Model.Index_Name, Location, Resolved_Length);
+   Resolve_Name (Segment, Model.Result_Ring_Name, Location, Resolved_Length);
+   Result_Rings.Attach (Results, Region, Location, Model.Result_Ring_Capacity);
+   Resolve_Name (Segment, Model.Index_Name, Location, Resolved_Length);
    Attach_Index (Index, Region, Location, Index_Capacity);
-   Resolve_Name
-     (Segment, Model.Gate_Name, Location, Resolved_Length);
+   Resolve_Name (Segment, Model.Gate_Name, Location, Resolved_Length);
    begin
       Strings.Attach (Gate, Region, Location, Model.Gate_Capacity);
    exception
       when Error : others =>
-         raise Program_Error with
-           "worker " & Image (Worker_Id) & " could not attach " &
-           Model.Gate_Name & " at offset" &
-           DS.Region_Offset'Image (Location) & " length" &
-           DS.Byte_Count'Image (Resolved_Length) & ": " &
-           Ada.Exceptions.Exception_Message (Error);
+         raise Program_Error
+           with
+             "worker "
+             & Image (Worker_Id)
+             & " could not attach "
+             & Model.Gate_Name
+             & " at offset"
+             & DS.Region_Offset'Image (Location)
+             & " length"
+             & DS.Byte_Count'Image (Resolved_Length)
+             & ": "
+             & Ada.Exceptions.Exception_Message (Error);
    end;
 
    Event :=
-     (Batch_Id       => 0,
-      Image_Id        => 0,
-      Content_Hash    => 0,
-      Red_Total       => 0,
-      Green_Total     => 0,
-      Blue_Total      => 0,
-      Pixel_Count     => 0,
-      Worker_Id       => Model.U32 (Worker_Id),
-      Index_Retries   => 0,
-      Queue_Retries   => 0,
-      Flags           => Model.Worker_Attached);
+     (Batch_Id      => 0,
+      Image_Id      => 0,
+      Content_Hash  => 0,
+      Red_Total     => 0,
+      Green_Total   => 0,
+      Blue_Total    => 0,
+      Pixel_Count   => 0,
+      Worker_Id     => Model.U32 (Worker_Id),
+      Index_Retries => 0,
+      Queue_Retries => 0,
+      Flags         => Model.Worker_Attached);
    Push_Result (Results, Event, Queue_Retries);
 
    loop
@@ -256,7 +236,8 @@ begin
          Gate_Length := Strings.Length (Gate);
          exit when Gate_Length > 0;
       exception
-         when DS.Busy_Error => null;
+         when DS.Busy_Error =>
+            null;
       end;
       delay 0.001;
    end loop;
@@ -271,58 +252,63 @@ begin
    begin
       loop
          Segments.Try_Find_Or_Create
-           (Segment, Model.Race_Name,
+           (Segment,
+            Model.Race_Name,
             Strings.Required_Storage (Model.Race_Capacity),
-            Handle, Claim, Outcome, Failure);
+            Handle,
+            Claim,
+            Outcome,
+            Failure);
          case Outcome is
-            when Segments.Created =>
-               Segments.Claimed_Extent
-                 (Segment, Claim, Location, Extent);
-               Strings.Initialize
-                 (Race_Object, Region, Location, Model.Race_Capacity);
-               Strings.Assign
-                 (Race_Object, To_Bytes ("created by worker " &
-                  Image (Worker_Id)));
+            when Segments.Created                                             =>
+               Segments.Claimed_Extent (Segment, Claim, Location, Extent);
+               Strings.Initialize (Race_Object, Region, Location, Model.Race_Capacity);
+               Strings.Assign (Race_Object, To_Bytes ("created by worker " & Image (Worker_Id)));
                Segments.Publish (Segment, Claim);
                Won := True;
                exit;
-            when Segments.Attached_Existing =>
+
+            when Segments.Attached_Existing                                   =>
                Segments.Resolve (Segment, Handle, Location, Extent);
                begin
-                  Strings.Attach
-                    (Race_Object, Region, Location, Model.Race_Capacity);
+                  Strings.Attach (Race_Object, Region, Location, Model.Race_Capacity);
                exception
                   when Error : others =>
-                     raise Program_Error with
-                       "worker " & Image (Worker_Id) & " could not attach " &
-                       Model.Race_Name & " at offset" &
-                       DS.Region_Offset'Image (Location) & " length" &
-                       DS.Byte_Count'Image (Extent) & ": " &
-                       Ada.Exceptions.Exception_Message (Error);
+                     raise Program_Error
+                       with
+                         "worker "
+                         & Image (Worker_Id)
+                         & " could not attach "
+                         & Model.Race_Name
+                         & " at offset"
+                         & DS.Region_Offset'Image (Location)
+                         & " length"
+                         & DS.Byte_Count'Image (Extent)
+                         & ": "
+                         & Ada.Exceptions.Exception_Message (Error);
                end;
                exit;
-            when Segments.Registry_Busy |
-              Segments.Initialization_In_Progress =>
+
+            when Segments.Registry_Busy | Segments.Initialization_In_Progress =>
                Registry_Retries := Registry_Retries + 1;
                delay 0.0;
-            when others =>
-               raise Program_Error with
-                 "worker registry race failed: " & Outcome'Image;
+
+            when others                                                       =>
+               raise Program_Error with "worker registry race failed: " & Outcome'Image;
          end case;
       end loop;
       Event :=
-        (Batch_Id => 0,
-         Image_Id => 0,
-         Content_Hash => 0,
-         Red_Total => 0,
-         Green_Total => 0,
-         Blue_Total => 0,
-         Pixel_Count => 0,
-         Worker_Id => Model.U32 (Worker_Id),
+        (Batch_Id      => 0,
+         Image_Id      => 0,
+         Content_Hash  => 0,
+         Red_Total     => 0,
+         Green_Total   => 0,
+         Blue_Total    => 0,
+         Pixel_Count   => 0,
+         Worker_Id     => Model.U32 (Worker_Id),
          Index_Retries => Model.U32 (Registry_Retries),
          Queue_Retries => 0,
-         Flags => Model.Worker_Race_Done or
-           (if Won then Model.Worker_Won_Race else 0));
+         Flags         => Model.Worker_Race_Done or (if Won then Model.Worker_Won_Race else 0));
       Push_Result (Results, Event, Queue_Retries);
    end;
 
@@ -340,7 +326,8 @@ begin
             Admitted := True;
          end if;
       exception
-         when DS.Busy_Error | Constraint_Error => null;
+         when DS.Busy_Error | Constraint_Error =>
+            null;
       end;
       exit when Admitted;
       delay 0.001;
@@ -348,9 +335,9 @@ begin
 
    loop
       declare
-         Job         : Model.Image_Job;
-         Pop_Outcome : Job_Rings.Pop_Result;
-         Local       : Model.Image_Result;
+         Job                 : Model.Image_Job;
+         Pop_Outcome         : Job_Rings.Pop_Result;
+         Local               : Model.Image_Result;
          Local_Queue_Retries : Natural := 0;
          Local_Index_Retries : Natural := 0;
       begin
@@ -370,7 +357,8 @@ begin
                end if;
                Retire := Worker_Id > Gate_Limit;
             exception
-               when DS.Busy_Error | Constraint_Error => null;
+               when DS.Busy_Error | Constraint_Error =>
+                  null;
             end;
             exit when Retire;
             Job_Rings.Try_Pop (Jobs, Job, Pop_Outcome);
@@ -386,34 +374,33 @@ begin
                raise Program_Error with "worker received mismatched epoch end";
             end if;
             Event :=
-              (Batch_Id       => Job.Batch_Id,
-               Image_Id       => 0,
-               Content_Hash   => 0,
-               Red_Total      => 0,
-               Green_Total    => 0,
-               Blue_Total     => 0,
-               Pixel_Count    => Model.U64 (Batch_Images_Done),
-               Worker_Id      => Model.U32 (Worker_Id),
-               Index_Retries  => 0,
-               Queue_Retries  => 0,
-               Flags          => Model.Worker_Batch_Done);
+              (Batch_Id      => Job.Batch_Id,
+               Image_Id      => 0,
+               Content_Hash  => 0,
+               Red_Total     => 0,
+               Green_Total   => 0,
+               Blue_Total    => 0,
+               Pixel_Count   => Model.U64 (Batch_Images_Done),
+               Worker_Id     => Model.U32 (Worker_Id),
+               Index_Retries => 0,
+               Queue_Retries => 0,
+               Flags         => Model.Worker_Batch_Done);
             Push_Result (Results, Event, Queue_Retries);
             Current_Batch := 0;
             Batch_Images_Done := 0;
             loop
                declare
-                  Next_Batch  : Model.U64;
-                  Next_Limit  : Natural;
+                  Next_Batch : Model.U64;
+                  Next_Limit : Natural;
                begin
                   Read_Gate (Next_Batch, Next_Limit);
-                  if Next_Batch /= Job.Batch_Id
-                    or else Worker_Id > Next_Limit
-                  then
+                  if Next_Batch /= Job.Batch_Id or else Worker_Id > Next_Limit then
                      Retire := Worker_Id > Next_Limit;
                      exit;
                   end if;
                exception
-                  when DS.Busy_Error | Constraint_Error => null;
+                  when DS.Busy_Error | Constraint_Error =>
+                     null;
                end;
                delay 0.001;
             end loop;
@@ -426,8 +413,7 @@ begin
                raise Program_Error with "worker observed overlapping epochs";
             end if;
             Model.Analyze_Image
-              (Model.Image_Path (Corpus, Positive (Job.Image_Id)),
-               Width, Height, Passes, Worker_Id, Local);
+              (Model.Image_Path (Corpus, Positive (Job.Image_Id)), Width, Height, Passes, Worker_Id, Local);
             Local.Batch_Id := Job.Batch_Id;
             Local.Image_Id := Job.Image_Id;
             Local.Queue_Retries := Model.U32 (Local_Queue_Retries);
@@ -439,12 +425,9 @@ begin
                         Put_Outcome : Image_Maps.Put_Result;
                      begin
                         Image_Maps.Put
-                          (Index,
-                           (if Round = Index_Rounds then Job.Image_Id else 0),
-                           Local, Put_Outcome);
+                          (Index, (if Round = Index_Rounds then Job.Image_Id else 0), Local, Put_Outcome);
                         if Put_Outcome = Image_Maps.Table_Full then
-                           raise Program_Error with
-                             "shared image index is full";
+                           raise Program_Error with "shared image index is full";
                         end if;
                         exit;
                      end;

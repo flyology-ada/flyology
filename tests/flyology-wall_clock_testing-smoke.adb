@@ -44,7 +44,8 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
          null;
       end Wait_Until_Finished;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Result_State;
 
    procedure Check_Backstep (Lightweight : Boolean) is
@@ -55,10 +56,7 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
          Results : Result_State;
 
          task Waiter is
-            pragma Task_Info
-              (if Lightweight
-               then Flyology.Lightweight_Task
-               else Flyology.Native_Task);
+            pragma Task_Info (if Lightweight then Flyology.Lightweight_Task else Flyology.Native_Task);
          end Waiter;
 
          task body Waiter is
@@ -72,8 +70,7 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
                and then Result.Backward_Adjustment >= 0.5);
          exception
             when Error : others =>
-               Ada.Text_IO.Put_Line
-                 (Ada.Exceptions.Exception_Information (Error));
+               Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Information (Error));
                Results.Finished (False);
          end Waiter;
       begin
@@ -96,29 +93,25 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
 
       declare
          Source  : Flyology.Wall_Clock_Waits.Source;
-         Target  : constant Ada.Calendar.Time :=
-           Ada.Calendar.Time_Of (2030, 1, 1, 0.0);
+         Target  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (2030, 1, 1, 0.0);
          Changed : Boolean;
       begin
          Flyology.Wall_Clock_Waits.Open (Source);
 
          Set_Native_Remaining (5.0);
-         Changed := Flyology.Wall_Clock_Waits.Arm
-           (Source, Target, Maximum_Slice => 3.0);
+         Changed := Flyology.Wall_Clock_Waits.Arm (Source, Target, Maximum_Slice => 3.0);
          if Changed or else Last_Native_Arm /= 3.0 then
             raise Program_Error with "relative wall timer did not bound arm";
          end if;
 
          Set_Native_Remaining (2.0);
-         Changed := Flyology.Wall_Clock_Waits.Arm
-           (Source, Target, Maximum_Slice => 10.0);
+         Changed := Flyology.Wall_Clock_Waits.Arm (Source, Target, Maximum_Slice => 10.0);
          if Changed or else Last_Native_Arm /= 2.0 then
             raise Program_Error with "relative wall timer did not move forward";
          end if;
 
          Set_Native_Remaining (8.0);
-         Changed := Flyology.Wall_Clock_Waits.Arm
-           (Source, Target, Maximum_Slice => 10.0);
+         Changed := Flyology.Wall_Clock_Waits.Arm (Source, Target, Maximum_Slice => 10.0);
          if Changed or else Last_Native_Arm /= 8.0 then
             raise Program_Error with "relative wall timer did not rearm backstep";
          end if;
@@ -137,11 +130,9 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
       Set_Offset (0.0);
       Reset_Samples (Pause_For_Offset => False);
       Set_Sample_Bracket (0.250);
-      Result := Flyology.IO.Timers.Wait_Until
-        (Target, Backstep_Tolerance => 0.001);
+      Result := Flyology.IO.Timers.Wait_Until (Target, Backstep_Tolerance => 0.001);
       if Result.Outcome /= Flyology.IO.Timers.Target_Reached then
-         raise Program_Error with
-           "wide clock bracket manufactured a wall-clock backstep";
+         raise Program_Error with "wide clock bracket manufactured a wall-clock backstep";
       elsif Sample_Attempts < 3 then
          raise Program_Error with "wide clock bracket did not retry";
       end if;
@@ -157,18 +148,19 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
       Ready       : Boolean;
    begin
       Flyology.IO.Sockets.Create_Socket_Pair (Left, Right);
-      Configure_IO_Retry
-        (Steady_Advance  => 0.005,
-         Wall_Adjustment => -120.0);
-      Ready := Flyology.IO.Wait
-        (Flyology.IO.Sockets.Native_Descriptor (Left),
-         Flyology.IO.For_Read,
-         Timeout => 0.010);
+      Configure_IO_Retry (Steady_Advance => 0.005, Wall_Adjustment => -120.0);
+      Ready :=
+        Flyology.IO.Wait
+          (Flyology.IO.Sockets.Native_Descriptor (Left), Flyology.IO.For_Read, Timeout => 0.010);
       if Ready or else IO_Retry_Count /= 1 or else Offset /= -120.0 then
-         raise Program_Error with
-           "native EINTR retry state: ready=" & Boolean'Image (Ready)
-           & " retries=" & Natural'Image (IO_Retry_Count)
-           & " wall=" & Duration'Image (Offset);
+         raise Program_Error
+           with
+             "native EINTR retry state: ready="
+             & Boolean'Image (Ready)
+             & " retries="
+             & Natural'Image (IO_Retry_Count)
+             & " wall="
+             & Duration'Image (Offset);
       end if;
       Reset_IO_Retry;
       Set_Offset (0.0);
@@ -191,20 +183,16 @@ procedure Flyology.Wall_Clock_Testing.Smoke is
 
       declare
          Source  : Flyology.Wall_Clock_Waits.Source;
-         Target  : constant Ada.Calendar.Time :=
-           Ada.Calendar.Time_Of (2030, 1, 1, 0.0);
+         Target  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (2030, 1, 1, 0.0);
          Changed : Boolean;
       begin
          Flyology.Wall_Clock_Waits.Open (Source);
          Set_Native_Remaining (0.0);
          Set_Native_Consume_EINTR (2);
-         Changed := Flyology.Wall_Clock_Waits.Arm
-           (Source, Target, Maximum_Slice => 1.0);
+         Changed := Flyology.Wall_Clock_Waits.Arm (Source, Target, Maximum_Slice => 1.0);
          if Changed
            or else not Flyology.IO.Wait
-             (Flyology.Wall_Clock_Waits.Descriptor (Source),
-              Flyology.IO.For_Read,
-              Timeout => 1.0)
+                         (Flyology.Wall_Clock_Waits.Descriptor (Source), Flyology.IO.For_Read, Timeout => 1.0)
          then
             raise Program_Error with "wall event did not become ready";
          end if;

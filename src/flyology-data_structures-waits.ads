@@ -2,7 +2,10 @@ with Interfaces;
 
 --  Private monotonic-deadline and lane-aware yielding policy for explicitly
 --  waiting data-structure operations. No task or timer starts at elaboration.
-private package Flyology.Data_Structures.Waits with Preelaborate is
+
+private package Flyology.Data_Structures.Waits
+  with Preelaborate
+is
    type Context is private;
 
    function Start (Timeout : Wait_Timeout) return Context;

@@ -4,7 +4,10 @@ with Interfaces.C;
 --  descriptor is always readable through Flyology.IO: Linux uses the inotify
 --  descriptor directly, while Darwin exposes a private kqueue containing
 --  persistent EVFILT_VNODE registrations.
-private package Flyology.File_Watch_Native with Preelaborate is
+
+private package Flyology.File_Watch_Native
+  with Preelaborate
+is
    package C renames Interfaces.C;
 
    type Handle is new C.int;
@@ -26,18 +29,12 @@ private package Flyology.File_Watch_Native with Preelaborate is
 
    procedure Open (Source : in out C.int);
    function Add (Source : C.int; Path : String) return Handle;
-   procedure Remove
-     (Source  : C.int;
-      Subject : Handle;
-      Success : out Boolean);
+   procedure Remove (Source : C.int; Subject : Handle; Success : out Boolean);
    procedure Close (Source : in out C.int; Success : out Boolean);
 
    --  Drain one nonblocking kernel batch. Events for one native handle are
    --  coalesced when possible. A synthetic Invalid_Handle/Events_Lost result
    --  means callers must invalidate their complete watched set.
-   procedure Read
-     (Source : C.int;
-      Events : out Raw_Event_Array;
-      Count  : out Natural)
+   procedure Read (Source : C.int; Events : out Raw_Event_Array; Count : out Natural)
    with Post => Count <= Events'Length;
 end Flyology.File_Watch_Native;

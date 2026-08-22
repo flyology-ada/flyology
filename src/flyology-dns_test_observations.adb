@@ -21,8 +21,8 @@ package body Flyology.DNS_Test_Observations is
          end if;
       end Record_Receive_Wait;
 
-      function Post_Close_Receive_Waits return Natural is
-        (Post_Close_Count);
+      function Post_Close_Receive_Waits return Natural
+      is (Post_Close_Count);
    end Observations;
 
    procedure Reset is
@@ -30,14 +30,12 @@ package body Flyology.DNS_Test_Observations is
       Observations.Reset;
    end Reset;
 
-   procedure Record_Receive_Wait
-     (After_Close : Boolean)
-   is
+   procedure Record_Receive_Wait (After_Close : Boolean) is
    begin
       Observations.Record_Receive_Wait (After_Close);
    end Record_Receive_Wait;
 
-   function Post_Close_Receive_Waits return Natural is
-     (Observations.Post_Close_Receive_Waits);
+   function Post_Close_Receive_Waits return Natural
+   is (Observations.Post_Close_Receive_Waits);
 
 end Flyology.DNS_Test_Observations;

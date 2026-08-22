@@ -3,6 +3,7 @@ with Flyology.IO.TLS.ALPN;
 with Flyology.Operations;
 
 --  Adds ownership-preserving TLS to an admitted connection.
+
 package Flyology.IO.Connections.TLS is
 
    --  First-class ownership-preserving TLS upgrade. Provider setup is an
@@ -29,8 +30,7 @@ package Flyology.IO.Connections.TLS is
       Side        : Flyology.IO.TLS.Role;
       Server_Name : String;
       Timeout     : Duration := Infinite;
-      Token       : access Cancellation_Token := null)
-      return Upgrade_Operation;
+      Token       : access Cancellation_Token := null) return Upgrade_Operation;
 
    --  Start or restart a core TLS upgrade in an established operation object.
    --  @param Item Open plaintext admitted connection
@@ -48,9 +48,9 @@ package Flyology.IO.Connections.TLS is
       Timeout     : Duration := Infinite;
       Token       : access Cancellation_Token := null;
       Operation   : in out Upgrade_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Start an ALPN-capable TLS upgrade. Protocols is consumed during eager
    --  provider setup and need not outlive initiation; all other behavior
@@ -72,8 +72,7 @@ package Flyology.IO.Connections.TLS is
       Server_Name : String;
       Protocols   : Flyology.IO.TLS.ALPN.Protocol_List;
       Timeout     : Duration := Infinite;
-      Token       : access Cancellation_Token := null)
-      return Upgrade_Operation;
+      Token       : access Cancellation_Token := null) return Upgrade_Operation;
 
    --  Start or restart an ALPN-capable TLS upgrade.
    --  @param Item Open plaintext admitted connection
@@ -93,9 +92,9 @@ package Flyology.IO.Connections.TLS is
       Timeout     : Duration := Infinite;
       Token       : access Cancellation_Token := null;
       Operation   : in out Upgrade_Operation)
-     with Pre =>
-       not Flyology.Operations.Is_Active (Operation)
-       and then not Flyology.Operations.Is_Terminal (Operation);
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
    --  Consume a terminal TLS upgrade, raising its retained familiar error.
    --  @param Operation Terminal TLS upgrade operation
@@ -199,9 +198,7 @@ package Flyology.IO.Connections.TLS is
    --     provider or peer fails shutdown
    --  @exception Program_Error Item is closed or still plaintext
    procedure Shutdown
-     (Item    : in out Connection;
-      Timeout : Duration := Infinite;
-      Token   : access Cancellation_Token := null);
+     (Item : in out Connection; Timeout : Duration := Infinite; Token : access Cancellation_Token := null);
 
 private
    type Upgrade_Operation is new Connection_Operation with null record;

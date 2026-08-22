@@ -26,8 +26,7 @@ package body Flyology.File_Watch_Native is
    NOTE_RENAME : constant C.unsigned := 16#0020#;
    NOTE_REVOKE : constant C.unsigned := 16#0040#;
    VNODE_MASK  : constant C.unsigned :=
-     NOTE_DELETE or NOTE_WRITE or NOTE_EXTEND or NOTE_ATTRIB or NOTE_LINK
-     or NOTE_RENAME or NOTE_REVOKE;
+     NOTE_DELETE or NOTE_WRITE or NOTE_EXTEND or NOTE_ATTRIB or NOTE_LINK or NOTE_RENAME or NOTE_REVOKE;
 
    O_EVTONLY  : constant C.int := 16#0000_8000#;
    O_CLOEXEC  : constant C.int := 16#0100_0000#;
@@ -35,8 +34,7 @@ package body Flyology.File_Watch_Native is
    FD_CLOEXEC : constant C.int := 1;
    EINTR      : constant Integer := 4;
 
-   type Extension_Array is array (1 .. 2) of C.long_long
-     with Convention => C;
+   type Extension_Array is array (1 .. 2) of C.long_long with Convention => C;
    type Kevent_Record is record
       Ident  : SSE.Integer_Address;
       Filter : C.short;
@@ -46,15 +44,14 @@ package body Flyology.File_Watch_Native is
       Udata  : SSE.Integer_Address;
       Ext    : Extension_Array;
    end record
-     with Convention => C;
-   type Kevent_Array is array (Positive range <>) of aliased Kevent_Record
-     with Convention => C;
+   with Convention => C;
+   type Kevent_Array is array (Positive range <>) of aliased Kevent_Record with Convention => C;
 
    type Timespec is record
       Seconds     : C.long;
       Nanoseconds : C.long;
    end record
-     with Convention => C;
+   with Convention => C;
 
    function Kqueue return C.int;
    pragma Import (C, Kqueue, "kqueue");
@@ -67,23 +64,17 @@ package body Flyology.File_Watch_Native is
       Flags        : C.unsigned;
       Timeout      : System.Address) return C.int;
    pragma Import (C, Kevent, "kevent64");
-   function C_Open
-     (Path : System.Address; Flags : C.int; Mode : C.int) return C.int;
+   function C_Open (Path : System.Address; Flags : C.int; Mode : C.int) return C.int;
    pragma Import (C_Variadic_2, C_Open, "open");
-   function Fcntl_Set
-     (FD : C.int; Command : C.int; Argument : C.int) return C.int
-     with Import,
-          Convention    => C_Variadic_2,
-          External_Name => "fcntl";
+   function Fcntl_Set (FD : C.int; Command : C.int; Argument : C.int) return C.int
+   with Import, Convention => C_Variadic_2, External_Name => "fcntl";
    function C_Close (FD : C.int) return C.int;
    pragma Import (C, C_Close, "close");
 
-   function Has
-     (Value : C.unsigned; Flag : C.unsigned) return Boolean is
-     ((Value and Flag) /= 0);
-   function Has
-     (Value : C.unsigned_short; Flag : C.unsigned_short) return Boolean is
-     ((Value and Flag) /= 0);
+   function Has (Value : C.unsigned; Flag : C.unsigned) return Boolean
+   is ((Value and Flag) /= 0);
+   function Has (Value : C.unsigned_short; Flag : C.unsigned_short) return Boolean
+   is ((Value and Flag) /= 0);
 
    procedure Open (Source : in out C.int) is
       New_Source : C.int;
@@ -96,33 +87,30 @@ package body Flyology.File_Watch_Native is
       end if;
       New_Source := Kqueue;
       if New_Source < 0 then
-         raise Flyology.IO.Device_Error with
-           "kqueue file watcher creation failed, errno="
-           & GNAT.OS_Lib.Errno'Image;
+         raise Flyology.IO.Device_Error
+           with "kqueue file watcher creation failed, errno=" & GNAT.OS_Lib.Errno'Image;
       end if;
       Result := Fcntl_Set (New_Source, F_SETFD, FD_CLOEXEC);
       if Result < 0 then
          Error := GNAT.OS_Lib.Errno;
          Ignored := C_Close (New_Source);
-         raise Flyology.IO.Device_Error with
-           "kqueue file watcher configuration failed, errno=" & Error'Image;
+         raise Flyology.IO.Device_Error with "kqueue file watcher configuration failed, errno=" & Error'Image;
       end if;
       Source := New_Source;
    end Open;
 
    function Add (Source : C.int; Path : String) return Handle is
-      C_Path : aliased String (1 .. Path'Length + 1);
-      FD     : C.int;
-      Change : aliased Kevent_Record;
-      Result : C.int;
+      C_Path  : aliased String (1 .. Path'Length + 1);
+      FD      : C.int;
+      Change  : aliased Kevent_Record;
+      Result  : C.int;
       Ignored : C.int;
    begin
       C_Path (1 .. Path'Length) := Path;
       C_Path (C_Path'Last) := ASCII.NUL;
       FD := C_Open (C_Path'Address, O_EVTONLY + O_CLOEXEC, 0);
       if FD < 0 then
-         raise Flyology.IO.Device_Error with
-           "file watch open failed, errno=" & GNAT.OS_Lib.Errno'Image;
+         raise Flyology.IO.Device_Error with "file watch open failed, errno=" & GNAT.OS_Lib.Errno'Image;
       end if;
 
       Change :=
@@ -133,32 +121,19 @@ package body Flyology.File_Watch_Native is
          Data   => 0,
          Udata  => 0,
          Ext    => (others => 0));
-      Result :=
-        Kevent
-          (Source,
-           Change'Address,
-           1,
-           System.Null_Address,
-           0,
-           0,
-           System.Null_Address);
+      Result := Kevent (Source, Change'Address, 1, System.Null_Address, 0, 0, System.Null_Address);
       if Result /= 0 then
          declare
             Error : constant Integer := GNAT.OS_Lib.Errno;
          begin
             Ignored := C_Close (FD);
-            raise Flyology.IO.Device_Error with
-              "file watch registration failed, errno=" & Error'Image;
+            raise Flyology.IO.Device_Error with "file watch registration failed, errno=" & Error'Image;
          end;
       end if;
       return Handle (FD);
    end Add;
 
-   procedure Remove
-     (Source  : C.int;
-      Subject : Handle;
-      Success : out Boolean)
-   is
+   procedure Remove (Source : C.int; Subject : Handle; Success : out Boolean) is
       pragma Unreferenced (Source);
    begin
       if Subject = Invalid_Handle then
@@ -179,11 +154,7 @@ package body Flyology.File_Watch_Native is
       end if;
    end Close;
 
-   procedure Read
-     (Source : C.int;
-      Events : out Raw_Event_Array;
-      Count  : out Natural)
-   is
+   procedure Read (Source : C.int; Events : out Raw_Event_Array; Count : out Natural) is
       Native_Events : aliased Kevent_Array (Events'Range);
       Zero          : aliased Timespec := (Seconds => 0, Nanoseconds => 0);
       Result        : C.int;
@@ -205,28 +176,24 @@ package body Flyology.File_Watch_Native is
          exit when Result >= 0 or else GNAT.OS_Lib.Errno /= EINTR;
       end loop;
       if Result < 0 then
-         raise Flyology.IO.Device_Error with
-           "file watch drain failed, errno=" & GNAT.OS_Lib.Errno'Image;
+         raise Flyology.IO.Device_Error with "file watch drain failed, errno=" & GNAT.OS_Lib.Errno'Image;
       end if;
 
       for Index in 1 .. Natural (Result) loop
          Position := Events'First + Count;
-         if Has (Native_Events (Index).Flags, EV_ERROR)
-           and then Native_Events (Index).Data /= 0
-         then
-            raise Flyology.IO.Device_Error with
-              "file watch event failed, errno="
-              & Native_Events (Index).Data'Image;
+         if Has (Native_Events (Index).Flags, EV_ERROR) and then Native_Events (Index).Data /= 0 then
+            raise Flyology.IO.Device_Error
+              with "file watch event failed, errno=" & Native_Events (Index).Data'Image;
          end if;
 
          Changes :=
-           (Contents =>
+           (Contents    =>
               Has (Native_Events (Index).Fflags, NOTE_WRITE)
               or else Has (Native_Events (Index).Fflags, NOTE_EXTEND),
-            Metadata =>
+            Metadata    =>
               Has (Native_Events (Index).Fflags, NOTE_ATTRIB)
               or else Has (Native_Events (Index).Fflags, NOTE_LINK),
-            Identity =>
+            Identity    =>
               Has (Native_Events (Index).Fflags, NOTE_DELETE)
               or else Has (Native_Events (Index).Fflags, NOTE_RENAME),
             Invalidated =>
@@ -235,9 +202,7 @@ package body Flyology.File_Watch_Native is
               or else Has (Native_Events (Index).Fflags, NOTE_REVOKE)
               or else Has (Native_Events (Index).Flags, EV_EOF),
             Events_Lost => False);
-         Events (Position) :=
-           (Subject => Handle (Native_Events (Index).Ident),
-            Changes => Changes);
+         Events (Position) := (Subject => Handle (Native_Events (Index).Ident), Changes => Changes);
          Count := Count + 1;
       end loop;
    end Read;

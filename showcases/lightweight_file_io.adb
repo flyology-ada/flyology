@@ -29,12 +29,12 @@ procedure Lightweight_File_IO is
       entry Wait_Until_Done;
       function Passed return Boolean;
    private
-      Ready              : Natural := 0;
-      Completed          : Natural := 0;
-      Expected           : Natural := 0;
-      Gate_Open          : Boolean := False;
-      Cancelled          : Boolean := False;
-      All_OK             : Boolean := True;
+      Ready     : Natural := 0;
+      Completed : Natural := 0;
+      Expected  : Natural := 0;
+      Gate_Open : Boolean := False;
+      Cancelled : Boolean := False;
+      All_OK    : Boolean := True;
    end Progress;
 
    protected body Progress is
@@ -78,30 +78,25 @@ procedure Lightweight_File_IO is
          null;
       end Wait_Until_Done;
 
-      function Passed return Boolean is (All_OK);
+      function Passed return Boolean
+      is (All_OK);
    end Progress;
 
-   File : Flyology.IO.Files.File_Descriptor :=
-     Flyology.IO.Files.Invalid_File;
+   File : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
 
    task type Writer (Index : Positive) is
       pragma Task_Info (Flyology.Lightweight_Task);
    end Writer;
 
    task body Writer is
-      Item : constant Stream_Element_Array :=
-        [1 => Stream_Element (Index mod 251)];
-      Last : Stream_Element_Offset;
+      Item    : constant Stream_Element_Array := [1 => Stream_Element (Index mod 251)];
+      Last    : Stream_Element_Offset;
       Proceed : Boolean;
    begin
       Progress.Arrived;
       Progress.Start (Proceed);
       if Proceed then
-         Flyology.IO.Files.Write_At
-           (File,
-            Flyology.IO.Files.File_Offset (Index - 1),
-            Item,
-            Last);
+         Flyology.IO.Files.Write_At (File, Flyology.IO.Files.File_Offset (Index - 1), Item, Last);
          Progress.Finished (Last = Item'Last);
       else
          Progress.Finished (True);
@@ -112,7 +107,7 @@ procedure Lightweight_File_IO is
    end Writer;
 
    type Writer_Access is access Writer;
-   Writers : array (1 .. Task_Count) of Writer_Access;
+   Writers          : array (1 .. Task_Count) of Writer_Access;
    Baseline_Threads : constant C.int := Thread_Count;
    Threads          : C.int;
    Created          : Natural := 0;
@@ -130,10 +125,7 @@ begin
    Remove_File;
    File :=
      Flyology.IO.Files.Open
-       (File_Path,
-        Mode     => Flyology.IO.Files.Write_Only,
-        Create   => True,
-        Truncate => True);
+       (File_Path, Mode => Flyology.IO.Files.Write_Only, Create => True, Truncate => True);
 
    for Index in Writers'Range loop
       Writers (Index) := new Writer (Index);
@@ -146,9 +138,7 @@ begin
    Put_Line ("process pthreads:" & Threads'Image);
    Topology_OK :=
      Threads = Baseline_Threads
-     or else
-       (Baseline_Threads < C.int'Last
-        and then Threads = Baseline_Threads + 1);
+     or else (Baseline_Threads < C.int'Last and then Threads = Baseline_Threads + 1);
 
    Progress.Release (Created);
    Gate_Opened := True;
@@ -157,15 +147,12 @@ begin
    Remove_File;
 
    if not Topology_OK then
-      raise Program_Error with
-        "lightweight file tasks created hidden pthreads";
+      raise Program_Error with "lightweight file tasks created hidden pthreads";
    end if;
    if not Progress.Passed then
       raise Program_Error with "kernel-completion file writes failed";
    end if;
-   Put_Line
-     ("all file operations completed through the event loop; "
-      & "worker pthreads: 0");
+   Put_Line ("all file operations completed through the event loop; " & "worker pthreads: 0");
 exception
    when others =>
       if not Gate_Opened then

@@ -6,7 +6,10 @@ with System;
 --  addressable region whose lifetime the caller owns.
 --  Region operations are not synchronized; attachment, detachment, and
 --  backing-store lifetime require application-level exclusion.
-package Flyology_Allocators.Regions with Preelaborate is
+
+package Flyology_Allocators.Regions
+  with Preelaborate
+is
 
    --  Backing-region view governed by this package.
    subtype View is Region_View;
@@ -19,10 +22,7 @@ package Flyology_Allocators.Regions with Preelaborate is
    --  @param Length Number of accessible bytes
    --  @exception Region_Error Base is null, Length is zero or too large, or
    --     the native address range overflows
-   procedure Attach
-     (Item   : in out View;
-      Base   : System.Address;
-      Length : Byte_Count);
+   procedure Attach (Item : in out View; Base : System.Address; Length : Byte_Count);
 
    --  Detach Item without changing or releasing any backing bytes. Existing
    --  structure views captured from Item must be detached separately before
@@ -48,10 +48,8 @@ package Flyology_Allocators.Regions with Preelaborate is
    --  Return a checked address within an attached caller-owned region. Offset
    --  is relative to the first byte and may be zero.
    function Address_At
-     (Item      : View;
-      Offset    : Byte_Count;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count := 1) return System.Address;
+     (Item : View; Offset : Byte_Count; Extent : Byte_Count; Alignment : Byte_Count := 1)
+      return System.Address;
 
    --  Validate a persisted relationship without exposing a native address.
    --  Offset zero is rejected as the null sentinel. Alignment must be a
@@ -62,10 +60,6 @@ package Flyology_Allocators.Regions with Preelaborate is
    --  @param Alignment Required native alignment
    --  @exception Region_Error Item is detached or the relationship is null,
    --     overflowing, misaligned, out of range, or not natively representable
-   procedure Validate
-     (Item      : View;
-      Offset    : Region_Offset;
-      Extent    : Byte_Count;
-      Alignment : Byte_Count := 1);
+   procedure Validate (Item : View; Offset : Region_Offset; Extent : Byte_Count; Alignment : Byte_Count := 1);
 
 end Flyology_Allocators.Regions;

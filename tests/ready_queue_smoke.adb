@@ -6,9 +6,9 @@ procedure Ready_Queue_Smoke is
    Worker_Priority   : constant := 5;
    Promoted_Priority : constant := 20;
    Blocker_Priority  : constant := 25;
-   type Result_Array is
-     array (Positive range 1 .. Worker_Count) of Positive;
-   Stop_Blocker : Boolean := False with Atomic;
+   type Result_Array is array (Positive range 1 .. Worker_Count) of Positive;
+   Stop_Blocker      : Boolean := False
+   with Atomic;
 
    protected State is
       procedure Arrive (Ticket : out Positive);
@@ -25,13 +25,13 @@ procedure Ready_Queue_Smoke is
       function Second_Ticket return Positive;
       function Third_Ticket return Positive;
    private
-      Arrivals : Natural := 0;
+      Arrivals        : Natural := 0;
       Blocker_Started : Boolean := False;
       Blocker_Running : Boolean := False;
-      Released : Boolean := False;
-      Completed : Natural := 0;
-      Run_Ids     : Result_Array := (others => 1);
-      Run_Tickets : Result_Array := (others => 1);
+      Released        : Boolean := False;
+      Completed       : Natural := 0;
+      Run_Ids         : Result_Array := (others => 1);
+      Run_Tickets     : Result_Array := (others => 1);
    end State;
 
    protected body State is
@@ -88,11 +88,14 @@ procedure Ready_Queue_Smoke is
          null;
       end Await_Completion;
 
-      function First_Id return Positive is (Run_Ids (1));
+      function First_Id return Positive
+      is (Run_Ids (1));
 
-      function Second_Ticket return Positive is (Run_Tickets (2));
+      function Second_Ticket return Positive
+      is (Run_Tickets (2));
 
-      function Third_Ticket return Positive is (Run_Tickets (3));
+      function Third_Ticket return Positive
+      is (Run_Tickets (3));
    end State;
 
    task type Worker (Id : Positive) is
@@ -131,8 +134,7 @@ begin
    State.Start_Blocker;
    State.Await_Blocker_Running;
    State.Release;
-   Ada.Dynamic_Priorities.Set_Priority
-     (Promoted_Priority, Promoted'Identity);
+   Ada.Dynamic_Priorities.Set_Priority (Promoted_Priority, Promoted'Identity);
    Stop_Blocker := True;
    delay 0.0;
    State.Await_Completion;

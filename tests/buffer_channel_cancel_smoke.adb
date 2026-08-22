@@ -10,6 +10,7 @@ with Flyology.Cancellation;
 --  the canceller from one execution group, so the receiver cannot resume
 --  between the accepted send and the cancellation request: the receive entry
 --  body has already dequeued the token when the receiver is aborted.
+
 procedure Buffer_Channel_Cancel_Smoke is
    package Buffers renames Flyology.Buffers;
    package Channels renames Flyology.Buffers.Channels;
@@ -20,8 +21,7 @@ procedure Buffer_Channel_Cancel_Smoke is
    use type Channels.Try_Receive_Result;
 
    Attempts : constant := 16;
-   Payload  : constant Ada.Streams.Stream_Element_Array :=
-     (11, 22, 33, 44);
+   Payload  : constant Ada.Streams.Stream_Element_Array := (11, 22, 33, 44);
 
    Storage : aliased Buffers.Pool (Block_Size => 16, Capacity => 4);
 
@@ -39,9 +39,7 @@ procedure Buffer_Channel_Cancel_Smoke is
          for Offset in 0 .. Payload'Length - 1 loop
             Assert
               (Data (Data'First + Ada.Streams.Stream_Element_Offset (Offset))
-                 = Payload
-                     (Payload'First
-                      + Ada.Streams.Stream_Element_Offset (Offset)),
+               = Payload (Payload'First + Ada.Streams.Stream_Element_Offset (Offset)),
                "recovered payload differs");
          end loop;
       end Check;
@@ -51,13 +49,8 @@ procedure Buffer_Channel_Cancel_Smoke is
 
    --  Block until the peer task is queued on the channel entry. Both tasks
    --  share one execution group, so the poll must yield cooperatively.
-   procedure Await_Waiter
-     (Queue    : in out Channels.Channel;
-      Receiver : Boolean;
-      Message  : String)
-   is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (10);
+   procedure Await_Waiter (Queue : in out Channels.Channel; Receiver : Boolean; Message : String) is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (10);
       Waiting  : Natural;
    begin
       loop
@@ -75,23 +68,17 @@ procedure Buffer_Channel_Cancel_Smoke is
    --  Account for the message after the receive was cancelled: it is either
    --  delivered into Target or still queued, never destroyed.
    procedure Account_For_Message
-     (Queue  : in out Channels.Channel;
-      Target : in out Buffers.Unique_Buffer;
-      Path   : String)
+     (Queue : in out Channels.Channel; Target : in out Buffers.Unique_Buffer; Path : String)
    is
       Result : Channels.Try_Receive_Result;
    begin
       if not Buffers.Has_Buffer (Target) then
          Channels.Try_Receive_Move (Queue, Target, Result);
-         Assert
-           (Result = Channels.Item_Received,
-            Path & " destroyed a successfully sent message");
+         Assert (Result = Channels.Item_Received, Path & " destroyed a successfully sent message");
       end if;
       Check_Payload (Target);
       Buffers.Release (Target);
-      Assert
-        (Buffers.Current (Storage).Outstanding = 0,
-         Path & " leaked a pool slot");
+      Assert (Buffers.Current (Storage).Outstanding = 0, Path & " leaked a pool slot");
    end Account_For_Message;
 
    --  A requested cancellation token aborts the receive after the channel
@@ -103,19 +90,20 @@ procedure Buffer_Channel_Cancel_Smoke is
       Notified : Boolean := False;
    begin
       declare
-         task Receiver with CPU => 1 is
+         task Receiver
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Receiver;
 
-         task Sender with CPU => 1 is
+         task Sender
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Sender;
 
          task body Receiver is
             Metadata : Channels.Transfer_Metadata;
          begin
-            Channels.Timed_Receive_Move
-              (Queue, Target, 30.0, Metadata, Stop'Access);
+            Channels.Timed_Receive_Move (Queue, Target, 30.0, Metadata, Stop'Access);
          exception
             when Flyology.Cancellation.Operation_Cancelled =>
                Notified := True;
@@ -146,11 +134,13 @@ procedure Buffer_Channel_Cancel_Smoke is
       Completed : Boolean := False;
    begin
       declare
-         task Receiver with CPU => 1 is
+         task Receiver
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Receiver;
 
-         task Sender with CPU => 1 is
+         task Sender
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Sender;
 
@@ -191,11 +181,13 @@ procedure Buffer_Channel_Cancel_Smoke is
       Buffers.Acquire (Outgoing);
       Buffers.Copy_From (Outgoing, Payload);
       declare
-         task Sender with CPU => 1 is
+         task Sender
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Sender;
 
-         task Drainer with CPU => 1 is
+         task Drainer
+           with CPU => 1 is
             pragma Task_Info (Flyology.Lightweight_Task);
          end Drainer;
 
@@ -221,9 +213,7 @@ procedure Buffer_Channel_Cancel_Smoke is
       Assert (Result = Channels.Item_Received, "drainer missed the filler");
       Buffers.Release (Drained);
 
-      if Buffers.Has_Buffer (Outgoing)
-        and then Channels.Current (Queue).Pending = 1
-      then
+      if Buffers.Has_Buffer (Outgoing) and then Channels.Current (Queue).Pending = 1 then
          --  The sender and the channel claim the same slot. Undo the
          --  duplicate before reporting it, so that the pool's stale-release
          --  diagnostic during finalization cannot mask this failure.
@@ -232,7 +222,8 @@ procedure Buffer_Channel_Cancel_Smoke is
          begin
             Buffers.Release (Drained);
          exception
-            when others => null;
+            when others =>
+               null;
          end;
          Assert (False, "aborted send duplicated ownership of one pool slot");
       end if;
@@ -245,9 +236,7 @@ procedure Buffer_Channel_Cancel_Smoke is
          Check_Payload (Drained);
          Buffers.Release (Drained);
       end if;
-      Assert
-        (Buffers.Current (Storage).Outstanding = 0,
-         "aborted send leaked a pool slot");
+      Assert (Buffers.Current (Storage).Outstanding = 0, "aborted send leaked a pool slot");
    end Aborted_Send;
 
    Cancellations : Natural := 0;
@@ -261,9 +250,7 @@ begin
       if Observed then
          Cancellations := Cancellations + 1;
       end if;
-      Assert
-        (Buffers.Current (Storage).Outstanding = 0,
-         "cancellation attempt left the pool unbalanced");
+      Assert (Buffers.Current (Storage).Outstanding = 0, "cancellation attempt left the pool unbalanced");
    end loop;
 
    for Attempt in 1 .. Attempts loop
@@ -271,9 +258,7 @@ begin
       if Observed then
          Aborts := Aborts + 1;
       end if;
-      Assert
-        (Buffers.Current (Storage).Outstanding = 0,
-         "abort attempt left the pool unbalanced");
+      Assert (Buffers.Current (Storage).Outstanding = 0, "abort attempt left the pool unbalanced");
    end loop;
 
    for Attempt in 1 .. Attempts loop
@@ -281,9 +266,7 @@ begin
       if Observed then
          Send_Aborts := Send_Aborts + 1;
       end if;
-      Assert
-        (Buffers.Current (Storage).Outstanding = 0,
-         "send attempt left the pool unbalanced");
+      Assert (Buffers.Current (Storage).Outstanding = 0, "send attempt left the pool unbalanced");
    end loop;
 
    --  The scenarios are worthless if the transfer always completed normally.

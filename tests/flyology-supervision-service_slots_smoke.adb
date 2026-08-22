@@ -6,26 +6,21 @@ procedure Flyology.Supervision.Service_Slots_Smoke is
 
    type Service_Kind is (Metrics, Commands);
 
-   function Logical_Id (Service : Service_Kind) return Child_Id is
-     (case Service is
+   function Logical_Id (Service : Service_Kind) return Child_Id
+   is (case Service is
          when Metrics  => 41,
          when Commands => 42);
 
-   package Slots is new Flyology.Supervision.Service_Slots
-     (Service_Kind => Service_Kind,
-      Logical_Id   => Logical_Id);
+   package Slots is new
+     Flyology.Supervision.Service_Slots (Service_Kind => Service_Kind, Logical_Id => Logical_Id);
    use type Slots.Availability_Status;
 
    Directory : aliased Slots.Directory;
 
-   First : constant Child_Handle :=
-     (Controller => New_Controller, Id => 41, Generation => 1);
-   Replacement : constant Child_Handle :=
-     (Controller => Controller (First), Id => 41, Generation => 2);
-   Foreign : constant Child_Handle :=
-     (Controller => New_Controller, Id => 41, Generation => 1);
-   Wrong_Child : constant Child_Handle :=
-     (Controller => Controller (First), Id => 42, Generation => 1);
+   First       : constant Child_Handle := (Controller => New_Controller, Id => 41, Generation => 1);
+   Replacement : constant Child_Handle := (Controller => Controller (First), Id => 41, Generation => 2);
+   Foreign     : constant Child_Handle := (Controller => New_Controller, Id => 41, Generation => 1);
+   Wrong_Child : constant Child_Handle := (Controller => Controller (First), Id => 42, Generation => 1);
 
    First_Control       : Generation_Control;
    Duplicate_Control   : Generation_Control;
@@ -66,8 +61,7 @@ begin
       Slots.Withdraw (Publication);
       pragma Assert (not Slots.Active (Publication));
       pragma Assert (not Slots.Current (Directory, Old_Lease));
-      pragma Assert
-        (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
+      pragma Assert (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
    end;
 
    declare
@@ -79,8 +73,7 @@ begin
       pragma Assert (Slots.Handle (Observation.Lease) = Replacement);
       pragma Assert (not Slots.Current (Directory, Old_Lease));
    end;
-   pragma Assert
-     (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
+   pragma Assert (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
 
    Rejected := False;
    declare
@@ -123,6 +116,5 @@ begin
       pragma Assert (Slots.Handle (Observation.Lease) = Foreign);
       abort Publisher;
    end;
-   pragma Assert
-     (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
+   pragma Assert (Slots.Acquire (Directory, Metrics).Status = Slots.Unavailable);
 end Flyology.Supervision.Service_Slots_Smoke;

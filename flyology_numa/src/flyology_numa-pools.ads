@@ -36,20 +36,19 @@ with Flyology_NUMA.Placement;
 --  A pool is not task safe. Allocating from one subpool in two tasks at once
 --  can hand both the same address. Give each task its own pool, or serialize
 --  the allocations, or use this only where one task allocates.
+
 package Flyology_NUMA.Pools is
 
    --  A reference to one of a pool's subpools, which for this pool is one
    --  of its memory nodes.
-   subtype Subpool_Handle is
-     System.Storage_Pools.Subpools.Subpool_Handle;
+   subtype Subpool_Handle is System.Storage_Pools.Subpools.Subpool_Handle;
 
    --  The placement policies that draw memory from a named set of nodes.
    --
    --  A pool exists to put memory on a node, so the two policies that name
    --  no node are not among the ones it can be given. Asking for memory from
    --  wherever the host likes needs no pool of this kind.
-   subtype Binding_Policy is Placement.Policy_Kind
-     range Placement.Preferred .. Placement.Interleaved;
+   subtype Binding_Policy is Placement.Policy_Kind range Placement.Preferred .. Placement.Interleaved;
 
    --  A storage pool whose subpools are memory nodes.
    --
@@ -68,8 +67,7 @@ package Flyology_NUMA.Pools is
    type Node_Pool
      (Policy : Binding_Policy;
       Extent : Byte_Count)
-   is new System.Storage_Pools.Subpools.Root_Storage_Pool_With_Subpools
-     with private;
+   is new System.Storage_Pools.Subpools.Root_Storage_Pool_With_Subpools with private;
 
    --  Return the subpool of Pool that draws memory from Node.
    --
@@ -78,8 +76,7 @@ package Flyology_NUMA.Pools is
    --  @param Pool The pool to take the subpool from.
    --  @param Node The node the subpool should draw memory from.
    --  @return The subpool for that node.
-   function On_Node
-     (Pool : in out Node_Pool; Node : Node_Id) return Subpool_Handle;
+   function On_Node (Pool : in out Node_Pool; Node : Node_Id) return Subpool_Handle;
 
    --  Report whether the host accepted the placement of every page this
    --  node's subpool has obtained.
@@ -95,15 +92,13 @@ package Flyology_NUMA.Pools is
    --  @param Pool The pool to inspect.
    --  @param Node The node whose subpool to inspect.
    --  @return True when the host accepted placement of every page obtained.
-   function Placement_Reached
-     (Pool : Node_Pool; Node : Node_Id) return Boolean;
+   function Placement_Reached (Pool : Node_Pool; Node : Node_Id) return Boolean;
 
    --  Return the number of bytes Pool has obtained from the host for Node.
    --  @param Pool The pool to inspect.
    --  @param Node The node whose subpool to inspect.
    --  @return Bytes obtained, including any not yet handed out.
-   function Reserved_Bytes
-     (Pool : Node_Pool; Node : Node_Id) return Byte_Count;
+   function Reserved_Bytes (Pool : Node_Pool; Node : Node_Id) return Byte_Count;
 
 private
 
@@ -119,9 +114,9 @@ private
    --  through it.
    type Page_Run is record
       Base   : System.Address := System.Null_Address;
-      Extent : Byte_Count     := 0;
-      Used   : Byte_Count     := 0;
-      Placed : Boolean        := False;
+      Extent : Byte_Count := 0;
+      Used   : Byte_Count := 0;
+      Placed : Boolean := False;
       Next   : Page_Run_Access;
    end record;
 
@@ -154,7 +149,8 @@ private
    --  @param Alignment The alignment the storage must begin on.
    --  @param Subpool The subpool to draw from.
    --  @exclude
-   overriding procedure Allocate_From_Subpool
+   overriding
+   procedure Allocate_From_Subpool
      (Pool                     : in out Node_Pool;
       Storage_Address          : out System.Address;
       Size_In_Storage_Elements : System.Storage_Elements.Storage_Count;
@@ -166,16 +162,15 @@ private
    --  @param Pool The pool to make the subpool in.
    --  @return The subpool for that node.
    --  @exclude
-   overriding function Create_Subpool
-     (Pool : in out Node_Pool) return not null Subpool_Handle;
+   overriding
+   function Create_Subpool (Pool : in out Node_Pool) return not null Subpool_Handle;
 
    --  Return a subpool's pages to the host. The runtime calls this from
    --  Ada.Unchecked_Deallocate_Subpool and when the pool is finalized.
    --  @param Pool The pool the subpool belongs to.
    --  @param Subpool The subpool whose pages to return.
    --  @exclude
-   overriding procedure Deallocate_Subpool
-     (Pool    : in out Node_Pool;
-      Subpool : in out Subpool_Handle);
+   overriding
+   procedure Deallocate_Subpool (Pool : in out Node_Pool; Subpool : in out Subpool_Handle);
 
 end Flyology_NUMA.Pools;

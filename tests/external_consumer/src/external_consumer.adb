@@ -22,8 +22,7 @@ procedure External_Consumer is
      (Context      : in out Structured_Context;
       Connection   : in out Flyology.IO.Connections.Connection;
       Peer         : Flyology.IO.Sockets.Endpoint;
-      Cancellation : not null access
-        Flyology.IO.Connections.Cancellation_Token)
+      Cancellation : not null access Flyology.IO.Connections.Cancellation_Token)
    is
       pragma Unreferenced (Context, Connection, Peer, Cancellation);
    begin
@@ -32,28 +31,28 @@ procedure External_Consumer is
 
    --  The generic body is compiled under this consumer project's switches,
    --  which deliberately define no Flyology test-hook symbols.
-   package Structured_Consumer is new Flyology.IO.Structured_Servers
-     (Handler_Context => Structured_Context,
-      Handle          => Handle_Structured_Connection);
+   package Structured_Consumer is new
+     Flyology.IO.Structured_Servers
+       (Handler_Context => Structured_Context,
+        Handle          => Handle_Structured_Connection);
    pragma Unreferenced (Structured_Consumer);
 
    type Worker_Context is limited null record;
 
    procedure Process_Job
-     (Context  : in out Worker_Context;
-      Job      : Integer;
-      Stopping : not null access Flyology.Cancellation.Token)
+     (Context : in out Worker_Context; Job : Integer; Stopping : not null access Flyology.Cancellation.Token)
    is
       pragma Unreferenced (Context, Job, Stopping);
    begin
       null;
    end Process_Job;
 
-   package Worker_Consumer is new Flyology.Worker_Pools
-     (Job_Type       => Integer,
-      Empty_Job      => 0,
-      Worker_Context => Worker_Context,
-      Process        => Process_Job);
+   package Worker_Consumer is new
+     Flyology.Worker_Pools
+       (Job_Type       => Integer,
+        Empty_Job      => 0,
+        Worker_Context => Worker_Context,
+        Process        => Process_Job);
    pragma Unreferenced (Worker_Consumer);
 
    procedure Execute_Native
@@ -67,15 +66,12 @@ procedure External_Consumer is
       Result := Input;
    end Execute_Native;
 
-   package Native_Consumer is new Flyology.Native_Executors
-     (Input_Type  => Integer,
-      Result_Type => Integer,
-      Execute     => Execute_Native);
+   package Native_Consumer is new
+     Flyology.Native_Executors (Input_Type => Integer, Result_Type => Integer, Execute => Execute_Native);
    pragma Unreferenced (Native_Consumer);
 
    Expected_Lightweight : constant Boolean :=
-     Ada.Command_Line.Argument_Count = 1
-     and then Ada.Command_Line.Argument (1) = "lightweight";
+     Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "lightweight";
 
    protected Observation is
       procedure Report (Lightweight : Boolean);
@@ -98,7 +94,8 @@ procedure External_Consumer is
          null;
       end Wait;
 
-      function Passed return Boolean is (OK);
+      function Passed return Boolean
+      is (OK);
    end Observation;
 
    task type Default_Worker (Model : Flyology.Execution_Model) is
@@ -136,7 +133,8 @@ procedure External_Consumer is
             null;
          end Wait;
 
-         function Passed return Boolean is (OK);
+         function Passed return Boolean
+         is (OK);
       end Outcome;
 
       procedure Raise_Marker is
@@ -157,23 +155,20 @@ procedure External_Consumer is
       exception
          when Error : Marker_Error =>
             Outcome.Report
-              (Ada.Exceptions.Exception_Message (Error) =
-                 "external lightweight traceback marker");
+              (Ada.Exceptions.Exception_Message (Error) = "external lightweight traceback marker");
          when others =>
             Outcome.Report (False);
       end Worker;
    begin
       Outcome.Wait;
       if not Outcome.Passed then
-         raise Program_Error with
-           "external lightweight symbolic traceback failed";
+         raise Program_Error with "external lightweight symbolic traceback failed";
       end if;
    end Check_Lightweight_Exception;
 begin
    if Ada.Command_Line.Argument_Count /= 1
-     or else
-       (Ada.Command_Line.Argument (1) /= "native"
-        and then Ada.Command_Line.Argument (1) /= "lightweight")
+     or else (Ada.Command_Line.Argument (1) /= "native"
+              and then Ada.Command_Line.Argument (1) /= "lightweight")
    then
       raise Program_Error with "expected native or lightweight argument";
    end if;
@@ -189,8 +184,7 @@ begin
    Check_Lightweight_Exception;
 
    declare
-      Worker : constant Default_Worker_Access :=
-        new Default_Worker (Flyology.Project_Default);
+      Worker : constant Default_Worker_Access := new Default_Worker (Flyology.Project_Default);
       pragma Unreferenced (Worker);
    begin
       Observation.Wait;
@@ -204,6 +198,5 @@ begin
       raise Program_Error with "explicit lightweight task started no runtime";
    end if;
 
-   Ada.Text_IO.Put_Line
-     ("external Alire consumer: " & Ada.Command_Line.Argument (1) & " passed");
+   Ada.Text_IO.Put_Line ("external Alire consumer: " & Ada.Command_Line.Argument (1) & " passed");
 end External_Consumer;

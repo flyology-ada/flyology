@@ -34,7 +34,8 @@ procedure Timer_Heap_Smoke is
          null;
       end Wait;
 
-      function Passed return Boolean is (All_OK and not Unexpected);
+      function Passed return Boolean
+      is (All_OK and not Unexpected);
    end Results;
 
 begin
@@ -44,14 +45,12 @@ begin
       end Timed_Worker;
 
       task body Timed_Worker is
-         Delay_For : constant Duration :=
-           Duration ((Index * 17) mod 31 + 1) / 1_000.0;
-         Started : constant Time := Clock;
+         Delay_For : constant Duration := Duration ((Index * 17) mod 31 + 1) / 1_000.0;
+         Started   : constant Time := Clock;
       begin
          delay Delay_For;
          Results.Finished
-           (To_Duration (Clock - Started) >= Delay_For - 0.001
-            and then To_Duration (Clock - Started) < 1.0);
+           (To_Duration (Clock - Started) >= Delay_For - 0.001 and then To_Duration (Clock - Started) < 1.0);
       exception
          when others =>
             Results.Finished (False);

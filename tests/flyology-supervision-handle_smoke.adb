@@ -9,12 +9,11 @@ procedure Flyology.Supervision.Handle_Smoke is
    type Service_Kind is (Only_Service);
    type Context is limited null record;
 
-   function Logical_Id (Child : Service_Kind) return Child_Id is
-     (case Child is when Only_Service => Child_Id'First);
+   function Logical_Id (Child : Service_Kind) return Child_Id
+   is (case Child is
+         when Only_Service => Child_Id'First);
 
-   function Specification
-     (Child : Service_Kind) return Child_Specification
-   is
+   function Specification (Child : Service_Kind) return Child_Specification is
       pragma Unreferenced (Child);
    begin
       return
@@ -29,18 +28,13 @@ procedure Flyology.Supervision.Handle_Smoke is
          Group             => 0);
    end Specification;
 
-   function No_Relationship
-     (Left, Right : Service_Kind) return Boolean
-   is
+   function No_Relationship (Left, Right : Service_Kind) return Boolean is
       pragma Unreferenced (Left, Right);
    begin
       return False;
    end No_Relationship;
 
-   procedure Execute
-     (State   : in out Context;
-      Control : not null access Generation_Control)
-   is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
       pragma Unreferenced (State);
    begin
       Mark_Ready (Control.all);
@@ -52,10 +46,11 @@ procedure Flyology.Supervision.Handle_Smoke is
       end loop;
    end Execute;
 
-   package Generation is new Flyology.Supervision.Children
-     (Application_Context => Context,
-      Execute             => Execute,
-      Task_Model          => Native_Task);
+   package Generation is new
+     Flyology.Supervision.Children
+       (Application_Context => Context,
+        Execute             => Execute,
+        Task_Model          => Native_Task);
 
    procedure Run_Generation
      (State   : aliased in out Context;
@@ -68,14 +63,15 @@ procedure Flyology.Supervision.Handle_Smoke is
       Generation.Run (State, Control, Result);
    end Run_Generation;
 
-   package Supervisors is new Flyology.Supervision.Static
-     (Child_Kind          => Service_Kind,
-      Application_Context => Context,
-      Logical_Id          => Logical_Id,
-      Specification       => Specification,
-      Depends_On          => No_Relationship,
-      Cohort_Member       => No_Relationship,
-      Run_One_Generation  => Run_Generation);
+   package Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Service_Kind,
+        Application_Context => Context,
+        Logical_Id          => Logical_Id,
+        Specification       => Specification,
+        Depends_On          => No_Relationship,
+        Cohort_Member       => No_Relationship,
+        Run_One_Generation  => Run_Generation);
 
    State  : aliased Context;
    Item   : aliased Supervisors.Supervisor;
@@ -93,8 +89,7 @@ procedure Flyology.Supervision.Handle_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   Deadline       : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    Default_Handle : Child_Handle;
 begin
    Owner.Start;
@@ -112,10 +107,10 @@ begin
       Supervisors.Restart (Item, Only_Service, Default_Handle);
       Supervisors.Request_Shutdown (Item);
       Owner.Join;
-      raise Program_Error with
-        "default child handle authorized the first live controller";
+      raise Program_Error with "default child handle authorized the first live controller";
    exception
-      when Supervisors.Stale_Handle => null;
+      when Supervisors.Stale_Handle =>
+         null;
    end;
 
    Supervisors.Request_Shutdown (Item);

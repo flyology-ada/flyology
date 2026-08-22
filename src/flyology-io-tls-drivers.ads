@@ -5,6 +5,7 @@ with Flyology.Operations;
 --  Bounded, set-independent access to one standalone TLS connection lease.
 --  Higher-level protocol operations store a Capability while owning the only
 --  completion-set slot themselves.
+
 package Flyology.IO.TLS.Drivers is
 
    --  Set-independent standalone TLS driver state. A higher-level protocol
@@ -24,8 +25,7 @@ package Flyology.IO.TLS.Drivers is
    --  @enum Need_Read The next provider step needs descriptor read readiness
    --  @enum Need_Write The next provider step needs descriptor write readiness
    --  @enum Peer_Closed The peer ended the applicable TLS direction
-   type Step_Result is
-     (Made_Progress, Need_Read, Need_Write, Peer_Closed);
+   type Step_Result is (Made_Progress, Need_Read, Need_Write, Peer_Closed);
 
    --  Register Item and attempt its exclusive provider lease once. Item and
    --  Token remain borrowed until Release or finalization.
@@ -50,17 +50,13 @@ package Flyology.IO.TLS.Drivers is
    --  @exception Operation_Cancelled Token or Close is active
    --  @exception Timeout_Error The lease remains busy at the shared deadline
    --  @exception Program_Error IO is fresh, released, or already acquired
-   procedure Poll_Acquisition
-     (IO     : in out Capability;
-      Result : out Acquisition_Result);
+   procedure Poll_Acquisition (IO : in out Capability; Result : out Acquisition_Result);
 
    --  Arm an outer operation for lease availability, close, and cancellation.
    --  @param IO Started capability awaiting its lease
    --  @param Operation Outer user-visible provider operation
    --  @exception Program_Error IO is not awaiting acquisition
-   procedure Arm_Acquisition
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class);
+   procedure Arm_Acquisition (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class);
 
    --  Arm an outer operation for the readiness direction returned by a step,
    --  plus close and cancellation.
@@ -69,9 +65,7 @@ package Flyology.IO.TLS.Drivers is
    --  @param Required Need_Read or Need_Write returned by a provider step
    --  @exception Program_Error IO is not acquired or Required is not a wait
    procedure Arm_Transport
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class;
-      Required  : Step_Result);
+     (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class; Required : Step_Result);
 
    --  Add the unused portion of Start's shared deadline to an outer operation.
    --  A higher-level provider must call this once after Start; provider steps
@@ -79,18 +73,14 @@ package Flyology.IO.TLS.Drivers is
    --  Deadline_Reached transition.
    --  @param IO Engaged capability
    --  @param Operation Outer user-visible provider operation
-   procedure Arm_Deadline
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class);
+   procedure Arm_Deadline (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class);
 
    --  Perform one bounded provider handshake step.
    --  @param IO Acquired capability
    --  @param Result Progress, required readiness, or peer closure
    --  @exception Operation_Cancelled Token or Close interrupts the driver
    --  @exception TLS_Error The provider fails or reports invalid progress
-   procedure Handshake
-     (IO     : in out Capability;
-      Result : out Step_Result);
+   procedure Handshake (IO : in out Capability; Result : out Step_Result);
 
    --  Perform one bounded decrypted receive step.
    --  @param IO Acquired capability
@@ -123,9 +113,7 @@ package Flyology.IO.TLS.Drivers is
    --  @param Result Progress, required readiness, or peer closure
    --  @exception Operation_Cancelled Token or Close interrupts the driver
    --  @exception TLS_Error The provider fails or reports invalid progress
-   procedure Shutdown
-     (IO     : in out Capability;
-      Result : out Step_Result);
+   procedure Shutdown (IO : in out Capability; Result : out Step_Result);
 
    --  Discharge the lease or registration and every retained borrow.
    --  @param IO Capability whose TLS connection borrow is discharged
@@ -155,6 +143,7 @@ private
    --  failures.
    --  @param IO Capability whose retained borrow is discharged
    --  @exclude
-   overriding procedure Finalize (IO : in out Capability);
+   overriding
+   procedure Finalize (IO : in out Capability);
 
 end Flyology.IO.TLS.Drivers;

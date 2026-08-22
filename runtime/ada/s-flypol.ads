@@ -11,15 +11,9 @@ package System.Flyology.Poller is
       Descriptor : Interfaces.C.int;
       Condition  : Interest;
    end record;
-   type Interest_Request_Array is
-     array (Positive range <>) of Interest_Request;
+   type Interest_Request_Array is array (Positive range <>) of Interest_Request;
    type Event_Kind is
-     (Wake_Event,
-      Readable_Event,
-      Writable_Event,
-      Read_Write_Event,
-      File_Event,
-      Timeout_Event);
+     (Wake_Event, Readable_Event, Writable_Event, Read_Write_Event, File_Event, Timeout_Event);
 
    type Poll_Event is record
       Kind       : Event_Kind := Timeout_Event;
@@ -35,18 +29,13 @@ package System.Flyology.Poller is
    procedure Finalize (Item : in out Poller);
 
    --  Arm a one-shot readiness notification for Descriptor.
-   function Watch
-     (Item       : in out Poller;
-      Descriptor : Interfaces.C.int;
-      Condition  : Interest) return Boolean;
+   function Watch (Item : in out Poller; Descriptor : Interfaces.C.int; Condition : Interest) return Boolean;
 
    --  Arm one-shot readiness notifications as one logical operation. Success
    --  means every request is armed. A failure may leave an earlier request
    --  armed, so the caller must pass the complete set to Cancel_Many before
    --  releasing its scheduler state. Repeated pairs are permitted.
-   function Watch_Many
-     (Item     : in out Poller;
-      Requests : Interest_Request_Array) return Boolean
+   function Watch_Many (Item : in out Poller; Requests : Interest_Request_Array) return Boolean
    with Pre => Requests'Length > 0;
 
    --  Roll back an armed interest that has no scheduler waiters. This is used
@@ -57,17 +46,12 @@ package System.Flyology.Poller is
    --  armed, both report success because nothing remains to cancel. False is
    --  reserved for a genuinely broken poller, which the scheduler treats as
    --  fatal.
-   function Cancel
-     (Item       : in out Poller;
-      Descriptor : Interfaces.C.int;
-      Condition  : Interest) return Boolean;
+   function Cancel (Item : in out Poller; Descriptor : Interfaces.C.int; Condition : Interest) return Boolean;
 
    --  Clear every requested interest, including after a descriptor close or
    --  an already-consumed one-shot event. All requests are attempted even if
    --  one reports a hard poller failure.
-   function Cancel_Many
-     (Item     : in out Poller;
-      Requests : Interest_Request_Array) return Boolean
+   function Cancel_Many (Item : in out Poller; Requests : Interest_Request_Array) return Boolean
    with Pre => Requests'Length > 0;
 
    --  Report whether an armed one-shot interest may remain after its last
@@ -81,14 +65,14 @@ package System.Flyology.Poller is
    --  to be returned by Wait_Batch. The buffer must remain valid until that
    --  completion is delivered.
    function Submit_File
-     (Item        : in out Poller;
-      Descriptor  : Interfaces.C.int;
-      Buffer      : System.Address;
-      Length      : Interfaces.C.size_t;
-      Offset      : Interfaces.C.long_long;
-      For_Write   : Boolean;
-      Token       : System.Address;
-      Error_Code  : out Interfaces.C.int) return Boolean;
+     (Item       : in out Poller;
+      Descriptor : Interfaces.C.int;
+      Buffer     : System.Address;
+      Length     : Interfaces.C.size_t;
+      Offset     : Interfaces.C.long_long;
+      For_Write  : Boolean;
+      Token      : System.Address;
+      Error_Code : out Interfaces.C.int) return Boolean;
 
    --  Report whether the poller's completion engine supports a terminal
    --  zero-copy socket send.
@@ -97,12 +81,12 @@ package System.Flyology.Poller is
    --  Enqueue a zero-copy socket send and arrange for one terminal File_Event
    --  after the kernel no longer owns Buffer.
    function Submit_Send_ZC
-     (Item        : in out Poller;
-      Descriptor  : Interfaces.C.int;
-      Buffer      : System.Address;
-      Length      : Interfaces.C.size_t;
-      Token       : System.Address;
-      Error_Code  : out Interfaces.C.int) return Boolean;
+     (Item       : in out Poller;
+      Descriptor : Interfaces.C.int;
+      Buffer     : System.Address;
+      Length     : Interfaces.C.size_t;
+      Token      : System.Address;
+      Error_Code : out Interfaces.C.int) return Boolean;
 
    --  Invoke the platform cancellation backend. The scheduler calls this
    --  only from the event-loop thread that owns Item.File_State.
@@ -112,8 +96,7 @@ package System.Flyology.Poller is
       Token          : System.Address;
       Value          : out System.Flyology.File_Engine.Completion;
       Has_Completion : out Boolean;
-      Error_Code     : out Interfaces.C.int)
-      return System.Flyology.File_Engine.Cancellation_Disposition;
+      Error_Code     : out Interfaces.C.int) return System.Flyology.File_Engine.Cancellation_Disposition;
 
    --  True when no file operation or cancellation completion still belongs
    --  to the kernel. Terminal Darwin quarantine records are released when the
@@ -121,33 +104,27 @@ package System.Flyology.Poller is
    function File_Quiescent (Item : Poller) return Boolean;
 
    --  A negative timeout waits indefinitely. The result is false on error.
-   function Wait
-     (Item                : in out Poller;
-      Timeout             : Duration;
-      Event               : out Poll_Event) return Boolean;
+   function Wait (Item : in out Poller; Timeout : Duration; Event : out Poll_Event) return Boolean;
 
    --  Collect up to Events'Length notifications in one kernel call. Count is
    --  zero for a timeout or an interrupted wait. The result is false only for
    --  a real poller error.
    function Wait_Batch
-     (Item                : in out Poller;
-      Timeout             : Duration;
-      Events              : out Poll_Event_Array;
-      Count               : out Natural) return Boolean
-   with Pre =>
-          Events'Length in
-            1 .. System.Flyology.Poller_Policy.Max_Batch_Capacity,
-        Post => Count <= Events'Length;
+     (Item : in out Poller; Timeout : Duration; Events : out Poll_Event_Array; Count : out Natural)
+      return Boolean
+   with
+     Pre  => Events'Length in 1 .. System.Flyology.Poller_Policy.Max_Batch_Capacity,
+     Post => Count <= Events'Length;
 
    --  Safe to invoke from a designated native thread.
    function Wake (Item : Poller) return Boolean;
 
 private
    type Poller is limited record
-      Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
-      Wake_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
-      State : System.Address := System.Null_Address;
-      File_State : System.Flyology.File_Engine.Engine;
+      Descriptor       : Interfaces.C.int := Interfaces.C.int (-1);
+      Wake_Descriptor  : Interfaces.C.int := Interfaces.C.int (-1);
+      State            : System.Address := System.Null_Address;
+      File_State       : System.Flyology.File_Engine.Engine;
       --  Linux retains a drain obligation after consuming the shared eventfd.
       --  A one-result caller alternates sources while that obligation remains.
       File_Drain_State : System.Flyology.Poller_Policy.Drain_State;

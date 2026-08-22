@@ -13,9 +13,7 @@ package body Shared_Image_Index_Support is
    use type Files.Count;
    use type U64;
 
-   function Create_Job
-     (Data : Image_Job) return Job_Representation.Value
-   is
+   function Create_Job (Data : Image_Job) return Job_Representation.Value is
       Builder : Job_Representation.Value_Builder := Job_Representation.Start;
    begin
       Job_Representation.Store_U64 (Builder, 0, Data.Batch_Id);
@@ -23,21 +21,16 @@ package body Shared_Image_Index_Support is
       return Job_Representation.Freeze (Builder);
    end Create_Job;
 
-   function Observe_Job
-     (Item : Job_Representation.Const_Ref) return Image_Job is
-     (Batch_Id => Job_Representation.Load_U64 (Item, 0),
-      Image_Id => Job_Representation.Load_U64 (Item, 8));
+   function Observe_Job (Item : Job_Representation.Const_Ref) return Image_Job
+   is (Batch_Id => Job_Representation.Load_U64 (Item, 0), Image_Id => Job_Representation.Load_U64 (Item, 8));
 
-   procedure Construct_Job
-     (Item : in out Job_Representation.Builder; Data : Image_Job) is
+   procedure Construct_Job (Item : in out Job_Representation.Builder; Data : Image_Job) is
    begin
       Job_Representation.Store_U64 (Item, 0, Data.Batch_Id);
       Job_Representation.Store_U64 (Item, 8, Data.Image_Id);
    end Construct_Job;
 
-   procedure Store_Result
-     (Item : in out Result_Representation.Value_Builder;
-      Data : Image_Result) is
+   procedure Store_Result (Item : in out Result_Representation.Value_Builder; Data : Image_Result) is
    begin
       Result_Representation.Store_U64 (Item, 0, Data.Batch_Id);
       Result_Representation.Store_U64 (Item, 8, Data.Image_Id);
@@ -52,9 +45,7 @@ package body Shared_Image_Index_Support is
       Result_Representation.Store_U32 (Item, 68, Data.Flags);
    end Store_Result;
 
-   procedure Store_Result
-     (Item : in out Result_Representation.Builder;
-      Data : Image_Result) is
+   procedure Store_Result (Item : in out Result_Representation.Builder; Data : Image_Result) is
    begin
       Result_Representation.Store_U64 (Item, 0, Data.Batch_Id);
       Result_Representation.Store_U64 (Item, 8, Data.Image_Id);
@@ -69,40 +60,33 @@ package body Shared_Image_Index_Support is
       Result_Representation.Store_U32 (Item, 68, Data.Flags);
    end Store_Result;
 
-   function Create_Result
-     (Data : Image_Result) return Result_Representation.Value
-   is
-      Builder : Result_Representation.Value_Builder :=
-        Result_Representation.Start;
+   function Create_Result (Data : Image_Result) return Result_Representation.Value is
+      Builder : Result_Representation.Value_Builder := Result_Representation.Start;
    begin
       Store_Result (Builder, Data);
       return Result_Representation.Freeze (Builder);
    end Create_Result;
 
-   function Observe_Result
-     (Item : Result_Representation.Const_Ref) return Image_Result is
-     (Batch_Id      => Result_Representation.Load_U64 (Item, 0),
-      Image_Id      => Result_Representation.Load_U64 (Item, 8),
-      Content_Hash  => Result_Representation.Load_U64 (Item, 16),
-      Red_Total     => Result_Representation.Load_U64 (Item, 24),
-      Green_Total   => Result_Representation.Load_U64 (Item, 32),
-      Blue_Total    => Result_Representation.Load_U64 (Item, 40),
-      Pixel_Count   => Result_Representation.Load_U64 (Item, 48),
-      Worker_Id     => Result_Representation.Load_U32 (Item, 56),
-      Index_Retries => Result_Representation.Load_U32 (Item, 60),
-      Queue_Retries => Result_Representation.Load_U32 (Item, 64),
-      Flags         => Result_Representation.Load_U32 (Item, 68));
+   function Observe_Result (Item : Result_Representation.Const_Ref) return Image_Result
+   is (Batch_Id      => Result_Representation.Load_U64 (Item, 0),
+       Image_Id      => Result_Representation.Load_U64 (Item, 8),
+       Content_Hash  => Result_Representation.Load_U64 (Item, 16),
+       Red_Total     => Result_Representation.Load_U64 (Item, 24),
+       Green_Total   => Result_Representation.Load_U64 (Item, 32),
+       Blue_Total    => Result_Representation.Load_U64 (Item, 40),
+       Pixel_Count   => Result_Representation.Load_U64 (Item, 48),
+       Worker_Id     => Result_Representation.Load_U32 (Item, 56),
+       Index_Retries => Result_Representation.Load_U32 (Item, 60),
+       Queue_Retries => Result_Representation.Load_U32 (Item, 64),
+       Flags         => Result_Representation.Load_U32 (Item, 68));
 
-   procedure Construct_Result
-     (Item : in out Result_Representation.Builder; Data : Image_Result) is
+   procedure Construct_Result (Item : in out Result_Representation.Builder; Data : Image_Result) is
    begin
       Store_Result (Item, Data);
    end Construct_Result;
 
-   function Image_Path (Directory : String; Image_Id : Positive) return String
-   is
-      Raw : constant String := Ada.Strings.Fixed.Trim
-        (Positive'Image (Image_Id), Ada.Strings.Both);
+   function Image_Path (Directory : String; Image_Id : Positive) return String is
+      Raw    : constant String := Ada.Strings.Fixed.Trim (Positive'Image (Image_Id), Ada.Strings.Both);
       Padded : String (1 .. 8) := (others => '0');
    begin
       if Raw'Length > Padded'Length then
@@ -112,21 +96,22 @@ package body Shared_Image_Index_Support is
       return Directory & "/image-" & Padded & ".ppm";
    end Image_Path;
 
-   function Header (Width, Height : Positive) return String is
-     ("P6" & ASCII.LF
-      & Ada.Strings.Fixed.Trim (Positive'Image (Width), Ada.Strings.Both)
-      & " "
-      & Ada.Strings.Fixed.Trim (Positive'Image (Height), Ada.Strings.Both)
-      & ASCII.LF & "255" & ASCII.LF);
+   function Header (Width, Height : Positive) return String
+   is ("P6"
+       & ASCII.LF
+       & Ada.Strings.Fixed.Trim (Positive'Image (Width), Ada.Strings.Both)
+       & " "
+       & Ada.Strings.Fixed.Trim (Positive'Image (Height), Ada.Strings.Both)
+       & ASCII.LF
+       & "255"
+       & ASCII.LF);
 
    function To_Bytes (Text : String) return Streams.Stream_Element_Array is
-      Result : Streams.Stream_Element_Array
-        (1 .. Streams.Stream_Element_Offset (Text'Length));
+      Result : Streams.Stream_Element_Array (1 .. Streams.Stream_Element_Offset (Text'Length));
    begin
       for Index in Text'Range loop
-         Result
-           (Streams.Stream_Element_Offset (Index - Text'First + 1)) :=
-             Streams.Stream_Element (Character'Pos (Text (Index)));
+         Result (Streams.Stream_Element_Offset (Index - Text'First + 1)) :=
+           Streams.Stream_Element (Character'Pos (Text (Index)));
       end loop;
       return Result;
    end To_Bytes;
@@ -142,17 +127,11 @@ package body Shared_Image_Index_Support is
       return State;
    end Next_Random;
 
-   procedure Generate_Image
-     (Path   : String;
-      Width  : Positive;
-      Height : Positive;
-      State  : in out U64)
-   is
-      File : Files.File_Type;
-      Prefix : constant Streams.Stream_Element_Array :=
-        To_Bytes (Header (Width, Height));
+   procedure Generate_Image (Path : String; Width : Positive; Height : Positive; State : in out U64) is
+      File      : Files.File_Type;
+      Prefix    : constant Streams.Stream_Element_Array := To_Bytes (Header (Width, Height));
       Remaining : Natural := Width * Height * 3;
-      Buffer : Streams.Stream_Element_Array (1 .. 64 * 1_024);
+      Buffer    : Streams.Stream_Element_Array (1 .. 64 * 1_024);
    begin
       Files.Create (File, Files.Out_File, Path);
       Files.Write (File, Prefix);
@@ -165,9 +144,7 @@ package body Shared_Image_Index_Support is
                  Streams.Stream_Element (Next_Random (State) and 16#FF#);
             end loop;
             Files.Write
-              (File, Buffer
-                 (Buffer'First ..
-                    Buffer'First + Streams.Stream_Element_Offset (Count) - 1));
+              (File, Buffer (Buffer'First .. Buffer'First + Streams.Stream_Element_Offset (Count) - 1));
             Remaining := Remaining - Count;
          end;
       end loop;
@@ -188,43 +165,39 @@ package body Shared_Image_Index_Support is
       Worker_Id : Positive;
       Result    : out Image_Result)
    is
-      Prefix : constant Streams.Stream_Element_Array :=
-        To_Bytes (Header (Width, Height));
-      Pixel_Bytes : constant Natural := Width * Height * 3;
-      Expected_Size : constant Files.Count :=
-        Files.Count
-          (Prefix'Length + Streams.Stream_Element_Offset (Pixel_Bytes));
-      File : Files.File_Type;
-      Buffer : Streams.Stream_Element_Array (1 .. 64 * 1_024);
-      Last : Streams.Stream_Element_Offset;
-      Hash : U64 := 16#CBF2_9CE4_8422_2325#;
+      Prefix           : constant Streams.Stream_Element_Array := To_Bytes (Header (Width, Height));
+      Pixel_Bytes      : constant Natural := Width * Height * 3;
+      Expected_Size    : constant Files.Count :=
+        Files.Count (Prefix'Length + Streams.Stream_Element_Offset (Pixel_Bytes));
+      File             : Files.File_Type;
+      Buffer           : Streams.Stream_Element_Array (1 .. 64 * 1_024);
+      Last             : Streams.Stream_Element_Offset;
+      Hash             : U64 := 16#CBF2_9CE4_8422_2325#;
       Red, Green, Blue : U64 := 0;
    begin
       Result :=
-        (Batch_Id       => 0,
-         Image_Id        => 0,
-         Content_Hash    => 0,
-         Red_Total       => 0,
-         Green_Total     => 0,
-         Blue_Total      => 0,
-         Pixel_Count     => 0,
-         Worker_Id       => 0,
-         Index_Retries   => 0,
-         Queue_Retries   => 0,
-         Flags           => 0);
+        (Batch_Id      => 0,
+         Image_Id      => 0,
+         Content_Hash  => 0,
+         Red_Total     => 0,
+         Green_Total   => 0,
+         Blue_Total    => 0,
+         Pixel_Count   => 0,
+         Worker_Id     => 0,
+         Index_Retries => 0,
+         Queue_Retries => 0,
+         Flags         => 0);
       for Pass in 1 .. Passes loop
          Files.Open (File, Files.In_File, Path);
          if Files.Size (File) /= Expected_Size then
-            raise Ada.IO_Exceptions.Data_Error with
-              "PPM file has unexpected size: " & Path;
+            raise Ada.IO_Exceptions.Data_Error with "PPM file has unexpected size: " & Path;
          end if;
          declare
             Observed : Streams.Stream_Element_Array (Prefix'Range);
          begin
             Files.Read (File, Observed, Last);
             if Last /= Observed'Last or else Observed /= Prefix then
-               raise Ada.IO_Exceptions.Data_Error with
-                 "PPM header mismatch: " & Path;
+               raise Ada.IO_Exceptions.Data_Error with "PPM header mismatch: " & Path;
             end if;
          end;
          declare
@@ -234,16 +207,13 @@ package body Shared_Image_Index_Support is
             while Remaining > 0 loop
                Files.Read (File, Buffer, Last);
                if Last < Buffer'First then
-                  raise Ada.IO_Exceptions.Data_Error with
-                    "PPM payload is truncated: " & Path;
+                  raise Ada.IO_Exceptions.Data_Error with "PPM payload is truncated: " & Path;
                end if;
                declare
-                  Count : constant Natural :=
-                    Natural (Last - Buffer'First + 1);
+                  Count : constant Natural := Natural (Last - Buffer'First + 1);
                begin
                   if Count > Remaining then
-                     raise Ada.IO_Exceptions.Data_Error with
-                       "PPM payload exceeds expected size";
+                     raise Ada.IO_Exceptions.Data_Error with "PPM payload exceeds expected size";
                   end if;
                   for Index in Buffer'First .. Last loop
                      declare
@@ -252,9 +222,14 @@ package body Shared_Image_Index_Support is
                         Hash := (Hash xor Value) * 16#0000_0100_0000_01B3#;
                         if Pass = 1 then
                            case Channel is
-                              when 0 => Red := Red + Value;
-                              when 1 => Green := Green + Value;
-                              when others => Blue := Blue + Value;
+                              when 0      =>
+                                 Red := Red + Value;
+
+                              when 1      =>
+                                 Green := Green + Value;
+
+                              when others =>
+                                 Blue := Blue + Value;
                            end case;
                            Channel := (Channel + 1) mod 3;
                         end if;

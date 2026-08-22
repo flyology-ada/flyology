@@ -17,22 +17,14 @@ procedure Structured_Server_Reset_Smoke is
    Reset_Count : constant := 32;
 
    function Open_FD_Count return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_open_fd_count";
+   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
 
    function Queue_TCP_Resets
-     (Port  : Interfaces.C.unsigned;
-      Count : Interfaces.C.unsigned) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_queue_tcp_resets";
+     (Port : Interfaces.C.unsigned; Count : Interfaces.C.unsigned) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_queue_tcp_resets";
 
-   function Create_Unix_Listener
-     (Error : access Interfaces.C.int) return Interfaces.C.int
-     with Import,
-          Convention => C,
-          External_Name => "flyology_test_unix_listener";
+   function Create_Unix_Listener (Error : access Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_unix_listener";
 
    protected type Tracker is
       procedure Healthy_Connection;
@@ -47,7 +39,8 @@ procedure Structured_Server_Reset_Smoke is
          Healthy := Healthy + 1;
       end Healthy_Connection;
 
-      function Healthy_Count return Natural is (Healthy);
+      function Healthy_Count return Natural
+      is (Healthy);
    end Tracker;
 
    type Context is limited record
@@ -64,11 +57,9 @@ procedure Structured_Server_Reset_Smoke is
       pragma Unreferenced (Peer);
    begin
       begin
-         Connection.Receive_Exactly
-           (Marker, Timeout => 1.0, Token => Cancellation);
+         Connection.Receive_Exactly (Marker, Timeout => 1.0, Token => Cancellation);
          if Marker = [1 => 91] then
-            Connection.Send_All
-              (Marker, Timeout => 1.0, Token => Cancellation);
+            Connection.Send_All (Marker, Timeout => 1.0, Token => Cancellation);
             State.State.Healthy_Connection;
          end if;
       exception
@@ -80,11 +71,12 @@ procedure Structured_Server_Reset_Smoke is
       end;
    end Handle;
 
-   package Structured is new Flyology.IO.Structured_Servers
-     (Handler_Context => Context,
-      Handle          => Handle,
-      Handler_Model   => Flyology.Native_Task,
-      Handler_CPU     => System.Multiprocessors.Not_A_Specific_CPU);
+   package Structured is new
+     Flyology.IO.Structured_Servers
+       (Handler_Context => Context,
+        Handle          => Handle,
+        Handler_Model   => Flyology.Native_Task,
+        Handler_CPU     => System.Multiprocessors.Not_A_Specific_CPU);
 
    Before : constant Interfaces.C.int := Open_FD_Count;
 begin
@@ -93,24 +85,19 @@ begin
       State     : aliased Context;
       Listener  : Sockets.Socket_Type;
       Address   : Sockets.Endpoint;
-      Failed    : Boolean := False with Atomic;
-      Client_OK : Boolean := False with Atomic;
+      Failed    : Boolean := False
+      with Atomic;
+      Client_OK : Boolean := False
+      with Atomic;
       Error     : Interfaces.C.int;
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option
-        (Listener,
-         Sockets.Socket_Level,
-         (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket
-        (Listener,
-         Sockets.Network_Endpoint
-           (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => Reset_Count + 4);
       Address := Sockets.Get_Socket_Name (Listener);
 
-      Error := Queue_TCP_Resets
-        (Interfaces.C.unsigned (Address.Port), Reset_Count);
+      Error := Queue_TCP_Resets (Interfaces.C.unsigned (Address.Port), Reset_Count);
       pragma Assert (Error = 0, "could not queue reset TCP clients");
 
       declare
@@ -122,8 +109,7 @@ begin
          task body Runner is
          begin
             begin
-               Structured.Serve
-                 (Item, Listener, State, Drain_Timeout => 0.2);
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.2);
             exception
                when Structured.Server_Failed =>
                   Failed := True;
@@ -132,8 +118,7 @@ begin
 
          task body Client is
             Socket   : Sockets.Socket_Type;
-            Marker   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
-              [1 => 91];
+            Marker   : constant Ada.Streams.Stream_Element_Array (1 .. 1) := [1 => 91];
             Response : Ada.Streams.Stream_Element_Array (1 .. 1);
          begin
             begin
@@ -161,9 +146,7 @@ begin
       pragma Assert (Structured.Current (Item).Failures = 0);
    end;
 
-   pragma Assert
-     (Open_FD_Count = Before,
-      "reset clients changed the process descriptor count");
+   pragma Assert (Open_FD_Count = Before, "reset clients changed the process descriptor count");
 
    declare
       Before_Address : constant Interfaces.C.int := Open_FD_Count;
@@ -176,15 +159,13 @@ begin
       Rejected       : Boolean := False;
    begin
       Result := Create_Unix_Listener (Error'Access);
-      pragma Assert
-        (Result >= 0,
-         "could not create AF_UNIX listener [errno="
-         & Interfaces.C.int'Image (Error) & "]");
+      pragma
+        Assert
+          (Result >= 0, "could not create AF_UNIX listener [errno=" & Interfaces.C.int'Image (Error) & "]");
       Descriptor := Flyology.IO.Descriptor (Result);
       Sockets.Adopt (Descriptor, Listener);
       begin
-         Sockets.Accept_Connection
-           (Listener, Accepted, Address, Timeout => 0.1);
+         Sockets.Accept_Connection (Listener, Accepted, Address, Timeout => 0.1);
       exception
          when Sockets.Socket_Error =>
             Rejected := True;
@@ -193,10 +174,7 @@ begin
          Sockets.Close_Socket (Accepted);
       end if;
       Sockets.Close_Socket (Listener);
-      pragma Assert
-        (Rejected, "unsupported accepted address was silently retried");
-      pragma Assert
-        (Open_FD_Count = Before_Address,
-         "unsupported accepted address leaked a descriptor");
+      pragma Assert (Rejected, "unsupported accepted address was silently retried");
+      pragma Assert (Open_FD_Count = Before_Address, "unsupported accepted address leaked a descriptor");
    end;
 end Structured_Server_Reset_Smoke;

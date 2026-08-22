@@ -6,6 +6,7 @@ private with Flyology.Wake_Sources;
 
 --  Gives one protocol pump bounded full-duplex access to an admitted
 --  connection without exposing its descriptor or transport ownership.
+
 package Flyology.IO.Connections.Drivers is
 
    --  Set-independent connection driver state. A higher-level protocol may
@@ -26,8 +27,7 @@ package Flyology.IO.Connections.Drivers is
    --  @enum Need_Read The next provider or socket step needs read readiness
    --  @enum Need_Write The next provider or socket step needs write readiness
    --  @enum Peer_Closed The peer ended the applicable transport direction
-   type Step_Result is
-     (Made_Progress, Need_Read, Need_Write, Peer_Closed);
+   type Step_Result is (Made_Progress, Need_Read, Need_Write, Peer_Closed);
 
    --  Transport conditions to include in one Wait call. The outbound protocol
    --  wakeup and lifecycle cancellation sources are always included.
@@ -39,24 +39,19 @@ package Flyology.IO.Connections.Drivers is
    end record;
 
    --  Wait for inbound or TLS read progress.
-   Read_Interest : constant Readiness_Interest :=
-     (Readable => True, Writable => False);
+   Read_Interest   : constant Readiness_Interest := (Readable => True, Writable => False);
    --  Wait for outbound or TLS write progress.
-   Write_Interest : constant Readiness_Interest :=
-     (Readable => False, Writable => True);
+   Write_Interest  : constant Readiness_Interest := (Readable => False, Writable => True);
    --  Wait for both transport directions.
-   Duplex_Interest : constant Readiness_Interest :=
-     (Readable => True, Writable => True);
+   Duplex_Interest : constant Readiness_Interest := (Readable => True, Writable => True);
    --  Wait only for a protocol wakeup or lifecycle cancellation.
-   Protocol_Only : constant Readiness_Interest :=
-     (Readable => False, Writable => False);
+   Protocol_Only   : constant Readiness_Interest := (Readable => False, Writable => False);
 
    --  Reason one capability wait returned.
    --  @enum Transport_Ready One requested descriptor condition is ready
    --  @enum Outbound_Ready A coalesced protocol wakeup was consumed
    --  @enum Wait_Timed_Out The per-wait timeout expired before Run's deadline
-   type Wait_Result is
-     (Transport_Ready, Outbound_Ready, Wait_Timed_Out);
+   type Wait_Result is (Transport_Ready, Outbound_Ready, Wait_Timed_Out);
 
    --  Start borrowing Item for a higher-level operation and attempt its lease
    --  once. Capability must be fresh or released. No wait occurs. Item and
@@ -82,18 +77,14 @@ package Flyology.IO.Connections.Drivers is
    --  @exception Operation_Cancelled Shutdown, Token, or Close is active
    --  @exception Socket_Error Socket preparation fails after acquisition
    --  @exception Program_Error IO is fresh, released, or already acquired
-   procedure Poll_Acquisition
-     (IO     : in out Capability;
-      Result : out Acquisition_Result);
+   procedure Poll_Acquisition (IO : in out Capability; Result : out Acquisition_Result);
 
    --  Arm the outer provider operation for connection lease availability and
    --  every applicable lifecycle source. The capability owns no set slot.
    --  @param IO Started capability awaiting its lease
    --  @param Operation Outer user-visible provider operation
    --  @exception Program_Error IO is not awaiting acquisition
-   procedure Arm_Acquisition
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class);
+   procedure Arm_Acquisition (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class);
 
    --  Arm the outer provider operation for the single readiness direction
    --  returned by Receive or Send, plus close, manager shutdown, and Token.
@@ -102,17 +93,13 @@ package Flyology.IO.Connections.Drivers is
    --  @param Required Need_Read or Need_Write returned by a transport step
    --  @exception Program_Error IO is not acquired or Required is not a wait
    procedure Arm_Transport
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class;
-      Required  : Step_Result);
+     (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class; Required : Step_Result);
 
    --  Arm the outer provider operation with the unused portion of the shared
    --  Start deadline. An infinite deadline adds no timer source.
    --  @param IO Engaged capability
    --  @param Operation Outer user-visible provider operation
-   procedure Arm_Deadline
-     (IO        : in out Capability;
-      Operation : in out Flyology.Operations.Operation'Class);
+   procedure Arm_Deadline (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class);
 
    --  Release or abandon the connection lease and every retained borrow. Call
    --  this before publishing the outer operation's terminal outcome. Repeating
@@ -246,8 +233,7 @@ package Flyology.IO.Connections.Drivers is
 private
    protected type Wakeup_Controller is
       procedure Signal;
-      procedure Wait_Source
-        (FD : out Flyology.IO.Descriptor; Already_Pending : out Boolean);
+      procedure Wait_Source (FD : out Flyology.IO.Descriptor; Already_Pending : out Boolean);
       procedure Consume;
    private
       Pending   : Boolean := False;
@@ -260,22 +246,23 @@ private
    end record;
 
    type Capability is new Ada.Finalization.Limited_Controlled with record
-      Item         : Connection_Access := null;
-      Token        : Cancellation_Access := null;
-      Guard        : Scoped_Operation_Guard;
-      FD           : Flyology.IO.Descriptor := Invalid_Descriptor;
-      Lease_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Item                 : Connection_Access := null;
+      Token                : Cancellation_Access := null;
+      Guard                : Scoped_Operation_Guard;
+      FD                   : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Lease_Source         : Flyology.IO.Descriptor := Invalid_Descriptor;
       Initial_Close_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
-      Close_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
-      Owner        : Server_Access := null;
-      Transport    : Transport_Kind := No_Transport;
-      Started      : Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Deadline     : Duration := Infinite;
+      Close_Source         : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Owner                : Server_Access := null;
+      Transport            : Transport_Kind := No_Transport;
+      Started              : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Deadline             : Duration := Infinite;
    end record;
 
    --  Release an engaged capability during scope finalization.
    --  @exclude
    --  @param IO Capability being finalized
-   overriding procedure Finalize (IO : in out Capability);
+   overriding
+   procedure Finalize (IO : in out Capability);
 
 end Flyology.IO.Connections.Drivers;

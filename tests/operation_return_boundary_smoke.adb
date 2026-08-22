@@ -34,9 +34,9 @@ procedure Operation_Return_Boundary_Smoke is
    subtype Buffer_Index is Positive range 1 .. 8 * 1_024;
    type Byte_Buffer is array (Buffer_Index) of Character;
 
-   type Test_Operation
-     (Owner : not null access Operations.Completion_Set'Class)
-   is new Operations.Operation (Owner) with record
+   type Test_Operation (Owner : not null access Operations.Completion_Set'Class) is
+     new Operations.Operation (Owner)
+   with record
       Item_Handle  : System.Address := System.Null_Address;
       Token_Handle : System.Address := System.Null_Address;
       IO_Started   : Boolean := False;
@@ -47,41 +47,26 @@ procedure Operation_Return_Boundary_Smoke is
       Peer_Ended   : Boolean := False;
    end record;
 
-   overriding procedure Drive
-     (Item  : in out Test_Operation;
-      Event : Operations.Driver_Event);
+   overriding
+   procedure Drive (Item : in out Test_Operation; Event : Operations.Driver_Event);
 
-   overriding procedure Request_Cancellation
-     (Item : in out Test_Operation);
+   overriding
+   procedure Request_Cancellation (Item : in out Test_Operation);
 
-   procedure Check
-     (Condition : Boolean;
-      Message   : String)
-   is
+   procedure Check (Condition : Boolean; Message : String) is
    begin
       if not Condition then
          raise Program_Error with Message;
       end if;
    end Check;
 
-   procedure Check_Result
-     (Item    : Result_Record;
-      Context : String)
-   is
+   procedure Check_Result (Item : Result_Record; Context : String) is
    begin
       Check (Item.Status = Available, Context & ": status changed");
-      Check
-        (Strings.To_String (Item.Method) = "GET",
-         Context & ": method changed");
-      Check
-        (Strings.To_String (Item.Target) = "/return-boundary",
-         Context & ": target changed");
-      Check
-        (Strings.To_String (Item.Header_Block) = "x-test: value",
-         Context & ": header block changed");
-      Check
-        (Strings.To_String (Item.Payload) = "body",
-         Context & ": body changed");
+      Check (Strings.To_String (Item.Method) = "GET", Context & ": method changed");
+      Check (Strings.To_String (Item.Target) = "/return-boundary", Context & ": target changed");
+      Check (Strings.To_String (Item.Header_Block) = "x-test: value", Context & ": header block changed");
+      Check (Strings.To_String (Item.Payload) = "body", Context & ": body changed");
    end Check_Result;
 
    procedure Fill (Item : out Result_Record) is
@@ -90,26 +75,20 @@ procedure Operation_Return_Boundary_Smoke is
       Item.Target := Strings.To_Unbounded_String ("/return-boundary");
       Item.Authority := Strings.To_Unbounded_String ("example.test");
       Item.Header_Block := Strings.To_Unbounded_String ("x-test: value");
-      Item.Physical_Header_Block :=
-        Strings.To_Unbounded_String ("X-Test: value");
+      Item.Physical_Header_Block := Strings.To_Unbounded_String ("X-Test: value");
       Item.Payload := Strings.To_Unbounded_String ("body");
       Item.Status := Peer_Closed;
    end Fill;
 
-   procedure Publish_Plain
-     (Source : Result_Record;
-      Target : not null access Result_Record)
-   is
+   procedure Publish_Plain (Source : Result_Record; Target : not null access Result_Record) is
    begin
       Target.all := Source;
       Target.Status := Available;
       Check_Result (Target.all, "inside plain publisher");
    end Publish_Plain;
 
-   overriding procedure Drive
-     (Item  : in out Test_Operation;
-      Event : Operations.Driver_Event)
-   is
+   overriding
+   procedure Drive (Item : in out Test_Operation; Event : Operations.Driver_Event) is
    begin
       if Event /= Operations.Start_Operation then
          Drivers.Complete (Item, Operations.Failed);
@@ -120,9 +99,8 @@ procedure Operation_Return_Boundary_Smoke is
       Drivers.Complete (Item, Operations.Succeeded);
    end Drive;
 
-   overriding procedure Request_Cancellation
-     (Item : in out Test_Operation)
-   is
+   overriding
+   procedure Request_Cancellation (Item : in out Test_Operation) is
    begin
       Drivers.Complete (Item, Operations.Cancelled);
    exception
@@ -130,10 +108,7 @@ procedure Operation_Return_Boundary_Smoke is
          null;
    end Request_Cancellation;
 
-   function Start
-     (Set : not null access Operations.Completion_Set'Class)
-      return Test_Operation
-   is
+   function Start (Set : not null access Operations.Completion_Set'Class) return Test_Operation is
    begin
       return Result : Test_Operation (Set) do
          Drivers.Start (Result);
@@ -141,23 +116,20 @@ procedure Operation_Return_Boundary_Smoke is
       end return;
    end Start;
 
-   procedure Finish
-     (Item   : in out Test_Operation;
-      Target : not null access Result_Record)
-   is
-      Outcome : constant Operations.Terminal_Outcome :=
-        Operations.Outcome (Item);
+   procedure Finish (Item : in out Test_Operation; Target : not null access Result_Record) is
+      Outcome : constant Operations.Terminal_Outcome := Operations.Outcome (Item);
    begin
       Operations.Consume (Item);
       case Outcome is
          when Operations.Succeeded =>
             Target.all := Item.Value_Result;
-            Target.Status :=
-              (if Item.Peer_Ended then Peer_Closed else Available);
+            Target.Status := (if Item.Peer_Ended then Peer_Closed else Available);
             Check_Result (Target.all, "inside operation finish");
+
          when Operations.Cancelled =>
             raise Operations.Operation_Cancelled;
-         when Operations.Failed =>
+
+         when Operations.Failed    =>
             raise Program_Error with "test operation failed";
       end case;
    end Finish;
@@ -198,8 +170,7 @@ procedure Operation_Return_Boundary_Smoke is
       begin
          declare
             Set    : aliased Operations.Completion_Set (1);
-            Alarm  : Flyology.IO.Timers.Timer_Operation :=
-              Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
+            Alarm  : Flyology.IO.Timers.Timer_Operation := Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
             Source : Result_Record;
          begin
             Operations.Wait_All (Set);
@@ -212,8 +183,7 @@ procedure Operation_Return_Boundary_Smoke is
          declare
             Set   : aliased Operations.Completion_Set (2);
             Get   : Test_Operation := Start (Set'Access);
-            Alarm : Flyology.IO.Timers.Timer_Operation :=
-              Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
+            Alarm : Flyology.IO.Timers.Timer_Operation := Flyology.IO.Timers.Sleep_For (Set'Access, 0.0);
          begin
             Operations.Wait_All (Set);
             Flyology.IO.Timers.Finish (Alarm);

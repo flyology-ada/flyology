@@ -9,19 +9,13 @@ procedure Channel_Reentrancy_Child is
    use type Interfaces.C.long;
 
    function Write
-     (FD     : Interfaces.C.int;
-      Buffer : System.Address;
-      Length : Interfaces.C.size_t) return Interfaces.C.long
-     with Import, Convention => C, External_Name => "write";
+     (FD : Interfaces.C.int; Buffer : System.Address; Length : Interfaces.C.size_t) return Interfaces.C.long
+   with Import, Convention => C, External_Name => "write";
 
    procedure Signal_Reentry is
-      Message : aliased constant String :=
-        "FLYOLOGY_EXPECT_BLOCKED_REACHED" & ASCII.LF;
-      Result : constant Interfaces.C.long :=
-        Write
-          (2,
-           Message (Message'First)'Address,
-           Interfaces.C.size_t (Message'Length));
+      Message : aliased constant String := "FLYOLOGY_EXPECT_BLOCKED_REACHED" & ASCII.LF;
+      Result  : constant Interfaces.C.long :=
+        Write (2, Message (Message'First)'Address, Interfaces.C.size_t (Message'Length));
    begin
       if Result /= Interfaces.C.long (Message'Length) then
          raise Program_Error with "cannot signal reentry test boundary";
@@ -29,8 +23,7 @@ procedure Channel_Reentrancy_Child is
    end Signal_Reentry;
 
    Model : constant Flyology.Execution_Model :=
-     (if Ada.Command_Line.Argument_Count = 1
-        and then Ada.Command_Line.Argument (1) = "lightweight"
+     (if Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "lightweight"
       then Flyology.Lightweight_Task
       else Flyology.Native_Task);
 
@@ -39,17 +32,21 @@ procedure Channel_Reentrancy_Child is
          Live : Boolean := False;
       end record;
 
-      overriding procedure Adjust (Item : in out Reentrant_Value);
-      overriding procedure Finalize (Item : in out Reentrant_Value);
+      overriding
+      procedure Adjust (Item : in out Reentrant_Value);
+      overriding
+      procedure Finalize (Item : in out Reentrant_Value);
 
       Reentry_Hook : access procedure := null;
 
-      overriding procedure Adjust (Item : in out Reentrant_Value) is
+      overriding
+      procedure Adjust (Item : in out Reentrant_Value) is
       begin
          null;
       end Adjust;
 
-      overriding procedure Finalize (Item : in out Reentrant_Value) is
+      overriding
+      procedure Finalize (Item : in out Reentrant_Value) is
       begin
          if Item.Live then
             Item.Live := False;
@@ -60,14 +57,12 @@ procedure Channel_Reentrancy_Child is
          end if;
       end Finalize;
 
-      Empty : constant Reentrant_Value :=
-        (Ada.Finalization.Controlled with Live => False);
+      Empty : constant Reentrant_Value := (Ada.Finalization.Controlled with Live => False);
 
-      package Channels is new Flyology.Channels.Bounded
-        (Element_Type => Reentrant_Value,
-         Empty_Value  => Empty);
+      package Channels is new
+        Flyology.Channels.Bounded (Element_Type => Reentrant_Value, Empty_Value => Empty);
 
-      Queue   : Channels.Channel (Capacity => 1);
+      Queue : Channels.Channel (Capacity => 1);
 
       procedure Reenter_Queue is
          State : constant Channels.Snapshot := Queue.Current;

@@ -8,14 +8,15 @@ with Interfaces.C;
 --
 --  Linux is the only host that answers; elsewhere every requested counter
 --  reports Unsupported_Platform and no descriptor is opened.
+
 package Flyology_Bench.Internal_Probes.Counters is
 
    subtype Counter_Index is Natural range 0 .. Perf_Value_Count - 1;
 
-   Cycles_Index : constant := 0;
-   Instructions_Index : constant := 1;
-   Cache_Misses_Index : constant := 2;
-   Branches_Index : constant := 3;
+   Cycles_Index        : constant := 0;
+   Instructions_Index  : constant := 1;
+   Cache_Misses_Index  : constant := 2;
+   Branches_Index      : constant := 3;
    Branch_Misses_Index : constant := 4;
 
    type Group is limited private;
@@ -24,19 +25,14 @@ package Flyology_Bench.Internal_Probes.Counters is
    --  join one counting group when both are requested and both open, so
    --  instructions per cycle is never formed from two differently bounded
    --  windows.
-   procedure Open
-     (Counters       : in out Group;
-      Requested_Mask : Interfaces.Unsigned_64);
+   procedure Open (Counters : in out Group; Requested_Mask : Interfaces.Unsigned_64);
 
    --  Records a baseline for every open counter and then enables them.
    procedure Start (Counters : in out Group);
 
    --  Disables every open counter and reports each one's scaled delta
    --  against the baseline taken by Start.
-   procedure Finish
-     (Counters : in out Group;
-      Result   : out Perf_Values;
-      Mask     : out Interfaces.Unsigned_64);
+   procedure Finish (Counters : in out Group; Result : out Perf_Values; Mask : out Interfaces.Unsigned_64);
 
    --  Reads every open counter without disabling it, together with the
    --  multiplexing time accounting a caller needs to scale a span.
@@ -50,9 +46,7 @@ package Flyology_Bench.Internal_Probes.Counters is
 
    procedure Close (Counters : in out Group);
 
-   function Status
-     (Counters : Group;
-      Index    : Counter_Index) return Metric_Availability;
+   function Status (Counters : Group; Index : Counter_Index) return Metric_Availability;
 
    --  Ties a group's descriptors to a scope, so an abandoned measurement
    --  cannot leave counters open.
@@ -61,7 +55,8 @@ package Flyology_Bench.Internal_Probes.Counters is
       Initialized : Boolean := False;
    end record;
 
-   overriding procedure Finalize (Object : in out Handle);
+   overriding
+   procedure Finalize (Object : in out Handle);
 
 private
 
@@ -78,8 +73,7 @@ private
    type Group is limited record
       Descriptor       : Descriptors := [others => -1];
       Mask             : Interfaces.Unsigned_64 := 0;
-      Outcome          : Perf_Status_Values :=
-        [others => Metric_Not_Requested];
+      Outcome          : Perf_Status_Values := [others => Metric_Not_Requested];
       Grouped          : Boolean := False;
       Baseline_Value   : Perf_Values := [others => 0];
       Baseline_Enabled : Perf_Values := [others => 0];

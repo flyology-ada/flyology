@@ -13,28 +13,27 @@ procedure Loop_Thread_Placement is
    Kind   : Groups.Loop_Thread_Placement := Groups.No_Placement;
 
    protected Output is
-      procedure Report
-        (Group     : Groups.Group_Id;
-         Processor : Integer);
+      procedure Report (Group : Groups.Group_Id; Processor : Integer);
       entry Wait;
    private
       Reports : Natural := 0;
    end Output;
 
    protected body Output is
-      procedure Report
-        (Group     : Groups.Group_Id;
-         Processor : Integer)
-      is
-         Status : constant Groups.Placement_Status :=
-           Groups.Loop_Thread_Status (Group);
+      procedure Report (Group : Groups.Group_Id; Processor : Integer) is
+         Status : constant Groups.Placement_Status := Groups.Loop_Thread_Status (Group);
       begin
          Put_Line
-           ("logical_group=" & Group'Image
-            & " placement=" & Status.Kind'Image
-            & " requested_value=" & Status.Value'Image
-            & " state=" & Status.State'Image
-            & " observed_linux_cpu=" & Processor'Image);
+           ("logical_group="
+            & Group'Image
+            & " placement="
+            & Status.Kind'Image
+            & " requested_value="
+            & Status.Value'Image
+            & " state="
+            & Status.State'Image
+            & " observed_linux_cpu="
+            & Processor'Image);
          Reports := Reports + 1;
       end Report;
 
@@ -71,9 +70,7 @@ procedure Loop_Thread_Placement is
       Candidate : Groups.Placement_Value := 0;
    begin
       for Index in Values'Range loop
-         while Candidate < 4_096
-           and then not Groups.Placement_Value_Available
-             (Groups.Strict_CPU, Candidate)
+         while Candidate < 4_096 and then not Groups.Placement_Value_Available (Groups.Strict_CPU, Candidate)
          loop
             Candidate := Candidate + 1;
          end loop;
@@ -97,13 +94,10 @@ begin
       Kind := Groups.Strict_CPU;
       Select_Linux_CPUs;
       Put_Line
-        ("Linux strict mode requests and verifies one zero-based OS logical "
-         & "CPU per scheduler pthread.");
+        ("Linux strict mode requests and verifies one zero-based OS logical " & "CPU per scheduler pthread.");
    elsif Groups.Placement_Supported (Groups.Advisory_Tag) then
       Kind := Groups.Advisory_Tag;
-      Put_Line
-        ("Darwin advisory mode supplies cache-locality tags; tags are not "
-         & "physical CPU numbers.");
+      Put_Line ("Darwin advisory mode supplies cache-locality tags; tags are not " & "physical CPU numbers.");
    else
       Put_Line
         ("This host exposes neither Linux strict affinity nor a supported "
@@ -113,8 +107,7 @@ begin
 
    if Kind /= Groups.No_Placement then
       for Index in Values'Range loop
-         if Groups.Configure_Loop_Thread
-           (Groups.Group_Id (Index), Kind, Values (Index)) /= Groups.Configured
+         if Groups.Configure_Loop_Thread (Groups.Group_Id (Index), Kind, Values (Index)) /= Groups.Configured
          then
             raise Program_Error with "cannot configure showcase loop";
          end if;

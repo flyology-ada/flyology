@@ -10,27 +10,19 @@ procedure DNS_Resolution is
    use type Ada.Real_Time.Time;
 
    Host : constant String :=
-     (if Ada.Command_Line.Argument_Count = 0
-      then "example.com" else Ada.Command_Line.Argument (1));
+     (if Ada.Command_Line.Argument_Count = 0 then "example.com" else Ada.Command_Line.Argument (1));
 
    protected Output is
-      procedure Show
-        (Lane : String; Values : Flyology.IO.DNS.Address_Array;
-         Elapsed : Duration);
+      procedure Show (Lane : String; Values : Flyology.IO.DNS.Address_Array; Elapsed : Duration);
       procedure Failed (Lane, Message : String);
    end Output;
 
    protected body Output is
-      procedure Show
-        (Lane : String; Values : Flyology.IO.DNS.Address_Array;
-         Elapsed : Duration)
-      is
+      procedure Show (Lane : String; Values : Flyology.IO.DNS.Address_Array; Elapsed : Duration) is
       begin
-         Ada.Text_IO.Put_Line
-           (Lane & " resolved " & Host & " in" & Elapsed'Image & " s");
+         Ada.Text_IO.Put_Line (Lane & " resolved " & Host & " in" & Elapsed'Image & " s");
          for Value of Values loop
-            Ada.Text_IO.Put_Line
-              ("  " & Flyology.IO.Sockets.Image (Value));
+            Ada.Text_IO.Put_Line ("  " & Flyology.IO.Sockets.Image (Value));
          end loop;
       end Show;
 
@@ -40,33 +32,30 @@ procedure DNS_Resolution is
       end Failed;
    end Output;
 
-   task type Resolver (Model : Flyology.Execution_Model; Native : Boolean) is
+   task type Resolver
+     (Model  : Flyology.Execution_Model;
+      Native : Boolean)
+   is
       pragma Task_Info (Model);
    end Resolver;
 
    task body Resolver is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Values  : constant Flyology.IO.DNS.Address_Array :=
-        Flyology.IO.DNS.Resolve (Host, Timeout => 5.0);
+      Values  : constant Flyology.IO.DNS.Address_Array := Flyology.IO.DNS.Resolve (Host, Timeout => 5.0);
       Lane    : constant String := (if Native then "native " else "lightweight");
    begin
-      Output.Show
-        (Lane, Values,
-         Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
+      Output.Show (Lane, Values, Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
    exception
       when Occurrence : others =>
          Output.Failed
-           ((if Native then "native " else "lightweight"),
-            Ada.Exceptions.Exception_Message (Occurrence));
+           ((if Native then "native " else "lightweight"), Ada.Exceptions.Exception_Message (Occurrence));
    end Resolver;
 
    type Resolver_Access is access Resolver;
 begin
    declare
-      Native  : constant Resolver_Access :=
-        new Resolver (Flyology.Native_Task, True);
-      Lightweight : constant Resolver_Access :=
-        new Resolver (Flyology.Lightweight_Task, False);
+      Native      : constant Resolver_Access := new Resolver (Flyology.Native_Task, True);
+      Lightweight : constant Resolver_Access := new Resolver (Flyology.Lightweight_Task, False);
       pragma Unreferenced (Native, Lightweight);
    begin
       null;

@@ -16,6 +16,7 @@ with System;
 --  Placement governs where pages come from. It does not move a running
 --  thread; a thread is placed with the CPU aspect or a dispatching domain,
 --  using the processors the parent package reports for a node.
+
 package Flyology_NUMA.Placement is
 
    --  Whether this process can place memory on this host.
@@ -53,8 +54,7 @@ package Flyology_NUMA.Placement is
    --     each page. The node set is not used.
    --  @enum Unrestricted Remove any policy and return to the host default.
    --     The node set is not used.
-   type Policy_Kind is
-     (Preferred, Bound, Interleaved, Local, Unrestricted);
+   type Policy_Kind is (Preferred, Bound, Interleaved, Local, Unrestricted);
 
    --  What became of a placement request.
    --
@@ -70,13 +70,7 @@ package Flyology_NUMA.Placement is
    --  @enum Insufficient_Memory The host could not satisfy the request.
    --  @enum Failed The host refused the request for another reason.
    type Placement_Outcome is
-     (Applied,
-      Not_Supported,
-      Not_Permitted,
-      Unusable_Nodes,
-      Unaligned,
-      Insufficient_Memory,
-      Failed);
+     (Applied, Not_Supported, Not_Permitted, Unusable_Nodes, Unaligned, Insufficient_Memory, Failed);
 
    --  Return the page size that placement acts in units of.
    --
@@ -123,10 +117,7 @@ package Flyology_NUMA.Placement is
    --  @param Nodes The nodes to draw from. Ignored for Local and
    --     Unrestricted.
    --  @param Result What became of the request.
-   procedure Apply_To_Thread
-     (Policy : Policy_Kind;
-      Nodes  : Node_Set;
-      Result : out Placement_Outcome);
+   procedure Apply_To_Thread (Policy : Policy_Kind; Nodes : Node_Set; Result : out Placement_Outcome);
 
    --  Report which node holds the page containing an address.
    --

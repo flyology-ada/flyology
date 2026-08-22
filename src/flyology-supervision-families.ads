@@ -17,24 +17,27 @@ with Flyology.Execution_Groups;
 --  @formal Control_Group Exact shared lightweight group for managers
 --  @formal Event_Capacity Maximum retained supervisor events
 --  @formal Monitor_Capacity Maximum concurrent exact-generation waiters
+
 generic
    type Request is private;
    type Application_Context (<>) is limited private;
 
-   with procedure Run_One_Generation
-     (Context : aliased in out Application_Context;
-      Input   : Request;
-      Control : aliased in out Generation_Control;
-      Result  : out Generation_Result);
+   with
+     procedure Run_One_Generation
+       (Context : aliased in out Application_Context;
+        Input   : Request;
+        Control : aliased in out Generation_Control;
+        Result  : out Generation_Result);
 
-   Policy           : Child_Specification;
-   First_Child_Id   : Child_Id;
+   Policy : Child_Specification;
+   First_Child_Id : Child_Id;
    Maximum_Children : Positive;
-   Control_Group    : Flyology.Execution_Groups.Group_Selecting_CPU := 127;
-   Event_Capacity   : Positive := 256;
+   Control_Group : Flyology.Execution_Groups.Group_Selecting_CPU := 127;
+   Event_Capacity : Positive := 256;
    Monitor_Capacity : Positive := 64;
 
-package Flyology.Supervision.Families is
+package Flyology.Supervision.Families
+is
 
    --  Raised before admission opens when the common policy, id range, or
    --  control-plane placement is invalid.
@@ -94,19 +97,14 @@ package Flyology.Supervision.Families is
    --  @param Handle Exact logical child and first generation
    --  @exception Program_Error Family is not running or is shutting down
    --  @exception Constraint_Error Every fixed slot is occupied
-   procedure Start
-     (Item   : in out Family;
-      Input  : Request;
-      Handle : out Child_Handle);
+   procedure Start (Item : in out Family; Input : Request; Handle : out Child_Handle);
 
    --  Cooperatively stop the exact admitted or live generation. A terminated
    --  generation awaiting replacement backoff cannot stop its replacement.
    --  @param Item Running family
    --  @param Handle Exact generation to stop
    --  @exception Stale_Handle Handle does not identify an admitted/live task
-   procedure Stop
-     (Item   : in out Family;
-      Handle : Child_Handle);
+   procedure Stop (Item : in out Family; Handle : Child_Handle);
 
    --  Request bounded replacement of the exact running family generation.
    --  The common policy must be restart safe, locally recoverable, and not
@@ -117,9 +115,7 @@ package Flyology.Supervision.Families is
    --  @exception Stale_Handle Handle is foreign, stale, or not running
    --  @exception Program_Error The family policy does not permit local
    --     replacement
-   procedure Restart
-     (Item   : in out Family;
-      Handle : Child_Handle);
+   procedure Restart (Item : in out Family; Handle : Child_Handle);
 
    --  Reject the exact running generation after a failed external health
    --  probe. Diagnostic is copied before entering controller state.
@@ -127,10 +123,7 @@ package Flyology.Supervision.Families is
    --  @param Handle Exact current generation
    --  @param Diagnostic Bounded application health diagnostic
    --  @exception Stale_Handle Handle is foreign, stale, or not running
-   procedure Report_Unhealthy
-     (Item       : in out Family;
-      Handle     : Child_Handle;
-      Diagnostic : String);
+   procedure Report_Unhealthy (Item : in out Family; Handle : Child_Handle; Diagnostic : String);
 
    --  Close admission and cooperatively stop every occupied slot. A request
    --  made before Run is retained through configuration. The call is
@@ -148,9 +141,7 @@ package Flyology.Supervision.Families is
    --  @param Handle Exact logical child and generation
    --  @return Fixed current snapshot
    --  @exception Stale_Handle Handle no longer identifies the slot
-   function Current
-     (Item   : Family;
-      Handle : Child_Handle) return Child_Snapshot;
+   function Current (Item : Family; Handle : Child_Handle) return Child_Snapshot;
 
    --  Observe the latest generation for one stable logical child id. This
    --  overload is read-only and does not authorize a generation operation.
@@ -158,9 +149,7 @@ package Flyology.Supervision.Families is
    --  @param Child Logical child id within this family
    --  @return Latest fixed snapshot for the occupied slot
    --  @exception Stale_Handle Child is outside the family or currently free
-   function Current
-     (Item  : Family;
-      Child : Child_Id) return Child_Snapshot;
+   function Current (Item : Family; Child : Child_Id) return Child_Snapshot;
 
    --  Sample a generation-qualified handle for one occupied logical child.
    --  A concurrent restart may make the returned handle stale before use.
@@ -168,9 +157,7 @@ package Flyology.Supervision.Families is
    --  @param Child Logical child id within this family
    --  @return Latest exact generation handle
    --  @exception Stale_Handle Child is outside the family or currently free
-   function Latest
-     (Item  : Family;
-      Child : Child_Id) return Child_Handle;
+   function Latest (Item : Family; Child : Child_Id) return Child_Handle;
 
    --  Wait for Handle's exact generation to terminate or be replaced. The
    --  registration and current-generation check are atomic with respect to
@@ -187,9 +174,7 @@ package Flyology.Supervision.Families is
    --     generation retained in its slot
    --  @exception Constraint_Error Monitor_Capacity waiters are already active
    function Wait_Termination
-     (Item    : in out Family;
-      Handle  : Child_Handle;
-      Timeout : Duration := -1.0) return Generation_Observation;
+     (Item : in out Family; Handle : Child_Handle; Timeout : Duration := -1.0) return Generation_Observation;
 
    --  Copy events after Cursor in ascending sequence order. Cursor advances
    --  to the last copied event, and Dropped reports an overwritten sequence
@@ -218,12 +203,10 @@ private
    type Incident_Id_Array is array (Slot_Index) of Incident_Id;
    type Incident_Attempt_Array is array (Slot_Index) of Incident_Attempt;
    type Incident_Context_Array is array (Slot_Index) of Incident_Context;
-   type Event_Buffer is array (Positive range 1 .. Event_Capacity) of
-     Supervisor_Event;
+   type Event_Buffer is array (Positive range 1 .. Event_Capacity) of Supervisor_Event;
    subtype Monitor_Index is Positive range 1 .. Monitor_Capacity;
    subtype Monitor_Token is Interfaces.Unsigned_64;
-   type Monitor_State is
-     (Monitor_Free, Monitor_Pending, Monitor_Terminated, Monitor_Replaced);
+   type Monitor_State is (Monitor_Free, Monitor_Pending, Monitor_Terminated, Monitor_Replaced);
    type Monitor_State_Array is array (Monitor_Index) of Monitor_State;
    type Monitor_Token_Array is array (Monitor_Index) of Monitor_Token;
    type Monitor_Handle_Array is array (Monitor_Index) of Child_Handle;
@@ -233,12 +216,8 @@ private
    type Slot_State_Array is array (Slot_Index) of Slot_State;
 
    protected type Family_State is
-      procedure Configure
-        (Identity  : Controller_Id;
-         Inherited : Incident_Context);
-      procedure Reserve
-        (Slot   : out Slot_Index;
-         Handle : out Child_Handle);
+      procedure Configure (Identity : Controller_Id; Inherited : Incident_Context);
+      procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle);
       procedure Commit (Slot : Slot_Index; Handle : Child_Handle);
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle);
       procedure Take_Start
@@ -254,23 +233,12 @@ private
          Shutdown : out Boolean;
          Override : out Termination_Summary);
       procedure Request_Intervention
-        (Handle      : Child_Handle;
-         Termination : Termination_Summary;
-         Valid       : out Boolean);
+        (Handle : Child_Handle; Termination : Termination_Summary; Valid : out Boolean);
       procedure Publish_Starting
-        (Slot   : Slot_Index;
-         Handle : Child_Handle;
-         Incident : Incident_Context;
-         Accepted : out Boolean);
-      function Replacement_Wait_Allowed
-        (Slot : Slot_Index) return Boolean;
-      procedure Publish_Ready
-        (Slot   : Slot_Index;
-         Handle : Child_Handle;
-         Now    : Ada.Real_Time.Time);
-      procedure Publish_Stuck
-        (Slot   : Slot_Index;
-         Handle : Child_Handle);
+        (Slot : Slot_Index; Handle : Child_Handle; Incident : Incident_Context; Accepted : out Boolean);
+      function Replacement_Wait_Allowed (Slot : Slot_Index) return Boolean;
+      procedure Publish_Ready (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time);
+      procedure Publish_Stuck (Slot : Slot_Index; Handle : Child_Handle);
       procedure Publish_Termination
         (Slot        : Slot_Index;
          Handle      : Child_Handle;
@@ -282,27 +250,16 @@ private
          Next        : out Child_Handle;
          Recovery    : out Incident_Context);
       function Incident_Can_Close
-        (Slot   : Slot_Index;
-         Handle : Child_Handle;
-         Now    : Ada.Real_Time.Time) return Boolean;
+        (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time) return Boolean;
       procedure Manager_Done (Slot : Slot_Index; Handle : Child_Handle);
-      procedure Manager_Failed
-        (Slot        : Slot_Index;
-         Handle      : Child_Handle;
-         Termination : Termination_Summary);
+      procedure Manager_Failed (Slot : Slot_Index; Handle : Child_Handle; Termination : Termination_Summary);
       procedure Request_Stop;
       function Is_Finished return Boolean;
       function Admission_Is_Open return Boolean;
       function Read_Result return Supervisor_Result;
-      function Read_Snapshot
-        (Handle : Child_Handle;
-         Valid  : out Boolean) return Child_Snapshot;
-      function Read_Logical_Snapshot
-        (Child : Child_Id;
-         Valid : out Boolean) return Child_Snapshot;
-      function Read_Latest
-        (Child : Child_Id;
-         Valid : out Boolean) return Child_Handle;
+      function Read_Snapshot (Handle : Child_Handle; Valid : out Boolean) return Child_Snapshot;
+      function Read_Logical_Snapshot (Child : Child_Id; Valid : out Boolean) return Child_Snapshot;
+      function Read_Latest (Child : Child_Id; Valid : out Boolean) return Child_Handle;
       procedure Register_Monitor
         (Handle    : Child_Handle;
          Immediate : out Boolean;
@@ -312,9 +269,7 @@ private
          Token     : out Monitor_Token;
          Valid     : out Boolean);
       entry Await_Monitor (Monitor_Index)
-        (Token    : Monitor_Token;
-         Status   : out Generation_Observation_Status;
-         Snapshot : out Child_Snapshot);
+        (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot);
       procedure Cancel_Monitor
         (Ticket    : Monitor_Index;
          Token     : Monitor_Token;
@@ -340,59 +295,50 @@ private
          Now         : Ada.Real_Time.Time;
          Termination : Termination_Kind := No_Termination;
          Incident    : Incident_Context := No_Incident;
-         Backoff     : Ada.Real_Time.Time_Span :=
-           Ada.Real_Time.Time_Span_Zero);
-      procedure Complete_Monitors
-        (Slot   : Slot_Index;
-         Status : Generation_Observation_Status);
-      Configured : Boolean := False;
-      Identity   : Controller_Id := Controller_Id'First;
-      Run_Used   : Boolean := False;
-      Shutdown  : Boolean := False;
-      Terminal  : Boolean := False;
-      Slots     : Slot_State_Array := (others => Free);
-      Snapshots : Snapshot_Array;
-      Has_Generation : Boolean_Array := (others => False);
-      Stop_Requested : Boolean_Array := (others => False);
-      Recovery_Requested : Boolean_Array := (others => False);
-      Intervention : Termination_Array;
-      Queue     : Slot_Order := (others => Slot_Index'First);
-      Queue_Head : Slot_Index := Slot_Index'First;
-      Queue_Tail : Slot_Index := Slot_Index'First;
-      Queue_Length : Natural := 0;
-      Reserved_Children : Natural := 0;
-      Live_Managers : Natural := 0;
-      Total_Used : Natural_Array := (others => 0);
-      Window_Used : Natural_Array := (others => 0);
-      Consecutive : Natural_Array := (others => 0);
-      Incident_Since : Time_Array :=
-        (others => Ada.Real_Time.Time_First);
-      Window_Since : Time_Array :=
-        (others => Ada.Real_Time.Time_First);
-      Ready_Since : Time_Array :=
-        (others => Ada.Real_Time.Time_First);
-      Last_Incident : Incident_Id_Array :=
-        (others => Incident_Id'First);
-      Last_Attempt : Incident_Attempt_Array :=
-        (others => Incident_Attempt'First);
-      Has_Incident : Boolean_Array := (others => False);
-      Active_Incidents : Incident_Context_Array := (others => No_Incident);
-      Inherited_Incident : Incident_Context := No_Incident;
-      Events : Event_Buffer;
-      Event_First : Positive := Event_Buffer'First;
-      Event_Length : Natural := 0;
-      Event_Last_Sequence : Event_Sequence := 0;
+         Backoff     : Ada.Real_Time.Time_Span := Ada.Real_Time.Time_Span_Zero);
+      procedure Complete_Monitors (Slot : Slot_Index; Status : Generation_Observation_Status);
+      Configured               : Boolean := False;
+      Identity                 : Controller_Id := Controller_Id'First;
+      Run_Used                 : Boolean := False;
+      Shutdown                 : Boolean := False;
+      Terminal                 : Boolean := False;
+      Slots                    : Slot_State_Array := (others => Free);
+      Snapshots                : Snapshot_Array;
+      Has_Generation           : Boolean_Array := (others => False);
+      Stop_Requested           : Boolean_Array := (others => False);
+      Recovery_Requested       : Boolean_Array := (others => False);
+      Intervention             : Termination_Array;
+      Queue                    : Slot_Order := (others => Slot_Index'First);
+      Queue_Head               : Slot_Index := Slot_Index'First;
+      Queue_Tail               : Slot_Index := Slot_Index'First;
+      Queue_Length             : Natural := 0;
+      Reserved_Children        : Natural := 0;
+      Live_Managers            : Natural := 0;
+      Total_Used               : Natural_Array := (others => 0);
+      Window_Used              : Natural_Array := (others => 0);
+      Consecutive              : Natural_Array := (others => 0);
+      Incident_Since           : Time_Array := (others => Ada.Real_Time.Time_First);
+      Window_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
+      Ready_Since              : Time_Array := (others => Ada.Real_Time.Time_First);
+      Last_Incident            : Incident_Id_Array := (others => Incident_Id'First);
+      Last_Attempt             : Incident_Attempt_Array := (others => Incident_Attempt'First);
+      Has_Incident             : Boolean_Array := (others => False);
+      Active_Incidents         : Incident_Context_Array := (others => No_Incident);
+      Inherited_Incident       : Incident_Context := No_Incident;
+      Events                   : Event_Buffer;
+      Event_First              : Positive := Event_Buffer'First;
+      Event_Length             : Natural := 0;
+      Event_Last_Sequence      : Event_Sequence := 0;
       Event_Sequence_Exhausted : Boolean := False;
-      Monitor_States : Monitor_State_Array := (others => Monitor_Free);
-      Monitor_Tokens : Monitor_Token_Array := (others => 0);
-      Monitor_Handles : Monitor_Handle_Array;
-      Monitor_Snapshots : Monitor_Snapshot_Array;
-      Result : Supervisor_Result;
+      Monitor_States           : Monitor_State_Array := (others => Monitor_Free);
+      Monitor_Tokens           : Monitor_Token_Array := (others => 0);
+      Monitor_Handles          : Monitor_Handle_Array;
+      Monitor_Snapshots        : Monitor_Snapshot_Array;
+      Result                   : Supervisor_Result;
    end Family_State;
 
    type Family_State_Access is access all Family_State;
-   type Monitor_Guard is
-     limited new Ada.Finalization.Limited_Controlled with record
+   type Monitor_Guard is limited new Ada.Finalization.Limited_Controlled with record
       State  : Family_State_Access := null;
       Ticket : Monitor_Index := Monitor_Index'First;
       Token  : Monitor_Token := 0;
@@ -401,7 +347,8 @@ private
 
    --  @exclude
    --  @param Item In-flight family monitor registration canceled on unwinding
-   overriding procedure Finalize (Item : in out Monitor_Guard);
+   overriding
+   procedure Finalize (Item : in out Monitor_Guard);
 
    type Family is limited record
       State  : aliased Family_State;

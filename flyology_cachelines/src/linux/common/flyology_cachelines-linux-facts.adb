@@ -1,8 +1,7 @@
 package body Flyology_Cachelines.Linux.Facts is
 
    function Detected
-     (Fallback : Cache_Parameters := No_Cache_Parameters)
-      return Flyology_Cachelines.Platform.Host_Facts
+     (Fallback : Cache_Parameters := No_Cache_Parameters) return Flyology_Cachelines.Platform.Host_Facts
    is
       Classes : constant Core_Classes := Detect_Core_Classes;
       Result  : Flyology_Cachelines.Platform.Host_Facts;
@@ -35,8 +34,7 @@ package body Flyology_Cachelines.Linux.Facts is
 
       for Index in 1 .. Classes.Count loop
          declare
-            Class : Core_Class_Parameters renames
-              Classes.Classes (Core_Class (Index));
+            Class : Core_Class_Parameters renames Classes.Classes (Core_Class (Index));
          begin
             Result.Classes (Core_Class (Index)) :=
               (Line_Size        => Class.Line_Size,
@@ -49,18 +47,14 @@ package body Flyology_Cachelines.Linux.Facts is
                L2_Sharing_Cores =>
                  (if Class.L2_CPUs = 0
                   then 0
-                  else Natural'Max
-                         (Class.L2_CPUs * Class.Cores / Class.CPUs, 1)));
+                  else Natural'Max (Class.L2_CPUs * Class.Cores / Class.CPUs, 1)));
          end;
       end loop;
 
       return Result;
    exception
       when others =>
-         return (Count     => 0,
-                 Ordering  => Unordered,
-                 Line_Size => 0,
-                 Classes   => (others => (others => 0)));
+         return (Count => 0, Ordering => Unordered, Line_Size => 0, Classes => (others => (others => 0)));
    end Detected;
 
 end Flyology_Cachelines.Linux.Facts;

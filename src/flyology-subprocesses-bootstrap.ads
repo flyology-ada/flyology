@@ -4,6 +4,7 @@ with Flyology.IO.Sockets;
 --  Launches a child image with two private AF_UNIX stream channels at stable
 --  descriptors. The control channel carries framed upgrade commands. The
 --  capability channel is dedicated exclusively to typed SCM_RIGHTS handoff.
+
 package Flyology.Subprocesses.Bootstrap is
    package Sockets renames Flyology.IO.Sockets;
    package Socket_Handoffs renames Flyology.IO.Socket_Handoffs;
@@ -12,7 +13,7 @@ package Flyology.Subprocesses.Bootstrap is
    Bootstrap_Error : exception;
 
    --  Stable child descriptor for the framed control stream.
-   Child_Control_Descriptor : constant Flyology.IO.Descriptor := 3;
+   Child_Control_Descriptor    : constant Flyology.IO.Descriptor := 3;
    --  Stable child descriptor for the capability-handoff stream.
    Child_Capability_Descriptor : constant Flyology.IO.Descriptor := 4;
 
@@ -36,14 +37,13 @@ package Flyology.Subprocesses.Bootstrap is
       Child        : in out Process;
       Control      : in out Sockets.Socket_Type;
       Capabilities : in out Socket_Handoffs.Handoff_Channel)
-   with Pre =>
-     not Is_Open (Child)
+   with
+     Pre  =>
+       not Is_Open (Child)
        and then not Sockets.Is_Open (Control)
        and then not Socket_Handoffs.Is_Open (Capabilities),
      Post =>
-       Is_Open (Child)
-         and then Sockets.Is_Open (Control)
-         and then Socket_Handoffs.Is_Open (Capabilities);
+       Is_Open (Child) and then Sockets.Is_Open (Control) and then Socket_Handoffs.Is_Open (Capabilities);
 
    --  Adopt and validate the inherited child endpoints. Call this once near
    --  image startup, before creating application tasks. fd 3 becomes Control;
@@ -58,12 +58,8 @@ package Flyology.Subprocesses.Bootstrap is
    procedure Adopt_Inherited
      (Control      : in out Sockets.Socket_Type;
       Capabilities : in out Socket_Handoffs.Handoff_Channel;
-      Trust        : Socket_Handoffs.Peer_Trust :=
-        Socket_Handoffs.Trusted_Peer)
-   with Pre =>
-     not Sockets.Is_Open (Control)
-       and then not Socket_Handoffs.Is_Open (Capabilities),
-     Post =>
-       Sockets.Is_Open (Control)
-         and then Socket_Handoffs.Is_Open (Capabilities);
+      Trust        : Socket_Handoffs.Peer_Trust := Socket_Handoffs.Trusted_Peer)
+   with
+     Pre  => not Sockets.Is_Open (Control) and then not Socket_Handoffs.Is_Open (Capabilities),
+     Post => Sockets.Is_Open (Control) and then Socket_Handoffs.Is_Open (Capabilities);
 end Flyology.Subprocesses.Bootstrap;
