@@ -57,7 +57,8 @@ is
    with
      Pre  => Is_Supported_Sample (Numerator)
        and then Is_Supported_Sample (Denominator),
-     Post => Is_Supported_Speedup (Ratio'Result);
+     Post => Ratio'Result >= Minimum_Speedup
+       and then Ratio'Result <= Maximum_Speedup;
 
    function Time_Change (Speedup : Long_Float) return Long_Float
    with
