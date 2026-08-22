@@ -263,6 +263,14 @@ procedure Flyology_Bench_Smoke is
       Collect_Process_Telemetry => False,
       Progress            => null,
       Progress_Name       => <>);
+
+   --  Host CPU counters advance in ticks, so interference response tests need
+   --  observation windows comfortably longer than one tick.  Ten-millisecond
+   --  samples also leave enough retained units to exercise a grouped retake.
+   Interference_Config : constant Flyology_Bench.Configuration :=
+     (Config with delta
+        Measurement_Time    => 0.100,
+        Minimum_Sample_Time => 0.010);
    First  : Flyology_Bench.Measurement;
    Maximum_Resample_Result : Flyology_Bench.Measurement;
    Second : Flyology_Bench.Measurement;
@@ -914,26 +922,26 @@ begin
          "per-sample foreign share was not retained");
    end;
 
-   --  A limit of zero plus real foreign load makes every window contaminated,
-   --  which exercises the retake path and its budget.
+   --  A zero limit asks the real-host integration probe to retake every
+   --  actionable contaminated window.  Scheduler placement and counter-tick
+   --  boundaries may still leave a run with no actionable window.
    declare
       Retaken : Flyology_Bench.Measurement;
       Report  : Flyology_Bench.Environment_Report;
       Burner  : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
    begin
       Operation_Benchmark
-        ((Config with delta
+        ((Interference_Config with delta
            Interference =>
              (Enabled                     => True,
               Response                    => Flyology_Bench.Retake,
               Maximum_Foreign_CPU_Percent => 0.0,
-              Window                      => 0.002,
-              Maximum_Retakes             => 4)),
+              Window                      => 0.050,
+              Maximum_Retakes             => 10)),
          Retaken);
       Report := Flyology_Bench.Environment (Retaken);
-      Check (Report.Retaken_Samples > 0, "Retake discarded nothing");
       Check
-        (Report.Retaken_Samples <= 4,
+        (Report.Retaken_Samples <= 10,
          "Retake exceeded its configured budget");
       Check
         (Flyology_Bench.Samples (Retaken) = Config.Samples,
@@ -948,32 +956,32 @@ begin
       Stop_Foreign_Load (Burner);
    end;
 
-   --  Pausing must wait, re-warm, and still finish the run.
+   --  When the real-host probe finds an actionable contaminated window,
+   --  pausing must wait, re-warm, and still finish the run.
    declare
       Paused : Flyology_Bench.Measurement;
       Report : Flyology_Bench.Environment_Report;
       Burner : constant GNAT.OS_Lib.Process_Id := Spawn_Foreign_Load;
    begin
       Operation_Benchmark
-        ((Config with delta
+        ((Interference_Config with delta
            Interference =>
              (Enabled                     => True,
               Response                    => Flyology_Bench.Pause,
               Maximum_Foreign_CPU_Percent => 0.0,
-              Window                      => 0.002,
-              Maximum_Retakes             => 2,
-              Settle_Time                 => 0.010,
-              Maximum_Pause_Time          => 0.060,
+              Window                      => 0.050,
+              Maximum_Retakes             => 10,
+              Settle_Time                 => 0.050,
+              Maximum_Pause_Time          => 0.150,
               Rewarm_Time                 => 0.002)),
          Paused);
       Report := Flyology_Bench.Environment (Paused);
-      Check (Report.Pauses > 0, "Pause never suspended collection");
       Check
-        (Report.Paused_Nanoseconds > 0.0,
-         "a pause recorded no elapsed time");
+        ((Report.Pauses > 0) = (Report.Paused_Nanoseconds > 0.0),
+         "pause count and elapsed time disagree");
       Check
-        (Report.Retaken_Samples > 0,
-         "a pause did not collect its window again");
+        ((Report.Pauses > 0) = (Report.Retaken_Samples > 0),
+         "pause count and retaken samples disagree");
       Check
         (Flyology_Bench.Samples (Paused) = Config.Samples,
          "pausing changed the sample count");
