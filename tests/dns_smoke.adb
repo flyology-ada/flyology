@@ -1,14 +1,18 @@
 with Ada.Directories;
 with Ada.Exceptions;
+with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Cancellation;
 with Flyology.IO.DNS;
 with Flyology.IO.DNS.Testing;
 with Flyology.IO.Files;
 with Flyology.IO.Sockets;
+with Flyology.Operations;
+with Flyology.Operations.Drivers;
 with Flyology.Wake_Sources;
 
 procedure DNS_Smoke is
@@ -16,11 +20,88 @@ procedure DNS_Smoke is
    package Sockets renames Flyology.IO.Sockets;
    package Streams renames Ada.Streams;
    package Unbounded renames Ada.Strings.Unbounded;
+   package Operations renames Flyology.Operations;
+   package Drivers renames Flyology.Operations.Drivers;
 
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
+   use type Ada.Real_Time.Time;
    use type Sockets.Selector_Status;
    use type Flyology.IO.Files.File_Descriptor;
+   use type Operations.Driver_Event;
+   use type Operations.Terminal_Outcome;
+
+   type Parent_Phase is (Starting_DNS, Waiting_For_DNS, Cancelling_DNS);
+   type DNS_Parent (Owner : not null access Operations.Completion_Set'Class) is
+     new Operations.Operation (Owner)
+   with record
+      Child  : DNS.Resolve_Operation (Owner);
+      Server : Sockets.Endpoint := Sockets.No_Endpoint;
+      Phase  : Parent_Phase := Starting_DNS;
+      Failed : Boolean := False;
+   end record;
+
+   overriding
+   procedure Drive (Item : in out DNS_Parent; Event : Operations.Driver_Event);
+
+   overriding
+   procedure Request_Cancellation (Item : in out DNS_Parent);
+
+   overriding
+   procedure Drive (Item : in out DNS_Parent; Event : Operations.Driver_Event) is
+   begin
+      if Event = Operations.Start_Operation then
+         Item.Phase := Waiting_For_DNS;
+         DNS.Resolve_Using
+           ("cancel.test",
+            (1 => Item.Server),
+            DNS.IPv4_Only,
+            Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (2.0),
+            Attempts       => 1,
+            Retry_Interval => 1.0,
+            Operation      => Item.Child);
+         Operations.Continue_After (Item, Item.Child);
+      elsif Event = Operations.Dependency_Changed then
+         begin
+            declare
+               Ignored : constant DNS.Address_Array := DNS.Finish (Item.Child);
+               pragma Unreferenced (Ignored);
+            begin
+               Item.Failed := Item.Phase /= Cancelling_DNS;
+            end;
+         exception
+            when DNS.Operation_Cancelled =>
+               Item.Failed := Item.Phase /= Cancelling_DNS;
+            when others =>
+               Item.Failed := True;
+         end;
+         Operations.Release (Item.Child);
+         Drivers.Complete (Item, (if Item.Failed then Operations.Failed else Operations.Cancelled));
+      else
+         Item.Failed := True;
+         Drivers.Complete (Item, Operations.Failed);
+      end if;
+   end Drive;
+
+   overriding
+   procedure Request_Cancellation (Item : in out DNS_Parent) is
+   begin
+      Item.Phase := Cancelling_DNS;
+      Operations.Cancel (Item.Child);
+   exception
+      when others =>
+         Item.Failed := True;
+         Drivers.Complete (Item, Operations.Failed);
+   end Request_Cancellation;
+
+   procedure Start_Parent (Item : in out DNS_Parent; Server : Sockets.Endpoint) is
+   begin
+      Item.Server := Server;
+      Item.Phase := Starting_DNS;
+      Item.Failed := False;
+      Drivers.Start (Item);
+      Operations.Drive (Operations.Operation'Class (Item), Operations.Start_Operation);
+   end Start_Parent;
 
    function Run (Model : Flyology.Execution_Model) return Boolean is
       Cancel_Source     : aliased Flyology.Wake_Sources.Source;
@@ -373,7 +454,8 @@ procedure DNS_Smoke is
             Truncated : Boolean := False;
             Malformed : Boolean := False;
             TTL       : Natural := 60;
-            Socket    : access Sockets.Socket_Type := null)
+            Socket    : access Sockets.Socket_Type := null;
+            Datagram  : access Sockets.Socket_Type := null)
          is
             Response      : Streams.Stream_Element_Array (1 .. 512) := (others => 0);
             Position      : Streams.Stream_Element_Offset := 1;
@@ -442,7 +524,11 @@ procedure DNS_Smoke is
                end if;
             end if;
             if Socket = null then
-               Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent_Last, Destination);
+               if Datagram = null then
+                  Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent_Last, Destination);
+               else
+                  Sockets.Send_Socket (Datagram.all, Response (1 .. Position - 1), Sent_Last, Destination);
+               end if;
             else
                declare
                   Prefix : Streams.Stream_Element_Array (1 .. 2);
@@ -492,6 +578,17 @@ procedure DNS_Smoke is
                elsif Name = "malformed.test" then
                   Send_Response (Name, IPv4 => "192.0.2.2", Malformed => True);
                   Send_Response (Name, IPv4 => "192.0.2.2");
+               elsif Name = "off-path.test" then
+                  declare
+                     Spoof : aliased Sockets.Socket_Type;
+                  begin
+                     Sockets.Create_Socket (Spoof, Sockets.IPv4, Sockets.Socket_Datagram);
+                     Sockets.Bind_Socket
+                       (Spoof, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+                     Send_Response (Name, IPv4 => "192.0.2.250", Datagram => Spoof'Access);
+                     Sockets.Close_Socket (Spoof);
+                  end;
+                  Send_Response (Name, IPv4 => "192.0.2.3");
                elsif Name = "retry.test" then
                   Retry_Count := Retry_Count + 1;
                   if Retry_Count > 1 then
@@ -535,8 +632,10 @@ procedure DNS_Smoke is
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
-               elsif Name = "tcp-truncated.test" then
-                  Control.TCP_Truncated_Query;
+               elsif Name in "tcp-truncated.test" | "scoped-tcp-truncated.test" then
+                  if Name = "tcp-truncated.test" then
+                     Control.TCP_Truncated_Query;
+                  end if;
                   Send_Response (Name, Truncated => True);
                   declare
                      Connection : aliased Sockets.Socket_Type;
@@ -804,6 +903,451 @@ procedure DNS_Smoke is
             end;
             OK := OK and Raised;
          end Expect_Malformed;
+
+         procedure Run_Scoped_Checks is
+            function Ref (Item : Operations.Operation'Class) return Operations.Operation_Reference
+            renames Operations.Reference;
+         begin
+            Set_Stage ("scoped UDP and hidden child");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (4);
+               Operation : aliased DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "a.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+               Gate      : Operations.Gate_Operation := Operations.Wait_All (Set'Access, [Ref (Operation)]);
+               Batch     : Operations.Completion_Batch (Set.Capacity);
+               Matched   : Operations.Completion_Batch (Set.Capacity);
+            begin
+               while not Operations.Is_Terminal (Operation) loop
+                  Operations.Wait_Some (Set, Batch);
+                  for Index in 1 .. Batch.Count loop
+                     OK :=
+                       OK
+                       and then Natural (Batch.Ids (Index))
+                                in Operations.Id (Operation) | Operations.Id (Gate);
+                  end loop;
+               end loop;
+               Operations.Wait_All (Set);
+               Operations.Finish (Gate, Matched);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.1";
+               end;
+            end;
+
+            Set_Stage ("scoped TCP fallback");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "tcp.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "198.51.100.9";
+               end;
+            end;
+
+            Set_Stage ("scoped malformed retry");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "malformed.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.2";
+               end;
+            end;
+
+            Set_Stage ("scoped off-path datagram");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "off-path.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.3";
+               end;
+            end;
+
+            Set_Stage ("scoped truncated TCP response");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "scoped-tcp-truncated.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+               Raised    : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Malformed_Response =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
+            end;
+
+            Set_Stage ("scoped configuration snapshot");
+            DNS.Clear_Cache;
+            declare
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    "config.test",
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.53";
+               end;
+            end;
+
+            Set_Stage ("scoped gates");
+            declare
+               Set       : aliased Operations.Completion_Set (6);
+               One       : aliased DNS.Resolve_Operation :=
+                 DNS.Resolve_Using (Set'Access, "192.0.2.1", Servers, DNS.IPv4_Only);
+               Two       : aliased DNS.Resolve_Operation :=
+                 DNS.Resolve_Using (Set'Access, "192.0.2.2", Servers, DNS.IPv4_Only);
+               Three     : aliased DNS.Resolve_Operation :=
+                 DNS.Resolve_Using (Set'Access, "192.0.2.3", Servers, DNS.IPv4_Only);
+               Some_Gate : Operations.Gate_Operation :=
+                 Operations.Wait_Some (Set'Access, [Ref (One), Ref (Two)], Required => 1);
+               All_Gate  : Operations.Gate_Operation :=
+                 Operations.Wait_All (Set'Access, [Ref (One), Ref (Two)]);
+               Success   : Operations.Gate_Operation :=
+                 Operations.Wait_For_Success (Set'Access, [Ref (Two), Ref (Three)]);
+               Matched   : Operations.Completion_Batch (Set.Capacity);
+            begin
+               Operations.Wait_All (Set);
+               Operations.Finish (Some_Gate, Matched);
+               Operations.Finish (All_Gate, Matched);
+               Operations.Finish (Success, Matched);
+               declare
+                  First  : constant DNS.Address_Array := DNS.Finish (One);
+                  Second : constant DNS.Address_Array := DNS.Finish (Two);
+                  Third  : constant DNS.Address_Array := DNS.Finish (Three);
+               begin
+                  OK := OK and then First'Length = 1 and then Second'Length = 1 and then Third'Length = 1;
+               end;
+            end;
+
+            Set_Stage ("scoped token cancellation");
+            declare
+               Stop      : aliased Flyology.Cancellation.Token;
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "cancel.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (2.0),
+                    Attempts       => 1,
+                    Retry_Interval => 1.0,
+                    Token          => Stop'Access);
+               Raised    : Boolean := False;
+            begin
+               delay 0.02;
+               Stop.Request;
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Operation_Cancelled =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
+            end;
+
+            Set_Stage ("scoped already-requested token");
+            declare
+               Stop      : aliased Flyology.Cancellation.Token;
+               Set       : aliased Operations.Completion_Set (1);
+               Operation : DNS.Resolve_Operation (Set'Access);
+               Raised    : Boolean := False;
+            begin
+               Stop.Request;
+               DNS.Resolve_Using
+                 ("cancel.test",
+                  Servers,
+                  DNS.IPv4_Only,
+                  Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (2.0),
+                  Attempts       => 1,
+                  Retry_Interval => 1.0,
+                  Token          => Stop'Access,
+                  Operation      => Operation);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Operation_Cancelled =>
+                     Raised := True;
+               end;
+               OK := OK and then Raised and then Operations.Pending_Count (Set) = 0;
+            end;
+
+            Set_Stage ("scoped explicit cancellation");
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "cancel.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (2.0),
+                    Attempts       => 1,
+                    Retry_Interval => 1.0);
+               Raised    : Boolean := False;
+            begin
+               delay 0.02;
+               Operations.Cancel (Operation);
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Operation_Cancelled =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
+            end;
+
+            Set_Stage ("scoped deadline");
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "cancel.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (0.05),
+                    Attempts       => 1,
+                    Retry_Interval => 1.0);
+               Raised    : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when Flyology.IO.Timeout_Error =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
+            end;
+
+            Set_Stage ("scoped already-expired deadline");
+            declare
+               Set       : aliased Operations.Completion_Set (1);
+               Operation : DNS.Resolve_Operation (Set'Access);
+               Raised    : Boolean := False;
+            begin
+               DNS.Resolve_Using
+                 ("cancel.test",
+                  Servers,
+                  DNS.IPv4_Only,
+                  Ada.Real_Time.Clock,
+                  Attempts       => 1,
+                  Retry_Interval => 1.0,
+                  Operation      => Operation);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when Flyology.IO.Timeout_Error =>
+                     Raised := True;
+               end;
+               OK := OK and then Raised and then Operations.Pending_Count (Set) = 0;
+            end;
+
+            Set_Stage ("scoped immediate resolver bypass");
+            declare
+               Empty     : DNS.Name_Server_Array (1 .. 0);
+               Set       : aliased Operations.Completion_Set (1);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using (Set'Access, "192.0.2.44", Empty, DNS.IPv4_Only, Retry_Interval => 0.0);
+            begin
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.44";
+               end;
+            end;
+
+            Set_Stage ("scoped child capacity rollback");
+            declare
+               Set       : aliased Operations.Completion_Set (1);
+               Operation : DNS.Resolve_Operation (Set'Access);
+               Raised    : Boolean := False;
+            begin
+               begin
+                  DNS.Resolve_Using
+                    ("a.test",
+                     Servers,
+                     DNS.IPv4_Only,
+                     Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                     Attempts       => 1,
+                     Retry_Interval => Attempt_Interval,
+                     Operation      => Operation);
+               exception
+                  when Operations.Capacity_Error =>
+                     Raised := True;
+               end;
+               OK := OK and then Raised and then Operations.Pending_Count (Set) = 0;
+            end;
+
+            Set_Stage ("scoped parent cancellation");
+            declare
+               Set    : aliased Operations.Completion_Set (3);
+               Parent : DNS_Parent (Set'Access);
+            begin
+               Start_Parent (Parent, Server);
+               delay 0.02;
+               Operations.Cancel (Parent);
+               Operations.Wait_All (Set);
+               OK :=
+                 OK and then Operations.Outcome (Parent) = Operations.Cancelled and then not Parent.Failed;
+               Operations.Consume (Parent);
+            end;
+
+            Set_Stage ("scoped abandonment");
+            declare
+               Set : aliased Operations.Completion_Set (2);
+            begin
+               declare
+                  Operation : DNS.Resolve_Operation :=
+                    DNS.Resolve_Using
+                      (Set'Access,
+                       "cancel.test",
+                       Servers,
+                       DNS.IPv4_Only,
+                       Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (2.0),
+                       Attempts       => 1,
+                       Retry_Interval => 1.0);
+                  pragma Unreferenced (Operation);
+               begin
+                  delay 0.02;
+               end;
+               OK := OK and then Operations.Pending_Count (Set) = 0;
+            end;
+
+            Set_Stage ("scoped slot reuse and cleanup");
+            declare
+               Set       : aliased Operations.Completion_Set (1);
+               Operation : DNS.Resolve_Operation (Set'Access);
+            begin
+               for Attempt in 1 .. 10_000 loop
+                  DNS.Resolve_Using ("192.0.2.44", Servers, DNS.IPv4_Only, Operation => Operation);
+                  declare
+                     Values : constant DNS.Address_Array := DNS.Finish (Operation);
+                  begin
+                     OK := OK and then Values'Length = 1;
+                  end;
+               end loop;
+               OK := OK and then Operations.Pending_Count (Set) = 0;
+            end;
+         end Run_Scoped_Checks;
       begin
          Control.Await_Start;
          Control.Get_Address (Server);
@@ -988,6 +1532,7 @@ procedure DNS_Smoke is
                OK := False;
          end;
          OK := OK and then Control.Missing_Queries = 1;
+         Run_Scoped_Checks;
          Set_Stage ("cancellation");
          begin
             declare

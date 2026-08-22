@@ -1,10 +1,9 @@
 with Ada.Characters.Handling;
-with Ada.Real_Time;
 with Ada.Strings.Fixed;
 with Flyology.DNS_Test_Observations;
 with Flyology.DNS_Policy;
 with Flyology.IO.Files;
-with Interfaces;
+with Flyology.Operations.Drivers;
 with Interfaces.C;
 with System;
 
@@ -21,36 +20,23 @@ package body Flyology.IO.DNS is
    use type Streams.Stream_Element;
    use type Sockets.Address_Family;
    use type Flyology.IO.Files.File_Descriptor;
+   use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Terminal_Outcome;
 
-   Max_Name_Length       : constant := 253;
-   Max_Packet_Length     : constant := 4_096;
-   Max_TCP_Packet_Length : constant := 16_384;
-   Max_Config_Length     : constant := 16_384;
-   Max_Name_Servers      : constant := 4;
-   Max_Search_Domains    : constant := 6;
-   Max_Addresses         : constant := 16;
-   Max_Records           : constant := 32;
-   Max_Cache_Entries     : constant := 64;
-   Max_Cache_Key_Length  : constant := 512;
-   DNS_Port              : constant Sockets.Port := 53;
-   Type_A                : constant Natural := 1;
-   Type_CNAME            : constant Natural := 5;
-   Type_SOA              : constant Natural := 6;
-   Type_AAAA             : constant Natural := 28;
-   Class_IN              : constant Natural := 1;
+   Max_Packet_Length    : constant := 4_096;
+   Max_Config_Length    : constant := 16_384;
+   Max_Records          : constant := 32;
+   Max_Cache_Entries    : constant := 64;
+   Max_Cache_Key_Length : constant := 512;
+   DNS_Port             : constant Sockets.Port := 53;
+   Type_A               : constant Natural := 1;
+   Type_CNAME           : constant Natural := 5;
+   Type_SOA             : constant Natural := 6;
+   Type_AAAA            : constant Natural := 28;
+   Class_IN             : constant Natural := 1;
 
    subtype Byte is U8.Unsigned_8;
    type Byte_Array is array (Natural range <>) of Byte;
-   type Name_Buffer is record
-      Length : Natural range 0 .. Max_Name_Length := 0;
-      Data   : String (1 .. Max_Name_Length) := (others => ' ');
-   end record;
-
-   type Raw_Address is record
-      Family : Sockets.Address_Family := Sockets.IPv4;
-      Bytes  : Byte_Array (1 .. 16) := (others => 0);
-   end record;
-   type Raw_Address_Array is array (Positive range <>) of Raw_Address;
 
    type Parsed_Record is record
       Owner   : Name_Buffer;
@@ -60,7 +46,6 @@ package body Flyology.IO.DNS is
       Address : Raw_Address;
    end record;
    type Parsed_Record_Array is array (Positive range <>) of Parsed_Record;
-   type Name_Buffer_Array is array (Positive range <>) of Name_Buffer;
 
    type Parse_Outcome is (Answer, No_Data, Not_Found, Truncated, Server_Failure);
    type Parse_Result is record
@@ -70,17 +55,6 @@ package body Flyology.IO.DNS is
       Canonical     : Name_Buffer;
       TTL           : Natural := 0;
       Negative_TTL  : Natural := 30;
-   end record;
-
-   type Resolver_Config is record
-      Servers      : Name_Server_Array (1 .. Max_Name_Servers);
-      Server_Count : Natural range 0 .. Max_Name_Servers := 0;
-      Search       : Name_Buffer_Array (1 .. Max_Search_Domains);
-      Search_Count : Natural range 0 .. Max_Search_Domains := 0;
-      NDots        : Natural range 0 .. 15 := 1;
-      Attempts     : Positive range 1 .. 5 := 2;
-      Per_Attempt  : Duration := 2.0;
-      Rotate       : Boolean := False;
    end record;
 
    type Cache_Entry is record
@@ -1618,6 +1592,951 @@ package body Flyology.IO.DNS is
       end loop;
       return Try_Name (Name);
    end Resolve;
+
+   function Load_Configuration
+     (Configuration_Path : String := "/etc/resolv.conf") return Resolver_Configuration is
+   begin
+      return Result : Resolver_Configuration do
+         Read_Config (Result.Value, Configuration_Path);
+         if Result.Value.Server_Count = 0 then
+            raise Resolution_Failed with "no numeric name server found in resolver configuration";
+         end if;
+      end return;
+   end Load_Configuration;
+
+   function Time_Left (Deadline : Ada.Real_Time.Time) return Duration is
+   begin
+      if Deadline = Ada.Real_Time.Time_Last then
+         return Infinite;
+      elsif Ada.Real_Time.Clock >= Deadline then
+         return 0.0;
+      else
+         return Ada.Real_Time.To_Duration (Deadline - Ada.Real_Time.Clock);
+      end if;
+   end Time_Left;
+
+   procedure Close_Quietly (Socket : in out Sockets.Socket_Type) is
+   begin
+      if Sockets.Is_Open (Socket) then
+         Sockets.Close_Socket (Socket);
+      end if;
+   exception
+      when others =>
+         null;
+   end Close_Quietly;
+
+   procedure Clear_Scoped_State (Item : in out Resolve_Operation) is
+   begin
+      Close_Quietly (Item.State.UDP_Socket);
+      Close_Quietly (Item.State.TCP_Socket);
+      Item.State.Token := null;
+      Item.State.Token_Source := Invalid_Descriptor;
+      Item.State.Child := No_Child;
+      Item.State.Phase := Idle;
+   end Clear_Scoped_State;
+
+   procedure Complete_Scoped
+     (Item    : in out Resolve_Operation;
+      Outcome : Flyology.Operations.Terminal_Outcome;
+      Failure : Resolve_Failure := No_Failure) is
+   begin
+      Item.State.Failure := Failure;
+      Clear_Scoped_State (Item);
+      Flyology.Operations.Drivers.Complete (Item, Outcome);
+   end Complete_Scoped;
+
+   function Child_Interrupts (Item : Resolve_Operation) return Interrupt_Set is
+   begin
+      if Item.State.Token_Source = Invalid_Descriptor then
+         return No_Interrupts;
+      else
+         return (1 => Item.State.Token_Source);
+      end if;
+   end Child_Interrupts;
+
+   procedure Build_Candidates (State : in out Resolve_Operation_State; Name : String; Use_Search : Boolean) is
+      Absolute : constant Boolean := Name'Length > 0 and then Name (Name'Last) = '.';
+      Bare     : constant Name_Buffer := To_Name (Name);
+      Dots     : Natural := 0;
+
+      procedure Append (Value : Name_Buffer) is
+      begin
+         State.Candidate_Count := State.Candidate_Count + 1;
+         State.Candidates (State.Candidate_Count) := Value;
+      end Append;
+   begin
+      State.Original_Name := Bare;
+      State.Candidate_Count := 0;
+      State.Candidate_Index := 0;
+      if not Use_Search
+        or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv4)
+        or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv6)
+        or else Image (Bare) = "localhost"
+      then
+         Append (Bare);
+         return;
+      end if;
+      for Character_Of_Name of Name loop
+         if Character_Of_Name = '.' then
+            Dots := Dots + 1;
+         end if;
+      end loop;
+      if Absolute or else Dots >= State.Configuration.NDots then
+         Append (Bare);
+         if Absolute then
+            return;
+         end if;
+      end if;
+      for Index in 1 .. State.Configuration.Search_Count loop
+         declare
+            Suffix : constant String := Image (State.Configuration.Search (Index));
+         begin
+            if Bare.Length < Max_Name_Length and then Suffix'Length <= Max_Name_Length - Bare.Length - 1 then
+               Append (To_Name (Image (Bare) & "." & Suffix));
+            end if;
+         end;
+      end loop;
+      Append (Bare);
+   end Build_Candidates;
+
+   procedure Start_Scoped
+     (Item          : in out Resolve_Operation;
+      Name          : String;
+      Configuration : Resolver_Config;
+      Family        : Family_Preference;
+      Deadline      : Ada.Real_Time.Time;
+      Token         : access Flyology.Cancellation.Token;
+      Use_Search    : Boolean)
+   is
+      Token_Source : Descriptor := Invalid_Descriptor;
+      Requested    : Boolean := False;
+      Immediate    : constant Boolean :=
+        Sockets.Is_IP_Address (Name, Sockets.IPv4)
+        or else Sockets.Is_IP_Address (Name, Sockets.IPv6)
+        or else Lower (Name) in "localhost" | "localhost.";
+   begin
+      if Configuration.Server_Count = 0 and then not Immediate then
+         raise Resolution_Failed with "no usable DNS name servers";
+      elsif not Immediate and then Configuration.Per_Attempt <= 0.0 then
+         raise Resolution_Failed with "DNS retry interval must be positive";
+      elsif not Immediate
+        and then Configuration.Server_Count > 0
+        and then Configuration.Attempts > Natural'Last / Configuration.Server_Count
+      then
+         raise Resolution_Failed with "DNS attempt count is too large";
+      end if;
+
+      Item.State.Configuration := Configuration;
+      Item.State.Family := Family;
+      Item.State.Deadline := Deadline;
+      Item.State.Rotation := 0;
+      Item.State.Value_Count := 0;
+      Item.State.Failure := No_Failure;
+      Item.State.Transport_Failed := False;
+      Item.State.Malformed_Failed := False;
+      Item.State.Server_Failed := False;
+      Build_Candidates (Item.State, Name, Use_Search);
+      if Use_Search and then Configuration.Rotate and then Configuration.Server_Count > 1 then
+         Server_Rotation.Next (Configuration.Server_Count, Item.State.Rotation);
+      end if;
+
+      if Token /= null then
+         Token.Wait_Source (Token_Source, Requested);
+      end if;
+      Item.State.Token := (if Token = null then null else Token.all'Unchecked_Access);
+      Item.State.Token_Source := Token_Source;
+      Flyology.Operations.Drivers.Start (Item);
+      if Requested then
+         Complete_Scoped (Item, Flyology.Operations.Cancelled, Cancelled_Failure);
+      elsif Deadline /= Ada.Real_Time.Time_Last and then Ada.Real_Time.Clock >= Deadline then
+         Complete_Scoped (Item, Flyology.Operations.Failed, Timeout_Failure);
+      else
+         Item.State.Phase := Begin_Candidate;
+         Flyology.Operations.Drive
+           (Flyology.Operations.Operation'Class (Item), Flyology.Operations.Start_Operation);
+      end if;
+   exception
+      when others =>
+         Clear_Scoped_State (Item);
+         if Flyology.Operations.Is_Active (Item) then
+            Flyology.Operations.Drivers.Rollback_Start (Item);
+         elsif Flyology.Operations.Is_Terminal (Item) then
+            Flyology.Operations.Consume (Item);
+         end if;
+         raise;
+   end Start_Scoped;
+
+   function Resolve
+     (Set           : not null access Flyology.Operations.Completion_Set'Class;
+      Name          : String;
+      Configuration : not null access constant Resolver_Configuration;
+      Family        : Family_Preference := Any_Family;
+      Deadline      : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
+      Token         : access Flyology.Cancellation.Token := null) return Resolve_Operation is
+   begin
+      return Result : Resolve_Operation (Set) do
+         Start_Scoped (Result, Name, Configuration.Value, Family, Deadline, Token, Use_Search => True);
+      end return;
+   end Resolve;
+
+   procedure Resolve
+     (Name          : String;
+      Configuration : not null access constant Resolver_Configuration;
+      Family        : Family_Preference := Any_Family;
+      Deadline      : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
+      Token         : access Flyology.Cancellation.Token := null;
+      Operation     : in out Resolve_Operation) is
+   begin
+      Start_Scoped (Operation, Name, Configuration.Value, Family, Deadline, Token, Use_Search => True);
+   end Resolve;
+
+   function Explicit_Configuration
+     (Name_Servers : Name_Server_Array; Attempts : Positive; Retry_Interval : Duration) return Resolver_Config
+   is
+      Result : Resolver_Config;
+   begin
+      if Name_Servers'Length > Max_Name_Servers then
+         raise Resolution_Failed with "too many DNS name servers";
+      end if;
+      Result.Server_Count := Name_Servers'Length;
+      for Offset in 0 .. Name_Servers'Length - 1 loop
+         Result.Servers (Offset + 1) := Name_Servers (Name_Servers'First + Offset);
+      end loop;
+      Result.Search_Count := 0;
+      Result.NDots := 1;
+      Result.Attempts := Attempts;
+      Result.Per_Attempt := Retry_Interval;
+      Result.Rotate := False;
+      return Result;
+   end Explicit_Configuration;
+
+   function Resolve_Using
+     (Set            : not null access Flyology.Operations.Completion_Set'Class;
+      Name           : String;
+      Name_Servers   : Name_Server_Array;
+      Family         : Family_Preference := Any_Family;
+      Deadline       : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
+      Attempts       : Positive := 2;
+      Retry_Interval : Duration := 1.0;
+      Token          : access Flyology.Cancellation.Token := null) return Resolve_Operation
+   is
+      Configuration : constant Resolver_Config :=
+        Explicit_Configuration (Name_Servers, Attempts, Retry_Interval);
+   begin
+      return Result : Resolve_Operation (Set) do
+         Start_Scoped (Result, Name, Configuration, Family, Deadline, Token, Use_Search => False);
+      end return;
+   end Resolve_Using;
+
+   procedure Resolve_Using
+     (Name           : String;
+      Name_Servers   : Name_Server_Array;
+      Family         : Family_Preference := Any_Family;
+      Deadline       : Ada.Real_Time.Time := Ada.Real_Time.Time_Last;
+      Attempts       : Positive := 2;
+      Retry_Interval : Duration := 1.0;
+      Token          : access Flyology.Cancellation.Token := null;
+      Operation      : in out Resolve_Operation)
+   is
+      Configuration : constant Resolver_Config :=
+        Explicit_Configuration (Name_Servers, Attempts, Retry_Interval);
+   begin
+      Start_Scoped (Operation, Name, Configuration, Family, Deadline, Token, Use_Search => False);
+   end Resolve_Using;
+
+   overriding
+   procedure Drive (Item : in out Resolve_Operation; Event : Flyology.Operations.Driver_Event) is
+      procedure Fail (Failure : Resolve_Failure) is
+      begin
+         Complete_Scoped (Item, Flyology.Operations.Failed, Failure);
+      end Fail;
+
+      procedure Release_Child is
+      begin
+         case Item.State.Child is
+            when Send_Child            =>
+               Flyology.Operations.Release (Item.State.Send_Operation);
+
+            when Receive_Child         =>
+               Flyology.Operations.Release (Item.State.Receive_Operation);
+
+            when Connect_Child         =>
+               Flyology.Operations.Release (Item.State.Connect_Operation);
+
+            when Send_All_Child        =>
+               Flyology.Operations.Release (Item.State.Send_All_Operation);
+
+            when Receive_Exactly_Child =>
+               Flyology.Operations.Release (Item.State.Receive_Exactly_Operation);
+
+            when No_Child              =>
+               null;
+         end case;
+         Item.State.Child := No_Child;
+      end Release_Child;
+
+      procedure Finish_Send (Last : out Streams.Stream_Element_Offset) is
+      begin
+         begin
+            Sockets.Finish (Item.State.Send_Operation, Last);
+         exception
+            when others =>
+               Release_Child;
+               raise;
+         end;
+         Release_Child;
+      end Finish_Send;
+
+      procedure Finish_Receive (Last : out Streams.Stream_Element_Offset) is
+      begin
+         begin
+            Sockets.Finish (Item.State.Receive_Operation, Last);
+         exception
+            when others =>
+               Release_Child;
+               raise;
+         end;
+         Release_Child;
+      end Finish_Receive;
+
+      procedure Finish_Connect is
+      begin
+         begin
+            Sockets.Finish (Item.State.Connect_Operation);
+         exception
+            when others =>
+               Release_Child;
+               raise;
+         end;
+         Release_Child;
+      end Finish_Connect;
+
+      procedure Finish_Send_All is
+      begin
+         begin
+            Sockets.Finish (Item.State.Send_All_Operation);
+         exception
+            when others =>
+               Release_Child;
+               raise;
+         end;
+         Release_Child;
+      end Finish_Send_All;
+
+      procedure Finish_Receive_Exactly is
+      begin
+         begin
+            Sockets.Finish (Item.State.Receive_Exactly_Operation);
+         exception
+            when others =>
+               Release_Child;
+               raise;
+         end;
+         Release_Child;
+      end Finish_Receive_Exactly;
+
+      procedure Start_UDP_Send;
+      procedure Start_UDP_Receive;
+      procedure Start_TCP_Connect;
+      procedure Start_TCP_Send;
+      procedure Start_TCP_Length;
+      procedure Start_TCP_Message;
+      procedure Begin_Attempt;
+      procedure Begin_Query;
+      procedure Begin_Family;
+      procedure End_Family (Failure : Resolve_Failure);
+      procedure End_Candidate (Failure : Resolve_Failure);
+      procedure Process_Parsed (Parsed : Parse_Result; From_TCP : Boolean);
+
+      procedure Continue_With (Child : in out Flyology.Operations.Operation'Class) is
+      begin
+         Flyology.Operations.Continue_After (Item, Child);
+      end Continue_With;
+
+      procedure Start_UDP_Send is
+         Data : Streams.Stream_Element_Array renames
+           Item.State.Query_Data (1 .. Streams.Stream_Element_Offset (Item.State.Query_Length));
+      begin
+         Item.State.Phase := UDP_Sending;
+         Sockets.Send
+           (Item.State.UDP_Socket'Unchecked_Access,
+            Data'Unrestricted_Access,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Send_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Send_Child;
+         Continue_With (Item.State.Send_Operation);
+      end Start_UDP_Send;
+
+      procedure Start_UDP_Receive is
+         Data : Streams.Stream_Element_Array renames
+           Item.State.TCP_Data (1 .. Streams.Stream_Element_Offset (Max_Packet_Length));
+      begin
+         Item.State.Phase := UDP_Receiving;
+         Sockets.Receive
+           (Item.State.UDP_Socket'Unchecked_Access,
+            Data'Unrestricted_Access,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Receive_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Receive_Child;
+         Continue_With (Item.State.Receive_Operation);
+      end Start_UDP_Receive;
+
+      procedure Start_TCP_Connect is
+         Server : constant Sockets.Endpoint :=
+           Item.State.Configuration.Servers
+             (1
+              + DNS_Policy.Selected_Endpoint
+                  (Item.State.Attempt_Index, Item.State.Rotation, Item.State.Configuration.Server_Count));
+      begin
+         Close_Quietly (Item.State.TCP_Socket);
+         Sockets.Create_Socket (Item.State.TCP_Socket, Server.Family, Sockets.Socket_Stream);
+         Item.State.Phase := TCP_Connecting;
+         Sockets.Connect
+           (Item.State.TCP_Socket'Unchecked_Access,
+            Server,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Connect_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Connect_Child;
+         Continue_With (Item.State.Connect_Operation);
+      end Start_TCP_Connect;
+
+      procedure Start_TCP_Send is
+         Data : Streams.Stream_Element_Array renames
+           Item.State.TCP_Data (1 .. Streams.Stream_Element_Offset (Item.State.Query_Length + 2));
+      begin
+         Item.State.TCP_Data (1) := Streams.Stream_Element ((Item.State.Query_Length / 256) mod 256);
+         Item.State.TCP_Data (2) := Streams.Stream_Element (Item.State.Query_Length mod 256);
+         Item.State.TCP_Data (3 .. Streams.Stream_Element_Offset (Item.State.Query_Length + 2)) :=
+           Item.State.Query_Data (1 .. Streams.Stream_Element_Offset (Item.State.Query_Length));
+         Item.State.Phase := TCP_Sending;
+         Sockets.Send_All
+           (Item.State.TCP_Socket'Unchecked_Access,
+            Data'Unrestricted_Access,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Send_All_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Send_All_Child;
+         Continue_With (Item.State.Send_All_Operation);
+      end Start_TCP_Send;
+
+      procedure Start_TCP_Length is
+         Prefix : Streams.Stream_Element_Array renames Item.State.TCP_Data (1 .. 2);
+      begin
+         Item.State.Phase := TCP_Receiving_Length;
+         Sockets.Receive_Exactly
+           (Item.State.TCP_Socket'Unchecked_Access,
+            Prefix'Unrestricted_Access,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Receive_Exactly_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Receive_Exactly_Child;
+         Continue_With (Item.State.Receive_Exactly_Operation);
+      end Start_TCP_Length;
+
+      procedure Start_TCP_Message is
+         Data : Streams.Stream_Element_Array renames
+           Item.State.TCP_Data (3 .. Streams.Stream_Element_Offset (Item.State.TCP_Length + 2));
+      begin
+         Item.State.Phase := TCP_Receiving_Message;
+         Sockets.Receive_Exactly
+           (Item.State.TCP_Socket'Unchecked_Access,
+            Data'Unrestricted_Access,
+            Time_Left (Item.State.Attempt_Deadline),
+            Item.State.Receive_Exactly_Operation,
+            Child_Interrupts (Item));
+         Item.State.Child := Receive_Exactly_Child;
+         Continue_With (Item.State.Receive_Exactly_Operation);
+      end Start_TCP_Message;
+
+      procedure Store_Aliases (Parsed : Parse_Result) is
+         TTL : Natural := Parsed.TTL;
+      begin
+         for Index in reverse 1 .. Item.State.CNAME_Depth loop
+            TTL := Natural'Min (TTL, Item.State.Alias_TTLs (Index));
+            Cache.Store
+              (Cache_Key
+                 (Item.State.Alias_Names (Index),
+                  Item.State.Query_Kind,
+                  Item.State.Configuration.Servers (1 .. Item.State.Configuration.Server_Count)),
+               False,
+               Parsed.Addresses,
+               Parsed.Address_Count,
+               TTL);
+         end loop;
+      end Store_Aliases;
+
+      procedure Append (Parsed : Parse_Result) is
+      begin
+         for Index in 1 .. Parsed.Address_Count loop
+            exit when Item.State.Value_Count = Max_Addresses;
+            Item.State.Value_Count := Item.State.Value_Count + 1;
+            Item.State.Values (Item.State.Value_Count) := Parsed.Addresses (Index);
+         end loop;
+      end Append;
+
+      procedure Process_Parsed (Parsed : Parse_Result; From_TCP : Boolean) is
+         Key : constant String :=
+           Cache_Key
+             (Item.State.Query_Name,
+              Item.State.Query_Kind,
+              Item.State.Configuration.Servers (1 .. Item.State.Configuration.Server_Count));
+      begin
+         Close_Quietly (Item.State.UDP_Socket);
+         if From_TCP then
+            Close_Quietly (Item.State.TCP_Socket);
+         end if;
+         case Parsed.Outcome is
+            when Answer         =>
+               Cache.Store (Key, False, Parsed.Addresses, Parsed.Address_Count, Parsed.TTL);
+               Store_Aliases (Parsed);
+               Append (Parsed);
+               End_Family (No_Failure);
+
+            when Not_Found      =>
+               Cache.Store (Key, True, Parsed.Addresses, 0, Parsed.Negative_TTL);
+               End_Family (Not_Found_Failure);
+
+            when No_Data        =>
+               if Parsed.Canonical.Length /= 0
+                 and then not Same_Name (Parsed.Canonical, Item.State.Query_Name)
+               then
+                  if Item.State.CNAME_Depth = 16 then
+                     End_Family (Malformed_Failure);
+                  else
+                     Item.State.CNAME_Depth := Item.State.CNAME_Depth + 1;
+                     Item.State.Alias_Names (Item.State.CNAME_Depth) := Item.State.Query_Name;
+                     Item.State.Alias_TTLs (Item.State.CNAME_Depth) := Parsed.TTL;
+                     Item.State.Query_Name := Parsed.Canonical;
+                     Begin_Query;
+                  end if;
+               else
+                  Cache.Store (Key, True, Parsed.Addresses, 0, Parsed.Negative_TTL);
+                  End_Family (Not_Found_Failure);
+               end if;
+
+            when Truncated      =>
+               if From_TCP then
+                  Item.State.Kind_Malformed_Failed := True;
+                  Begin_Attempt;
+               else
+                  Start_TCP_Connect;
+               end if;
+
+            when Server_Failure =>
+               Item.State.Kind_Server_Failed := True;
+               Begin_Attempt;
+         end case;
+      end Process_Parsed;
+
+      procedure End_Candidate (Failure : Resolve_Failure) is
+      begin
+         if Failure in Not_Found_Failure | Server_Failure
+           and then Item.State.Candidate_Index < Item.State.Candidate_Count
+         then
+            Item.State.Phase := Begin_Candidate;
+            Flyology.Operations.Drivers.Reschedule (Item);
+         else
+            Fail (Failure);
+         end if;
+      end End_Candidate;
+
+      procedure End_Family (Failure : Resolve_Failure) is
+      begin
+         if Failure = Malformed_Failure then
+            Item.State.Malformed_Failed := True;
+         elsif Failure = Server_Failure then
+            Item.State.Server_Failed := True;
+         elsif Failure in Timeout_Failure | Device_Failure | Socket_Failure then
+            Item.State.Transport_Failed := True;
+         end if;
+
+         if Item.State.Family = Any_Family and then Item.State.Family_Index = 1 then
+            Item.State.Family_Index := 2;
+            Item.State.Phase := Begin_Family;
+            Flyology.Operations.Drivers.Reschedule (Item);
+         elsif Item.State.Value_Count > 0 then
+            Complete_Scoped (Item, Flyology.Operations.Succeeded);
+         elsif Item.State.Malformed_Failed then
+            End_Candidate (Malformed_Failure);
+         elsif Item.State.Server_Failed then
+            End_Candidate (Server_Failure);
+         elsif Item.State.Transport_Failed then
+            End_Candidate (Timeout_Failure);
+         else
+            End_Candidate (Not_Found_Failure);
+         end if;
+      end End_Family;
+
+      procedure Begin_Attempt is
+         Maximum : constant Natural :=
+           Item.State.Configuration.Attempts * Item.State.Configuration.Server_Count;
+         Left    : Duration;
+
+         procedure Exhaust is
+         begin
+            case DNS_Policy.Classify_Exhausted
+                   (Malformed        => Item.State.Kind_Malformed_Failed,
+                    Server_Failed    => Item.State.Kind_Server_Failed,
+                    Transport_Failed => Item.State.Kind_Transport_Failed)
+            is
+               when DNS_Policy.Report_Malformed                                      =>
+                  End_Family (Malformed_Failure);
+
+               when DNS_Policy.Report_Server_Failure                                 =>
+                  End_Family (Server_Failure);
+
+               when DNS_Policy.Report_Transport_Failure | DNS_Policy.Report_Deadline =>
+                  End_Family (Timeout_Failure);
+            end case;
+         end Exhaust;
+      begin
+         if Time_Left (Item.State.Family_Deadline) = 0.0 then
+            Exhaust;
+            return;
+         end if;
+         Item.State.Attempt_Index := Item.State.Attempt_Index + 1;
+         if Item.State.Attempt_Index > Maximum then
+            Exhaust;
+            return;
+         end if;
+         Item.State.Transaction_ID := Next_Transaction_ID;
+         declare
+            Built  : constant Byte_Array :=
+              Build_Query (Item.State.Query_Name, Item.State.Query_Kind, Item.State.Transaction_ID);
+            Stream : constant Streams.Stream_Element_Array := To_Stream (Built);
+            Server : constant Sockets.Endpoint :=
+              Item.State.Configuration.Servers
+                (1
+                 + DNS_Policy.Selected_Endpoint
+                     (Item.State.Attempt_Index, Item.State.Rotation, Item.State.Configuration.Server_Count));
+         begin
+            Item.State.Query_Length := Stream'Length;
+            Item.State.Query_Data (1 .. Stream'Length) := Stream;
+            Left :=
+              Duration'Min (Item.State.Configuration.Per_Attempt, Time_Left (Item.State.Family_Deadline));
+            Item.State.Attempt_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Left);
+            Close_Quietly (Item.State.UDP_Socket);
+            Sockets.Create_Socket (Item.State.UDP_Socket, Server.Family, Sockets.Socket_Datagram);
+            Sockets.Connect_Socket (Item.State.UDP_Socket, Server);
+            Sockets.Prepare (Item.State.UDP_Socket);
+            Start_UDP_Send;
+         end;
+      end Begin_Attempt;
+
+      procedure Begin_Query is
+         Key      : constant String :=
+           Cache_Key
+             (Item.State.Query_Name,
+              Item.State.Query_Kind,
+              Item.State.Configuration.Servers (1 .. Item.State.Configuration.Server_Count));
+         Cached   : Raw_Address_Array (1 .. Max_Addresses);
+         Count    : Natural;
+         TTL      : Natural;
+         Found    : Boolean;
+         Negative : Boolean;
+         Parsed   : Parse_Result;
+      begin
+         Cache.Lookup (Key, Found, Negative, Cached, Count, TTL);
+         if Found then
+            if Negative then
+               End_Family (Not_Found_Failure);
+            else
+               Parsed :=
+                 (Outcome       => Answer,
+                  Addresses     => Cached,
+                  Address_Count => Count,
+                  Canonical     => Item.State.Query_Name,
+                  TTL           => TTL,
+                  Negative_TTL  => 30);
+               Store_Aliases (Parsed);
+               Append (Parsed);
+               End_Family (No_Failure);
+            end if;
+            return;
+         end if;
+         Item.State.Attempt_Index := 0;
+         Item.State.Kind_Transport_Failed := False;
+         Item.State.Kind_Malformed_Failed := False;
+         Item.State.Kind_Server_Failed := False;
+         Begin_Attempt;
+      end Begin_Query;
+
+      procedure Begin_Family is
+         Remaining_Time : Duration;
+      begin
+         Item.State.Query_Name := Item.State.Candidates (Item.State.Candidate_Index);
+         Item.State.CNAME_Depth := 0;
+         if Item.State.Family = IPv4_Only
+           or else (Item.State.Family = Any_Family and then Item.State.Family_Index = 2)
+         then
+            Item.State.Query_Kind := Type_A;
+            Item.State.Family_Deadline := Item.State.Deadline;
+         else
+            Item.State.Query_Kind := Type_AAAA;
+            if Item.State.Family = Any_Family and then Item.State.Deadline /= Ada.Real_Time.Time_Last then
+               Remaining_Time := Time_Left (Item.State.Deadline);
+               Item.State.Family_Deadline :=
+                 Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Duration'Max (0.0, Remaining_Time / 2.0));
+            else
+               Item.State.Family_Deadline := Item.State.Deadline;
+            end if;
+         end if;
+         Begin_Query;
+      end Begin_Family;
+
+      procedure Start_Candidate is
+         Name : Name_Buffer;
+      begin
+         Item.State.Candidate_Index := Item.State.Candidate_Index + 1;
+         Name := Item.State.Candidates (Item.State.Candidate_Index);
+         Item.State.Value_Count := 0;
+         Item.State.Transport_Failed := False;
+         Item.State.Malformed_Failed := False;
+         Item.State.Server_Failed := False;
+         if Sockets.Is_IP_Address (Image (Name), Sockets.IPv4) then
+            if Item.State.Family = IPv6_Only then
+               End_Candidate (Not_Found_Failure);
+            else
+               Item.State.Values (1) := Raw (Sockets.Parse_IP_Address (Image (Name)));
+               Item.State.Value_Count := 1;
+               Complete_Scoped (Item, Flyology.Operations.Succeeded);
+            end if;
+         elsif Sockets.Is_IP_Address (Image (Name), Sockets.IPv6) then
+            if Item.State.Family = IPv4_Only then
+               End_Candidate (Not_Found_Failure);
+            else
+               Item.State.Values (1) := Raw (Sockets.Parse_IP_Address (Image (Name)));
+               Item.State.Value_Count := 1;
+               Complete_Scoped (Item, Flyology.Operations.Succeeded);
+            end if;
+         elsif Image (Name) = "localhost" then
+            if Item.State.Family /= IPv4_Only then
+               Item.State.Value_Count := Item.State.Value_Count + 1;
+               Item.State.Values (Item.State.Value_Count) := Raw (Sockets.Loopback_IPv6);
+            end if;
+            if Item.State.Family /= IPv6_Only then
+               Item.State.Value_Count := Item.State.Value_Count + 1;
+               Item.State.Values (Item.State.Value_Count) := Raw (Sockets.Loopback_IPv4);
+            end if;
+            Complete_Scoped (Item, Flyology.Operations.Succeeded);
+         else
+            Item.State.Family_Index := 1;
+            Begin_Family;
+         end if;
+      end Start_Candidate;
+
+      procedure Transport_Failed is
+      begin
+         Close_Quietly (Item.State.UDP_Socket);
+         Close_Quietly (Item.State.TCP_Socket);
+         Item.State.Kind_Transport_Failed := True;
+         Begin_Attempt;
+      end Transport_Failed;
+
+      procedure Child_Completed is
+         Last   : Streams.Stream_Element_Offset;
+         Parsed : Parse_Result;
+      begin
+         if Item.State.Phase = Cancelling then
+            begin
+               case Item.State.Child is
+                  when Send_Child            =>
+                     Finish_Send (Last);
+
+                  when Receive_Child         =>
+                     Finish_Receive (Last);
+
+                  when Connect_Child         =>
+                     Finish_Connect;
+
+                  when Send_All_Child        =>
+                     Finish_Send_All;
+
+                  when Receive_Exactly_Child =>
+                     Finish_Receive_Exactly;
+
+                  when No_Child              =>
+                     null;
+               end case;
+            exception
+               when others =>
+                  null;
+            end;
+            Complete_Scoped (Item, Flyology.Operations.Cancelled, Cancelled_Failure);
+            return;
+         end if;
+
+         case Item.State.Phase is
+            when UDP_Sending           =>
+               Finish_Send (Last);
+               if Last /= Streams.Stream_Element_Offset (Item.State.Query_Length) then
+                  Fail (Resolution_Failure);
+               else
+                  Start_UDP_Receive;
+               end if;
+
+            when UDP_Receiving         =>
+               Finish_Receive (Last);
+               Parsed :=
+                 Parse_Response
+                   (To_Bytes (Item.State.TCP_Data (1 .. Max_Packet_Length), Last),
+                    Item.State.Transaction_ID,
+                    Item.State.Query_Name,
+                    Item.State.Query_Kind);
+               Process_Parsed (Parsed, From_TCP => False);
+
+            when TCP_Connecting        =>
+               Finish_Connect;
+               Start_TCP_Send;
+
+            when TCP_Sending           =>
+               Finish_Send_All;
+               Start_TCP_Length;
+
+            when TCP_Receiving_Length  =>
+               Finish_Receive_Exactly;
+               Item.State.TCP_Length :=
+                 Natural (Item.State.TCP_Data (1)) * 256 + Natural (Item.State.TCP_Data (2));
+               if Item.State.TCP_Length < 12 or else Item.State.TCP_Length > Max_TCP_Packet_Length then
+                  Item.State.Kind_Malformed_Failed := True;
+                  Begin_Attempt;
+               else
+                  Start_TCP_Message;
+               end if;
+
+            when TCP_Receiving_Message =>
+               Finish_Receive_Exactly;
+               Parsed :=
+                 Parse_Response
+                   (To_Bytes
+                      (Item.State.TCP_Data (3 .. Streams.Stream_Element_Offset (Item.State.TCP_Length + 2)),
+                       Streams.Stream_Element_Offset (Item.State.TCP_Length + 2)),
+                    Item.State.Transaction_ID,
+                    Item.State.Query_Name,
+                    Item.State.Query_Kind);
+               Process_Parsed (Parsed, From_TCP => True);
+
+            when others                =>
+               raise Program_Error with "DNS operation has no pending child phase";
+         end case;
+      exception
+         when Sockets.Operation_Interrupted | Flyology.Operations.Operation_Cancelled =>
+            Complete_Scoped (Item, Flyology.Operations.Cancelled, Cancelled_Failure);
+         when Timeout_Error =>
+            Transport_Failed;
+         when Malformed_Response =>
+            if Item.State.Phase = UDP_Receiving and then Time_Left (Item.State.Attempt_Deadline) > 0.0 then
+               Item.State.Kind_Malformed_Failed := True;
+               Start_UDP_Receive;
+            else
+               Item.State.Kind_Malformed_Failed := True;
+               Begin_Attempt;
+            end if;
+         when Device_Error | Sockets.Socket_Error =>
+            Transport_Failed;
+      end Child_Completed;
+   begin
+      if Item.State.Token /= null and then Item.State.Token.Requested then
+         if Event = Flyology.Operations.Dependency_Changed and then Item.State.Child /= No_Child then
+            Item.State.Phase := Cancelling;
+            Child_Completed;
+         else
+            Request_Cancellation (Item);
+         end if;
+      elsif Item.State.Phase = Begin_Candidate then
+         Start_Candidate;
+      elsif Item.State.Phase = Begin_Family then
+         Begin_Family;
+      elsif Item.State.Child /= No_Child then
+         Child_Completed;
+      else
+         raise Program_Error with "DNS operation has no driver transition";
+      end if;
+   exception
+      when Resolution_Failed =>
+         Fail (Resolution_Failure);
+      when Malformed_Response =>
+         Fail (Malformed_Failure);
+      when Device_Error =>
+         Fail (Device_Failure);
+      when Sockets.Socket_Error =>
+         Fail (Socket_Failure);
+      when Sockets.Operation_Interrupted | Flyology.Operations.Operation_Cancelled =>
+         Complete_Scoped (Item, Flyology.Operations.Cancelled, Cancelled_Failure);
+   end Drive;
+
+   overriding
+   procedure Request_Cancellation (Item : in out Resolve_Operation) is
+   begin
+      Item.State.Phase := Cancelling;
+      case Item.State.Child is
+         when Send_Child            =>
+            Flyology.Operations.Cancel (Item.State.Send_Operation);
+
+         when Receive_Child         =>
+            Flyology.Operations.Cancel (Item.State.Receive_Operation);
+
+         when Connect_Child         =>
+            Flyology.Operations.Cancel (Item.State.Connect_Operation);
+
+         when Send_All_Child        =>
+            Flyology.Operations.Cancel (Item.State.Send_All_Operation);
+
+         when Receive_Exactly_Child =>
+            Flyology.Operations.Cancel (Item.State.Receive_Exactly_Operation);
+
+         when No_Child              =>
+            Complete_Scoped (Item, Flyology.Operations.Cancelled, Cancelled_Failure);
+      end case;
+   exception
+      when others =>
+         null;
+   end Request_Cancellation;
+
+   function Finish (Operation : in out Resolve_Operation) return Address_Array is
+      Outcome : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Operation);
+      Failure : constant Resolve_Failure := Operation.State.Failure;
+      Count   : constant Natural := Operation.State.Value_Count;
+      Values  : constant Raw_Address_Array := Operation.State.Values;
+   begin
+      Flyology.Operations.Consume (Operation);
+      if Outcome = Flyology.Operations.Succeeded then
+         return To_Public (Values, Count);
+      elsif Outcome = Flyology.Operations.Cancelled or else Failure = Cancelled_Failure then
+         raise Operation_Cancelled with "DNS resolution cancelled";
+      end if;
+      case Failure is
+         when Not_Found_Failure  =>
+            raise Name_Not_Found with "DNS name not found";
+
+         when Resolution_Failure =>
+            raise Resolution_Failed with "DNS resolution failed";
+
+         when Malformed_Failure  =>
+            raise Malformed_Response with "no valid DNS response received";
+
+         when Server_Failure     =>
+            raise Name_Server_Failure with "DNS name server failed";
+
+         when Timeout_Failure    =>
+            raise Timeout_Error with "DNS resolution timed out";
+
+         when Device_Failure     =>
+            raise Device_Error with "DNS readiness polling failed";
+
+         when Socket_Failure     =>
+            raise Sockets.Socket_Error with "DNS socket operation failed";
+
+         when Cancelled_Failure  =>
+            raise Operation_Cancelled with "DNS resolution cancelled";
+
+         when No_Failure         =>
+            raise Resolution_Failed with "DNS operation failed";
+      end case;
+   end Finish;
 
    procedure Clear_Cache is
    begin

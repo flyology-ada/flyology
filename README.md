@@ -1732,6 +1732,7 @@ Standalone TLS operations and their set-independent capability are covered by
 | task-result `Wait` | success and all | native and lightweight |
 | bounded-channel `Send` and `Receive` | success and all | native and lightweight |
 | buffer-channel `Send_Move` and `Receive_Move` | success and all | native and lightweight |
+| DNS `Resolve` and `Resolve_Using` | some, success, and all, including hidden UDP/TCP children | native and lightweight |
 
 The same programs cover cancellation, timeout, EOF, zero-length stream and
 datagram operations, datagram metadata and source selection, retained connect
@@ -1755,7 +1756,6 @@ must not wrap the synchronous call inside `Drive`.
 | high-level connection admission and high-level connection TLS `Shutdown` | add later | Admission and close-notify have useful terminal results and existing nonblocking readiness steps; scoped `Upgrade`, high-level data operations, and standalone TLS `Shutdown` compose today. |
 | wall-clock `Wait_Until` and `Timer_Set.Wait_Next` | add later | Both return useful terminal observations. Their providers must retain the wall-clock source or the timer-set arm state instead of calling the synchronous waits from `Drive`; ordinary monotonic timer roots already compose today. |
 | cancellation-token `Await_Request` | add later | A token already has retained one-shot state and a readiness source, so a typed no-result operation can hide the descriptor adapter and compose directly with gates. |
-| DNS `Resolve` and `Resolve_Using` | add later | A resolver operation can compose its bounded UDP/TCP attempts and retain the address result; calling the synchronous resolver from a driver would nest waits. |
 | subprocess pipe I/O and `Wait` | add later | Pipe operations have descriptor readiness and the process owns a persistent exit wake source with a stable retained status. |
 | `Subprocesses.Capture.Run` | add later | Capture is a useful higher-level composite of stdin, stdout, stderr, and process-exit children; synchronous spawn remains an explicitly documented initiation cost. |
 | `Files.Transfers.Send_Chunk` | add later | The transfer naturally composes a file-read child with socket-send progress while retaining scratch-buffer ownership and one deadline. |
@@ -1957,6 +1957,28 @@ IPv4 `address:port` and bracketed IPv6 `[address]:port` server entries are a
 Flyology extension. `Resolve_Using` accepts explicit numeric endpoints for
 split-DNS applications and deterministic tests.
 
+Scoped `Resolve` separates resolver configuration I/O from asynchronous name
+resolution. `Load_Configuration` synchronously reads and validates one bounded,
+immutable `Resolver_Configuration`; a client can load that snapshot once and
+reuse it for origin resolutions. Starting an operation copies the selected
+servers, search domains, `ndots`, attempts, retry interval, and rotation policy,
+so `Drive` never reads resolver metadata and the snapshot is no longer borrowed
+after initiation. Scoped `Resolve_Using` instead copies an explicit server list
+and omits search expansion, matching its synchronous counterpart.
+
+Both scoped forms accept one absolute `Ada.Real_Time` deadline. Numeric,
+`localhost`, and cache results may terminalize during the bounded initiation
+step. Network paths compose the existing socket send, receive, exact-receive,
+complete-send, and connect operations through `Continue_After`. The root and
+one active child temporarily consume two completion-set slots; the child is
+internal and never appears in user completion batches or gates. A cancellation
+token contributes its readable wake descriptor to every child, while explicit
+`Operations.Cancel` remains available on the root. Cancellation and scope
+abandonment cancel and drain the child, close temporary sockets, and release
+the token descriptor before publishing the root outcome. Typed `Finish` then
+returns at most sixteen addresses or raises the same DNS/I/O exception class as
+the synchronous resolver.
+
 Each attempt sends a nonblocking UDP query to one configured server and parks
 the calling task on the socket, deadline, and optional cancellation descriptors
 in one wait set. Replies must match the connected source, transaction ID,
@@ -2095,6 +2117,14 @@ peer closure, or the read/write readiness needed next. `Wait` combines those
 transport interests with a reusable `Outbound_Wakeup`, concurrent connection
 close, manager shutdown, and an optional cancellation token. It suspends a
 lightweight task or blocks only a native task's pthread.
+
+An owner-stack protocol operation can use the composable `Arm_Transport`
+overload instead of `Wait`. It arms the hidden transport direction returned by
+`Receive` or `Send` together with the same `Outbound_Wakeup` and lifecycle
+sources, without exposing a descriptor or consuming another completion-set
+slot. A notification that is already pending is consumed before the operation
+is rescheduled; the resumed owner must exhaust all currently published output
+before rearming. A separately armed capability deadline remains in effect.
 
 ```ada
 procedure Pump
