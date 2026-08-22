@@ -350,6 +350,8 @@ package Flyology_Bench.Suites is
    --  newline-delimited JSON extends each complete existing result object.
    --  Progress and exception diagnostics go to Progress, never to an explicit
    --  --output file. An explicit file is plain and contains no ANSI escapes.
+   --  Output and Progress must remain open and must not be reset or closed,
+   --  including through another view, until Execute returns.
    --  @param Target Registry to execute.
    --  @param Suite_Name Stable suite identity segment.
    --  @param Options Parsed selection, configuration, and reporting policy.

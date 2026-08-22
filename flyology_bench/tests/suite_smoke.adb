@@ -25,7 +25,6 @@ procedure Suite_Smoke is
    Calls   : Natural := 0;
    Last_Config : Flyology_Bench.Configuration :=
      Flyology_Bench.Default_Configuration;
-   Reporter_Sink  : Ada.Text_IO.File_Type;
 
    type Legacy_CSV_Access is access procedure
      (Name   : String;
@@ -112,14 +111,6 @@ procedure Suite_Smoke is
    package Multi_Registration is new Runner.Multi_Way_Registration
      (Case_Id => Multi_Case,
       Run     => Run_Multi);
-
-   procedure Run_And_Close_Output
-     (Config : Flyology_Bench.Configuration;
-      Result : out Flyology_Bench.Measurement) is
-   begin
-      Measure_Operation (Config, Result);
-      Ada.Text_IO.Close (Reporter_Sink);
-   end Run_And_Close_Output;
 
    procedure Fail
      (Config : Flyology_Bench.Configuration;
@@ -712,40 +703,6 @@ begin
         (Ada.Strings.Fixed.Index (Read_All (Sink_Path), """quoted""") /= 0,
          "CSV exception escaping absent");
       Remove (Sink_Path);
-   end;
-
-   declare
-      Reporting_Target : Runner.Suite;
-      Summary          : Runner.Run_Summary;
-      Options          : constant Runner.Runner_Options :=
-        Runner.Parse
-          ([U ("--output-style=csv"), U ("--fail-fast")], Base_Config);
-      Progress         : Ada.Text_IO.File_Type;
-      Output_Path      : constant String := "suite-reporting-error.csv";
-      Progress_Path    : constant String := "suite-reporting-error.progress";
-      Raised           : Boolean := False;
-   begin
-      Runner.Register
-        (Reporting_Target, "close-output", Run_And_Close_Output'Access);
-      Remove (Output_Path);
-      Remove (Progress_Path);
-      Ada.Text_IO.Create (Reporter_Sink, Ada.Text_IO.Out_File, Output_Path);
-      Ada.Text_IO.Create (Progress, Ada.Text_IO.Out_File, Progress_Path);
-      begin
-         Runner.Execute
-           (Reporting_Target, "reporting_suite", Options, Summary,
-            Output => Reporter_Sink, Progress => Progress);
-      exception
-         when Ada.Text_IO.Status_Error | Ada.Text_IO.Device_Error =>
-            Raised := True;
-      end;
-      Ada.Text_IO.Close (Progress);
-      Check (Raised, "reporting failure did not propagate");
-      Check
-        (Summary.Completed = 1 and then Summary.Failed = 0,
-         "reporting failure was counted as callback failure");
-      Remove (Output_Path);
-      Remove (Progress_Path);
    end;
 
    Check (Calls > 0 and then Counter > 0, "callbacks did not execute");
