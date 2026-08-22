@@ -149,11 +149,14 @@ package body Flyology_Bench.Suites is
       procedure Put_Console is new
         Flyology_Bench.Reporters.Put_Multi_Comparison_Console (Case_Id);
       procedure Put_CSV is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_CSV (Case_Id);
+        Flyology_Bench.Reporters.Put_Multi_Comparison_CSV_With_Context
+          (Case_Id);
       procedure Put_Metrics_CSV is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV (Case_Id);
+        Flyology_Bench.Reporters.Put_Multi_Comparison_Metrics_CSV_With_Context
+          (Case_Id);
       procedure Put_JSON is new
-        Flyology_Bench.Reporters.Put_Multi_Comparison_JSON (Case_Id);
+        Flyology_Bench.Reporters.Put_Multi_Comparison_JSON_With_Context
+          (Case_Id);
 
       procedure Invoke
         (Config : Configuration;

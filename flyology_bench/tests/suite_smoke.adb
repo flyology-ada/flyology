@@ -27,6 +27,21 @@ procedure Suite_Smoke is
      Flyology_Bench.Default_Configuration;
    Reporter_Sink  : Ada.Text_IO.File_Type;
 
+   type Legacy_CSV_Access is access procedure
+     (Name   : String;
+      Result : Flyology_Bench.Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output);
+   Legacy_CSV : constant Legacy_CSV_Access :=
+     Flyology_Bench.Reporters.Put_CSV'Access;
+   pragma Unreferenced (Legacy_CSV);
+
+   procedure Legacy_JSON_Renaming
+     (Name   : String;
+      Result : Flyology_Bench.Measurement;
+      File   : Ada.Text_IO.File_Type := Ada.Text_IO.Standard_Output)
+     renames Flyology_Bench.Reporters.Put_JSON;
+   pragma Unreferenced (Legacy_JSON_Renaming);
+
    procedure Check (Condition : Boolean; Message : String) is
    begin
       if not Condition then
