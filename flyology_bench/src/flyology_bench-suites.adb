@@ -6,6 +6,7 @@ with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Strings;
 with Ada.Strings.Fixed;
+with Flyology_Bench.Baselines;
 
 package body Flyology_Bench.Suites is
 
@@ -14,6 +15,7 @@ package body Flyology_Bench.Suites is
       Dry_Run_Outcome,
       Inconclusive_Outcome,
       Unavailable_Outcome,
+      Rejected_Outcome,
       Failed_Outcome);
 
    type Index_Array is array (Case_Index) of Case_Index;
@@ -114,8 +116,42 @@ package body Flyology_Bench.Suites is
          Group           => To_Unbounded_String (Group),
          Tags            => To_Unbounded_String (Tags),
          Full            => To_Unbounded_String (Join_Name (Group, Name)),
-         Measurement_Run => Run);
+         Measurement_Run => Run,
+         Gate_Enabled    => False,
+         Gate_Path       => Null_Unbounded_String,
+         Gate_Fingerprint => Null_Unbounded_String,
+         Gate_Policy     =>
+           Flyology_Bench.Baselines.Fail_Closed_Gate_Policy);
    end Register;
+
+   procedure Register_Gated
+     (Target        : in out Suite;
+      Name          : String;
+      Run           : not null Measurement_Callback;
+      Baseline_Path : String;
+      Policy        : Flyology_Bench.Baselines.Gate_Policy :=
+        Flyology_Bench.Baselines.Fail_Closed_Gate_Policy;
+      Fingerprint   : String := "";
+      Group         : String := "";
+      Tags          : String := "") is
+   begin
+      Check_Registration (Target, Name, Group, Tags);
+      if Baseline_Path'Length = 0 then
+         raise Registration_Error with "baseline path must not be empty";
+      end if;
+      Target.Count := Target.Count + 1;
+      Target.Cases (Target.Count) :=
+        (Result           => Ordinary_Measurement,
+         Name             => To_Unbounded_String (Name),
+         Group            => To_Unbounded_String (Group),
+         Tags             => To_Unbounded_String (Tags),
+         Full             => To_Unbounded_String (Join_Name (Group, Name)),
+         Measurement_Run  => Run,
+         Gate_Enabled     => True,
+         Gate_Path        => To_Unbounded_String (Baseline_Path),
+         Gate_Fingerprint => To_Unbounded_String (Fingerprint),
+         Gate_Policy      => Policy);
+   end Register_Gated;
 
    procedure Register_Paired
      (Target         : in out Suite;
@@ -962,6 +998,7 @@ package body Flyology_Bench.Suites is
          when Dry_Run_Outcome      => "dry_run",
          when Inconclusive_Outcome => "inconclusive",
          when Unavailable_Outcome  => "unavailable",
+         when Rejected_Outcome     => "rejected",
          when Failed_Outcome       => "failed");
 
    procedure Put_Machine_Header (File : Ada.Text_IO.File_Type) is
@@ -1122,6 +1159,23 @@ package body Flyology_Bench.Suites is
            (Case_Name, Result, File, Context);
       end if;
    end Put_Measurement_Machine;
+
+   procedure Put_Gate_Result
+     (File   : Ada.Text_IO.File_Type;
+      Style  : Output_Style;
+      Result : Flyology_Bench.Baselines.Gate_Result) is
+   begin
+      case Style is
+         when Human =>
+            Flyology_Bench.Reporters.Put_Gate_Console
+              (Result, File, Flyology_Bench.Reporters.Plain);
+         when CSV =>
+            Flyology_Bench.Reporters.Put_Gate_CSV_Header (File);
+            Flyology_Bench.Reporters.Put_Gate_CSV (Result, File);
+         when JSON =>
+            Flyology_Bench.Reporters.Put_Gate_JSON (Result, File);
+      end case;
+   end Put_Gate_Result;
 
    procedure Put_Comparison_Machine
      (File           : Ada.Text_IO.File_Type;
@@ -1287,6 +1341,8 @@ package body Flyology_Bench.Suites is
                         Result  : Measurement;
                         Outcome : Case_Outcome := Completed_Outcome;
                         Returned : Boolean := False;
+                        Gate : Flyology_Bench.Baselines.Gate_Result;
+                        Gate_Evaluated : Boolean := False;
                      begin
                         begin
                            Item.Measurement_Run (Config, Result);
@@ -1305,6 +1361,25 @@ package body Flyology_Bench.Suites is
                            then
                               Outcome := Unavailable_Outcome;
                               Summary.Unavailable := Summary.Unavailable + 1;
+                           end if;
+                           if not Options.Dry and then Item.Gate_Enabled then
+                              Gate := Flyology_Bench.Baselines.Evaluate_Gate
+                                (Path => To_String (Item.Gate_Path),
+                                 Current_Name => Name,
+                                 Current => Result,
+                                 Fingerprint =>
+                                   To_String (Item.Gate_Fingerprint),
+                                 Policy => Item.Gate_Policy,
+                                 Random_Seed => Config.Random_Seed,
+                                 Confidence_Level_Percent =>
+                                   Config.Confidence_Level_Percent,
+                                 Bootstrap_Resamples =>
+                                   Config.Bootstrap_Resamples);
+                              Gate_Evaluated := True;
+                              if Flyology_Bench.Baselines.Rejected (Gate) then
+                                 Outcome := Rejected_Outcome;
+                                 Summary.Rejected := Summary.Rejected + 1;
+                              end if;
                            end if;
                            if Options.Output_Format = Human then
                               Ada.Text_IO.Put_Line
@@ -1325,6 +1400,10 @@ package body Flyology_Bench.Suites is
                               Put_Measurement_Machine
                                 (File, Options.Output_Format, Suite_Name, Name,
                                  Outcome, Result);
+                           end if;
+                           if Gate_Evaluated then
+                              Put_Gate_Result
+                                (File, Options.Output_Format, Gate);
                            end if;
                         end if;
                      end;
