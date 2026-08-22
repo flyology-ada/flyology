@@ -27,15 +27,16 @@ procedure Flyology_Bench_Smoke is
    use type Flyology_Bench.Placement_Outcome;
    use type Flyology_Bench.Host_Lock_Outcome;
    use type Flyology_Bench.Host_Lock.Acquisition;
+   use type Interfaces.Unsigned_64;
 
-   Counter : Natural := 0 with Volatile;
+   Counter : Interfaces.Unsigned_64 := 0 with Volatile;
 
    procedure Scheduler_Probe
      (Snapshot : out Flyology_Bench.Flyology_Scheduler_Snapshot) is
    begin
       Snapshot :=
         (Available  => True,
-         Dispatches => Interfaces.Unsigned_64 (Counter),
+         Dispatches => Counter,
          others     => 0);
    end Scheduler_Probe;
 
