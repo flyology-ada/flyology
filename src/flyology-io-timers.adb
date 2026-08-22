@@ -1,9 +1,7 @@
 with Flyology.Wall_Clock_Policy;
 with Flyology.Wall_Clock_Waits;
 with Flyology.Operations.Drivers;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_Testing;
-#end if;
 
 package body Flyology.IO.Timers is
    use type Ada.Calendar.Time;
@@ -35,15 +33,12 @@ package body Flyology.IO.Timers is
          Before := Ada.Real_Time.Clock;
          Wall :=
            Ada.Calendar.Clock
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-           + Flyology.Wall_Clock_Testing.Offset
-#end if;
-           ;
+           + (if Flyology.Wall_Clock_Testing.Enabled then Flyology.Wall_Clock_Testing.Offset else 0.0);
          After := Ada.Real_Time.Clock;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-         Flyology.Wall_Clock_Testing.Note_Sample_Attempt;
-         After := After + Ada.Real_Time.To_Time_Span (Flyology.Wall_Clock_Testing.Sample_Bracket);
-#end if;
+         if Flyology.Wall_Clock_Testing.Enabled then
+            Flyology.Wall_Clock_Testing.Note_Sample_Attempt;
+            After := After + Ada.Real_Time.To_Time_Span (Flyology.Wall_Clock_Testing.Sample_Bracket);
+         end if;
          if After < Before then
             raise Flyology.IO.Device_Error with "monotonic clock moved backward while sampling wall clock";
          end if;
@@ -54,9 +49,9 @@ package body Flyology.IO.Timers is
          raise Flyology.IO.Device_Error with "wall-clock sample bracket exceeded one second";
       end if;
 
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-      Flyology.Wall_Clock_Testing.Note_Sample;
-#end if;
+      if Flyology.Wall_Clock_Testing.Enabled then
+         Flyology.Wall_Clock_Testing.Note_Sample;
+      end if;
       return (Wall => Wall, Steady_Earliest => Before, Steady_Latest => After);
    end Read_Clocks;
 

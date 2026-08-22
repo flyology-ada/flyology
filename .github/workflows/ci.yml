@@ -111,6 +111,40 @@ jobs:
       - name: Run connection-density smoke
         run: ./showcases/run_connection_density.sh 200 1000
 
+  hook-elision:
+    name: Test-hook elision / ${{ matrix.os }} / GNAT 16.1.0
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Alire
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=16.1.0 \
+            gprbuild=26.0.1
+      - name: Configure Flyology index
+        timeout-minutes: 10
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Check every test-hook selection and optimization mode
+        timeout-minutes: 15
+        run: ./scripts/check-test-hook-elision.sh
+
   proof:
     name: SPARK proof / ubuntu-latest / GNAT 16.1.0
     runs-on: ubuntu-latest

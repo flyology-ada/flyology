@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
+with Flyology.Subprocess_Test_Hooks;
 with GNAT.OS_Lib;
 with Interfaces.C.Strings;
 with System;
@@ -96,11 +97,6 @@ package body Flyology.Subprocesses is
    pragma Import (C, C_Status_Signal, "flyology_subprocess_status_signal");
    function C_Status_Core_Dumped (Status : C.int) return C.int;
    pragma Import (C, C_Status_Core_Dumped, "flyology_subprocess_status_core_dumped");
-
-#if FLYOLOGY_SUBPROCESS_TEST_HOOKS then
-   function Test_Fail_Reaper_Allocation return C.int
-   with Import, Convention => C, External_Name => "flyology_test_subprocess_fail_reaper_allocation";
-#end if;
 
    Interrupted_Error : constant C.int := C_Errno_Interrupted;
    Would_Block_Error : constant C.int := C_Errno_Would_Block;
@@ -470,11 +466,11 @@ package body Flyology.Subprocesses is
       Stderr_Ends (0) := -1;
 
       begin
-#if FLYOLOGY_SUBPROCESS_TEST_HOOKS then
-         if Test_Fail_Reaper_Allocation /= 0 then
+         if Flyology.Subprocess_Test_Hooks.Enabled
+           and then Flyology.Subprocess_Test_Hooks.Fail_Reaper_Allocation
+         then
             raise Storage_Error with "injected subprocess reaper failure";
          end if;
-#end if;
          Child.Reaper := new Reaper_Task (Pid, Child.Exit_State'Unchecked_Access);
       exception
          when others =>

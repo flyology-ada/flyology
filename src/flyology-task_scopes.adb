@@ -172,9 +172,11 @@ package body Flyology.Task_Scopes is
    end Shared_State;
 
    task body Worker is
-      --  Activation-phase fault injection. The production hook is a static
-      --  True, so this declaration disappears outside hook builds.
-      Activation_Checked : constant Boolean := Test_Hooks.Check_Activation;
+      --  Activation-phase fault injection. Enabled is a literal False in the
+      --  production-selected specification, so the hook call disappears even
+      --  at -O0.
+      Activation_Checked : constant Boolean :=
+        (if Test_Hooks.Enabled then Test_Hooks.Check_Activation else True);
       pragma Unreferenced (Activation_Checked);
       package Conversions is new System.Address_To_Access_Conversions (Shared_State);
       State              : Conversions.Object_Pointer;

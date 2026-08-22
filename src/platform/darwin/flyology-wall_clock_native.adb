@@ -3,9 +3,7 @@ with Interfaces;
 with System;
 with System.OS_Constants;
 with System.Storage_Elements;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_Testing;
-#end if;
 
 package body Flyology.Wall_Clock_Native is
    package SSE renames System.Storage_Elements;
@@ -133,30 +131,29 @@ package body Flyology.Wall_Clock_Native is
          return Arm_Failed;
       end if;
 
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-      declare
-         Remaining : constant Interfaces.Integer_64 :=
-           Flyology.Wall_Clock_Testing.Native_Remaining_Nanoseconds;
-         Synthetic : Policy.Timestamp_Result;
-      begin
-         if Remaining >= 0 then
-            Synthetic := Policy.Subtract_Nanoseconds (Target, Remaining);
-            if not Synthetic.Fits then
+      if Flyology.Wall_Clock_Testing.Enabled then
+         declare
+            Remaining : constant Interfaces.Integer_64 :=
+              Flyology.Wall_Clock_Testing.Native_Remaining_Nanoseconds;
+            Synthetic : Policy.Timestamp_Result;
+         begin
+            if Remaining >= 0 then
+               Synthetic := Policy.Subtract_Nanoseconds (Target, Remaining);
+               if not Synthetic.Fits then
+                  return Arm_Failed;
+               end if;
+               Now := Synthetic.Value;
+            elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
                return Arm_Failed;
+            else
+               Now := To_Policy (Now_Native);
             end if;
-            Now := Synthetic.Value;
-         elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
-            return Arm_Failed;
-         else
-            Now := To_Policy (Now_Native);
-         end if;
-      end;
-#else
-      if Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
+         end;
+      elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
          return Arm_Failed;
+      else
+         Now := To_Policy (Now_Native);
       end if;
-      Now := To_Policy (Now_Native);
-#end if;
 
       Probe := Policy.Add_Nanoseconds (Now, Maximum_Slice_Nanoseconds);
       if not Probe.Fits then
@@ -173,9 +170,9 @@ package body Flyology.Wall_Clock_Native is
             return Arm_Failed;
          end if;
          Timeout := Interfaces.Integer_64'Max (Difference.Nanoseconds, 1);
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-         Flyology.Wall_Clock_Testing.Note_Native_Arm (Timeout);
-#end if;
+         if Flyology.Wall_Clock_Testing.Enabled then
+            Flyology.Wall_Clock_Testing.Note_Native_Arm (Timeout);
+         end if;
          Change :=
            (Ident  => 1,
             Filter => EVFILT_TIMER,
@@ -197,17 +194,15 @@ package body Flyology.Wall_Clock_Native is
       Error_Code : C.int;
    begin
       loop
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-         if Flyology.Wall_Clock_Testing.Take_Native_Consume_EINTR then
+         if Flyology.Wall_Clock_Testing.Enabled
+           and then Flyology.Wall_Clock_Testing.Take_Native_Consume_EINTR
+         then
             Result := -1;
             Error_Code := C.int (System.OS_Constants.EINTR);
          else
-#end if;
             Result := Kevent (State.Wait_FD, System.Null_Address, 0, Event'Address, 1, Zero'Address);
             Error_Code := (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
          end if;
-#end if;
          exit when Result >= 0 or else Error_Code /= C.int (System.OS_Constants.EINTR);
       end loop;
 

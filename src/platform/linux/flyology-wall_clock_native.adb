@@ -2,9 +2,7 @@ with GNAT.OS_Lib;
 with Interfaces;
 with System;
 with System.OS_Constants;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_Testing;
-#end if;
 
 package body Flyology.Wall_Clock_Native is
    use type C.long;
@@ -78,30 +76,29 @@ package body Flyology.Wall_Clock_Native is
          return Arm_Failed;
       end if;
 
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-      declare
-         Remaining : constant Interfaces.Integer_64 :=
-           Flyology.Wall_Clock_Testing.Native_Remaining_Nanoseconds;
-         Synthetic : Policy.Timestamp_Result;
-      begin
-         if Remaining >= 0 then
-            Synthetic := Policy.Subtract_Nanoseconds (Target, Remaining);
-            if not Synthetic.Fits then
+      if Flyology.Wall_Clock_Testing.Enabled then
+         declare
+            Remaining : constant Interfaces.Integer_64 :=
+              Flyology.Wall_Clock_Testing.Native_Remaining_Nanoseconds;
+            Synthetic : Policy.Timestamp_Result;
+         begin
+            if Remaining >= 0 then
+               Synthetic := Policy.Subtract_Nanoseconds (Target, Remaining);
+               if not Synthetic.Fits then
+                  return Arm_Failed;
+               end if;
+               Now := Synthetic.Value;
+            elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
                return Arm_Failed;
+            else
+               Now := To_Policy (Now_Native);
             end if;
-            Now := Synthetic.Value;
-         elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
-            return Arm_Failed;
-         else
-            Now := To_Policy (Now_Native);
-         end if;
-      end;
-#else
-      if Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
+         end;
+      elsif Clock_Gettime (Clock_Realtime, Now_Native'Access) /= 0 then
          return Arm_Failed;
+      else
+         Now := To_Policy (Now_Native);
       end if;
-      Now := To_Policy (Now_Native);
-#end if;
 
       Probe := Policy.Add_Nanoseconds (Now, Maximum_Slice_Nanoseconds);
       if not Probe.Fits then

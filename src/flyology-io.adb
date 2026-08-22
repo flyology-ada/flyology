@@ -2,20 +2,16 @@ with GNAT.OS_Lib;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with Flyology.Operations.Drivers;
-with System.OS_Constants;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_IO_Testing;
-#end if;
+with System.OS_Constants;
 
 package body Flyology.IO is
    package C renames Interfaces.C;
 
    use type C.int;
    use type Flyology.Operations.Driver_Event;
-   use type C.short;
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
    use type Interfaces.Integer_64;
-#end if;
+   use type C.short;
 
    POLLIN   : constant C.short := 16#0001#;
    POLLOUT  : constant C.short := 16#0004#;
@@ -59,15 +55,6 @@ package body Flyology.IO is
    function Read_Monotonic (Value : access Timespec) return C.int;
    pragma Import (C, Read_Monotonic, "flyology_monotonic_clock");
 
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-   function Test_Clock_Offset return Duration is
-      Nanoseconds : constant Interfaces.Integer_64 := Flyology.Wall_Clock_IO_Testing.Steady_Adjustment;
-   begin
-      return
-        Duration (Nanoseconds / 1_000_000_000) + Duration (Nanoseconds rem 1_000_000_000) / 1_000_000_000;
-   end Test_Clock_Offset;
-#end if;
-
    function Clock return Duration is
       Now    : aliased Timespec;
       Result : C.int;
@@ -79,10 +66,10 @@ package body Flyology.IO is
       return
         Duration (Now.Seconds)
         + Duration (Now.Nanoseconds) / 1_000_000_000
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-        + Test_Clock_Offset
-#end if;
-        ;
+        + (if Flyology.Wall_Clock_IO_Testing.Enabled
+           then Duration (Flyology.Wall_Clock_IO_Testing.Steady_Adjustment / 1_000_000_000)
+             + Duration (Flyology.Wall_Clock_IO_Testing.Steady_Adjustment rem 1_000_000_000) / 1_000_000_000
+           else 0.0);
    end Clock;
 
    function Is_Lightweight_Task return Boolean
@@ -207,21 +194,19 @@ package body Flyology.IO is
                Elapsed   : constant Duration := Clock - Started;
                Remaining : constant Duration := Time_Math.Remaining (Timeout, Elapsed);
             begin
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
-               if Flyology.Wall_Clock_IO_Testing.Take_EINTR then
+               if Flyology.Wall_Clock_IO_Testing.Enabled
+                 and then Flyology.Wall_Clock_IO_Testing.Take_EINTR
+               then
                   Result := -1;
                   Error_Code := C.int (System.OS_Constants.EINTR);
                else
-#end if;
                   Result :=
                     Poll
                       (Poll_Items'Address,
                        C.unsigned (Poll_Items'Length),
                        Time_Math.To_Milliseconds (Remaining));
                   Error_Code := (if Result < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
-#if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
                end if;
-#end if;
             end;
 
             if Result > 0 then

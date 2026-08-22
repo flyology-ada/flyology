@@ -1,9 +1,6 @@
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
 with Interfaces.C;
-#end if;
 
 package body Flyology.Worker_Pool_Test_Hooks is
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
    use type Interfaces.C.int;
 
    function Test_Activation_Failure return Interfaces.C.int
@@ -12,6 +9,8 @@ package body Flyology.Worker_Pool_Test_Hooks is
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_consume_failure";
    function Test_Completion_Wake return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_completion_wake";
+   function Test_Cancellation_Failure return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_cancellation_failure";
    function Test_Run_Claim_Barrier_Arrive return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_worker_run_claim_barrier_arrive";
    function Test_Run_Claim_Barrier_Released return Interfaces.C.int
@@ -40,6 +39,9 @@ package body Flyology.Worker_Pool_Test_Hooks is
       end if;
       return True;
    end Check_Activation;
+
+   function Cancellation_Failure return Boolean
+   is (Test_Cancellation_Failure /= 0);
 
    function Consume_Failure return Boolean
    is (Test_Consume_Failure /= 0);
@@ -92,18 +94,4 @@ package body Flyology.Worker_Pool_Test_Hooks is
          end loop;
       end if;
    end Capacity_Acquire_Barrier;
-#else
-   function Check_Activation return Boolean
-   is (True);
-   function Consume_Failure return Boolean
-   is (False);
-   function Completion_Wake return Boolean
-   is (False);
-   procedure Run_Claim_Barrier is null;
-   procedure Shutdown_Barrier is null;
-   procedure Token_Cleanup_Acquire is null;
-   procedure Token_Cleanup_Barrier is null;
-   procedure Token_Cleanup_Release is null;
-   procedure Capacity_Acquire_Barrier is null;
-#end if;
 end Flyology.Worker_Pool_Test_Hooks;

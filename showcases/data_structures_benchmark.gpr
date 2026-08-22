@@ -102,13 +102,11 @@ project Data_Structures_Benchmark is
               --  Reporters already supply UTF-8 bytes for sparklines. Keep
               --  Text_IO byte-transparent instead of transcoding them twice.
               & ("-gnatWb", "-gnat2022", "-gnata", "-gnatVa", "-gnatwa",
-                 "-gnatwJ",
-                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+                 "-gnatwJ");
          when "release" =>
             for Default_Switches ("Ada") use
               Flyology_Showcases_Config.Ada_Compiler_Switches
-              & ("-gnatWb", "-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
-                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              & ("-gnatWb", "-gnat2022", "-O3", "-gnatwa", "-gnatwJ");
       end case;
       for Default_Switches ("C++") use CPP_Switches;
    end Compiler;

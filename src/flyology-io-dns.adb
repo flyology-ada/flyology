@@ -1,9 +1,7 @@
 with Ada.Characters.Handling;
 with Ada.Real_Time;
 with Ada.Strings.Fixed;
-#if FLYOLOGY_DNS_TEST_HOOKS then
 with Flyology.DNS_Test_Observations;
-#end if;
 with Flyology.DNS_Policy;
 with Flyology.IO.Files;
 with Interfaces;
@@ -1224,10 +1222,10 @@ package body Flyology.IO.DNS is
                      --  before every wait rather than relying on Wait_Any
                      --  reporting a timeout.
                      exit when DNS_Policy.Receive_Window_Expired (Attempt_Left, Overall_Left, Infinite);
-#if FLYOLOGY_DNS_TEST_HOOKS then
-                     Flyology.DNS_Test_Observations.Record_Receive_Wait
-                       (After_Close => not Sockets.Is_Open (Channels (1)));
-#end if;
+                     if Flyology.DNS_Test_Observations.Enabled then
+                        Flyology.DNS_Test_Observations.Record_Receive_Wait
+                          (After_Close => not Sockets.Is_Open (Channels (1)));
+                     end if;
                      Ready_Index := Wait_Any (Requests (1 .. Request_Count), Wait_For);
                      if Ready_Index = 0 then
                         exit;

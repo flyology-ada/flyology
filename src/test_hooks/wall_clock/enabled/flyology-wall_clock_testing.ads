@@ -1,9 +1,15 @@
---  Test-only wall-clock observation control. Production timer sampling does
---  not reference this unit when FLYOLOGY_WALL_CLOCK_TEST_HOOKS is false.
+--  Enabled wall-clock observation control selected by the owning project.
+--  Production selects a bodyless specification and statically removes every
+--  guarded observation from clock and timer paths.
 with Interfaces;
 
 private package Flyology.Wall_Clock_Testing is
    use type Interfaces.Integer_64;
+
+   --  Keep this a literal compile-time constant. GNAT removes code guarded by
+   --  a literal False even at -O0; a function returning False can retain both
+   --  its call and references inside the guarded branch.
+   Enabled : constant Boolean := True;
 
    procedure Set_Offset (Value : Duration);
    function Offset return Duration;

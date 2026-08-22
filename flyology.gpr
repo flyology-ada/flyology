@@ -5,105 +5,103 @@ project Flyology is
    type DNS_Test_Hooks_Type is ("false", "true");
    DNS_Test_Hooks : DNS_Test_Hooks_Type :=
      external ("FLYOLOGY_DNS_TEST_HOOKS", "false");
-   DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=False";
+   DNS_Test_Hook_Source_Dir := "src/test_hooks/dns/disabled/";
    case DNS_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         DNS_Test_Hook_Switch := "-gnateDFLYOLOGY_DNS_TEST_HOOKS=True";
+         DNS_Test_Hook_Source_Dir := "src/test_hooks/dns/enabled/";
    end case;
 
    type TLS_Test_Hooks_Type is ("false", "true");
    TLS_Test_Hooks : TLS_Test_Hooks_Type :=
      external ("FLYOLOGY_TLS_TEST_HOOKS", "false");
+   TLS_Test_Hook_Source_Dir := "src/test_hooks/tls/disabled/";
    TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=0";
-   TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=False";
    case TLS_Test_Hooks is
       when "false" =>
-         for Excluded_Source_Files use
-           ("flyology-tls_test_hooks.ads",
-            "flyology-tls_test_hooks.adb");
+         null;
       when "true" =>
+         TLS_Test_Hook_Source_Dir := "src/test_hooks/tls/enabled/";
          TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
-         TLS_Ada_Test_Hook_Switch := "-gnateDFLYOLOGY_TLS_TEST_HOOKS=True";
    end case;
 
    type Connection_Test_Hooks_Type is ("false", "true");
    Connection_Test_Hooks : Connection_Test_Hooks_Type :=
      external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
-   Connection_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False";
+   Connection_Test_Hook_Source_Dir :=
+     "src/test_hooks/connection/disabled/";
    case Connection_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         Connection_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=True";
+         Connection_Test_Hook_Source_Dir :=
+           "src/test_hooks/connection/enabled/";
    end case;
 
    type Worker_Pool_Test_Hooks_Type is ("false", "true");
    Worker_Pool_Test_Hooks : Worker_Pool_Test_Hooks_Type :=
      external ("FLYOLOGY_WORKER_POOL_TEST_HOOKS", "false");
-   Worker_Pool_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=False";
+   Worker_Pool_Test_Hook_Source_Dir :=
+     "src/test_hooks/worker_pool/disabled/";
    case Worker_Pool_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         Worker_Pool_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_WORKER_POOL_TEST_HOOKS=True";
+         Worker_Pool_Test_Hook_Source_Dir :=
+           "src/test_hooks/worker_pool/enabled/";
    end case;
 
    type Subprocess_Test_Hooks_Type is ("false", "true");
    Subprocess_Test_Hooks : Subprocess_Test_Hooks_Type :=
      external ("FLYOLOGY_SUBPROCESS_TEST_HOOKS", "false");
-   Subprocess_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_SUBPROCESS_TEST_HOOKS=False";
+   Subprocess_Test_Hook_Source_Dir :=
+     "src/test_hooks/subprocess/disabled/";
    case Subprocess_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         Subprocess_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_SUBPROCESS_TEST_HOOKS=True";
+         Subprocess_Test_Hook_Source_Dir :=
+           "src/test_hooks/subprocess/enabled/";
    end case;
 
    type Structured_Server_Test_Hooks_Type is ("false", "true");
    Structured_Server_Test_Hooks : Structured_Server_Test_Hooks_Type :=
      external ("FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS", "false");
-   Structured_Server_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=False";
+   Structured_Server_Test_Hook_Source_Dir :=
+     "src/test_hooks/structured_server/disabled/";
    case Structured_Server_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         Structured_Server_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=True";
+         Structured_Server_Test_Hook_Source_Dir :=
+           "src/test_hooks/structured_server/enabled/";
    end case;
 
    type File_Watch_Test_Hooks_Type is ("false", "true");
    File_Watch_Test_Hooks : File_Watch_Test_Hooks_Type :=
      external ("FLYOLOGY_FILE_WATCH_TEST_HOOKS", "false");
-   File_Watch_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_FILE_WATCH_TEST_HOOKS=False";
+   File_Watch_Test_Hook_Source_Dir :=
+     "src/test_hooks/file_watch/disabled/";
    case File_Watch_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         File_Watch_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_FILE_WATCH_TEST_HOOKS=True";
+         File_Watch_Test_Hook_Source_Dir :=
+           "src/test_hooks/file_watch/enabled/";
    end case;
 
    type Wall_Clock_Test_Hooks_Type is ("false", "true");
    Wall_Clock_Test_Hooks : Wall_Clock_Test_Hooks_Type :=
      external ("FLYOLOGY_WALL_CLOCK_TEST_HOOKS", "false");
-   Wall_Clock_Test_Hook_Switch :=
-     "-gnateDFLYOLOGY_WALL_CLOCK_TEST_HOOKS=False";
+   Wall_Clock_Test_Hook_Source_Dir :=
+     "src/test_hooks/wall_clock/disabled/";
    case Wall_Clock_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
-         Wall_Clock_Test_Hook_Switch :=
-           "-gnateDFLYOLOGY_WALL_CLOCK_TEST_HOOKS=True";
+         Wall_Clock_Test_Hook_Source_Dir :=
+           "src/test_hooks/wall_clock/enabled/";
    end case;
 
    type Socket_Test_Hooks_Type is ("false", "true");
@@ -124,12 +122,25 @@ project Flyology is
    case Flyology_Config.Alire_Host_OS is
       when "linux" =>
          for Source_Dirs use
-           ("src/", "src/native/", "src/platform/linux/", "config/");
+           ("src/", "src/native/", "src/platform/linux/", "config/",
+            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when "macos" =>
          for Source_Dirs use
-           ("src/", "src/native/", "src/platform/darwin/", "config/");
+           ("src/", "src/native/", "src/platform/darwin/", "config/",
+            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when others =>
-         for Source_Dirs use ("src/", "src/native/", "config/");
+         for Source_Dirs use
+           ("src/", "src/native/", "config/",
+            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
    end case;
 
    type Documentation_Mode_Type is ("false", "true");
@@ -258,11 +269,7 @@ project Flyology is
    package Compiler is
       for Default_Switches ("Ada") use
         Flyology_Config.Ada_Compiler_Switches
-        & ("-gnatyM110", "-gnatwJ", DNS_Test_Hook_Switch, Connection_Test_Hook_Switch,
-           Worker_Pool_Test_Hook_Switch, Structured_Server_Test_Hook_Switch,
-           File_Watch_Test_Hook_Switch, Subprocess_Test_Hook_Switch,
-           Wall_Clock_Test_Hook_Switch,
-           TLS_Ada_Test_Hook_Switch);
+        & ("-gnatyM110", "-gnatwJ");
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
          Socket_Test_Hook_Switch);

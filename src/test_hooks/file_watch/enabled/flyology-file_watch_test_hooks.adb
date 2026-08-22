@@ -1,9 +1,6 @@
-#if FLYOLOGY_FILE_WATCH_TEST_HOOKS then
 with Interfaces.C;
-#end if;
 
 package body Flyology.File_Watch_Test_Hooks is
-#if FLYOLOGY_FILE_WATCH_TEST_HOOKS then
    use type Interfaces.C.int;
 
    function Test_Events_Lost return Interfaces.C.int
@@ -19,12 +16,4 @@ package body Flyology.File_Watch_Test_Hooks is
    is (Test_Remove_Failure /= 0);
    function Consume_Close_Failure return Boolean
    is (Test_Close_Failure /= 0);
-#else
-   function Consume_Events_Lost return Boolean
-   is (False);
-   function Consume_Remove_Failure return Boolean
-   is (False);
-   function Consume_Close_Failure return Boolean
-   is (False);
-#end if;
 end Flyology.File_Watch_Test_Hooks;

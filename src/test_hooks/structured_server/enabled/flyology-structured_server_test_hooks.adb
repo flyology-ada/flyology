@@ -1,5 +1,4 @@
 package body Flyology.Structured_Server_Test_Hooks is
-#if FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS then
    use type Interfaces.C.int;
 
    function Test_Barrier_Arrive (Point : Interfaces.C.int) return Interfaces.C.int
@@ -26,14 +25,4 @@ package body Flyology.Structured_Server_Test_Hooks is
       end if;
       return True;
    end Check_Activation;
-#else
-   procedure Barrier (Point : Interfaces.C.int) is
-      pragma Unreferenced (Point);
-   begin
-      null;
-   end Barrier;
-
-   function Check_Activation return Boolean
-   is (True);
-#end if;
 end Flyology.Structured_Server_Test_Hooks;

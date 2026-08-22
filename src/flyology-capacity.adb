@@ -1,4 +1,5 @@
 with Flyology.Capacity_Policy;
+with Flyology.Connection_Test_Hooks;
 with Flyology.Worker_Pool_Test_Hooks;
 
 package body Flyology.Capacity is
@@ -6,11 +7,6 @@ package body Flyology.Capacity is
    use type Interfaces.C.int;
    package Policy renames Flyology.Capacity_Policy;
    package Test_Hooks renames Flyology.Worker_Pool_Test_Hooks;
-
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-   function Test_Fail_Next_Release_Wake return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_fail_next_capacity_release_wake";
-#end if;
 
    protected body Gate is
       entry Acquire (Accepted : out Boolean; Cleanup_Armed : access Boolean := null)
@@ -47,7 +43,9 @@ package body Flyology.Capacity is
             --  This barrier is inside the protected action: abort stays
             --  deferred after the permit is counted until the caller's
             --  cleanup obligation is already authoritative.
-            Test_Hooks.Capacity_Acquire_Barrier;
+            if Test_Hooks.Enabled then
+               Test_Hooks.Capacity_Acquire_Barrier;
+            end if;
          end if;
       end Acquire;
 
@@ -96,11 +94,11 @@ package body Flyology.Capacity is
             Cleanup_Armed.all := False;
          end if;
          if Wake_Sources.Descriptor (Acquire_Wake) >= 0 and then not Acquire_Signalled then
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            if Test_Fail_Next_Release_Wake /= 0 then
+            if Flyology.Connection_Test_Hooks.Enabled
+              and then Flyology.Connection_Test_Hooks.Fail_Next_Capacity_Release_Wake
+            then
                raise Program_Error with "injected capacity release wake failure";
             end if;
-#end if;
             Wake_Sources.Signal (Acquire_Wake);
             Acquire_Signalled := True;
          end if;

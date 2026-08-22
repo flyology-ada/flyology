@@ -1,6 +1,4 @@
-#if FLYOLOGY_DNS_TEST_HOOKS then
 with Flyology.DNS_Test_Observations;
-#end if;
 
 package body Flyology.IO.DNS.Testing is
 
@@ -16,20 +14,17 @@ package body Flyology.IO.DNS.Testing is
 
    procedure Reset_Receive_Waits is
    begin
-#if FLYOLOGY_DNS_TEST_HOOKS then
-      Flyology.DNS_Test_Observations.Reset;
-#else
-      null;
-#end if;
+      if Flyology.DNS_Test_Observations.Enabled then
+         Flyology.DNS_Test_Observations.Reset;
+      end if;
    end Reset_Receive_Waits;
 
    function Post_Close_Receive_Waits return Natural is
    begin
-#if FLYOLOGY_DNS_TEST_HOOKS then
-      return Flyology.DNS_Test_Observations.Post_Close_Receive_Waits;
-#else
-      return 0;
-#end if;
+      return
+        (if Flyology.DNS_Test_Observations.Enabled
+         then Flyology.DNS_Test_Observations.Post_Close_Receive_Waits
+         else 0);
    end Post_Close_Receive_Waits;
 
    procedure Validate_Response

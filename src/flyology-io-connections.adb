@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Unchecked_Deallocation;
 with Flyology.Connection_Policy;
+with Flyology.Connection_Test_Hooks;
 with Flyology.IO.TLS_Driver;
 with Flyology.Operations.Drivers;
 with Flyology.Socket_Policy;
@@ -11,6 +12,7 @@ with System.Soft_Links;
 package body Flyology.IO.Connections is
    package Policy renames Flyology.Connection_Policy;
    package Sockets renames Flyology.IO.Sockets;
+   package Test_Hooks renames Flyology.Connection_Test_Hooks;
    package TLS renames Flyology.IO.TLS;
 
    use type Ada.Real_Time.Time;
@@ -83,35 +85,6 @@ package body Flyology.IO.Connections is
    begin
       Guard.Armed := False;
    end Disarm;
-
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-   function Test_Barrier_Arrive (Point : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arrive";
-   function Test_Barrier_Released (Point : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_released";
-   function Test_Barrier_Arrive_Once (Point : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arrive_once";
-   function Test_Receive_Limit (Requested : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_receive_limit";
-
-   procedure Test_Barrier (Point : Interfaces.C.int) is
-   begin
-      if Test_Barrier_Arrive (Point) /= 0 then
-         while Test_Barrier_Released (Point) = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_Barrier;
-
-   procedure Test_One_Shot_Barrier (Point : Interfaces.C.int) is
-   begin
-      if Test_Barrier_Arrive_Once (Point) /= 0 then
-         while Test_Barrier_Released (Point) = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_One_Shot_Barrier;
-#end if;
 
    protected body Descriptor_Controller is
       procedure Adopt
@@ -617,12 +590,13 @@ package body Flyology.IO.Connections is
    begin
       Item.Controller.Start_Operation
         (Guard.Generation'Access, Guard.State'Access, FD, Lease_Source, Initial_Close_Source, Initial_Owner);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (0);
-      --  Unlike the general barrier above, only the first registration parks.
-      --  A competing upgrade can therefore advance the transport generation.
-      Test_One_Shot_Barrier (6);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (0);
+         --  Unlike the general barrier above, only the first registration
+         --  parks. A competing upgrade can therefore advance the transport
+         --  generation.
+         Test_Hooks.One_Shot_Barrier (6);
+      end if;
       loop
          Interrupts (1) := Initial_Close_Source;
          Interrupt_Sources (Initial_Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
@@ -630,20 +604,18 @@ package body Flyology.IO.Connections is
            (Guard.Generation, Guard.State'Access, Result, FD, Close_Source, Guard.Socket, Owner, Transport);
          case Result is
             when Lease_Acquired  =>
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-               Test_Barrier (1);
-#end if;
+               if Test_Hooks.Enabled then
+                  Test_Hooks.Barrier (1);
+               end if;
                return;
 
             when Lease_Cancelled =>
                raise Operation_Cancelled with "connection closed while waiting for its operation lease";
 
             when Lease_Busy      =>
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-               Test_Barrier (4);
-#else
-               null;
-#end if;
+               if Test_Hooks.Enabled then
+                  Test_Hooks.Barrier (4);
+               end if;
          end case;
 
          --  Try_Acquire observes Active under the controller lock before this
@@ -719,9 +691,9 @@ package body Flyology.IO.Connections is
       if not Accepted then
          raise Admission_Closed;
       end if;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (10);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (10);
+      end if;
    end Reserve;
 
    procedure Reserve_Interruptibly
@@ -743,9 +715,9 @@ package body Flyology.IO.Connections is
          Manager.Try_Acquire (Result, Guard.Armed'Access);
          case Result is
             when Flyology.Capacity.Permit_Acquired   =>
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-               Test_Barrier (8);
-#end if;
+               if Test_Hooks.Enabled then
+                  Test_Hooks.Barrier (8);
+               end if;
                return;
 
             when Flyology.Capacity.Gate_Closed       =>
@@ -763,9 +735,9 @@ package body Flyology.IO.Connections is
          --  a later release leaves persistent readiness for this wait.
          Manager.Acquire_Wait_Source (Acquire_FD, Can_Acquire);
          if not Can_Acquire then
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            Test_Barrier (9);
-#end if;
+            if Test_Hooks.Enabled then
+               Test_Hooks.Barrier (9);
+            end if;
             if Token = null then
                Outcome := Wait_Interruptibly (Acquire_FD, For_Read, Remaining (Started, Timeout));
             else
@@ -817,9 +789,9 @@ package body Flyology.IO.Connections is
       Reserve (Manager, Guard);
       Item.Controller.Adopt
         (Flyology.IO.Sockets.Native_Descriptor (Socket), Socket, Guard.Owner, Guard.Armed'Access);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (12);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (12);
+      end if;
    end Take;
 
    procedure Connect
@@ -849,9 +821,9 @@ package body Flyology.IO.Connections is
          when Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
       end;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (18);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (18);
+      end if;
       if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
@@ -949,9 +921,9 @@ package body Flyology.IO.Connections is
             Operation  => Item.State.Child,
             Interrupts => Interrupts (1 .. Count));
          Item.State.Child_Live := True;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         Test_Barrier (19);
-#end if;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Barrier (19);
+         end if;
          Flyology.Operations.Continue_After (Item, Item.State.Child);
       exception
          when others =>
@@ -995,9 +967,9 @@ package body Flyology.IO.Connections is
             if Can_Acquire then
                Flyology.Operations.Drivers.Reschedule (Item);
             else
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-               Test_Barrier (9);
-#end if;
+               if Test_Hooks.Enabled then
+                  Test_Hooks.Barrier (9);
+               end if;
                Arm_Admission_Sources (Item, Acquire_FD);
             end if;
 
@@ -1034,9 +1006,9 @@ package body Flyology.IO.Connections is
                null;
          end;
          Flyology.Operations.Release (Item.State.Child);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         Test_Barrier (20);
-#end if;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Barrier (20);
+         end if;
          Item.State.Child_Live := False;
       exception
          when others =>
@@ -1044,11 +1016,9 @@ package body Flyology.IO.Connections is
             raise;
       end;
       System.Soft_Links.Abort_Undefer.all;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      if Succeeded then
-         Test_Barrier (18);
+      if Test_Hooks.Enabled and then Succeeded then
+         Test_Hooks.Barrier (18);
       end if;
-#end if;
 
       if Item.State.Cancelling then
          Complete_Managed_Connect
@@ -1302,9 +1272,9 @@ package body Flyology.IO.Connections is
       Item.TLS_Session := Session_Hold.Value;
       Session_Hold.Value := null;
       Item.TLS_Shutdown_Complete := False;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (7);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (7);
+      end if;
 
       TLS_Driver.Handshake (Item.TLS_Session.all, Check'Access, Await'Access);
       Item.Controller.Finish_TLS_Upgrade (Guard.Generation);
@@ -1390,17 +1360,17 @@ package body Flyology.IO.Connections is
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
       end;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (14);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (14);
+      end if;
       if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
       Item.Controller.Adopt
         (Flyology.IO.Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (11);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (11);
+      end if;
    end Accept_Connection;
 
    procedure Close (Item : in out Connection) is
@@ -1414,11 +1384,9 @@ package body Flyology.IO.Connections is
          Guard : Close_Guard (Item'Unchecked_Access, Outcome'Access);
          pragma Unreferenced (Guard);
       begin
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         if Outcome.Leader then
-            Test_Barrier (17);
+         if Test_Hooks.Enabled and then Outcome.Leader then
+            Test_Hooks.Barrier (17);
          end if;
-#end if;
          null;
       end;
 
@@ -2089,44 +2057,46 @@ package body Flyology.IO.Connections is
          if Item.TLS_Session = null then
             raise Program_Error with "TLS transport has no provider session";
          end if;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         declare
-            Limit : constant Interfaces.C.int := Test_Receive_Limit (Interfaces.C.int (Data'Length));
-         begin
-            TLS_Driver.Receive
-              (Item.TLS_Session.all,
-               Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
-               Last,
-               Check'Access,
-               Await'Access);
-         end;
-#else
-         TLS_Driver.Receive (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
-#end if;
+         if Test_Hooks.Enabled then
+            declare
+               Limit : constant Interfaces.C.int :=
+                 Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
+            begin
+               TLS_Driver.Receive
+                 (Item.TLS_Session.all,
+                  Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
+                  Last,
+                  Check'Access,
+                  Await'Access);
+            end;
+         else
+            TLS_Driver.Receive (Item.TLS_Session.all, Data, Last, Check'Access, Await'Access);
+         end if;
          return;
       elsif Transport /= Plain_Transport then
          raise Operation_Cancelled;
       end if;
       Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-      Test_Barrier (3);
-#end if;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (3);
+      end if;
       begin
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         declare
-            Limit : constant Interfaces.C.int := Test_Receive_Limit (Interfaces.C.int (Data'Length));
-         begin
+         if Test_Hooks.Enabled then
+            declare
+               Limit : constant Interfaces.C.int :=
+                 Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
+            begin
+               Flyology.IO.Sockets.Receive
+                 (Guard.Socket,
+                  Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
+                  Last,
+                  Remaining (Started, Timeout),
+                  Interrupts (1 .. Interrupt_Count + 1));
+            end;
+         else
             Flyology.IO.Sockets.Receive
-              (Guard.Socket,
-               Data (Data'First .. Data'First + Ada.Streams.Stream_Element_Offset (Limit) - 1),
-               Last,
-               Remaining (Started, Timeout),
-               Interrupts (1 .. Interrupt_Count + 1));
-         end;
-#else
-         Flyology.IO.Sockets.Receive
-           (Guard.Socket, Data, Last, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count + 1));
-#end if;
+              (Guard.Socket, Data, Last, Remaining (Started, Timeout), Interrupts (1 .. Interrupt_Count + 1));
+         end if;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
             raise Operation_Cancelled;
@@ -2175,9 +2145,9 @@ package body Flyology.IO.Connections is
          while First <= Data'Last loop
             Item.Controller.Check_Operation (Guard.Generation);
             Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            Test_Barrier (3);
-#end if;
+            if Test_Hooks.Enabled then
+               Test_Hooks.Barrier (3);
+            end if;
             Flyology.IO.Sockets.Receive
               (Guard.Socket,
                Data (First .. Data'Last),
@@ -2188,11 +2158,9 @@ package body Flyology.IO.Connections is
                raise Device_Error with "connection closed while receiving";
             end if;
             First := Last + 1;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            if First <= Data'Last then
-               Test_Barrier (5);
+            if Test_Hooks.Enabled and then First <= Data'Last then
+               Test_Hooks.Barrier (5);
             end if;
-#end if;
          end loop;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>
@@ -2244,11 +2212,7 @@ package body Flyology.IO.Connections is
             Interrupt_Sources (Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
             declare
                Chunk_Last : constant Ada.Streams.Stream_Element_Offset :=
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-                 First;
-#else
-                 Data'Last;
-#end if;
+                 (if Test_Hooks.Enabled then First else Data'Last);
             begin
                Flyology.IO.Sockets.Send
                  (Guard.Socket,
@@ -2261,11 +2225,9 @@ package body Flyology.IO.Connections is
                raise Device_Error with "connection closed while sending";
             end if;
             First := Last + 1;
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            if First <= Data'Last then
-               Test_Barrier (2);
+            if Test_Hooks.Enabled and then First <= Data'Last then
+               Test_Hooks.Barrier (2);
             end if;
-#end if;
          end loop;
       exception
          when Flyology.IO.Sockets.Operation_Interrupted =>

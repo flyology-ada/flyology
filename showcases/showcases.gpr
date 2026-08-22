@@ -57,20 +57,17 @@ project Showcases is
          when "development" =>
             for Default_Switches ("Ada") use
               Flyology_Showcases_Config.Ada_Compiler_Switches
-              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
-                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
             for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
          when "validation" =>
             for Default_Switches ("Ada") use
               Flyology_Showcases_Config.Ada_Compiler_Switches
-              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ",
-                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
             for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
          when "release" =>
             for Default_Switches ("Ada") use
               Flyology_Showcases_Config.Ada_Compiler_Switches
-              & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ",
-                 "-gnateDFLYOLOGY_CONNECTION_TEST_HOOKS=False");
+              & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ");
             for Default_Switches ("C") use ("-O3", "-Wall", "-Wextra");
       end case;
    end Compiler;

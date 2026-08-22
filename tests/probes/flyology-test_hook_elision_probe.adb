@@ -1,0 +1,41 @@
+with Flyology.Connection_Test_Hooks;
+with Flyology.DNS_Test_Observations;
+with Flyology.File_Watch_Test_Hooks;
+with Flyology.Structured_Server_Test_Hooks;
+with Flyology.Subprocess_Test_Hooks;
+with Flyology.TLS_Test_Hooks;
+with Flyology.Wall_Clock_IO_Testing;
+with Flyology.Wall_Clock_Testing;
+with Flyology.Worker_Pool_Test_Hooks;
+
+procedure Flyology.Test_Hook_Elision_Probe is
+   Observed : Boolean := False with Volatile;
+begin
+   if Flyology.DNS_Test_Observations.Enabled then
+      Flyology.DNS_Test_Observations.Reset;
+   end if;
+   if Flyology.TLS_Test_Hooks.Enabled then
+      Flyology.TLS_Test_Hooks.Reset;
+   end if;
+   if Flyology.Connection_Test_Hooks.Enabled then
+      Flyology.Connection_Test_Hooks.Barrier (0);
+   end if;
+   if Flyology.Worker_Pool_Test_Hooks.Enabled then
+      Flyology.Worker_Pool_Test_Hooks.Run_Claim_Barrier;
+   end if;
+   if Flyology.Subprocess_Test_Hooks.Enabled then
+      Observed := Flyology.Subprocess_Test_Hooks.Fail_Reaper_Allocation;
+   end if;
+   if Flyology.Structured_Server_Test_Hooks.Enabled then
+      Flyology.Structured_Server_Test_Hooks.Barrier (0);
+   end if;
+   if Flyology.File_Watch_Test_Hooks.Enabled then
+      Observed := Flyology.File_Watch_Test_Hooks.Consume_Events_Lost;
+   end if;
+   if Flyology.Wall_Clock_Testing.Enabled then
+      Flyology.Wall_Clock_Testing.Note_Sample;
+   end if;
+   if Flyology.Wall_Clock_IO_Testing.Enabled then
+      Flyology.Wall_Clock_IO_Testing.Reset;
+   end if;
+end Flyology.Test_Hook_Elision_Probe;

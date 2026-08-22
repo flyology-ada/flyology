@@ -41,7 +41,9 @@ package body Flyology.IO.File_Watches is
       Count  : Natural;
    begin
       Native.Read (Item.Native_Source, Events, Count);
-      if Flyology.File_Watch_Test_Hooks.Consume_Events_Lost then
+      if Flyology.File_Watch_Test_Hooks.Enabled
+        and then Flyology.File_Watch_Test_Hooks.Consume_Events_Lost
+      then
          if Count < Events'Length then
             Count := Count + 1;
          end if;
@@ -275,7 +277,9 @@ package body Flyology.IO.File_Watches is
       end loop;
       if Other = null then
          Native.Remove (Item.Native_Source, Native.Handle (Position.Subject), Success);
-         if Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure then
+         if Flyology.File_Watch_Test_Hooks.Enabled
+           and then Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure
+         then
             Success := False;
          end if;
       else
@@ -356,7 +360,9 @@ package body Flyology.IO.File_Watches is
          end loop;
          if Other = null then
             Native.Remove (Item.Native_Source, Native.Handle (Victim.Subject), Removed);
-            if Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure then
+            if Flyology.File_Watch_Test_Hooks.Enabled
+              and then Flyology.File_Watch_Test_Hooks.Consume_Remove_Failure
+            then
                Removed := False;
             end if;
          else
@@ -370,7 +376,9 @@ package body Flyology.IO.File_Watches is
       Item.First := null;
       Item.Count := 0;
       Native.Close (Item.Native_Source, Closed);
-      if Flyology.File_Watch_Test_Hooks.Consume_Close_Failure then
+      if Flyology.File_Watch_Test_Hooks.Enabled
+        and then Flyology.File_Watch_Test_Hooks.Consume_Close_Failure
+      then
          Closed := False;
       end if;
       Success := Success and then Closed;

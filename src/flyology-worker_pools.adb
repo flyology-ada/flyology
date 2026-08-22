@@ -165,7 +165,9 @@ package body Flyology.Worker_Pools is
                Failed := True;
          end;
 
-         Test_Hooks.Shutdown_Barrier;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Shutdown_Barrier;
+         end if;
 
          begin
             Item.Jobs.Close;
@@ -230,7 +232,9 @@ package body Flyology.Worker_Pools is
          --  object defers abort. A caller that loses the claim, or that is
          --  aborted while making it, therefore never arms teardown and never
          --  touches the pool state owned by the run already in progress.
-         Test_Hooks.Run_Claim_Barrier;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Run_Claim_Barrier;
+         end if;
          Item.State.Begin_Run (Item.Worker_Count);
          Cleanup_Armed := True;
       end Initialize;
@@ -286,7 +290,8 @@ package body Flyology.Worker_Pools is
          end Worker;
 
          task body Worker is
-            Activation_Checked  : constant Boolean := Test_Hooks.Check_Activation;
+            Activation_Checked  : constant Boolean :=
+              (if Test_Hooks.Enabled then Test_Hooks.Check_Activation else True);
             pragma Unreferenced (Activation_Checked);
             Completion_Reported : Boolean := False;
 

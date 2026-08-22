@@ -35,14 +35,20 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   `utf-8`. When formatting without a project, pass `--charset utf-8` explicitly
   so non-ASCII source text is not re-encoded. Change generators rather than
   running GNATformat on generated Ada independently.
-- GNATformat skips Ada sources containing GNAT preprocessing directives. Format
-  such a source through directive-preserving temporary variants: select and
-  format the true and false branches separately, compare their nonconditional
-  skeletons, then merge both formatted branches beneath the original
-  `#if`/`#else`/`#end if;` lines. If a directive splits an expression or
-  statement and changes surrounding wrapping, reconcile that boundary
-  explicitly. Verify both preprocessing configurations after the merge. Never
-  delete the directives or format only the currently active branch.
+- Do not use GNAT preprocessing directives in Ada source; GNATformat skips any
+  source that contains them. For test-only variants, select matching enabled
+  and disabled private package specifications through GPR source directories.
+  Both variants must document a literal `Enabled : constant Boolean := True`
+  or `False` next to the constant: GNAT removes code guarded by a literal false
+  even at `-O0`, while a function that returns false can retain its call and
+  references from the guarded branch. Put every test-only reference inside the
+  static guard, including references in a local helper body that GNAT may emit
+  even when every call to that helper disappears. Disabled variants use
+  imported-only sentinel declarations so a surviving reference is detectable;
+  they do not need `Pure`, and Flyology child units cannot be pure while their
+  parent is not. Run `scripts/check-test-hook-elision.sh` after changing a hook,
+  its GPR selection, or a guarded call site; it checks every selection and the
+  supported optimization modes.
 - Runtime units retain GNAT's `-gnatg` style profile, but every authoritative
   compile command in `prepare-rts.sh` must follow it with `-gnatyM110` so the
   compiler enforces the repository's 110-column limit instead of GNAT's

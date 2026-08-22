@@ -1,11 +1,8 @@
+with Flyology.Worker_Pool_Test_Hooks;
+
 package body Flyology.Cancellation is
 
    use type Interfaces.C.int;
-
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-   function Test_Cancellation_Failure return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_cancellation_failure";
-#end if;
 
    protected body Token is
       procedure Request is
@@ -18,11 +15,11 @@ package body Flyology.Cancellation is
             --  prevent polling or protected-entry waiters from observing it.
             Is_Requested := True;
             if Wake_Sources.Descriptor (Wake) >= 0 then
-#if FLYOLOGY_WORKER_POOL_TEST_HOOKS then
-               if Test_Cancellation_Failure /= 0 then
+               if Flyology.Worker_Pool_Test_Hooks.Enabled
+                 and then Flyology.Worker_Pool_Test_Hooks.Cancellation_Failure
+               then
                   raise Program_Error with "injected cancellation wake signaling failure";
                end if;
-#end if;
                Wake_Sources.Signal (Wake);
             end if;
          end if;

@@ -1,14 +1,18 @@
---  Test-only TLS ownership-transfer barrier state. The project excludes this
---  unit completely unless FLYOLOGY_TLS_TEST_HOOKS is enabled. It is a public
---  child only in that test build so its abstract state remains self-contained;
---  a private child's state would have to become part of Flyology's state.
+--  Enabled TLS ownership-transfer barrier state selected by the owning
+--  project. Production selects an imported-only private specification and
+--  statically removes its guarded references.
 
-package Flyology.TLS_Test_Hooks
+private package Flyology.TLS_Test_Hooks
   with
     SPARK_Mode     => On,
     Abstract_State => (Barrier_State with External => (Async_Readers, Async_Writers)),
     Initializes    => Barrier_State
 is
+   --  Keep this a literal compile-time constant. GNAT removes code guarded by
+   --  a literal False even at -O0; a function returning False can retain both
+   --  its call and references inside the guarded branch.
+   Enabled : constant Boolean := True;
+
    Barrier_Count : constant := 2;
 
    function Valid_Point (Point : Integer) return Boolean

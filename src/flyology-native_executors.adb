@@ -21,7 +21,9 @@ package body Flyology.Native_Executors is
    begin
       if Owner.Value /= null then
          Free_Token (Owner.Value);
-         Test_Hooks.Token_Cleanup_Release;
+         if Test_Hooks.Enabled then
+            Test_Hooks.Token_Cleanup_Release;
+         end if;
       end if;
    end Finalize;
 
@@ -32,7 +34,7 @@ package body Flyology.Native_Executors is
 
    procedure Consume_Completion_Wake (Wake : in out Flyology.Wake_Sources.Source) is
    begin
-      if Test_Hooks.Consume_Failure then
+      if Test_Hooks.Enabled and then Test_Hooks.Consume_Failure then
          raise Program_Error with "injected native executor wake consumption failure";
       end if;
       Flyology.Wake_Sources.Consume (Wake);
@@ -134,7 +136,7 @@ package body Flyology.Native_Executors is
             --  slot Running and lets the worker's Fail path record exactly one
             --  terminal outcome.
             Results (Slot) := Result;
-            if Test_Hooks.Completion_Wake then
+            if Test_Hooks.Enabled and then Test_Hooks.Completion_Wake then
                Flyology.Wake_Sources.Ensure (Wakes (Slot));
                Wake_Armed (Slot) := True;
             end if;
@@ -337,11 +339,13 @@ package body Flyology.Native_Executors is
          Owner.Value := Tokens (Slot);
          Tokens (Slot) := null;
          if Owner.Value /= null then
-            Test_Hooks.Token_Cleanup_Acquire;
-            --  This barrier is inside the protected action: abort remains
-            --  deferred after State relinquishes ownership until the caller's
-            --  controlled holder is already authoritative.
-            Test_Hooks.Token_Cleanup_Barrier;
+            if Test_Hooks.Enabled then
+               Test_Hooks.Token_Cleanup_Acquire;
+               --  This barrier is inside the protected action: abort remains
+               --  deferred after State relinquishes ownership until the
+               --  caller's controlled holder is already authoritative.
+               Test_Hooks.Token_Cleanup_Barrier;
+            end if;
          end if;
       end Take_Token;
 
@@ -363,7 +367,8 @@ package body Flyology.Native_Executors is
    end Shared_State;
 
    task body Worker is
-      Activation_Checked : constant Boolean := Test_Hooks.Check_Activation;
+      Activation_Checked : constant Boolean :=
+        (if Test_Hooks.Enabled then Test_Hooks.Check_Activation else True);
       pragma Unreferenced (Activation_Checked);
 
       package Conversions is new System.Address_To_Access_Conversions (Shared_State);
@@ -582,7 +587,9 @@ package body Flyology.Native_Executors is
          Item.State.Await_Shutdown;
          return;
       end if;
-      Test_Hooks.Shutdown_Barrier;
+      if Test_Hooks.Enabled then
+         Test_Hooks.Shutdown_Barrier;
+      end if;
       Perform_Cleanup;
       if Failed then
          Ada.Exceptions.Reraise_Occurrence (Primary_Error);

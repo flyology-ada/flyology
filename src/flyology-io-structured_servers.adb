@@ -40,7 +40,9 @@ package body Flyology.IO.Structured_Servers is
    procedure Finalize (Item : in out Listener_Close_Guard) is
    begin
       if Item.Value /= Invalid_Descriptor then
-         Test_Hooks.Barrier (4);
+         if Test_Hooks.Enabled then
+            Test_Hooks.Barrier (4);
+         end if;
          Item.Result.all := C_Close_Listener (Item.Value);
          Policy.Consume_After_Close_Attempt (Item.Value);
       end if;
@@ -262,7 +264,9 @@ package body Flyology.IO.Structured_Servers is
             --  descriptor in exactly one of Listener, Transfer, or
             --  Owned_Listener while moving it into the server.
             Sockets.Release (Listener, Guard.Transfer);
-            Test_Hooks.Barrier (1);
+            if Test_Hooks.Enabled then
+               Test_Hooks.Barrier (1);
+            end if;
             Sockets.Adopt (Guard.Transfer, Item.Owned_Listener);
             Guard.Armed := True;
          exception
@@ -368,12 +372,16 @@ package body Flyology.IO.Structured_Servers is
          raise Program_Error with "structured server requires a listening socket";
       end if;
 
-      Test_Hooks.Barrier (0);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (0);
+      end if;
 
       declare
          Cleanup : Serve_Cleanup_Guard;
       begin
-         Test_Hooks.Barrier (2);
+         if Test_Hooks.Enabled then
+            Test_Hooks.Barrier (2);
+         end if;
          declare
             task type Worker with CPU => Handler_CPU is
                pragma Task_Info (Handler_Model);
@@ -381,7 +389,8 @@ package body Flyology.IO.Structured_Servers is
             end Worker;
 
             task body Worker is
-               Activation_Checked  : constant Boolean := Test_Hooks.Check_Activation;
+               Activation_Checked  : constant Boolean :=
+                 (if Test_Hooks.Enabled then Test_Hooks.Check_Activation else True);
                pragma Unreferenced (Activation_Checked);
                Stop_Worker         : Boolean := False;
                Completion_Reported : Boolean := False;
@@ -478,7 +487,9 @@ package body Flyology.IO.Structured_Servers is
 
             Workers : array (1 .. Item.Capacity) of Worker;
          begin
-            Test_Hooks.Barrier (6);
+            if Test_Hooks.Enabled then
+               Test_Hooks.Barrier (6);
+            end if;
             declare
                Worker_Cleanup_Armed : aliased Boolean := True;
                Worker_Cleanup       : Worker_Cleanup_Guard (Worker_Cleanup_Armed'Access);
@@ -488,7 +499,9 @@ package body Flyology.IO.Structured_Servers is
                   Workers (Index).Start;
                end loop;
                Item.State.Mark_Accepting;
-               Test_Hooks.Barrier (3);
+               if Test_Hooks.Enabled then
+                  Test_Hooks.Barrier (3);
+               end if;
                if Item.State.Stop_Was_Requested then
                   Stop_Accepting;
                else

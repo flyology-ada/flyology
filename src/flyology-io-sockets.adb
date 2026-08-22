@@ -1,5 +1,6 @@
 with Ada.Strings;
 with Ada.Strings.Fixed;
+with Flyology.Connection_Test_Hooks;
 with Flyology.Socket_Policy;
 with Flyology.Operations.Drivers;
 with Flyology.Time_Math;
@@ -323,25 +324,6 @@ package body Flyology.IO.Sockets is
    --  A nonnegative result is the accepted descriptor, -1 means accept(2)
    --  failed, and -2 means C_Accept closed a descriptor that accept(2)
    --  returned but descriptor configuration could not make usable.
-
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-   function Test_Connection_Barrier_Arrive (Point : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_arrive";
-   function Test_Connection_Barrier_Released (Point : Interfaces.C.int) return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_connection_barrier_released";
-
-   procedure Test_Connection_Barrier (Point : Interfaces.C.int) is
-   begin
-      if Test_Connection_Barrier_Arrive (Point) /= 0 then
-         while Test_Connection_Barrier_Released (Point) = 0 loop
-            delay 0.0;
-         end loop;
-      end if;
-   end Test_Connection_Barrier;
-
-   procedure Test_Raw_Accept_Return_Barrier
-   with Import, Convention => C, External_Name => "flyology_test_connection_raw_accept_return_barrier";
-#end if;
 
    --  A protected call defers abort from the C accept return through
    --  publication in the caller-owned handle. The listener is nonblocking,
@@ -952,9 +934,9 @@ package body Flyology.IO.Sockets is
       begin
          Result := C_Accept (Listener, Decode_Address, Family, Address, Port, Scope, Error);
          if Result >= 0 then
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-            Test_Raw_Accept_Return_Barrier;
-#end if;
+            if Flyology.Connection_Test_Hooks.Enabled then
+               Flyology.Connection_Test_Hooks.Raw_Accept_Return_Barrier;
+            end if;
             Target.Value := Result;
             Set_Preparation_State (Target.Preparation'Address, Prepared);
          end if;
@@ -2327,9 +2309,9 @@ package body Flyology.IO.Sockets is
             Sources (Index + 1) := (Descriptor => Item.Interrupts (Index), For_Write => False);
          end loop;
          Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
-#if FLYOLOGY_CONNECTION_TEST_HOOKS then
-         Test_Connection_Barrier (21);
-#end if;
+         if Flyology.Connection_Test_Hooks.Enabled then
+            Flyology.Connection_Test_Hooks.Barrier (21);
+         end if;
       end Arm_Connection_Sources;
 
       procedure Arm_Retry_Interrupts is

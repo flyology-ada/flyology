@@ -4,9 +4,7 @@ with Flyology.Connection_Policy;
 with Flyology.IO.TLS_Driver;
 with Flyology.Operations.Drivers;
 with Flyology.TLS_Policy;
-#if FLYOLOGY_TLS_TEST_HOOKS then
 with Flyology.TLS_Test_Hooks;
-#end if;
 with Interfaces.C;
 
 package body Flyology.IO.TLS is
@@ -33,21 +31,25 @@ package body Flyology.IO.TLS is
    procedure Disable_SIGPIPE (Socket : Interfaces.C.int);
    pragma Import (C, Disable_SIGPIPE, "__gnat_disable_sigpipe");
 
-#if FLYOLOGY_TLS_TEST_HOOKS then
    --  Test-only barriers that widen the Take ownership-transfer window so a
-   --  test can deliver an abort inside it. Production preprocessing removes
-   --  this call site and excludes the Ada state package from the build.
+   --  test can deliver an abort inside it. The body repeats the callers'
+   --  literal guard because GNAT can retain an uncalled local subprogram body
+   --  at -O0 even after it removes every guarded call.
    procedure Test_Barrier (Point : Integer) is
-      Did_Arrive : Boolean;
    begin
-      Flyology.TLS_Test_Hooks.Arrive (Point, Did_Arrive);
-      if Did_Arrive then
-         while not Flyology.TLS_Test_Hooks.Released (Point) loop
-            delay 0.0;
-         end loop;
+      if Flyology.TLS_Test_Hooks.Enabled then
+         declare
+            Did_Arrive : Boolean;
+         begin
+            Flyology.TLS_Test_Hooks.Arrive (Point, Did_Arrive);
+            if Did_Arrive then
+               while not Flyology.TLS_Test_Hooks.Released (Point) loop
+                  delay 0.0;
+               end loop;
+            end if;
+         end;
       end if;
    end Test_Barrier;
-#end if;
 
    type Close_Outcome is record
       FD               : Descriptor := Invalid_Descriptor;
@@ -605,9 +607,9 @@ package body Flyology.IO.TLS is
          New_Session : Session_Access := null;
       begin
          New_Session := Factory (FD);
-#if FLYOLOGY_TLS_TEST_HOOKS then
-         Test_Barrier (0);
-#end if;
+         if Flyology.TLS_Test_Hooks.Enabled then
+            Test_Barrier (0);
+         end if;
          if New_Session = null then
             return;
          end if;
@@ -619,9 +621,9 @@ package body Flyology.IO.TLS is
                Free (New_Session);
                raise;
          end;
-#if FLYOLOGY_TLS_TEST_HOOKS then
-         Test_Barrier (1);
-#end if;
+         if Flyology.TLS_Test_Hooks.Enabled then
+            Test_Barrier (1);
+         end if;
          --  Nothing below can fail: Move only rejects an open target, and the
          --  caller precondition above rejects one. The connection therefore
          --  never keeps a descriptor it cannot close.
