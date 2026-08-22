@@ -13,4 +13,11 @@ begin
    Value := Interfaces.C.int'Last;
    Consume_After_Close_Attempt (Value);
    pragma Assert (Value = -1);
+
+   pragma Assert (Accepting_After_Worker_Start (Serving));
+   pragma Assert (not Accepting_After_Worker_Start (Idle));
+   pragma Assert (not Accepting_After_Worker_Start (Stop_Requested));
+   pragma Assert (Snapshot_Accepting (True, Serving));
+   pragma Assert (not Snapshot_Accepting (False, Serving));
+   pragma Assert (not Snapshot_Accepting (True, Stop_Requested));
 end Flyology.Structured_Server_Policy.Smoke;

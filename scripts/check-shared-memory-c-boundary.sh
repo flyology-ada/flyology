@@ -27,6 +27,7 @@ for symbol in $symbols; do
     flyology_shm_memfd_create|\
     flyology_shm_getsockname_family|\
     flyology_shm_getpeername_family|\
+    flyology_shm_socket_accepting|\
     flyology_shm_send_fd_once|\
     flyology_shm_receive_fds_once)
       ;;
@@ -37,19 +38,26 @@ for symbol in $symbols; do
   esac
 done
 
-for required in \
-  flyology_shm_fstat_fields \
-  flyology_shm_lstat_fields \
-  flyology_shm_fcntl_getfd \
-  flyology_shm_fcntl_setfd \
-  flyology_shm_fcntl_getfl \
-  flyology_shm_fcntl_get_seals \
-  flyology_shm_fcntl_add_seals \
-  flyology_shm_memfd_create \
-  flyology_shm_getsockname_family \
-  flyology_shm_getpeername_family \
-  flyology_shm_send_fd_once \
-  flyology_shm_receive_fds_once
+required_symbols='
+  flyology_shm_fstat_fields
+  flyology_shm_lstat_fields
+  flyology_shm_fcntl_getfd
+  flyology_shm_fcntl_setfd
+  flyology_shm_fcntl_getfl
+  flyology_shm_fcntl_get_seals
+  flyology_shm_fcntl_add_seals
+  flyology_shm_memfd_create
+  flyology_shm_getsockname_family
+  flyology_shm_getpeername_family
+  flyology_shm_send_fd_once
+  flyology_shm_receive_fds_once'
+
+if [ "$(uname -s)" = Darwin ]; then
+  required_symbols="$required_symbols
+  flyology_shm_socket_accepting"
+fi
+
+for required in $required_symbols
 do
   if ! printf '%s\n' "$symbols" | grep -Fx "$required" >/dev/null; then
     printf '%s\n' "missing shared-memory C symbol: $required" >&2

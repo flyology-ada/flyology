@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Replace a running Flyology server with a fresh executable through listener escrow, topology reconstruction, cancellable canaries, structured drain, and fresh-process reversal.">
+    <meta name="theme-color" content="#17213d">
+    <title>Process upgrades · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/process-upgrades/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <link rel="stylesheet" href="process-upgrades.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/" aria-current="page">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero upgrade-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Process upgrades</li></ol>
+          <p class="hero-kicker">GENERATION CHANGE / FRESH RUNTIME</p>
+          <h1>Upgrade a running server with overlapping generations.</h1>
+        </div>
+        <p class="doc-hero-copy">An image generation is one managed application process with its own executable, Ada runtime, supervision tree, and accepted connections. Flyology overlaps a previous generation and a candidate generation during replacement.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#premise">Why overlap generations</a></li>
+            <li><a href="#problem">Four reload mechanisms</a></li>
+            <li><a href="#contract">Continuity contract</a></li>
+            <li><a href="#story">One upgrade</a></li>
+            <li><a href="#prerequisites">Before you begin</a></li>
+            <li><a href="#model">Ownership model</a></li>
+            <li><a href="#boundary">Transfer boundary</a></li>
+            <li><a href="#supervision">Supervision tree</a></li>
+            <li><a href="#launch">Launch context</a></li>
+            <li><a href="#protocol">Lifecycle protocol</a></li>
+            <li><a href="#agent">Application-side agent</a></li>
+            <li><a href="#coordinator">Coordinator decisions</a></li>
+            <li><a href="#initial">First generation</a></li>
+            <li><a href="#example">Complete upgrade example</a></li>
+            <li><a href="#canary">Control canary effects</a></li>
+            <li><a href="#cancel">Cancel a canary</a></li>
+            <li><a href="#reverse">Reverse a promotion</a></li>
+            <li><a href="#operate">Observe and operate</a></li>
+            <li><a href="#limits">Verify within the limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="premise" class="opening-section">
+            <p class="chapter-marker"><span>PART I</span> The continuity problem</p>
+            <h2>A server upgrade is an ownership problem.</h2>
+            <p class="opening-lede">Assume a server is accepting connections while established sessions remain active. A new executable is ready. The deployment must introduce the new code while every live connection keeps one clear owner.</p>
+            <p>An <strong>image generation</strong> is one managed application process. It has its own executable, Ada runtime, supervision tree, tasks, connections, and process-local handles. The <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#6238e45b564b0a97577418058b93fdae3b92b25a0164eaf2c2eb222934c1267d"><code>Image_Generation</code></a> value identifies that process within one coordinator lifetime.</p>
+            <p>The <strong>previous generation</strong> is active before promotion. The <strong>candidate generation</strong> is the new process under evaluation. An <strong>artifact</strong> is an immutable executable. A <strong>launch description</strong> records the command and process context used to start an artifact.</p>
+            <p>Flyology keeps the original listener under a stable coordinator. It starts the candidate generation from its launch description, supplies a listener capability, and authorizes admission through a separate lifecycle command.</p>
+            <div class="premise-equation" aria-label="The process-upgrade objective">
+              <div><span>KEEP</span><strong>Established work</strong><p>The process that accepted a connection continues to own it.</p></div>
+              <div><span>CHANGE</span><strong>New admission</strong><p>The candidate receives a listener capability and separate protocol authorization to admit work.</p></div>
+              <div><span>CONTROL</span><strong>The overlap</strong><p>Readiness, cancellation, promotion, and drain decide when each generation may act.</p></div>
+            </div>
+            <p class="premise-rule">The coordinator transfers listener capabilities and desired-topology identity. Each generation constructs its own tasks and process-local state.</p>
+          </section>
+
+          <section id="problem">
+            <h2>Reload can mean four different operations.</h2>
+            <p>Before selecting a mechanism, decide which continuity property matters. Flyology implements the rolling replacement in the final row.</p>
+            <div class="reload-spectrum" role="region" aria-label="Reload mechanism comparison" tabindex="0">
+              <table>
+                <thead><tr><th>Mechanism</th><th>What changes</th><th>What remains</th><th>Result</th></tr></thead>
+                <tbody>
+                  <tr><td>Restart or <code>exec</code></td><td>The executable image and runtime state</td><td>Selected descriptors and operating-system process context</td><td>Simple restart without a canary overlap or previous-generation drain</td></tr>
+                  <tr><td>Load a shared library</td><td>Code behind a designed module ABI</td><td>Objects that obey that ABI</td><td>Possible for a narrow plugin, but not arbitrary Ada runtime state</td></tr>
+                  <tr><td>Patch mapped instructions</td><td>Selected machine code</td><td>The existing runtime and heap</td><td>Cannot reconstruct elaboration state and is not a reversible service upgrade</td></tr>
+                  <tr><td>Start a new process</td><td>Executable, runtime, tasks, and local state</td><td>Explicit capabilities and durable topology sources</td><td>Supports canary overlap, isolation, structured drain, and fresh-process reversal</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>Updating the executable on disk does not change pages already mapped by a running process. A shared-library switch remains useful for a narrow, versioned plugin ABI used only after every task stops calling the plugin. Flyology keeps that separate from whole-server replacement.</p>
+          </section>
+
+          <section id="contract">
+            <h2>Define continuity before designing the handoff.</h2>
+            <p>Consider a TLS server with sessions that can remain open for several minutes. During deployment, clients need three different forms of continuity.</p>
+            <ol class="continuity-points">
+              <li><span>01</span><div><strong>Admission continuity</strong><p>The service keeps a bound listener and a kernel backlog while generations change.</p></div></li>
+              <li><span>02</span><div><strong>Connection continuity</strong><p>Each accepted connection stays with the generation that owns its TLS and protocol state.</p></div></li>
+              <li><span>03</span><div><strong>Control continuity</strong><p>The coordinator uses transaction authority to act on the exact upgrade. That authority contains the coordinator id, upgrade id, and candidate generation.</p></div></li>
+            </ol>
+            <p>These guarantees do not require execution continuity. The service does not need to move a task stack, protected object, parser buffer, or TLS session into the new process.</p>
+            <div class="continuity-contract">
+              <div>
+                <span class="contract-label">PRESERVED</span>
+                <ul>
+                  <li>The original listening socket and kernel backlog</li>
+                  <li>Existing connections in their accepting generation</li>
+                  <li>The desired topology identity</li>
+                  <li>Exact transaction authority</li>
+                  <li>The prior launch description for reversal</li>
+                </ul>
+              </div>
+              <div>
+                <span class="contract-label">RECONSTRUCTED</span>
+                <ul>
+                  <li>The Ada runtime and every application task</li>
+                  <li>The local supervision tree and server owner</li>
+                  <li>Protected objects and heap-resident application state</li>
+                  <li>Process-local views of durable or shared state</li>
+                  <li>Signal handlers and other generation initialization</li>
+                </ul>
+              </div>
+            </div>
+            <aside class="callout callout-teal upgrade-boundary">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <div class="callout-body">
+                <p class="callout-lede"><strong>The goal is continuous admission during a controlled replacement.</strong></p>
+                <p>The coordinator preserves listener escrow and upgrade control during normal replacement. If it exits, it can no longer coordinate handoff or reversal. Managed generations then follow application policy. Kernel or host failure remains outside this protocol.</p>
+              </div>
+            </aside>
+          </section>
+
+          <section id="story">
+            <h2>Follow one upgrade from generation 17 to generation 18.</h2>
+            <p>Generation 17 is active and owns three established connections. The coordinator owns the original listener. The deployment supplies generation 18 with a launch description and a topology identity.</p>
+            <p>That identity contains an application signature, schema, epoch, digest, and candidate role. The role classifies the external effects that the candidate may perform. Generation 18 obtains the actual desired topology from its binary, configuration, or another durable source. It checks the reconstructed result against the supplied identity.</p>
+            <figure class="upgrade-story">
+              <figcaption><strong>One transaction, two possible decisions</strong><span>Promotion and cancellation share preparation, then diverge.</span></figcaption>
+              <ol>
+                <li><span class="story-index">01</span><div><strong>Start fresh</strong><p>The coordinator starts generation 18 with a new Ada runtime and two private bootstrap channels.</p></div><small>G17 keeps serving</small></li>
+                <li><span class="story-index">02</span><div><strong>Reconstruct</strong><p>Generation 18 creates its local supervision tree and verifies the requested topology identity.</p></div><small>No admission yet</small></li>
+                <li><span class="story-index">03</span><div><strong>Supply the listener capability</strong><p>The coordinator sends one validated listener duplicate. Generation 18 owns that duplicate, not the original.</p></div><small>Admission remains disabled</small></li>
+                <li><span class="story-index">04</span><div><strong>Authorize the canary</strong><p>The generation lifecycle protocol authorizes admission under rules that constrain external effects. The application then reports readiness.</p></div><small>G17 and G18 may accept</small></li>
+                <li class="story-branch"><span class="story-index">05A</span><div><strong>Cancel</strong><p>Revoke generation 18 admission, drain its work, compensate its effects, and retire it. Generation 17 remains active.</p></div><small>Reversible branch</small></li>
+                <li class="story-branch story-promote"><span class="story-index">05B</span><div><strong>Promote</strong><p>Commit generation 18, revoke generation 17 admission, then drain and reap generation 17.</p></div><small>Commit branch</small></li>
+              </ol>
+            </figure>
+            <p>Preparation keeps admission disabled while generation 18 constructs its local owners. Canary evidence exists before the coordinator chooses the cancellation or promotion branch.</p>
+            <p>If the promoted generation later regresses, reversal starts a new generation from the retained prior launch description and provisioning data.</p>
+            <p>The <a href="#example">complete coordinator example</a> later follows this same path in Ada, with one comment for each lifecycle decision.</p>
+          </section>
+
+          <section id="prerequisites">
+            <h2>Make the application reconstructible before upgrading it.</h2>
+            <p>Socket handoff transfers only the listener capability. The application must define how a candidate generation becomes correct from process-independent sources.</p>
+            <div class="readiness-checklist">
+              <dl>
+                <div><dt>Stable listener owner</dt><dd>Bind once in the coordinator. The application generations receive duplicates, while the coordinator retains the original.</dd></div>
+                <div><dt>Desired topology</dt><dd>Store required supervisors, servers, and resource owners in the binary, configuration, or another durable source. Give that topology an epoch and digest.</dd></div>
+                <div><dt>Application readiness</dt><dd>Only after the required topology exists and every required structured server accepts, return true from the application hook. Flyology then matches the reported epoch and digest against the provision.</dd></div>
+                <div><dt>Structured stop</dt><dd>Revoke new admission before waiting for existing work to join. Make repeated stop requests safe.</dd></div>
+                <div><dt>Effect classification</dt><dd>Decide which work is safe beside the previous generation, requires an exact deployment-epoch check at each effect boundary, remains shadow-only, or waits for promotion.</dd></div>
+                <div><dt>Durable compatibility</dt><dd>Define schema compatibility and compensation outside the generation lifecycle protocol. Reversal cannot undo an incompatible data migration.</dd></div>
+                <div><dt>Immutable artifacts</dt><dd>Use absolute, immutable executable paths when reversal must identify the prior program reliably.</dd></div>
+              </dl>
+            </div>
+            <p>If the application cannot reconstruct its local topology or fence overlapping effects, it is not ready for this upgrade procedure. Use a stop-and-restart deployment until those boundaries exist.</p>
+          </section>
+
+          <div class="chapter-divider" aria-hidden="true"><span>PART II</span><b>The mechanism</b></div>
+
+          <section id="model">
+            <span class="step-label">MODEL</span>
+            <h2>Keep one stable owner outside both generations.</h2>
+            <p><a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html"><code>Flyology.Process_Generations.Coordinators</code></a> owns the original listening socket. Each generation receives a listener duplicate as an operating-system capability. The generation lifecycle protocol authorizes the candidate to admit work separately.</p>
+            <figure class="architecture-figure upgrade-figure">
+              <figcaption><strong>Ownership during a canary</strong><span>Listener capabilities cross the boundary; live application state remains process-local.</span></figcaption>
+              <svg role="img" aria-labelledby="model-title model-desc" viewBox="0 0 820 430">
+                <title id="model-title">Coordinator, two image generations, and connection ownership</title>
+                <desc id="model-desc">The coordinator owns listener escrow and sends listener duplicates to generations 17 and 18. Each generation owns its runtime, supervision tree, and accepted connections. No state arrow connects the two process heaps.</desc>
+                <defs><marker id="model-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <rect class="diagram-box" x="259" y="24" width="302" height="82" rx="14"/>
+                <text x="410" y="56" text-anchor="middle" font-size="15" font-weight="650">Stable coordinator</text>
+                <text class="diagram-muted" x="410" y="80" text-anchor="middle">listener escrow · identities · prior artifact</text>
+                <path class="diagram-line-violet" d="M346 106v55H189v48" marker-end="url(#model-arrow)"/>
+                <path class="diagram-line-teal" d="M474 106v55h157v48" marker-end="url(#model-arrow)"/>
+                <text class="diagram-label" x="205" y="151">listener duplicate</text>
+                <text class="diagram-label" x="523" y="151">listener duplicate</text>
+                <rect class="diagram-violet" x="38" y="217" width="302" height="126" rx="14"/>
+                <text x="189" y="250" text-anchor="middle" font-size="15" font-weight="650">Generation 17 · active</text>
+                <text class="diagram-muted" x="189" y="277" text-anchor="middle">fresh runtime + reconstructed tree</text>
+                <text class="diagram-muted" x="189" y="301" text-anchor="middle">owns connections A, B, C</text>
+                <text class="diagram-muted" x="189" y="325" text-anchor="middle">drains only its own accepted work</text>
+                <rect class="diagram-teal" x="480" y="217" width="302" height="126" rx="14"/>
+                <text x="631" y="250" text-anchor="middle" font-size="15" font-weight="650">Generation 18 · canary</text>
+                <text class="diagram-muted" x="631" y="277" text-anchor="middle">fresh runtime + reconstructed tree</text>
+                <text class="diagram-muted" x="631" y="301" text-anchor="middle">owns connections D, E</text>
+                <text class="diagram-muted" x="631" y="318" text-anchor="middle" font-size="12"><tspan x="631">coordinator revokes admission</tspan><tspan x="631" dy="17">candidate drains accepted work</tspan></text>
+                <path class="no-transfer" d="M340 280h140"/>
+                <text class="diagram-label" x="410" y="267" text-anchor="middle">no heap transfer</text>
+                <path class="diagram-line-violet" d="M189 343v42" marker-end="url(#model-arrow)"/>
+                <path class="diagram-line-teal" d="M631 343v42" marker-end="url(#model-arrow)"/>
+                <text class="diagram-muted" x="189" y="412" text-anchor="middle">existing sessions finish here</text>
+                <text class="diagram-muted" x="631" y="412" text-anchor="middle">canary sessions finish here</text>
+              </svg>
+            </figure>
+            <p>The previous generation remains correct without knowing the candidate's layout. The candidate starts with its own executable, static data, heap, tasking runtime, and supervision scopes. When lightweight tasks require event machinery, that machinery also starts within the candidate process.</p>
+          </section>
+
+          <section id="boundary">
+            <span class="step-label">BOUNDARY 01</span>
+            <h2>Transfer capabilities and descriptions, not live process state.</h2>
+            <div class="transfer-ledger" aria-label="Transfer boundary">
+              <div class="ledger-heading"><span>Crosses the process boundary</span><span>Remains process-local</span></div>
+              <div class="ledger-row"><span>Listening socket duplicate</span><span>Accepted connection descriptors</span></div>
+              <div class="ledger-row"><span>Topology epoch and digest</span><span>Ada tasks and fiber stacks</span></div>
+              <div class="ledger-row"><span>Application and schema identities</span><span>Protected objects and heap pointers</span></div>
+              <div class="ledger-row"><span>Candidate role and transaction authority</span><span>TLS sessions and parser state</span></div>
+              <div class="ledger-row"><span>Framed commands and acknowledgments</span><span>Foreign-library and subprocess state</span></div>
+            </div>
+            <p>The <a href="../../api/b15b29c8dc9423cb2d51af610a1063d5a6e73e20fa7199f351d9ccf36416465b.html#2705fb586120cda73724d736625b1ee60972cf9e5144a6535fc05a037b1d34ad"><code>Provisioning_Data</code></a> record carries application identity, topology schema, epoch, digest, and role. Fixed-width messages avoid sending Ada record layouts across the wire.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Listener duplication does not provide weighted routing or an exact canary share.</strong> When two processes wait on listener duplicates, the kernel decides which waiter accepts.</p>
+            </aside>
+          </section>
+
+          <section id="supervision">
+            <span class="step-label">TOPOLOGY 02</span>
+            <h2>Reconstruct the supervision tree from desired topology.</h2>
+            <p>The coordinator sends a topology identity, not the topology itself. The candidate obtains the desired topology from application-controlled sources. It creates new supervisors, tasks, structured servers, and resource owners.</p>
+            <figure class="architecture-figure upgrade-figure topology-figure">
+              <figcaption><strong>Pre-admission tree reconstruction</strong><span>The candidate prepares local owners before the protocol authorizes admission.</span></figcaption>
+              <svg role="img" aria-labelledby="topology-title topology-desc" viewBox="0 0 820 410">
+                <title id="topology-title">Topology preparation before candidate admission</title>
+                <desc id="topology-desc">The coordinator sends a topology identity to generation 18. The candidate obtains the desired topology from application sources, prepares a root supervisor and its children without starting admission, then acknowledges preparation.</desc>
+                <defs><marker id="topology-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <rect class="diagram-box" x="24" y="45" width="208" height="95" rx="14"/>
+                <text x="128" y="75" text-anchor="middle" font-size="14" font-weight="650">Topology identity</text>
+                <text class="diagram-muted" x="128" y="100" text-anchor="middle">epoch 42</text>
+                <text class="diagram-muted" x="128" y="122" text-anchor="middle">digest 9f…2c</text>
+                <path class="diagram-line-violet" d="M232 92h86" marker-end="url(#topology-arrow)"/>
+                <text class="diagram-label" x="275" y="80" text-anchor="middle">prepare</text>
+                <rect class="diagram-violet" x="324" y="24" width="472" height="320" rx="16"/>
+                <text x="560" y="57" text-anchor="middle" font-size="15" font-weight="650">Generation 18 · new supervision tree</text>
+                <rect class="diagram-box" x="463" y="85" width="194" height="62" rx="12"/>
+                <text x="560" y="122" text-anchor="middle" font-size="14" font-weight="650">Root supervisor</text>
+                <path class="diagram-line" d="M560 147v55M560 181H408v21M560 181h152v21"/>
+                <rect class="diagram-teal" x="345" y="207" width="126" height="68" rx="11"/>
+                <text x="408" y="237" text-anchor="middle" font-size="13" font-weight="650">API server owner</text>
+                <text class="diagram-muted" x="408" y="257" text-anchor="middle">prepared · admission off</text>
+                <rect class="diagram-box" x="497" y="207" width="126" height="68" rx="11"/>
+                <text x="560" y="237" text-anchor="middle" font-size="13" font-weight="650">Cache owner</text>
+                <text class="diagram-muted" x="560" y="257" text-anchor="middle">prepared</text>
+                <rect class="diagram-box" x="649" y="207" width="126" height="68" rx="11"/>
+                <text x="712" y="237" text-anchor="middle" font-size="13" font-weight="650">Telemetry</text>
+                <text class="diagram-muted" x="712" y="257" text-anchor="middle">prepared</text>
+                <path class="diagram-line-teal" d="M560 275v47H240v44" marker-end="url(#topology-arrow)"/>
+                <rect class="diagram-teal" x="32" y="335" width="208" height="58" rx="12"/>
+                <text x="136" y="359" text-anchor="middle" font-size="13" font-weight="650">Prepared acknowledgment</text>
+                <text class="diagram-muted" x="136" y="380" text-anchor="middle">no admission yet</text>
+              </svg>
+            </figure>
+            <p>After canary authorization, the candidate starts the server task. Only after every required server accepts and the reconstructed topology matches the provision, return true from the application readiness hook. Flyology then validates the reported epoch and digest against the supplied identity.</p>
+            <p><a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html"><code>Flyology.IO.Structured_Servers</code></a> supplies the admission and drain boundary. The application defines the required supervised children and the digest calculation. Flyology does not inspect that application topology independently.</p>
+          </section>
+
+          <section id="launch">
+            <span class="step-label">BOOTSTRAP 03</span>
+            <h2>Declare the candidate generation's launch context.</h2>
+            <p>A <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#ac18ba65ab67c66e62a71e28951ff316c8731c00cceb329f49a5786f52228ea1"><code>Flyology.Subprocesses.Command</code></a> selects the candidate's executable, arguments, working directory, environment, and path-search policy. The following table identifies the properties that spawn stores, inherits, or resets.</p>
+            <div class="inheritance-map">
+              <dl>
+                <div><dt>Executable lookup</dt><dd>The command uses an exact path by default. An explicit option enables <code>PATH</code> search through the coordinator's environment at spawn time, even when the command stores a different child environment.</dd></div>
+                <div><dt>Working directory</dt><dd>At each spawn, the child inherits the coordinator's current directory unless the command specifies one.</dd></div>
+                <div><dt>Environment</dt><dd>At each spawn, the child inherits the coordinator's current environment unless the command stores an explicit environment.</dd></div>
+                <div><dt>Arguments</dt><dd>Spawn copies command arguments as exact <code>argv</code> values. No shell parses them.</dd></div>
+                <div><dt>Process group</dt><dd>The child starts a new process group. Descendants that leave this group also leave Flyology's subprocess cleanup boundary.</dd></div>
+                <div><dt>Credentials and groups</dt><dd>The child inherits credentials and supplementary groups through host <code>posix_spawn</code> behavior.</dd></div>
+                <div><dt>File mode mask</dt><dd>The child inherits the coordinator's file mode mask through host process semantics.</dd></div>
+                <div><dt>Resource and scheduling context</dt><dd>The child inherits resource limits, nice state, and other host context that the spawner does not override.</dd></div>
+                <div><dt>Signals</dt><dd>Spawn clears the child signal mask and resets every catchable disposition. The candidate installs its own handlers.</dd></div>
+                <div><dt>Open descriptors</dt><dd>Flyology-created descriptors are close-on-exec. Application descriptors follow their own <code>FD_CLOEXEC</code> policy. The child receives the listener capability later through typed handoff.</dd></div>
+                <div><dt>Standard streams</dt><dd>The child reads end-of-file from standard input. It inherits standard output and standard error.</dd></div>
+              </dl>
+            </div>
+            <p>Create the value with <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#eb28b48db71cda8812b4c838c6c0df0e6ecba881b2e2342e60fa2fd10f1e71ea"><code>To_Command</code></a>. Add each exact argument with <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#bed9e7a2808aae6ad5e6363170697a25ca15fe6b6720c45c81ed3fcd644f9564"><code>Append_Argument</code></a>. For a repeatable launch, call <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#09bc44ac1df7ac033359565db179df09a79d3c020bb568f1914380be12075701"><code>Set_Working_Directory</code></a>, then use <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#d5b1a117aebc2a53b41c2fa232cd2f4e05f36afdf7d4bd1a619a84a6ba6edd91"><code>Clear_Environment</code></a> and <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#94f5e2e267301bd4134df229287a2af662f507cc9d6ceefad70d89d917e33201"><code>Set_Environment_Variable</code></a> to build an explicit environment.</p>
+            <figure class="code-panel">
+              <figcaption>Make the launch context explicit</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Command := Flyology.Subprocesses.To_Command ("/srv/releases/app-18");
+Flyology.Subprocesses.Append_Argument (Command, "--managed-generation");
+Flyology.Subprocesses.Set_Working_Directory (Command, "/srv/app");
+
+Flyology.Subprocesses.Clear_Environment (Command);
+Flyology.Subprocesses.Set_Environment_Variable
+  (Command, "APP_CONFIG", "/etc/app/config.toml");
+Flyology.Subprocesses.Set_Environment_Variable
+  (Command, "LANG", "C.UTF-8");</code></pre>
+            </figure>
+            <p><a href="../../api/93089e052527f9f518d785f9013c3a3624bb34a48e51b02d542fc10fee2e63f2.html#735ee505fe140ecac952e864c58c506e22d6373754752d2fdc0e5487f2ce3ba0"><code>Flyology.Subprocesses.Bootstrap.Spawn</code></a> gives the child a framed control stream on descriptor 3 and a dedicated capability channel on descriptor 4.</p>
+          </section>
+
+          <section id="protocol">
+            <span class="step-label">PROTOCOL 04</span>
+            <h2>Advance only across acknowledged boundaries.</h2>
+            <ol class="generation-rail" aria-label="Upgrade lifecycle">
+              <li><span>1</span><strong>Spawn</strong><small>fresh process</small></li>
+              <li><span>2</span><strong>Provision</strong><small>topology identity</small></li>
+              <li><span>3</span><strong>Prepare</strong><small>candidate holds listener capability</small></li>
+              <li><span>4</span><strong>Canary</strong><small>admission enabled</small></li>
+              <li><span>5</span><strong>Promote</strong><small>commit candidate</small></li>
+              <li><span>6</span><strong>Drain</strong><small>retire previous</small></li>
+            </ol>
+            <p>Each transaction has a coordinator id, upgrade id, and candidate generation. The authority must match all three values. Stale commands cannot act on a later generation or upgrade.</p>
+            <p>Before calling <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#1fb633fbf4e7e8fb7bc9eb8f69b2b4d8f405874a8c0bc88d79e4e84e1cc5567d"><code>Start_Upgrade</code></a>, the deployer must verify the artifact identity and trust policy. The call returns after spawn, a child handshake bound to the transaction authority, provisioning, and listener handoff. The candidate still cannot accept.</p>
+            <p><a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#19775d373a65478e0c09e6906d67ee0970cddff05e700880ff6d8a561c0da6be"><code>Begin_Canary</code></a> authorizes admission. It waits until the application reports admission readiness, then validates the reported epoch and digest against the provision.</p>
+          </section>
+
+          <section id="agent">
+            <span class="step-label">AGENT 05</span>
+            <h2>Connect the generation lifecycle protocol to the application.</h2>
+            <p><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html"><code>Flyology.Process_Generations.Agents</code></a> is generic over an <a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#6081d11abfac53e32fb5a05172367d4ec59946e3d7443ef5f1abfd7a20f02541"><code>Application_Context</code></a> and six lifecycle hooks. It owns bootstrap and the lifetime of one server task. Application code owns topology construction and effect semantics.</p>
+            <p>The hooks connect protocol transitions to application-owned scopes. <a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#b971edcd60235537c68d19fa33190db10c554d62b129d520fefdd47e0723e7fd"><code>Run</code></a> adopts the inherited channels and drives those transitions for one generation.</p>
+            <figure class="code-panel">
+              <figcaption>Bind the generation lifecycle protocol to application lifecycle</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">package Image_Agent is new Flyology.Process_Generations.Agents
+  (Application_Context =&gt; Server_Context,
+   Prepare             =&gt; Prepare_Topology,
+   Run_Server          =&gt; Run_Structured_Server,
+   Ready               =&gt; Exact_Topology_Is_Accepting,
+   Request_Stop        =&gt; Revoke_Then_Stop,
+   Promoted            =&gt; Enable_Active_Only_Effects,
+   Compensate          =&gt; Compensate_Canary_Effects);
+
+Context : Server_Context;
+Image_Agent.Run (Context);</code></pre>
+            </figure>
+            <div class="hook-contracts">
+              <dl>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#e764028e7abe880fb631317579e7bc03bf304490b2dc141a5aa237cdc814bf3f"><code>Prepare</code></a></dt><dd>Construct the desired local topology before the candidate receives admission authorization.</dd></div>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#1a73c3df0027ae334eb4f2a63f6deae304ba4393620e1bb47e3c38af1c63abb3"><code>Run_Server</code></a></dt><dd>Own the structured server scope until a stop request causes every dependent task to join.</dd></div>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#50b72c391b2bf8fa187cdbb1030132f063b43539a61e6aa9ba16b8a4afbae415"><code>Ready</code></a></dt><dd>Only after the provisioned identity matches and every required server accepts, return true. Flyology relies on this application check.</dd></div>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#1f86ffcd8e76228faf37235d818500389d538a2a08e412804075b5bbcd323bfb"><code>Request_Stop</code></a></dt><dd>Revoke admission synchronously, then request structured shutdown. Accept repeated calls.</dd></div>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#00b083d869e020b1db32872c6e7d143687aed0ec60dadb9eeaaa688e7becd2e4"><code>Promoted</code></a></dt><dd>Enable active-only work and publish the committed deployment epoch.</dd></div>
+                <div><dt><a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#22fbf86bf6297d1900e770ba85967be3a655262e6d0bee0440b9ff1d46e0b32d"><code>Compensate</code></a></dt><dd>After the candidate server task terminates, reconcile candidate effects. Make the hook idempotent because the agent may call it again after uncertain acknowledgment.</dd></div>
+              </dl>
+            </div>
+          </section>
+
+          <section id="coordinator">
+            <span class="step-label">CONTROL 06</span>
+            <h2>Serialize upgrade decisions in the coordinator.</h2>
+            <p>The coordinator owns listener escrow and tracks one active generation plus at most one candidate. Its operations are synchronous, so the caller must serialize them.</p>
+            <p>Prepare the candidate with <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#1fb633fbf4e7e8fb7bc9eb8f69b2b4d8f405874a8c0bc88d79e4e84e1cc5567d"><code>Start_Upgrade</code></a>, then authorize admission with <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#19775d373a65478e0c09e6906d67ee0970cddff05e700880ff6d8a561c0da6be"><code>Begin_Canary</code></a>. After the canary passes, call <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#33b8fbcd8421e854ada04f9b1230d7d7cbf70815d7f6203434e009d8c68aeeb4"><code>Promote</code></a>. If the canary does not pass, call <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#16bf0d7b84ab7624e470f1e291441a3d81816b135a71f66caa7478dadd92f191"><code>Cancel</code></a>.</p>
+            <p>The complete example below shows these calls in their first-generation and shutdown context.</p>
+            <p>Use <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#b760cc12889d0bc06fed85609f613ed0e4bc3cd5ee5c74346fabe858fc3e354d"><code>Snapshot</code></a> for point-in-time state. It reconciles terminal child state and exposes phase, generation identities, admission, rollback availability, compensation, and a bounded failure message.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Run coordinator operations from a native task.</strong> Spawn and socket handoff are synchronous operations. They can occupy a lightweight task's event-loop pthread unless the caller has independently established every required readiness condition and accepts that occupation.</p>
+            </aside>
+            <h3>Keep lifecycle policy in Ada.</h3>
+            <p>Ada owns each acknowledged transition and every identity, validation, timeout, cleanup, compensation, and recovery decision.</p>
+            <div class="native-boundary" aria-label="Ada and native implementation boundary">
+              <div><span>ADA POLICY</span><p>Owns protocol states, identities, validation, timeouts, descriptor cleanup, compensation order, reversal classification, and process lifecycle.</p></div>
+              <div><span>NATIVE ABI LEAVES</span><p>Construct opaque <code>posix_spawn</code> objects, call variadic descriptor duplication, and encode or traverse host <code>cmsghdr</code> layouts.</p></div>
+            </div>
+            <p>The lifecycle policy is a pure SPARK unit. C does not decide when to admit, revoke, drain, compensate, promote, or reverse.</p>
+          </section>
+
+          <section id="initial">
+            <span class="step-label">LIFETIME 07</span>
+            <h2>Start the first managed generation and release it explicitly.</h2>
+            <p>Create one <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#b8e399512603e8f00558dbc50db28656437ab4a7f07b0b073aa3dad066b3130e"><code>Coordinator</code></a> in the stable owner process. <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#ee3960392c5626e031fe681cf40a2c20f39425bd5cd04fc42d89f89ae7be0a8d"><code>Initialize</code></a> transfers the original bound listener into escrow and closes the caller's socket owner.</p>
+            <p><a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#ff94d160f869eb92ea75dad13b0dcace8271f906724ed92fcaef021cab83fc49"><code>Start_Initial</code></a> starts, prepares, authorizes, and promotes the first generation under one total timeout. Use it to establish generation 17 before attempting generation 18.</p>
+            <p>At service shutdown, call <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#45fa2ff76037f0e57cd5045dd198fa0b360d0237a4c40bbea19a8767245e1327"><code>Shutdown</code></a>. It attempts cooperative drain and reaping for every managed generation. If cooperation is unavailable or fails, it hard-fences that generation and continues through the others. It releases listener escrow after all attempts, then reports the first cleanup failure. Each managed generation receives its own complete drain timeout.</p>
+          </section>
+
+          <section id="example">
+            <span class="step-label">EXAMPLE 08</span>
+            <h2>Run the complete generation 17 to 18 upgrade.</h2>
+            <h3>What the demo server does.</h3>
+            <p>The program being upgraded is a one-byte loopback request/reply server. For each accepted connection, the handler reads one byte and replies with the artifact's version byte. Generation 17 runs an artifact that replies with <code>1</code>. Generation 18 runs a separate artifact that replies with <code>2</code>.</p>
+            <p>The coordinator sends <code>Q</code> as a probe after the upgrade decision. A promotion run must receive <code>2</code>, showing that a new connection reached the changed executable. A cancellation run must receive <code>1</code>, showing that generation 17 remained the serving generation.</p>
+            <p>The server behavior is deliberately small. The example focuses on listener escrow, handoff, readiness, canary admission, promotion or cancellation, structured drain, and final shutdown. Already accepted connections remain with the generation that accepted them.</p>
+            <p>The application supplies a bound <code>Listener</code>, immutable commands, provisioning records, and its canary decision. The example uses <code>Coordinators</code> and <code>Generations</code> as package renames so each lifecycle call remains short.</p>
+            <p><code>Start_Initial</code> and <code>Start_Upgrade</code> each return an exact <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#53056fb187d273b8bb504e828297096508e839aab159468a667d4c75e05bd0ab"><code>Upgrade_Handle</code></a> as transaction authority. Cancellation also reports a <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#397e9de02424624eccf54b1305dc144c102cabb489344ef62386ee8bd0db74be"><code>Compensation_Result</code></a>. The following five fragments implement the lifecycle shown in the earlier story.</p>
+
+            <details class="source-disclosure">
+              <summary>Coordinator imports and test setup</summary>
+              <p>This first fragment supplies the Ada imports, listener setup, and assertions used by the five lifecycle fragments. The extraction script places it first in <code>guide_process_upgrade.adb</code>.</p>
+              <div class="readiness-checklist api-source-map">
+                <dl>
+                  <div><dt>Verification client</dt><dd><p><a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#7f60ea9d1590dc545f7fbd6ebae88361924604cac0ccac4ac6fa6262fdccc314"><code>Socket_Type</code></a> and <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#9f1989e144800f56d7cae428cc26f045c846cb5dca77e1a44d53ac28cd14ff90"><code>Endpoint</code></a> represent the client and its address. <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#1f086e104cceba6da31ad481c8838107985f88a0fbb7fa68f27ff6bf80e0d38e"><code>Create_Socket</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#6fdaef8bd98aa4f3139c60e6e8657f9e923ff25dc044c559fedba794a3d2ed2e"><code>Connect</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#9329a4159b1bff31eabdfc8f117a4086d493c9549e6f34c8fdeafa63927c0da1"><code>Send_All</code></a>, and <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#850e4b1438f2ae6034fc00a794e7c5f974e705d7c957c3c6da233221dfb0a47b"><code>Receive_Exactly</code></a> perform the verification exchange.</p></dd></div>
+                  <div><dt>Listener setup</dt><dd><p><a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html"><code>Flyology.IO.Sockets</code></a> supplies <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#1b42931d3700b91f4ae5a251288b980cd564b393289ca3ae793847be2b16fa5f"><code>Set_Socket_Option</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#7169a7068a3787eff34368a40239dd4278e50255b02b7ac630f3d625bc945f19"><code>Bind_Socket</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#257a4f87d48b11d4344dc98f20dfcc8c4642f57cf322d6e4daa679ab8a75fed2"><code>Network_Endpoint</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#c073e31734e52fe21c46537cad2ab08287b429e70a89472768bc41a75164fb2c"><code>Listen_Socket</code></a>, and <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#3d1bd2a5bfbde05e7620d5399d55207dcef04b7d940a40301237066b6b28eb3b"><code>Get_Socket_Name</code></a>. The option and endpoint values use <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#b6403d5e9562789032162e9f33e83b303ea21e565b64979ab3b981b5a8dedb3d"><code>Socket_Level</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#008ed8d904d1acddaf18c5279f6fe61bb78e6312e3b9200dcb817285fb0f4601"><code>Reuse_Address</code></a>, <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#c15113c320a402767464eaa272ca0a27379da917443082865b5a6d64fff6cb39"><code>Loopback_IPv4</code></a>, and <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#15279b2727fd78f48d4c9726d16f8def5f6aae24fdeb829786cc305767f90e27"><code>Any_Port</code></a>.</p></dd></div>
+                  <div><dt>Launch and provisioning</dt><dd><p><a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#ac18ba65ab67c66e62a71e28951ff316c8731c00cceb329f49a5786f52228ea1"><code>Command</code></a> represents each launch description. <a href="../../api/a4e5c25a2e5dd5280ca5ab3cb04f6d5c939a61a70b0a13e054d186af8a625fe9.html#eb28b48db71cda8812b4c838c6c0df0e6ecba881b2e2342e60fa2fd10f1e71ea"><code>To_Command</code></a> constructs the value from an executable path. <a href="../../api/b15b29c8dc9423cb2d51af610a1063d5a6e73e20fa7199f351d9ccf36416465b.html#9d3c7f49788c8a8e39d5fd0aa2d433120f4413acebb3306388e5d6ec1d1c771c"><code>Nonzero_U64</code></a>, <a href="../../api/b15b29c8dc9423cb2d51af610a1063d5a6e73e20fa7199f351d9ccf36416465b.html#2705fb586120cda73724d736625b1ee60972cf9e5144a6535fc05a037b1d34ad"><code>Provisioning_Data</code></a>, <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#b8af2fd742fd51fefb461214a45d5d97e49c9a460fe9a704d0feb2ecb3b0dcb4"><code>Coordinator_Id</code></a>, and <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#6238e45b564b0a97577418058b93fdae3b92b25a0164eaf2c2eb222934c1267d"><code>Image_Generation</code></a> represent the protocol values. The provisioning record sets <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Candidate_Role</code></a> to <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Canary_Safe</code></a>.</p></dd></div>
+                </dl>
+              </div>
+              <figure class="code-panel upgrade-example">
+                <figcaption>Coordinator source — setup fragment</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="1">with Ada.Command_Line;
+with Ada.Directories;
+with Ada.Streams;
+with Ada.Text_IO;
+with Flyology.IO.Sockets;
+with Flyology.Process_Generations;
+with Flyology.Process_Generations.Coordinators;
+with Flyology.Process_Generations.Messages;
+with Flyology.Subprocesses;
+
+procedure Guide_Process_Upgrade is
+   package Coordinators renames
+     Flyology.Process_Generations.Coordinators;
+   package Generations renames Flyology.Process_Generations;
+   package Messages renames Flyology.Process_Generations.Messages;
+   package Sockets renames Flyology.IO.Sockets;
+   package Subprocesses renames Flyology.Subprocesses;
+
+   use type Ada.Streams.Stream_Element;
+   use type Generations.Image_Generation;
+
+   function Requested_Promotion return Boolean is
+   begin
+      if Ada.Command_Line.Argument_Count /= 1 then
+         raise Program_Error with "expected promote or cancel";
+      elsif Ada.Command_Line.Argument (1) = "promote" then
+         return True;
+      elsif Ada.Command_Line.Argument (1) = "cancel" then
+         return False;
+      else
+         raise Program_Error with "expected promote or cancel";
+      end if;
+   end Requested_Promotion;
+
+   Bin_Directory : constant String :=
+     Ada.Directories.Containing_Directory
+       (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name));
+   Command_17 : constant Subprocesses.Command := Subprocesses.To_Command
+     (Ada.Directories.Compose
+        (Bin_Directory, "process_generation_agent_v1"));
+   Command_18 : constant Subprocesses.Command := Subprocesses.To_Command
+     (Ada.Directories.Compose
+        (Bin_Directory, "process_generation_agent_v2"));
+
+   function Provision
+     (Epoch : Messages.Nonzero_U64) return Messages.Provisioning_Data is
+   begin
+      return
+        (Application_Signature =&gt; 16#F1#,
+         Topology_Schema       =&gt; 1,
+         Topology_Epoch        =&gt; Epoch,
+         Digest                =&gt; (others =&gt; 0),
+         Role                  =&gt; Generations.Canary_Safe);
+   end Provision;
+
+   Promote_Candidate : constant Boolean := Requested_Promotion;
+   Canary_Evidence_Satisfies_Policy : constant Boolean :=
+     Promote_Candidate;
+   Coordinator_Identity : constant Generations.Coordinator_Id := 7_001;
+   Provision_17 : constant Messages.Provisioning_Data := Provision (17);
+   Provision_18 : constant Messages.Provisioning_Data := Provision (18);
+
+   Manager      : Coordinators.Coordinator;
+   Initial      : Generations.Upgrade_Handle;
+   Candidate    : Generations.Upgrade_Handle;
+   Compensation : Generations.Compensation_Result;
+   Listener : Sockets.Socket_Type;
+   Address  : Sockets.Endpoint;
+
+   function Query return Ada.Streams.Stream_Element is
+      Client : Sockets.Socket_Type;
+      Reply  : Ada.Streams.Stream_Element_Array (1 .. 1);
+   begin
+      Sockets.Create_Socket (Client);
+      Sockets.Connect (Client, Address, Timeout =&gt; 2.0);
+      Sockets.Send_All
+        (Client, [1 =&gt; Character'Pos ('Q')], Timeout =&gt; 2.0);
+      Sockets.Receive_Exactly (Client, Reply, Timeout =&gt; 2.0);
+      return Reply (1);
+   end Query;
+
+   procedure Reconcile_Cancellation
+     (Result : Generations.Compensation_Result) is
+   begin
+      raise Program_Error with
+        "cancellation requires reconciliation: " &amp;
+        Generations.Compensation_Result'Image (Result);
+   end Reconcile_Cancellation;
+
+   procedure Assert_Generation
+     (Authority : Generations.Upgrade_Handle;
+      Expected  : Generations.Image_Generation) is
+   begin
+      if Authority.Candidate /= Expected then
+         raise Program_Error with "unexpected image generation";
+      end if;
+   end Assert_Generation;
+
+   procedure Serve_Until_Test_Requests_Shutdown is
+      Expected : constant Ada.Streams.Stream_Element :=
+        (if Promote_Candidate then Character'Pos ('2')
+         else Character'Pos ('1'));
+   begin
+      for Attempt in 1 .. 40 loop
+         begin
+            if Query = Expected then
+               Ada.Text_IO.Put_Line
+                 ((if Promote_Candidate
+                   then "promotion: generation 18 served"
+                   else "cancellation: generation 17 remained active"));
+               return;
+            end if;
+         exception
+            when others =&gt;
+               if Attempt = 40 then
+                  raise;
+               end if;
+         end;
+         delay 0.025;
+      end loop;
+      raise Program_Error with "selected generation did not serve";
+   end Serve_Until_Test_Requests_Shutdown;
+begin
+   Sockets.Create_Socket (Listener);
+   Sockets.Set_Socket_Option
+     (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+   Sockets.Bind_Socket
+     (Listener,
+      Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+   Sockets.Listen_Socket (Listener, Length =&gt; 16);
+   Address := Sockets.Get_Socket_Name (Listener);
+</code></pre>
+              </figure>
+            </details>
+
+            <h3>1. Escrow the listener and start generation 17.</h3>
+            <p>The stable coordinator takes the bound listener. <code>Start_Initial</code> then constructs generation 17 and makes it active.</p>
+            <figure class="code-panel upgrade-example">
+              <figcaption>Establish the stable owner and first generation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="2">   --  Transfer the bound listener to the stable coordinator.
+   Coordinators.Initialize
+     (Item             =&gt; Manager,
+      Identity         =&gt; Coordinator_Identity,
+      Listener         =&gt; Listener,
+      First_Generation =&gt; 17);
+
+   --  Start generation 17 and make it the first active generation.
+   Coordinators.Start_Initial
+     (Item       =&gt; Manager,
+      Executable =&gt; Command_17,
+      Provision  =&gt; Provision_17,
+      Authority  =&gt; Initial);
+   Assert_Generation (Initial, 17);</code></pre>
+            </figure>
+
+            <h3>2. Prepare generation 18 without admission.</h3>
+            <p><code>Start_Upgrade</code> starts the candidate, provisions its topology identity, and hands it a listener capability. It returns before the candidate can accept.</p>
+            <figure class="code-panel upgrade-example">
+              <figcaption>Prepare the candidate generation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="3">   --  Start generation 18. On return, it is prepared but cannot accept.
+   Coordinators.Start_Upgrade
+     (Item       =&gt; Manager,
+      Executable =&gt; Command_18,
+      Provision  =&gt; Provision_18,
+      Authority  =&gt; Candidate);
+   Assert_Generation (Candidate, 18);</code></pre>
+            </figure>
+
+            <h3>3. Authorize the controlled overlap.</h3>
+            <p><code>Begin_Canary</code> grants admission and waits for the application readiness hook. Generation 17 remains active during this step.</p>
+            <figure class="code-panel upgrade-example">
+              <figcaption>Begin canary admission</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="4">   --  Authorize canary admission and wait for application readiness.
+   Coordinators.Begin_Canary
+     (Item      =&gt; Manager,
+      Authority =&gt; Candidate);</code></pre>
+            </figure>
+
+            <h3>4. Promote or cancel from explicit evidence.</h3>
+            <p>Promotion commits generation 18 and drains generation 17. Cancellation retires generation 18, retains generation 17, and requires an immediate compensation decision. The demo accepts <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#397e9de02424624eccf54b1305dc144c102cabb489344ef62386ee8bd0db74be"><code>Nothing_To_Do</code></a> and <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#397e9de02424624eccf54b1305dc144c102cabb489344ef62386ee8bd0db74be"><code>Compensated</code></a> as completed outcomes; it sends any other result to reconciliation.</p>
+            <figure class="code-panel upgrade-example">
+              <figcaption>Choose and account for the canary outcome</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="5">   --  Apply deployment policy to the observed canary evidence.
+   if Canary_Evidence_Satisfies_Policy then
+      --  Commit generation 18, then revoke and drain generation 17.
+      Coordinators.Promote (Manager, Candidate);
+   else
+      --  Revoke and drain generation 18, then return compensation outcome.
+      Coordinators.Cancel (Manager, Candidate, Compensation);
+      if Compensation not in
+        Generations.Nothing_To_Do | Generations.Compensated
+      then
+         Reconcile_Cancellation (Compensation);
+      end if;
+   end if;</code></pre>
+            </figure>
+
+            <h3>5. Verify continued service, then shut down.</h3>
+            <p>The mini showcase serves one verification request from the selected generation. A real service waits for its application shutdown request at this point.</p>
+            <figure class="code-panel upgrade-example">
+              <figcaption>Keep serving before coordinator shutdown</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada" data-extract-file="guide_process_upgrade.adb" data-extract-order="6">   --  Serve a verification request before the test requests shutdown.
+   Serve_Until_Test_Requests_Shutdown;
+
+   --  At service shutdown, drain or fence every managed generation.
+   Coordinators.Shutdown (Manager);
+end Guide_Process_Upgrade;</code></pre>
+            </figure>
+            <p>The setup fragment and five story fragments form the complete main program. The extraction script joins them in numeric order with an empty separator. The two server artifacts are separate programs, shown next.</p>
+
+            <h3>Build two server artifacts.</h3>
+            <p>Both artifacts use the same generation agent and structured server. Their source differs in one observable behavior: generation 17 replies with <code>1</code>, while generation 18 replies with <code>2</code>. The coordinator launches both executables by name.</p>
+            <div class="version-pair">
+              <figure class="code-panel upgrade-example">
+                <figcaption>Generation 17 artifact</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada" data-extract-file="process_generation_agent_v1.adb" data-extract-order="1">with Process_Generation_Demo;
+
+procedure Process_Generation_Agent_V1 is
+begin
+   --  The generation 17 artifact replies with the byte "1".
+   Process_Generation_Demo.Run (Character'Pos ('1'));
+end Process_Generation_Agent_V1;</code></pre>
+              </figure>
+              <figure class="code-panel upgrade-example">
+                <figcaption>Generation 18 artifact</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada" data-extract-file="process_generation_agent_v2.adb" data-extract-order="1">with Process_Generation_Demo;
+
+procedure Process_Generation_Agent_V2 is
+begin
+   --  The generation 18 artifact replies with the byte "2".
+   Process_Generation_Demo.Run (Character'Pos ('2'));
+end Process_Generation_Agent_V2;</code></pre>
+              </figure>
+            </div>
+            <p>The promotion run must receive <code>2</code> after the cutover. The cancellation run must still receive <code>1</code>. These checks confirm that the selected executable produces the expected reply in each branch.</p>
+
+            <details class="source-disclosure">
+              <summary>Complete shared agent and project source</summary>
+              <p>These supporting files are collapsed to keep the lifecycle visible. They are still rendered text and participate in the same extraction check.</p>
+              <div class="readiness-checklist api-source-map">
+                <dl>
+                  <div><dt>Connection handler</dt><dd><p><a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html"><code>Flyology.IO.Connections</code></a> supplies <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c6b1bbcb41764201a660916f4786908859d4b13d5cdb961e0f32e60f7faa76a9"><code>Connection</code></a> and <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#3965a31c9ee830bb345590cd600e8a38366353975940154af3d8777e16bf94d7"><code>Cancellation_Token</code></a>. The handler calls <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c3cee1844eef030ab2ffa44083c3f8d691dbd37db73c29ba022075ece5b63cfc"><code>Receive_Exactly</code></a> and <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#76beff4fc687f191ded93f9375c44f9251c99bbf0ead593723d7ec5388a591f2"><code>Send_All</code></a>.</p></dd></div>
+                  <div><dt>Structured server</dt><dd><p>The application instantiates <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html"><code>Flyology.IO.Structured_Servers</code></a> with a <a href="../../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#726aaaac29c58a02cdeb708e96b9a137809dbc3a0f21c93a5a0c6bc74c796d56"><code>Native_Task</code></a> handler. It uses <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#faf7e17eb0214e4ddd3cd4cd2e4fb9635edd569aa68e3893932fd713442410a4"><code>Server</code></a>, <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#92b702da4211397f186045d2dd2b704bae491238f89a4a8f2304810e58629537"><code>Snapshot</code></a>, <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#904f83f05b6ffe80abc8c7db47a2412c039f6ceef2814366fb56d8c7af4bc4b6"><code>Serve</code></a>, <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#cd6041952e5871cb7bfe1bd92ce1bdc5a36eaf6556fd6261296ba2fff11a9e1d"><code>Current</code></a>, and <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#1a128ab3abfd1ea9260f5efdb3c1c4239dc600138694c300ecb9bd135cae4e5f"><code>Request_Shutdown</code></a>. The readiness comparison uses <a href="../../api/b15b29c8dc9423cb2d51af610a1063d5a6e73e20fa7199f351d9ccf36416465b.html#c0735e7647ead0b772eb9431bb2c606d3cc2bb41e5adfd9370a570f5e6a158a5"><code>Topology_Digest</code></a>.</p></dd></div>
+                  <div><dt>Generation agent</dt><dd><p>The final instantiation binds the application hooks to <a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html"><code>Flyology.Process_Generations.Agents</code></a>. Its <a href="../../api/0126644ad248883d9b8645d5a87e97fabf33b8f09ce59055cc1c50112f29193b.html#b971edcd60235537c68d19fa33190db10c554d62b129d520fefdd47e0723e7fd"><code>Run</code></a> operation starts the agent protocol.</p></dd></div>
+                </dl>
+              </div>
+              <figure class="code-panel upgrade-example">
+                <figcaption>process_generation_demo.ads</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada" data-extract-file="process_generation_demo.ads" data-extract-order="1">with Ada.Streams;
+
+package Process_Generation_Demo is
+   procedure Run (Version : Ada.Streams.Stream_Element);
+end Process_Generation_Demo;</code></pre>
+              </figure>
+              <figure class="code-panel upgrade-example">
+                <figcaption>process_generation_demo.adb</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada" data-extract-file="process_generation_demo.adb" data-extract-order="1">with Flyology;
+with Flyology.IO.Connections;
+with Flyology.IO.Sockets;
+with Flyology.IO.Structured_Servers;
+with Flyology.Process_Generations;
+with Flyology.Process_Generations.Agents;
+with Flyology.Process_Generations.Messages;
+
+package body Process_Generation_Demo is
+   procedure Run (Version : Ada.Streams.Stream_Element) is
+      package Connections renames Flyology.IO.Connections;
+      package Generations renames Flyology.Process_Generations;
+      package Messages renames Flyology.Process_Generations.Messages;
+      package Sockets renames Flyology.IO.Sockets;
+
+      use type Messages.Nonzero_U64;
+      use type Messages.Topology_Digest;
+
+      type Handler_Context is limited record
+         Reply : Ada.Streams.Stream_Element := Version;
+      end record;
+
+      procedure Handle
+        (Context      : in out Handler_Context;
+         Connection   : in out Connections.Connection;
+         Peer         : Sockets.Endpoint;
+         Cancellation : not null access Connections.Cancellation_Token)
+      is
+         Request : Ada.Streams.Stream_Element_Array (1 .. 1);
+      begin
+         Connection.Receive_Exactly
+           (Request, Timeout =&gt; 30.0, Token =&gt; Cancellation);
+         Connection.Send_All
+           ([1 =&gt; Context.Reply], Timeout =&gt; 5.0,
+            Token =&gt; Cancellation);
+         pragma Unreferenced (Peer);
+      end Handle;
+
+      package Structured is new Flyology.IO.Structured_Servers
+        (Handler_Context =&gt; Handler_Context,
+         Handle          =&gt; Handle,
+         Handler_Model   =&gt; Flyology.Native_Task);
+
+      type Application_Context is limited record
+         Handler   : aliased Handler_Context;
+         Server    : aliased Structured.Server (Capacity =&gt; 4);
+         Provision : Messages.Provisioning_Data :=
+           (Application_Signature =&gt; 1,
+            Topology_Schema       =&gt; 1,
+            Topology_Epoch        =&gt; 1,
+            Digest                =&gt; (others =&gt; 0),
+            Role                  =&gt; Generations.Canary_Safe);
+      end record;
+
+      procedure Prepare
+        (Context : in out Application_Context;
+         Data    : Messages.Provisioning_Data) is
+      begin
+         if Data.Application_Signature /= 16#F1# or else
+           Data.Topology_Schema /= 1
+         then
+            raise Program_Error with "incompatible image provisioning";
+         end if;
+         Context.Provision := Data;
+      end Prepare;
+
+      procedure Run_Server
+        (Context  : in out Application_Context;
+         Listener : in out Sockets.Socket_Type;
+         Role     : Generations.Candidate_Role) is
+      begin
+         pragma Unreferenced (Role);
+         Structured.Serve
+           (Context.Server, Listener, Context.Handler,
+            Drain_Timeout =&gt; 2.0);
+      end Run_Server;
+
+      function Ready
+        (Context : Application_Context;
+         Data    : Messages.Provisioning_Data) return Boolean
+      is
+         Current : constant Structured.Snapshot :=
+           Structured.Current (Context.Server);
+      begin
+         return Data.Topology_Epoch = Context.Provision.Topology_Epoch
+           and then Data.Digest = Context.Provision.Digest
+           and then Current.Accepting
+           and then Current.Failures = 0;
+      end Ready;
+
+      procedure Request_Stop (Context : in out Application_Context) is
+      begin
+         Structured.Request_Shutdown (Context.Server);
+      end Request_Stop;
+
+      procedure Promoted
+        (Context   : in out Application_Context;
+         Authority : Generations.Upgrade_Handle) is
+      begin
+         pragma Unreferenced (Context, Authority);
+      end Promoted;
+
+      function Compensate
+        (Context   : in out Application_Context;
+         Authority : Generations.Upgrade_Handle)
+         return Generations.Compensation_Result is
+      begin
+         pragma Unreferenced (Context, Authority);
+         return Generations.Nothing_To_Do;
+      end Compensate;
+
+      package Agent is new Generations.Agents
+        (Application_Context =&gt; Application_Context,
+         Prepare             =&gt; Prepare,
+         Run_Server          =&gt; Run_Server,
+         Ready               =&gt; Ready,
+         Request_Stop        =&gt; Request_Stop,
+         Promoted            =&gt; Promoted,
+         Compensate          =&gt; Compensate);
+
+      Context : Application_Context;
+   begin
+      Agent.Run (Context, Ready_Timeout =&gt; 2.0, Drain_Timeout =&gt; 3.0);
+   end Run;
+end Process_Generation_Demo;</code></pre>
+              </figure>
+              <figure class="code-panel upgrade-example">
+                <figcaption>process_upgrade_guide.gpr</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code data-extract-file="process_upgrade_guide.gpr" data-extract-order="1">with "../../flyology.gpr";
+
+project Process_Upgrade_Guide is
+   for Languages use ("Ada");
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use
+     ("guide_process_upgrade.adb",
+      "process_generation_agent_v1.adb",
+      "process_generation_agent_v2.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwJ", "-gnatwa", "-gnatyg");
+   end Compiler;
+end Process_Upgrade_Guide;</code></pre>
+              </figure>
+            </details>
+            <p><code>./scripts/check-process-upgrade-guide-example.sh</code> extracts every displayed file and verifies each file's complete, unique numeric order. It decodes HTML entities, joins fragments with an empty separator, builds the three executables, and runs both decisions. No Ada source is copied from a hidden fixture.</p>
+          </section>
+
+          <div class="chapter-divider" aria-hidden="true"><span>PART III</span><b>Decision and recovery</b></div>
+
+          <section id="canary">
+            <span class="step-label">CANARY 09</span>
+            <h2>Control external effects during the canary.</h2>
+            <p>The canary may accept real connections. It must therefore constrain its external effects, not only its traffic volume. Select an exact <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Candidate_Role</code></a>.</p>
+            <div class="canary-bands">
+              <div><span><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Canary_Safe</code></a></span><strong>Concurrent work is permitted</strong><p>The application establishes that this work may run beside the previous generation.</p></div>
+              <div><span><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Fenced</code></a></span><strong>Check the active deployment epoch</strong><p>The application must validate the exact active deployment epoch atomically with each effect.</p></div>
+              <div><span><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Shadow</code></a></span><strong>Observe or compute without commit</strong><p>The candidate may validate real traffic but must not publish effects.</p></div>
+              <div><span><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#cdd74fa2b843afa480a6a64d8e3359912949fac3220a1189a09e0b1b092a9180"><code>Active_Only</code></a></span><strong>Wait for promotion</strong><p>When the agent invokes the <code>Promoted</code> hook, enable singleton or irreversible work.</p></div>
+            </div>
+            <p>The application defines whether it can compensate an effect. Compensatability is not another role. The compensation hook must use transaction authority and report an exact <code>Compensation_Result</code>.</p>
+            <p>Listener duplication does not provide weighted routing or an exact canary share. Use an external proxy or a separate listener when weighted routing is required.</p>
+          </section>
+
+          <section id="cancel">
+            <span class="step-label">CANCEL 10</span>
+            <h2>Revoke, drain, compensate, then retire.</h2>
+            <figure class="architecture-figure upgrade-figure sequence-figure">
+              <figcaption><strong>Cancellation order</strong><span>The previous generation receives no cancellation command.</span></figcaption>
+              <svg role="img" aria-labelledby="cancel-title cancel-desc" viewBox="0 0 820 390">
+                <title id="cancel-title">Cancelled canary sequence</title>
+                <desc id="cancel-desc">The coordinator requests cancellation. The candidate first revokes admission, drains structured work, attempts idempotent compensation, acknowledges the result, and exits. The previous generation continues serving.</desc>
+                <defs><marker id="cancel-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <text x="130" y="30" text-anchor="middle" font-size="14" font-weight="650">Coordinator</text>
+                <text x="410" y="30" text-anchor="middle" font-size="14" font-weight="650">Candidate</text>
+                <text x="690" y="30" text-anchor="middle" font-size="14" font-weight="650">Previous generation</text>
+                <path class="lifeline" d="M130 48v310M410 48v310M690 48v310"/>
+                <path class="diagram-line-violet" d="M130 80h280" marker-end="url(#cancel-arrow)"/>
+                <text class="diagram-label" x="270" y="68" text-anchor="middle">cancel request</text>
+                <rect class="diagram-violet" x="337" y="97" width="146" height="46" rx="10"/>
+                <text x="410" y="125" text-anchor="middle" font-size="13" font-weight="650">revoke admission</text>
+                <rect class="diagram-box" x="337" y="159" width="146" height="46" rx="10"/>
+                <text x="410" y="187" text-anchor="middle" font-size="13" font-weight="650">join server task</text>
+                <rect class="diagram-teal" x="337" y="217" width="146" height="54" rx="10"/>
+                <text x="410" y="240" text-anchor="middle" font-size="13" font-weight="650"><tspan x="410">compensate</tspan><tspan x="410" dy="17">idempotently</tspan></text>
+                <path class="diagram-line-teal" d="M410 290H130" marker-end="url(#cancel-arrow)"/>
+                <text class="diagram-label" x="270" y="280" text-anchor="middle">outcome acknowledgment</text>
+                <path class="diagram-line" d="M130 323h280" marker-end="url(#cancel-arrow)"/>
+                <text class="diagram-label" x="270" y="313" text-anchor="middle">retire candidate</text>
+                <rect class="active-marker" x="625" y="96" width="130" height="174" rx="12"/>
+                <text x="690" y="171" text-anchor="middle" font-size="13" font-weight="650">continues</text>
+                <text x="690" y="194" text-anchor="middle" font-size="13" font-weight="650">serving</text>
+                <text class="diagram-muted" x="690" y="226" text-anchor="middle">no command</text>
+              </svg>
+            </figure>
+            <p><a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#16bf0d7b84ab7624e470f1e291441a3d81816b135a71f66caa7478dadd92f191"><code>Cancel</code></a> synchronously revokes and drains the candidate. During a canary, it calls compensation after quiescence. The result distinguishes success, failure, and uncertainty.</p>
+            <p>A <a href="../../api/51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287.html"><code>Flyology.Cancellation.Token</code></a> is a one-shot cancellation source. Another task may request the token while <code>Start_Upgrade</code> or <code>Begin_Canary</code> runs. That task must not call another coordinator operation concurrently.</p>
+            <p>After the coordinator fences the interrupted candidate, the operation raises <a href="../../api/80460ee1eee26eb0b52768b2f53b1ca5e65ec852eb5ba8bca123a84d213ca447.html#96e424517d23c1b68d7bcb028a8bbb492be07ac598019be1f30e8e15300d16f1"><code>Operation_Cancelled</code></a>. A token can interrupt only <code>Start_Upgrade</code> or <code>Begin_Canary</code>. After <code>Promote</code> begins, <code>Cancel</code> cannot reverse it. A later failure produces the <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#d450ac3b301a3c485f87d8cc479f5b297d662d2efba5be00724603ed5fd8010b"><code>Rollback_Required</code></a> phase.</p>
+          </section>
+
+          <section id="reverse">
+            <span class="step-label">REVERSAL 11</span>
+            <h2>Reverse by starting a new generation from the prior artifact.</h2>
+            <p>Promotion changes which generation is active. The coordinator retains the prior launch description and provisioning data so that it can start a new replacement generation.</p>
+            <p>This guide calls the operational procedure <strong>reversal</strong>. The public API and lifecycle phase retain the exact terms <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#43120606f36bf245c5f30d6e474b6d44ad0a627263b093ce7552b5be4b9a460e"><code>Rollback_To_Previous</code></a> and <code>Rollback_Required</code>.</p>
+            <figure class="architecture-figure upgrade-figure reversal-figure">
+              <figcaption><strong>Fresh-process reversal</strong><span>The replacement uses the prior artifact and creates new runtime state.</span></figcaption>
+              <svg role="img" aria-labelledby="reverse-title reverse-desc" viewBox="0 0 820 310">
+                <title id="reverse-title">Reversal starts a fresh process from the prior artifact</title>
+                <desc id="reverse-desc">Generation 18 is promoted and generation 17 is retired. When reversal is required, the coordinator fences the affected generations and starts generation 19 from artifact A with a new runtime and reconstructed supervision tree.</desc>
+                <defs><marker id="reverse-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker></defs>
+                <rect class="diagram-box retired" x="24" y="70" width="196" height="116" rx="14"/>
+                <text x="122" y="103" text-anchor="middle" font-size="14" font-weight="650">Generation 17</text>
+                <text class="diagram-muted" x="122" y="128" text-anchor="middle">artifact A · retired</text>
+                <text class="diagram-muted" x="122" y="151" text-anchor="middle">runtime gone</text>
+                <path class="diagram-line-violet" d="M220 128h92" marker-end="url(#reverse-arrow)"/>
+                <text class="diagram-label" x="266" y="115" text-anchor="middle">promote</text>
+                <rect class="diagram-violet" x="318" y="70" width="196" height="116" rx="14"/>
+                <text x="416" y="103" text-anchor="middle" font-size="14" font-weight="650">Generation 18</text>
+                <text class="diagram-muted" x="416" y="128" text-anchor="middle">artifact B · active</text>
+                <text class="diagram-muted" x="416" y="151" text-anchor="middle">reversal required</text>
+                <path class="diagram-line-teal" d="M514 128h92" marker-end="url(#reverse-arrow)"/>
+                <text class="diagram-label" x="560" y="115" text-anchor="middle">fence + spawn</text>
+                <rect class="diagram-teal" x="612" y="70" width="184" height="116" rx="14"/>
+                <text x="704" y="103" text-anchor="middle" font-size="14" font-weight="650">Generation 19</text>
+                <text class="diagram-muted" x="704" y="128" text-anchor="middle">artifact A · fresh</text>
+                <text class="diagram-muted" x="704" y="151" text-anchor="middle">new runtime + tree</text>
+                <path class="artifact-return" d="M122 186v67h582v-67" marker-end="url(#reverse-arrow)"/>
+                <text class="diagram-label" x="413" y="273" text-anchor="middle">retained launch description + provisioning data</text>
+              </svg>
+            </figure>
+            <p><code>Rollback_To_Previous</code> retires every generation from that promotion that the coordinator still owns. A completed promotion normally leaves only the current active generation. An uncertain promotion can leave more than one generation under coordinator ownership. The procedure then starts a new generation from the retained prior artifact and provisioning data.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <div class="callout-body">
+                <p class="callout-lede"><strong>Reversal is service-level reconstruction.</strong></p>
+                <p>If cooperative drain is unavailable, reversal can hard-fence a generation by terminating it at the process boundary. Hard fencing does not establish clean application quiescence. It can leave persisted guards or shared-state transitions abandoned.</p>
+                <p>After hard fencing, use each subsystem's owner-death and recovery rules before reusing that state. Durable data changes still require application migration, compatibility, or compensation rules.</p>
+              </div>
+            </aside>
+          </section>
+
+          <section id="operate">
+            <span class="step-label">OPERATE 12</span>
+            <h2>Observe authority, admission, and drain separately.</h2>
+            <div class="operations-table" role="region" aria-label="Operational checks" tabindex="0">
+              <table>
+                <thead><tr><th>Checkpoint</th><th>Evidence</th><th>Stop condition</th></tr></thead>
+                <tbody>
+                  <tr><td>Prepared</td><td>Child handshake bound to transaction authority, exact provision accepted, listener duplicate held</td><td>Stop on a protocol mismatch, timeout, or child exit</td></tr>
+                  <tr><td>Canary ready</td><td>Application hook reports readiness; Flyology matches the topology epoch and digest</td><td>Stop on stale evidence, a failed hook, or cancellation</td></tr>
+                  <tr><td>Promotion</td><td>Candidate committed; previous admission revoked</td><td>After the phase becomes <code>Rollback_Required</code>, do not call canary, promotion, or cancellation operations</td></tr>
+                  <tr><td>Drain</td><td>Structured server joined and previous process reaped</td><td>After a missed deadline, select fresh-process reversal, shutdown, or an external replacement procedure</td></tr>
+                  <tr><td>Cancellation</td><td>Candidate quiescent; compensation outcome recorded</td><td>Uncertain compensation requires reconciliation</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>Record evidence for each upgrade decision.</h3>
+            <ul class="evidence-list">
+              <li><strong>Authority:</strong> coordinator id, upgrade id, and candidate generation.</li>
+              <li><strong>Generations:</strong> active and candidate generation identifiers.</li>
+              <li><strong>Identity:</strong> artifact identity, topology epoch, and topology digest.</li>
+              <li><strong>Lifecycle:</strong> phase, admission state, and drain duration.</li>
+              <li><strong>Effects:</strong> compensation outcome and any external reconciliation record.</li>
+            </ul>
+            <p>A PID identifies an operating-system process. It is not sufficient transaction authority.</p>
+
+            <h3>Classify failure before choosing recovery.</h3>
+            <div class="operations-table failure-table" role="region" aria-label="Failure classification and recovery" tabindex="0">
+              <table>
+                <thead><tr><th>Observation</th><th>Coordinator result</th><th>Operator response</th></tr></thead>
+                <tbody>
+                  <tr><td>Spawn, handshake, or provisioning fails</td><td><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#d450ac3b301a3c485f87d8cc479f5b297d662d2efba5be00724603ed5fd8010b"><code>Failed</code></a>; previous generation remains active</td><td>Correct the artifact or topology source, then start a new transaction</td></tr>
+                  <tr><td>Readiness rejects, mismatches, or times out</td><td><a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html#d450ac3b301a3c485f87d8cc479f5b297d662d2efba5be00724603ed5fd8010b"><code>Cancelled</code></a> after orderly cleanup; <code>Failed</code> if cleanup cannot complete; previous generation remains active</td><td>Inspect readiness and any cleanup failure before starting a new transaction</td></tr>
+                  <tr><td>Candidate exits during canary</td><td><code>Failed</code>; candidate removed; compensation pending</td><td>Run durable reconciliation or abandon its staged namespace</td></tr>
+                  <tr><td>Previous generation misses its drain deadline after promotion begins</td><td><code>Rollback_Required</code>; candidate effects may have committed</td><td>Block further effects with the deployment-epoch fence, then reverse, shut down, or use an external replacement procedure</td></tr>
+                  <tr><td>Active generation exits outside an upgrade</td><td><code>Failed</code> or <code>Rollback_Required</code>; listener escrow and prior artifact may remain</td><td>Start an explicit fresh generation</td></tr>
+                  <tr><td>Coordinator exits</td><td>In-memory coordination and listener escrow are lost; generation behavior follows application policy</td><td>Use an external supervisor to restart or replace the deployment</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>After the phase becomes <code>Rollback_Required</code>, take a serialized <code>Snapshot</code>. If its <a href="../../api/6da62036953840add5c5dca17e73d1ef50b42782d0a1c28574b36af332061d7c.html#e078a6967964e14965e003208ba0b84d0253752ecce3cbfe4adbbfd75f7ce7dd"><code>Rollback_Available</code></a> field is true, the caller may select <code>Rollback_To_Previous</code>. Otherwise, use <code>Shutdown</code> or an external replacement procedure. A forward repair is external; it is not another coordinator command.</p>
+            <div class="procedure-strip">
+              <div><span>PREPARE</span><p>Build an immutable artifact. Validate configuration, topology identity, and reversal compatibility.</p></div>
+              <div><span>EXPOSE</span><p>Begin the canary. Observe real requests, structured readiness, error rate, and application invariants.</p></div>
+              <div><span>DECIDE</span><p>If the evidence satisfies promotion policy, promote. Otherwise cancel, drain, and reconcile compensation.</p></div>
+              <div><span>RETIRE</span><p>Wait for the previous generation to drain. Keep the prior artifact until the reversal window closes.</p></div>
+            </div>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">LIMITS 13</span>
+            <h2>Verify the protocol within its limits.</h2>
+            <ul>
+              <li>The protocol manages one listener escrow, one active generation, and at most one candidate generation.</li>
+              <li>Coordinator operations are synchronous. One caller must serialize them and ordinarily run them from a native task.</li>
+              <li>Duplicated listeners provide kernel-mediated admission, not weighted routing or an exact canary share.</li>
+              <li>The application hook decides readiness. Flyology validates the returned topology epoch and digest.</li>
+              <li>Drain depends on application tasks reaching their structured stopping points.</li>
+              <li>Compensation can be incomplete or uncertain. The application must reconcile durable effects.</li>
+              <li>The protocol does not transfer active connections, shared heap objects, or Ada runtime state.</li>
+              <li>Flyology is experimental. Validate the exact host, compiler release, service protocol, and failure model.</li>
+            </ul>
+            <p>Use this mechanism only if all these conditions hold:</p>
+            <ul>
+              <li>The listener can remain in stable escrow.</li>
+              <li>Each generation can reconstruct its topology.</li>
+              <li>The application can classify and fence external effects.</li>
+              <li>Structured servers can revoke admission before draining.</li>
+            </ul>
+            <p>Otherwise, use a stop-and-restart procedure or an application-specific migration protocol.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">✓</span>
+              <div class="callout-body">
+                <p class="callout-lede"><strong>Verify the design and its executable contracts.</strong></p>
+                <p>The <a href="https://github.com/flyology-ada/flyology/blob/main/docs/process-upgrades-design.md">process-upgrade design record</a> covers protocol states, native boundaries, and failure classification. The <a href="../../api/ecf60e8a742aa050cdf1c74682a3d008bbed3fd3afe433407bec83a8fe17ee4a.html">generated API reference</a> defines exact types and preconditions.</p>
+                <p>Run <code>./scripts/test.sh</code> for the maintained behavioral suite and <code>./scripts/prove.sh</code> for the SPARK proof campaign. Use <code>./scripts/test-linux-docker.sh</code> when the changed boundary also requires Linux validation.</p>
+              </div>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Guide</a><a href="../supervision/">Supervision</a><a href="../subprocesses/">Subprocesses</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

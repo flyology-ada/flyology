@@ -43,8 +43,19 @@ package body Flyology.Subprocesses is
       Stdout_Read          : C.int;
       Stdout_Write         : C.int;
       Stderr_Read          : C.int;
-      Stderr_Write         : C.int) return C.int;
+      Stderr_Write         : C.int;
+      Control_Parent       : C.int;
+      Control_Child        : C.int;
+      Capability_Parent    : C.int;
+      Capability_Child     : C.int;
+      Control_Target       : C.int;
+      Capability_Target    : C.int) return C.int;
    pragma Import (C, C_Spawn, "flyology_subprocess_spawn");
+
+   --  Bootstrap publishes these stable child descriptors. Keep the launch
+   --  policy in Ada; C only assembles the opaque posix_spawn file actions.
+   Child_Control_Target    : constant C.int := 3;
+   Child_Capability_Target : constant C.int := 4;
 
    function C_Observe_Exit (Pid : C.int) return C.int;
    pragma Import
@@ -280,6 +291,8 @@ package body Flyology.Subprocesses is
          Error_Code := Error_Value;
       end Snapshot;
 
+      function Completed return Boolean is (Is_Done);
+
       function Wait_Descriptor return IO.Descriptor is
         (Wake_Sources.Descriptor (Wake));
    end Exit_Control;
@@ -340,7 +353,16 @@ package body Flyology.Subprocesses is
       end loop;
    end Free_C_Strings;
 
-   procedure Spawn (Item : Command; Child : in out Process) is
+   procedure Spawn_Internal
+     (Item              : Command;
+      Child             : in out Process;
+      Control_Parent    : C.int;
+      Control_Child     : C.int;
+      Capability_Parent : C.int;
+      Capability_Child  : C.int;
+      Pipe_Output       : Boolean := True;
+      Pipe_Error        : Boolean := True)
+   is
       Stdin_Ends  : aliased Descriptor_Pair := (others => -1);
       Stdout_Ends : aliased Descriptor_Pair := (others => -1);
       Stderr_Ends : aliased Descriptor_Pair := (others => -1);
@@ -363,13 +385,30 @@ package body Flyology.Subprocesses is
       Require_Command (Item);
       if Is_Open (Child) then
          raise Program_Error with "subprocess owner is already open";
+      elsif not
+        ((Control_Parent = -1 and then Control_Child = -1 and then
+          Capability_Parent = -1 and then Capability_Child = -1)
+         or else
+           (Control_Parent > 4 and then Control_Child > 4 and then
+            Capability_Parent > 4 and then Capability_Child > 4 and then
+            Control_Parent /= Control_Child and then
+            Control_Parent /= Capability_Parent and then
+            Control_Parent /= Capability_Child and then
+            Control_Child /= Capability_Parent and then
+            Control_Child /= Capability_Child and then
+            Capability_Parent /= Capability_Child))
+      then
+         raise Program_Error with
+           "invalid subprocess bootstrap descriptor set";
       end if;
       if C_Pipe (Stdin_Ends'Address) /= 0
-        or else C_Pipe (Stdout_Ends'Address) /= 0
-        or else C_Pipe (Stderr_Ends'Address) /= 0
+        or else (Pipe_Output and then C_Pipe (Stdout_Ends'Address) /= 0)
+        or else (Pipe_Error and then C_Pipe (Stderr_Ends'Address) /= 0)
         or else C_Set_Nonblocking (Stdin_Ends (1)) /= 0
-        or else C_Set_Nonblocking (Stdout_Ends (0)) /= 0
-        or else C_Set_Nonblocking (Stderr_Ends (0)) /= 0
+        or else
+          (Pipe_Output and then C_Set_Nonblocking (Stdout_Ends (0)) /= 0)
+        or else
+          (Pipe_Error and then C_Set_Nonblocking (Stderr_Ends (0)) /= 0)
       then
          Cleanup_Ends;
          raise Spawn_Error with
@@ -420,7 +459,10 @@ package body Flyology.Subprocesses is
             (if Item.Search_Path then 1 else 0),
             Stdin_Ends (0), Stdin_Ends (1),
             Stdout_Ends (0), Stdout_Ends (1),
-            Stderr_Ends (0), Stderr_Ends (1));
+            Stderr_Ends (0), Stderr_Ends (1),
+            Control_Parent, Control_Child,
+            Capability_Parent, Capability_Child,
+            Child_Control_Target, Child_Capability_Target);
 
          CS.Free (Directory);
          CS.Free (Executable);
@@ -505,10 +547,23 @@ package body Flyology.Subprocesses is
       when others =>
          Cleanup_Ends;
          raise;
+   end Spawn_Internal;
+
+   procedure Spawn (Item : Command; Child : in out Process) is
+   begin
+      Spawn_Internal (Item, Child, -1, -1, -1, -1);
    end Spawn;
 
    function Is_Open (Child : Process) return Boolean is
      (Child.Pid_Value > 0);
+
+   function Has_Exited (Child : Process) return Boolean is
+   begin
+      if not Is_Open (Child) then
+         raise Program_Error with "subprocess owner is closed";
+      end if;
+      return Child.Exit_State.Completed;
+   end Has_Exited;
 
    function Identifier (Child : Process) return Process_Id is
    begin

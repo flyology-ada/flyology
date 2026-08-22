@@ -69,6 +69,7 @@ based on the surviving correspondence.
 - [Runtime observability](#runtime-observability)
   - [Sampled stall watchdog](#sampled-stall-watchdog)
 - [Process lifecycle](#process-lifecycle)
+  - [New-process upgrades](#new-process-upgrades)
 - [Design decisions](#design-decisions)
 - [Ada, C, and assembly boundary](#ada-c-and-assembly-boundary)
 - [TLA+ concurrency models](#tla-concurrency-models)
@@ -2820,6 +2821,28 @@ Loop pthreads inherit the creator's signal mask. A signal handler may therefore
 run on a loop pthread and interrupt the kernel wait; pollers treat `EINTR` as a
 retry/no-event result. Application signal handlers must still obey normal
 async-signal-safety rules and must not call Ada tasking or Flyology APIs.
+
+### New-process upgrades
+
+`Flyology.Process_Generations.Coordinators` and
+`Flyology.Process_Generations.Agents` provide an experimental two-process
+upgrade protocol. A stable coordinator retains the original listener, starts a
+new executable with fresh Ada tasks and a fresh supervision tree, provisions an
+exact topology epoch and digest, and lends it a validated listener duplicate.
+The previous image owns and drains every connection it already accepted.
+
+A canary can be cancelled by synchronously revoking its admission, draining its
+structured server, and running an idempotent application compensation hook.
+Promotion drains the previous image. Reversal after promotion starts another
+fresh process from the retained prior artifact; it never transfers or revives
+Ada tasks, task stacks, protected objects, TLS sessions, connection handlers,
+or subprocess parentage. Shared listener duplicates also provide no weighted
+traffic guarantee. The complete ownership, failure, and native-boundary
+contract, including working-directory, environment, signal, and descriptor
+inheritance, is in
+[the process-upgrade website guide](https://flyology.org/guide/process-upgrades/).
+The repository also retains the detailed
+[process-upgrade design record](docs/process-upgrades-design.md).
 
 ## Design decisions
 

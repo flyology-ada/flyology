@@ -1,11 +1,20 @@
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Environment_Variables;
+with Ada.Streams;
+with Flyology.IO.Socket_Handoffs;
+with Flyology.IO.Sockets;
+with Flyology.Subprocesses.Bootstrap;
 with Interfaces.C;
 with System;
 
 procedure Subprocess_Fixture is
    package C renames Interfaces.C;
+   package Bootstrap renames Flyology.Subprocesses.Bootstrap;
+   package Handoffs renames Flyology.IO.Socket_Handoffs;
+   package Sockets renames Flyology.IO.Sockets;
+
+   use type Ada.Streams.Stream_Element_Array;
    use type C.int;
    use type C.long;
 
@@ -69,7 +78,37 @@ procedure Subprocess_Fixture is
      (if Ada.Command_Line.Argument_Count = 0
       then "none" else Ada.Command_Line.Argument (1));
 begin
-   if Mode = "capture" then
+   if Mode = "bootstrap" then
+      declare
+         Control      : Sockets.Socket_Type;
+         Capabilities : Handoffs.Handoff_Channel;
+         Listener     : Sockets.Socket_Type;
+         Accepted     : Sockets.Socket_Type;
+         Peer         : Sockets.Endpoint;
+         Command      : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Request      : Ada.Streams.Stream_Element_Array (1 .. 1);
+      begin
+         Bootstrap.Adopt_Inherited (Control, Capabilities);
+         Sockets.Receive_Exactly (Control, Command, Timeout => 2.0);
+         if Command /= [1 => 16#42#] then
+            Ada.Command_Line.Set_Exit_Status (99);
+            return;
+         end if;
+         Handoffs.Receive_Listener (Capabilities, Listener);
+         Sockets.Accept_Connection
+           (Listener, Accepted, Peer, Timeout => 2.0);
+         Sockets.Receive_Exactly (Accepted, Request, Timeout => 2.0);
+         if Request /= [1 => 16#58#] then
+            Ada.Command_Line.Set_Exit_Status (100);
+            return;
+         end if;
+         Sockets.Send_All (Accepted, [1 => 16#59#], Timeout => 2.0);
+         Sockets.Send_All (Control, [1 => 16#41#], Timeout => 2.0);
+      exception
+         when others =>
+            Ada.Command_Line.Set_Exit_Status (101);
+      end;
+   elsif Mode = "capture" then
       Write_All (1, "stdout-value");
       Write_All (2, "stderr-value");
    elsif Mode = "stdin" then

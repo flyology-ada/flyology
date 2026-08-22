@@ -211,6 +211,7 @@ procedure Structured_Server_Smoke is
                begin
                   pragma Assert (Sample.Active_Handlers = 2);
                   pragma Assert (Sample.Accepted_Connections = 2);
+                  pragma Assert (Sample.Accepting);
                end;
                delay 0.020;
                pragma Assert

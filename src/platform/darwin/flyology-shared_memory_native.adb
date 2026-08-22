@@ -88,6 +88,9 @@ package body Flyology.Shared_Memory_Native is
    function C_Peer_Family
      (Descriptor : C.int; Family : access C.int) return C.int;
    pragma Import (C, C_Peer_Family, "flyology_shm_getpeername_family");
+   function C_Socket_Accepting
+     (Descriptor : C.int; Accepting : access C.int) return C.int;
+   pragma Import (C, C_Socket_Accepting, "flyology_shm_socket_accepting");
    function C_Send_Once (Socket, Descriptor : C.int) return C.long;
    pragma Import (C, C_Send_Once, "flyology_shm_send_fd_once");
    function C_Receive_Once
@@ -223,6 +226,16 @@ package body Flyology.Shared_Memory_Native is
       Value := Local;
       return Result;
    end Socket_Type;
+   function Socket_Accepting
+     (Descriptor : C.int; Value : out C.int) return C.int
+   is
+      Local  : aliased C.int;
+      Result : constant C.int :=
+        C_Socket_Accepting (Descriptor, Local'Access);
+   begin
+      Value := Local;
+      return Result;
+   end Socket_Accepting;
    function Local_Socket_Family
      (Descriptor : C.int; Family : out C.int) return C.int
    is

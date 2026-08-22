@@ -54,6 +54,7 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 - [File-to-socket transfers](https://flyology.org/guide/file-transfers/): Positional regular-file transfers, buffer ownership, deadlines, cancellation, native sendfile, Linux lightweight SEND_ZC, and fallbacks.
 - [Native subprocesses](https://flyology.org/guide/subprocesses/): Native-task process creation, bounded capture, deadlines, cancellation, ownership, and teardown.
 - [Structured task supervision](https://flyology.org/guide/supervision/): Typed static trees, bounded dynamic families, readiness, generation-safe replacement, recovery, incident budgets, stopping, and event rings.
+- [Process upgrades](https://flyology.org/guide/process-upgrades/): Listener escrow, fresh-process topology reconstruction, cancellable canaries, compensation, promotion, drain, and fresh-process reversal.
 - [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, bounded multi-deadline, and wall-clock timer behavior, including backward clock changes.
 
 ## Libraries that require Flyology Runtime

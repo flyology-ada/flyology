@@ -390,6 +390,12 @@ poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
 process_exec_child_smoke
+process_bootstrap_smoke
+flyology-process_generation_policy-smoke
+process_generation_messages_smoke
+process_generation_protocol_smoke
+process_generation_transport_smoke
+process_generation_coordinator_smoke
 process_lifecycle_smoke
 ready_queue_smoke
 runtime_smoke
@@ -402,6 +408,7 @@ stack_pool_smoke
 stack_size_limits_child
 stack_size_limits_smoke
 stack_size_parity_smoke
+socket_handoff_smoke
 suspension_object_smoke
 task_scope_faults_smoke
 task_scopes_smoke
@@ -477,6 +484,8 @@ done
 
 all_test_mains="default_policy_smoke
 $ordinary_unhooked_mains
+process_generation_agent_v1
+process_generation_agent_v2
 $pool_mains
 loop_thread_project_placement_smoke
 $fault_mains"
@@ -543,8 +552,16 @@ link_test_mains \
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 native_mains="default_policy_smoke
-$ordinary_unhooked_mains"
+$ordinary_unhooked_mains
+process_generation_agent_v1
+process_generation_agent_v2"
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+
+#  The website's process-upgrade example is the source of truth for its
+#  coordinator block. Extract it without rewriting, compose a temporary mini
+#  showcase, and exercise both the promotion and cancellation decisions.
+FLYOLOGY_GUIDE_EXAMPLE_REUSE_BUILD=1 \
+  "$project_root/scripts/check-process-upgrade-guide-example.sh"
 
 #  On Darwin/AArch64 GNAT routes nested-subprogram callbacks through libgcc's
 #  heap trampolines, whose per-pthread cursor corrupts callbacks that outlive a

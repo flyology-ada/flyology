@@ -163,6 +163,13 @@ package Flyology.Subprocesses is
    --  @return True between successful Spawn and Close
    function Is_Open (Child : Process) return Boolean;
 
+   --  Report whether the reaper has observed terminal process state. This is a
+   --  nonblocking observation; the status remains available to Wait.
+   --  @param Child Open process owner
+   --  @return True after exit or a terminal reaper failure is recorded
+   --  @exception Program_Error Child is closed
+   function Has_Exited (Child : Process) return Boolean;
+
    --  Return the root's launch-time process identifier. After reaping, the
    --  host may reuse this value even before Child is closed. Do not use it for
    --  signaling or as a durable application identity.
@@ -339,6 +346,7 @@ private
       procedure Snapshot
         (Done, Failed : out Boolean;
          Raw_Status, Error_Code : out Interfaces.C.int);
+      function Completed return Boolean;
       function Wait_Descriptor return Flyology.IO.Descriptor;
    private
       Is_Done      : Boolean := False;
@@ -364,6 +372,27 @@ private
       Exit_State : aliased Exit_Control;
       Reaper    : Reaper_Access := null;
    end record;
+
+   --  Internal launch seam used by the Bootstrap child package. Bootstrap
+   --  descriptors are either four distinct values above fd 4 or all invalid.
+   --  @exclude
+   --  @param Item Launch command
+   --  @param Child Destination process owner
+   --  @param Control_Parent Coordinator control endpoint
+   --  @param Control_Child Child control endpoint
+   --  @param Capability_Parent Coordinator capability endpoint
+   --  @param Capability_Child Child capability endpoint
+   --  @param Pipe_Output Create a coordinator-owned standard-output pipe
+   --  @param Pipe_Error Create a coordinator-owned standard-error pipe
+   procedure Spawn_Internal
+     (Item              : Command;
+      Child             : in out Process;
+      Control_Parent    : Interfaces.C.int;
+      Control_Child     : Interfaces.C.int;
+      Capability_Parent : Interfaces.C.int;
+      Capability_Child  : Interfaces.C.int;
+      Pipe_Output       : Boolean := True;
+      Pipe_Error        : Boolean := True);
 
    --  Release process ownership without propagating cleanup failures.
    --  @param Child Process owner being finalized

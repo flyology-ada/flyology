@@ -18,6 +18,7 @@ symbols=$(nm -g "$archive" | awk '
 for symbol in $symbols; do
   case "$symbol" in
     flyology_subprocess_pipe|\
+    flyology_subprocess_duplicate_above|\
     flyology_subprocess_set_nonblocking|\
     flyology_subprocess_spawn|\
     flyology_subprocess_observe_exit|\
@@ -44,6 +45,7 @@ done
 
 for required in \
   flyology_subprocess_pipe \
+  flyology_subprocess_duplicate_above \
   flyology_subprocess_set_nonblocking \
   flyology_subprocess_spawn \
   flyology_subprocess_observe_exit \

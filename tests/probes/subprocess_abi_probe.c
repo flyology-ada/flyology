@@ -10,14 +10,17 @@
 #include <signal.h>
 #include <stddef.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 int flyology_subprocess_pipe(int[2]);
+int flyology_subprocess_duplicate_above(int, int);
 int flyology_subprocess_set_nonblocking(int);
 int flyology_subprocess_spawn(pid_t *, const char *, char *const [], int,
                               char *const [], const char *, int,
+                              int, int, int, int, int, int,
                               int, int, int, int, int, int);
 long flyology_subprocess_write_no_sigpipe(int, const void *, size_t);
 int flyology_subprocess_signal_interrupt(void);
@@ -33,12 +36,25 @@ int flyology_subprocess_status_signaled(int);
 int flyology_subprocess_status_signal(int);
 int flyology_subprocess_status_core_dumped(int);
 
+static int move_above_bootstrap(int *descriptor)
+{
+    int replacement;
+    if (*descriptor > 4) return 0;
+    replacement = flyology_subprocess_duplicate_above(*descriptor, 5);
+    if (replacement < 0) return -1;
+    close(*descriptor);
+    *descriptor = replacement;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int descriptors[2] = { -1, -1 };
     int input[2] = { -1, -1 };
     int output[2] = { -1, -1 };
     int error[2] = { -1, -1 };
+    int bootstrap_control[2] = { -1, -1 };
+    int bootstrap_capability[2] = { -1, -1 };
     int status = 0;
     pid_t child;
     pid_t live_child = -1;
@@ -51,6 +67,16 @@ int main(int argc, char **argv)
 
     if (argc == 2 && strcmp(argv[1], "--wait-for-signal") == 0) {
         for (;;) pause();
+    }
+    if (argc == 2 && strcmp(argv[1], "--bootstrap-child") == 0) {
+        char control = 'C';
+        char capability = 'K';
+        if (fcntl(3, F_GETFD) < 0 || fcntl(4, F_GETFD) < 0 ||
+            (fcntl(3, F_GETFD) & FD_CLOEXEC) != 0 ||
+            (fcntl(4, F_GETFD) & FD_CLOEXEC) != 0 ||
+            write(3, &control, 1) != 1 || write(4, &capability, 1) != 1)
+            return 2;
+        return 0;
     }
 
     if (flyology_subprocess_signal_interrupt() != SIGINT ||
@@ -104,6 +130,57 @@ int main(int argc, char **argv)
         goto cleanup;
 
     {
+        char *child_arguments[] = { argv[0], "--bootstrap-child", NULL };
+        char *child_environment[] = { NULL };
+        char control = 0;
+        char capability = 0;
+
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, bootstrap_control) != 0 ||
+            socketpair(AF_UNIX, SOCK_STREAM, 0, bootstrap_capability) != 0 ||
+            fcntl(bootstrap_control[0], F_SETFD, FD_CLOEXEC) != 0 ||
+            fcntl(bootstrap_control[1], F_SETFD, FD_CLOEXEC) != 0 ||
+            fcntl(bootstrap_capability[0], F_SETFD, FD_CLOEXEC) != 0 ||
+            fcntl(bootstrap_capability[1], F_SETFD, FD_CLOEXEC) != 0 ||
+            move_above_bootstrap(&bootstrap_control[0]) != 0 ||
+            move_above_bootstrap(&bootstrap_control[1]) != 0 ||
+            move_above_bootstrap(&bootstrap_capability[0]) != 0 ||
+            move_above_bootstrap(&bootstrap_capability[1]) != 0 ||
+            bootstrap_control[0] <= 4 || bootstrap_control[1] <= 4 ||
+            bootstrap_capability[0] <= 4 ||
+            bootstrap_capability[1] <= 4 ||
+            (fcntl(bootstrap_control[0], F_GETFD) & FD_CLOEXEC) == 0 ||
+            (fcntl(bootstrap_control[1], F_GETFD) & FD_CLOEXEC) == 0 ||
+            flyology_subprocess_pipe(input) != 0 ||
+            flyology_subprocess_pipe(output) != 0 ||
+            flyology_subprocess_pipe(error) != 0)
+            goto cleanup;
+        if (flyology_subprocess_spawn
+              (&child, argv[0], child_arguments, 1, child_environment,
+               NULL, 0, input[0], input[1], output[0], output[1],
+               error[0], error[1],
+               bootstrap_control[0], bootstrap_control[1],
+               bootstrap_capability[0], bootstrap_capability[1], 3, 4) != 0)
+            goto cleanup;
+        live_child = child;
+        close(bootstrap_control[1]); bootstrap_control[1] = -1;
+        close(bootstrap_capability[1]); bootstrap_capability[1] = -1;
+        for (int index = 0; index < 2; ++index) {
+            close(input[index]); input[index] = -1;
+            close(output[index]); output[index] = -1;
+            close(error[index]); error[index] = -1;
+        }
+        if (read(bootstrap_control[0], &control, 1) != 1 || control != 'C' ||
+            read(bootstrap_capability[0], &capability, 1) != 1 ||
+            capability != 'K' || waitpid(child, &status, 0) != child ||
+            !flyology_subprocess_status_exited(status) ||
+            flyology_subprocess_status_exit_code(status) != 0)
+            goto cleanup;
+        live_child = -1;
+        close(bootstrap_control[0]); bootstrap_control[0] = -1;
+        close(bootstrap_capability[0]); bootstrap_capability[0] = -1;
+    }
+
+    {
         struct sigaction ignored;
         struct sigaction previous_action;
         sigset_t blocked;
@@ -125,7 +202,7 @@ int main(int argc, char **argv)
         if (flyology_subprocess_spawn
               (&child, argv[0], child_arguments, 1, child_environment,
                NULL, 0, input[0], input[1], output[0], output[1],
-               error[0], error[1]) != 0)
+               error[0], error[1], -1, -1, -1, -1, 3, 4) != 0)
             goto cleanup;
         live_child = child;
         (void)pthread_sigmask(SIG_SETMASK, &previous_mask, NULL);
@@ -156,6 +233,9 @@ cleanup:
         if (input[index] >= 0) close(input[index]);
         if (output[index] >= 0) close(output[index]);
         if (error[index] >= 0) close(error[index]);
+        if (bootstrap_control[index] >= 0) close(bootstrap_control[index]);
+        if (bootstrap_capability[index] >= 0)
+            close(bootstrap_capability[index]);
     }
     return result;
 }

@@ -106,6 +106,25 @@ is
    with Post => Snapshot_Running'Result =
      (Serve_Started and then Phase in Serving | Stop_Requested);
 
+   --  Publish admission readiness only while the server remains in its
+   --  serving phase after every worker has activated.
+   --  @param Phase Current lifecycle phase after worker startup
+   --  @return True only while admission may begin
+   function Accepting_After_Worker_Start
+     (Phase : Run_Phase) return Boolean
+   with Post => Accepting_After_Worker_Start'Result = (Phase = Serving);
+
+   --  Derive exact current admission readiness. A retained internal flag is
+   --  masked by phase so a concurrent stop is visible immediately.
+   --  @param Was_Marked Whether worker activation completed
+   --  @param Phase Current lifecycle phase
+   --  @return True only after activation and before shutdown
+   function Snapshot_Accepting
+     (Was_Marked : Boolean;
+      Phase      : Run_Phase) return Boolean
+   with Post => Snapshot_Accepting'Result =
+     (Was_Marked and then Phase = Serving);
+
    --  Derive the Shutdown_Requested field of a public server snapshot.
    --  @param Phase Current lifecycle phase
    --  @return True once shutdown has been requested

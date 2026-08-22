@@ -6,11 +6,13 @@
  * Subprocess ABI leaves only.
  *
  * posix_spawn file-action and attribute objects, waitid's siginfo_t payload,
- * signal-number macros, wait-status macros, pipe2 flags, and SIGPIPE masking
- * are C-only or host-header-selected interfaces. This file exposes those
- * mechanisms through fixed signatures. Ada owns validation, argv/environment
- * construction, retry and deadline policy, descriptor ownership and cleanup,
- * signal selection, reaping order, bounded capture, and lifecycle decisions.
+ * signal-number macros, wait-status macros, pipe2 flags, variadic fcntl
+ * duplication, bootstrap file actions, and SIGPIPE masking are
+ * C-only or host-header-selected interfaces. This file exposes those
+ * mechanisms through fixed signatures. Ada owns socket-pair creation,
+ * validation, argv/environment construction, retry and deadline policy,
+ * descriptor ownership and cleanup, signal selection, reaping order, bounded
+ * capture, and lifecycle decisions.
  */
 
 #include <errno.h>
@@ -28,15 +30,15 @@ extern char **environ;
 _Static_assert(sizeof(pid_t) <= sizeof(int), "pid_t must fit the Ada ABI");
 _Static_assert(sizeof(ssize_t) <= sizeof(long), "ssize_t must fit the Ada ABI");
 
-static int flyology_move_above_stdio(int *descriptor)
+static int flyology_move_above(int *descriptor, int reserved_maximum)
 {
     int replacement;
 
-    if (*descriptor > STDERR_FILENO) return 0;
+    if (*descriptor > reserved_maximum) return 0;
 #if defined(F_DUPFD_CLOEXEC)
-    replacement = fcntl(*descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    replacement = fcntl(*descriptor, F_DUPFD_CLOEXEC, reserved_maximum + 1);
 #else
-    replacement = fcntl(*descriptor, F_DUPFD, STDERR_FILENO + 1);
+    replacement = fcntl(*descriptor, F_DUPFD, reserved_maximum + 1);
 #endif
     if (replacement < 0) return -1;
 #if !defined(F_DUPFD_CLOEXEC)
@@ -96,8 +98,8 @@ int flyology_subprocess_pipe(int descriptors[2])
         return -1;
     }
 #endif
-    if (flyology_move_above_stdio(&descriptors[0]) < 0 ||
-        flyology_move_above_stdio(&descriptors[1]) < 0) {
+    if (flyology_move_above(&descriptors[0], STDERR_FILENO) < 0 ||
+        flyology_move_above(&descriptors[1], STDERR_FILENO) < 0) {
         int saved = errno;
         (void)close(descriptors[0]);
         (void)close(descriptors[1]);
@@ -105,6 +107,23 @@ int flyology_subprocess_pipe(int descriptors[2])
         return -1;
     }
     return 0;
+}
+
+int flyology_subprocess_duplicate_above(int descriptor, int minimum)
+{
+#if defined(F_DUPFD_CLOEXEC)
+    return fcntl(descriptor, F_DUPFD_CLOEXEC, minimum);
+#else
+    int replacement = fcntl(descriptor, F_DUPFD, minimum);
+    if (replacement < 0) return -1;
+    if (fcntl(replacement, F_SETFD, FD_CLOEXEC) < 0) {
+        int saved = errno;
+        (void)close(replacement);
+        errno = saved;
+        return -1;
+    }
+    return replacement;
+#endif
 }
 
 int flyology_subprocess_set_nonblocking(int descriptor)
@@ -126,7 +145,13 @@ int flyology_subprocess_spawn(pid_t *pid,
                               int stdout_read,
                               int stdout_write,
                               int stderr_read,
-                              int stderr_write)
+                              int stderr_write,
+                              int control_parent,
+                              int control_child,
+                              int capability_parent,
+                              int capability_child,
+                              int control_target,
+                              int capability_target)
 {
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attributes;
@@ -135,6 +160,8 @@ int flyology_subprocess_spawn(pid_t *pid,
     short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK |
                   POSIX_SPAWN_SETSIGDEF;
     int result;
+    /* Ada validates the all-disabled or four-distinct-descriptor contract. */
+    int bootstrap = control_parent != -1;
 
     result = posix_spawn_file_actions_init(&actions);
     if (result != 0) return result;
@@ -147,16 +174,43 @@ int flyology_subprocess_spawn(pid_t *pid,
 #define FLYOLOGY_ACTION(call) do { result = (call); if (result != 0) goto done; } while (0)
     FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_read,
                                                      STDIN_FILENO));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2(&actions, stdout_write,
-                                                     STDOUT_FILENO));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2(&actions, stderr_write,
-                                                     STDERR_FILENO));
+    if (stdout_write >= 0) {
+        FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
+          (&actions, stdout_write, STDOUT_FILENO));
+    }
+    if (stderr_write >= 0) {
+        FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
+          (&actions, stderr_write, STDERR_FILENO));
+    }
     FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_read));
     FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_write));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_read));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdout_write));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_read));
-    FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stderr_write));
+    if (stdout_read >= 0) {
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, stdout_read));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, stdout_write));
+    }
+    if (stderr_read >= 0) {
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, stderr_read));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, stderr_write));
+    }
+
+    if (bootstrap) {
+        FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
+          (&actions, control_child, control_target));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
+          (&actions, capability_child, capability_target));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, control_parent));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, control_child));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, capability_parent));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
+          (&actions, capability_child));
+    }
 
     if (working_directory != NULL) {
         FLYOLOGY_ACTION(flyology_spawn_addchdir(&actions,
