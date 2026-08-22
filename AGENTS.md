@@ -514,6 +514,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   ignores ambient settings, and `--reset` restores native defaults. Generated
   GPR configuration must bind the validated `gnat_native` or
   `gnat_flyology_native` prefix explicitly.
+- Toolchain discovery invoked from an Alire dependency action must not feed the
+  inherited `FLYOLOGY_ROOT`, `GPR_CONFIG`, or `FLYOLOGY_ALIRE_PREFIX` back into
+  nested `alr printenv`. The root and generated configuration would change the
+  shared build hash and deploy the release twice; the generated prefix would
+  then conflict between those deployments.
 - Flyology serializes its own Alire RTS preparation within one dependency
   checkout. Alire may still mutate `alire/build_hash_inputs` before dependency
   actions, so concurrent full `alr build` processes must not share one local
