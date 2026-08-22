@@ -86,6 +86,12 @@ package Flyology.IO.Connections.Drivers is
    --  @exception Program_Error IO is not awaiting acquisition
    procedure Arm_Acquisition (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class);
 
+   --  Thread-safe, reusable protocol-output notification. It owns its wake
+   --  descriptor and never exposes it. Signals coalesce until Wait or the
+   --  composable Arm_Transport overload consumes them. The object must outlive
+   --  every operation, Run call, and task that can use it.
+   type Outbound_Wakeup is limited private;
+
    --  Arm the outer provider operation for the single readiness direction
    --  returned by Receive or Send, plus close, manager shutdown, and Token.
    --  @param IO Acquired capability
@@ -94,6 +100,24 @@ package Flyology.IO.Connections.Drivers is
    --  @exception Program_Error IO is not acquired or Required is not a wait
    procedure Arm_Transport
      (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class; Required : Step_Result);
+
+   --  Arm the outer provider operation for one transport direction, protocol
+   --  output publication, close, manager shutdown, and Token in one bounded
+   --  readiness set. Outbound remains opaque and consumes no completion-set
+   --  slot. If a coalesced output notification is already pending, it is
+   --  consumed and Operation is rescheduled instead of armed. Arm_Deadline may
+   --  be used independently on the same Operation.
+   --  @param IO Acquired capability
+   --  @param Operation Outer user-visible provider operation
+   --  @param Required Need_Read or Need_Write returned by a transport step
+   --  @param Outbound Reusable protocol-output notification
+   --  @exception Program_Error IO is not acquired or Required is not a wait
+   --     result, or wake descriptor creation or consumption fails
+   procedure Arm_Transport
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Step_Result;
+      Outbound  : in out Outbound_Wakeup);
 
    --  Arm the outer provider operation with the unused portion of the shared
    --  Start deadline. An infinite deadline adds no timer source.
@@ -121,11 +145,6 @@ package Flyology.IO.Connections.Drivers is
    --  @param IO Capability to inspect
    --  @return True when transport steps are permitted
    function Is_Acquired (IO : Capability) return Boolean;
-
-   --  Thread-safe, reusable protocol-output notification. It owns its wake
-   --  descriptor and never exposes it. Signals coalesce until Wait consumes
-   --  them. The object must outlive Run and every task that can call Signal.
-   type Outbound_Wakeup is limited private;
 
    --  Publish protocol output availability. Publish the protected queue state
    --  before calling Signal. After Outbound_Ready, the driver must observe all

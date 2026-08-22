@@ -57,7 +57,9 @@ procedure Connection_Operations_Smoke is
       type Connection_Transport (Item : not null access Connections.Connection'Class) is limited
         new Synthetic_Transport
       with record
-         IO : Connection_Drivers.Capability;
+         IO      : Connection_Drivers.Capability;
+         Wakeup  : Connection_Drivers.Outbound_Wakeup;
+         Timeout : Duration := 1.0;
       end record;
 
       overriding
@@ -90,9 +92,10 @@ procedure Connection_Operations_Smoke is
         (Set       : not null access Flyology.Operations.Completion_Set'Class;
          Transport : not null access Synthetic_Transport'Class)
       is new Flyology.Operations.Operation (Set) with record
-         Data      : Stream_Array_Access := null;
-         Last      : Stream_Element_Offset := 0;
-         Acquiring : Boolean := True;
+         Data           : Stream_Array_Access := null;
+         Last           : Stream_Element_Offset := 0;
+         Acquiring      : Boolean := True;
+         Protocol_Ready : access Boolean := null;
       end record;
 
       overriding
@@ -110,7 +113,7 @@ procedure Connection_Operations_Smoke is
          Operation : in out Flyology.Operations.Operation'Class;
          Result    : out Connection_Drivers.Acquisition_Result) is
       begin
-         Connection_Drivers.Start (Item.IO, Item.Item, Result, Timeout => 1.0);
+         Connection_Drivers.Start (Item.IO, Item.Item, Result, Timeout => Item.Timeout);
          Connection_Drivers.Arm_Deadline (Item.IO, Operation);
       end Start_Receive;
 
@@ -144,7 +147,7 @@ procedure Connection_Operations_Smoke is
          Operation : in out Flyology.Operations.Operation'Class;
          Required  : Connection_Drivers.Step_Result) is
       begin
-         Connection_Drivers.Arm_Transport (Item.IO, Operation, Required);
+         Connection_Drivers.Arm_Transport (Item.IO, Operation, Required, Item.Wakeup);
       end Arm_Step;
 
       overriding
@@ -161,6 +164,13 @@ procedure Connection_Operations_Smoke is
          if Event = Flyology.Operations.Deadline_Reached then
             Release (Item.Transport.all);
             Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
+            return;
+         elsif Event /= Flyology.Operations.Start_Operation
+           and then Item.Protocol_Ready /= null
+           and then Item.Protocol_Ready.all
+         then
+            Release (Item.Transport.all);
+            Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
             return;
          elsif Event = Flyology.Operations.Start_Operation then
             Start_Receive (Item.Transport.all, Item, Acquired);
@@ -341,6 +351,112 @@ procedure Connection_Operations_Smoke is
             Sockets.Close_Socket (Peer);
          end;
       end loop;
+
+      --  The combined transport/outbound arming overload consumes an already
+      --  pending coalesced notification before rescheduling. Reusing the same
+      --  wakeup for a subsequent transport wait proves no stale signal spins.
+      declare
+         Manager      : aliased Connections.Server (Capacity => 1);
+         Item         : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Channel      : aliased Connection_Transport (Item'Access);
+         Published    : aliased Boolean := True;
+         Data         : aliased Stream_Element_Array := [1 => 0];
+      begin
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         Connection_Drivers.Signal (Channel.Wakeup);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Get : Synthetic_Receive_Operation (Set'Access, Channel'Access);
+         begin
+            Get.Data := Data'Unchecked_Access;
+            Get.Protocol_Ready := Published'Unchecked_Access;
+            Flyology.Operations.Drivers.Start (Get);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded;
+            Flyology.Operations.Consume (Get);
+         end;
+         Published := False;
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Get : Synthetic_Receive_Operation (Set'Access, Channel'Access);
+         begin
+            Get.Data := Data'Unchecked_Access;
+            Flyology.Operations.Drivers.Start (Get);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+            Sockets.Send_All (Peer, [1 => 73]);
+            Flyology.Operations.Wait_All (Set);
+            Passed :=
+              Passed
+              and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded
+              and then Data = [1 => 73];
+            Flyology.Operations.Consume (Get);
+         end;
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  A notification published after readiness is armed wakes the same
+      --  owner operation without a helper operation or visible descriptor.
+      declare
+         Manager      : aliased Connections.Server (Capacity => 1);
+         Item         : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Channel      : aliased Connection_Transport (Item'Access);
+         Published    : aliased Boolean := False;
+         Data         : aliased Stream_Element_Array := [1 => 0];
+      begin
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Get : Synthetic_Receive_Operation (Set'Access, Channel'Access);
+         begin
+            Get.Data := Data'Unchecked_Access;
+            Get.Protocol_Ready := Published'Unchecked_Access;
+            Flyology.Operations.Drivers.Start (Get);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+            Published := True;
+            Connection_Drivers.Signal (Channel.Wakeup);
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded;
+            Flyology.Operations.Consume (Get);
+         end;
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  The readiness set coexists with the capability's absolute deadline.
+      declare
+         Manager      : aliased Connections.Server (Capacity => 1);
+         Item         : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Channel      : aliased Connection_Transport (Item'Access);
+         Data         : aliased Stream_Element_Array := [1 => 0];
+      begin
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         Channel.Timeout := 0.005;
+         declare
+            Set : aliased Flyology.Operations.Completion_Set (1);
+            Get : Synthetic_Receive_Operation (Set'Access, Channel'Access);
+         begin
+            Get.Data := Data'Unchecked_Access;
+            Flyology.Operations.Drivers.Start (Get);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+            Flyology.Operations.Wait_All (Set);
+            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Failed;
+            Flyology.Operations.Consume (Get);
+         end;
+         Connections.Close (Item);
+         Sockets.Close_Socket (Peer);
+      end;
 
       --  Lease acquisition is itself composable: a second outer transport
       --  operation arms the connection lease source and resumes after the
