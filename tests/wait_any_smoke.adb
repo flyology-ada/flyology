@@ -1,5 +1,7 @@
 with Ada.Streams;
 with Ada.Real_Time;
+with Ada.Exceptions;
+with Ada.Text_IO;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Sockets;
@@ -103,12 +105,20 @@ procedure Wait_Any_Smoke is
       declare
          Requests : Flyology.IO.Wait_Request_Array
            (1 .. Flyology.IO.Max_Wait_Requests);
+         Selected : Natural;
       begin
          Requests :=
            [others =>
               (Flyology.IO.Sockets.Native_Descriptor (Left_2),
                Flyology.IO.For_Read)];
-         Passed := Passed and then Flyology.IO.Wait_Any (Requests, 0.0) = 1;
+         --  A positive timeout forces the lightweight lane through the RTS
+         --  multi-watch path at the full public request bound.
+         Selected := Flyology.IO.Wait_Any (Requests, 1.0);
+         Passed := Passed and then Selected = 1;
+         if Selected /= 1 then
+            raise Program_Error with
+              "full readiness set selected" & Natural'Image (Selected);
+         end if;
       end;
 
       declare
@@ -223,7 +233,10 @@ procedure Wait_Any_Smoke is
       Flyology.IO.Sockets.Close_Socket (Right_1);
       Result.Set (Passed);
    exception
-      when others =>
+      when Error : others =>
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            Ada.Exceptions.Exception_Information (Error));
          Result.Set (False);
    end Runner;
 

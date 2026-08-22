@@ -2,7 +2,10 @@ with Ada.Finalization;
 with Ada.Streams;
 with Flyology.IO.Sockets;
 with Flyology.Cancellation;
+with Flyology.Operations;
 with Flyology.Wake_Sources;
+private with Ada.Real_Time;
+private with Ada.Exceptions;
 
 --  Runs provider-neutral TLS sessions over Flyology socket readiness.
 --
@@ -158,8 +161,8 @@ package Flyology.IO.TLS is
    --  destroys the TLS session, then closes the descriptor. Other concurrent
    --  operations wait their turn. Take is the only non-concurrent operation:
    --  callers must give it exclusive access to a closed Connection.
-   --  Operations queued behind an active provider call recheck cancellation
-   --  and their original deadline at intervals of at most 10 milliseconds.
+   --  Operations queued behind an active provider call wait on the retained
+   --  lease source and preserve their original monotonic deadline.
    type Connection is new Ada.Finalization.Limited_Controlled with private;
 
    --  Create a provider session and transfer Socket's sole closing ownership
@@ -279,6 +282,190 @@ package Flyology.IO.TLS is
       Timeout : Duration := Infinite;
       Token   : access Flyology.Cancellation.Token := null);
 
+   --  Common limited base for scoped standalone TLS operations. Item, Token,
+   --  and any borrowed buffer must outlive the operation through terminal
+   --  completion or finalization. The owning task must cancel or finalize its
+   --  pending operations before calling Close itself; a concurrent Close may
+   --  interrupt them and waits until their leases are discharged.
+   type Connection_Operation is
+     abstract new Flyology.Operations.Operation with private;
+   --  Scoped standalone TLS handshake result.
+   type Handshake_Operation is new Connection_Operation with private;
+   --  Scoped one-chunk decrypted receive result.
+   type Receive_Operation is new Connection_Operation with private;
+   --  Scoped exact decrypted receive result.
+   type Receive_Exactly_Operation is new Connection_Operation with private;
+   --  Scoped complete encrypted send result.
+   type Send_All_Operation is new Connection_Operation with private;
+   --  Scoped close-notify exchange result.
+   type Shutdown_Operation is new Connection_Operation with private;
+
+   --  Start a composable TLS handshake.
+   --  @param Set Completion set owning the operation slot
+   --  @param Item Open standalone TLS connection
+   --  @param Timeout Shared lease-and-handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited handshake operation
+   function Handshake
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Handshake_Operation;
+
+   --  Start or restart a handshake operation.
+   --  @param Item Open standalone TLS connection
+   --  @param Timeout Shared lease-and-handshake deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed operation
+   procedure Handshake
+     (Item      : not null access Connection'Class;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Handshake_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a composable one-chunk decrypted receive.
+   --  @param Set Completion set owning the operation slot
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased destination borrowed through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Receive_Operation;
+
+   --  Start or restart a one-chunk receive operation.
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased destination borrowed through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed operation
+   procedure Receive
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Receive_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a composable receive that fills Data.
+   --  @param Set Completion set owning the operation slot
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased destination borrowed through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited exact-receive operation
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Receive_Exactly_Operation;
+
+   --  Start or restart an exact-receive operation.
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased destination borrowed through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed operation
+   procedure Receive_Exactly
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Receive_Exactly_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a composable complete encrypted send.
+   --  @param Set Completion set owning the operation slot
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased source borrowed read-only through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited complete-send operation
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Send_All_Operation;
+
+   --  Start or restart a complete-send operation.
+   --  @param Item Open standalone TLS connection
+   --  @param Data Aliased source borrowed read-only through completion
+   --  @param Timeout Shared lease-and-I/O deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed operation
+   procedure Send_All
+     (Item      : not null access Connection'Class;
+      Data      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Send_All_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a composable TLS close-notify exchange.
+   --  @param Set Completion set owning the operation slot
+   --  @param Item Open standalone TLS connection
+   --  @param Timeout Shared lease-and-shutdown deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited shutdown operation
+   function Shutdown
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Shutdown_Operation;
+
+   --  Start or restart a shutdown operation.
+   --  @param Item Open standalone TLS connection
+   --  @param Timeout Shared lease-and-shutdown deadline
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed operation
+   procedure Shutdown
+     (Item      : not null access Connection'Class;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Shutdown_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal handshake operation.
+   --  @param Operation Terminal handshake operation
+   procedure Finish (Operation : in out Handshake_Operation);
+   --  Consume a terminal receive and publish Last.
+   --  @param Operation Terminal receive operation
+   --  @param Last Last element received, or Data'First - 1 on close-notify
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+   --  Consume a terminal exact-receive operation.
+   --  @param Operation Terminal exact-receive operation
+   procedure Finish (Operation : in out Receive_Exactly_Operation);
+   --  Consume a terminal complete-send operation.
+   --  @param Operation Terminal complete-send operation
+   procedure Finish (Operation : in out Send_All_Operation);
+   --  Consume a terminal shutdown operation.
+   --  @param Operation Terminal shutdown operation
+   procedure Finish (Operation : in out Shutdown_Operation);
+
    --  Cancel an active operation, destroy provider state, and close the
    --  socket.
    --  Provider state is destroyed before the descriptor. Concurrent callers
@@ -327,19 +514,31 @@ private
         (Value : Session'Class) return String) return String;
 
    type Descriptor_Generation is mod 2 ** 64;
-   --  Distinguish successful serialization from a close observed at the gate.
-   type Acquire_Result is (Acquired, Closing, Closed, Replaced);
+   --  Distinguish a busy lease from acquisition and lifecycle cancellation.
+   type Lease_Result is (Lease_Busy, Lease_Acquired, Lease_Cancelled);
+   type Operation_State is (Unregistered, Registered, Acquired);
 
    protected type Descriptor_Controller is
       procedure Adopt (FD : Descriptor);
-      entry Acquire
-        (Expected     : Descriptor_Generation;
+      procedure Start_Operation
+        (Generation   : not null access Descriptor_Generation;
+         State        : not null access Operation_State;
          FD           : out Descriptor;
-         Generation   : not null access Descriptor_Generation;
-         Armed        : not null access Boolean;
-         Close_Source : out Descriptor;
-         Result       : out Acquire_Result);
-      procedure Release (Generation : Descriptor_Generation);
+         Lease_Source : out Descriptor;
+         Close_Source : out Descriptor);
+      procedure Try_Acquire
+        (Expected_Generation : Descriptor_Generation;
+         State               : not null access Operation_State;
+         Result              : out Lease_Result;
+         FD                  : in out Descriptor;
+         Close_Source        : in out Descriptor);
+      procedure Abandon_Operation
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State);
+      procedure Check_Operation (Generation : Descriptor_Generation);
+      procedure Release
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State);
       procedure Begin_Close
         (FD         : out Descriptor;
          Generation : out Descriptor_Generation;
@@ -348,9 +547,6 @@ private
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
       --  Snapshot connection state at an operation's public call boundary.
-      procedure Snapshot_Acquisition
-        (State      : out Acquire_Result;
-         Generation : out Descriptor_Generation);
       function Is_Open_State return Boolean;
       function Close_Requested return Boolean;
    private
@@ -358,6 +554,9 @@ private
       Current_Generation : Descriptor_Generation := 0;
       Active             : Boolean := False;
       Close_In_Progress  : Boolean := False;
+      Started_Operations : Natural := 0;
+      Lease_Signalled    : Boolean := False;
+      Lease_Wake         : Flyology.Wake_Sources.Source;
       Close_Wake         : Flyology.Wake_Sources.Source;
    end Descriptor_Controller;
 
@@ -366,6 +565,124 @@ private
       Session    : Session_Access := null;
       Controller : Descriptor_Controller;
    end record;
+
+   type Connection_Access is access all Connection'Class;
+
+   type Operation_Guard is new Ada.Finalization.Limited_Controlled with record
+      Item       : Connection_Access := null;
+      Generation : aliased Descriptor_Generation := 0;
+      State      : aliased Operation_State := Unregistered;
+   end record;
+
+   --  @exclude
+   --  @param Guard Internal lease guard
+   procedure Release_Operation (Guard : in out Operation_Guard);
+   --  @exclude
+   --  @param Guard Internal lease guard
+   overriding procedure Finalize (Guard : in out Operation_Guard);
+
+   type Cancellation_Access is access all Flyology.Cancellation.Token;
+
+   type Driver_State is limited record
+      Item         : Connection_Access := null;
+      Token        : Cancellation_Access := null;
+      Guard        : Operation_Guard;
+      FD           : Descriptor := Invalid_Descriptor;
+      Lease_Source : Descriptor := Invalid_Descriptor;
+      Close_Source : Descriptor := Invalid_Descriptor;
+      Started      : Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Deadline     : Duration := Infinite;
+   end record;
+
+   --  @exclude
+   --  @param State Internal driver state
+   --  @param Item Borrowed TLS connection
+   --  @param Result Initial lease result
+   --  @param Timeout Shared operation deadline
+   --  @param Token Optional cancellation token
+   procedure Start_Driver
+     (State   : in out Driver_State;
+      Item    : not null access Connection'Class;
+      Result  : out Lease_Result;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token);
+   --  @exclude
+   --  @param State Internal driver state
+   --  @param Result Lease retry result
+   procedure Poll_Driver
+     (State  : in out Driver_State;
+      Result : out Lease_Result);
+   --  @exclude
+   --  @param State Internal driver state
+   procedure Check_Driver (State : in out Driver_State);
+   --  @exclude
+   --  @param State Internal driver state
+   procedure Release_Driver (State : in out Driver_State);
+   --  @exclude
+   --  @param State Internal driver state
+   --  @return Unused portion of the shared deadline
+   function Driver_Remaining (State : Driver_State) return Duration;
+   --  @exclude
+   --  @param State Internal driver state
+   --  @param Operation Outer operation to arm
+   procedure Arm_Driver_Acquisition
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class);
+   --  @exclude
+   --  @param State Internal driver state
+   --  @param Operation Outer operation to arm
+   --  @param Status Provider readiness direction
+   procedure Arm_Driver_Transport
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Status    : Step_Status);
+   --  @exclude
+   --  @param State Internal driver state
+   --  @param Operation Outer operation to arm
+   procedure Arm_Driver_Deadline
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class);
+
+   type Scoped_TLS_Kind is
+     (Handshake_IO,
+      Receive_One,
+      Receive_Complete,
+      Send_Complete,
+      Shutdown_IO);
+   type Stream_Array_Access is access all
+     Ada.Streams.Stream_Element_Array;
+   type Constant_Stream_Array_Access is access constant
+     Ada.Streams.Stream_Element_Array;
+
+   type Connection_Operation is
+     abstract new Flyology.Operations.Operation with record
+      State       : Driver_State;
+      Kind        : Scoped_TLS_Kind := Handshake_IO;
+      Data        : Stream_Array_Access := null;
+      Send_Data   : Constant_Stream_Array_Access := null;
+      Cursor      : Ada.Streams.Stream_Element_Offset := 1;
+      Last        : Ada.Streams.Stream_Element_Offset := 0;
+      Has_Failure : Boolean := False;
+      Failure     : Ada.Exceptions.Exception_Occurrence;
+   end record;
+
+   --  @exclude
+   --  @param Item Internal scoped TLS operation
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Connection_Operation;
+      Event : Flyology.Operations.Driver_Event);
+   --  @exclude
+   --  @param Item Internal scoped TLS operation
+   overriding procedure Request_Cancellation
+     (Item : in out Connection_Operation);
+
+   type Handshake_Operation is new Connection_Operation with null record;
+   type Receive_Operation is new Connection_Operation with null record;
+   type Receive_Exactly_Operation is
+     new Connection_Operation with null record;
+   type Send_All_Operation is new Connection_Operation with null record;
+   type Shutdown_Operation is new Connection_Operation with null record;
 
    --  Close Item without propagating finalization errors.
    --  @param Item Connection being finalized

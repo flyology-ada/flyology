@@ -103,11 +103,108 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   lane. A lightweight call suspends only its task; a native call may block only
   its pthread. Preserve `out` values, exceptions, retry deadlines, and ownership
   semantics across both paths.
+- Scoped operation overloads are additive. Keep the synchronous overload and
+  implement both forms through the same provider state machine when that
+  provider has been converted. The scoped form must not create a helper task,
+  task stack, callback thread, or steady-state heap allocation.
+- Use a function that returns a limited operation when the operation is the one
+  natural result and build-in-place initialization is clear. Use an `out`
+  operation parameter when a procedure produces fresh caller-owned operation
+  state or several outputs. Use `in out` only when initiation reads and mutates
+  established request state, such as an explicit rearm or restart. Keep every
+  other formal mode semantic: immutable and borrowed inputs are `in`, writable
+  buffers or transferred ownership are `in out`, and values produced without
+  reading their prior state are `out`.
+- A scoped operation is limited and belongs to one bounded completion set. The
+  set must outlive every associated operation. A pending operation retains all
+  borrowed actual parameters until terminal completion. Scope exit, abort, and
+  cancellation must cancel and drain any provider that can retain kernel or
+  runtime references before operation or buffer storage is reclaimed.
+- A first-class wait gate is a regular scoped operation and consumes one set
+  slot. It observes a fixed nonempty snapshot of generation-stamped operations
+  or earlier gates in the same set. References are values without Ada access
+  components and must not outlive their set. Retain each observed terminal
+  member until all dependent gates terminalize; gate cancellation detaches only
+  the observer. Terminal gates count every outcome, while success gates fail as
+  soon as their threshold is impossible. Gate propagation is a bounded stable
+  scheduler cut and must not allocate, poll, or wake the owner per edge.
+- Resolve every started operation once with its provider-specific `Finish` in
+  normal code. `Finish` commits outputs, reports the retained provider error,
+  and releases capacity. `Consume` is explicit result discard. Controlled
+  finalization is only the cancel/drain/discard safety net. An `out` result from
+  a `Finish` that raises is undefined under normal Ada copy-out rules.
+- Scoped provider drivers run only on the owner task stack. `Start` reserves an
+  operation's set slot; each bounded `Drive` step must arm readiness or a
+  deadline, retain an external-completion source, continue after one child, or
+  publish one terminal outcome. An operation-producing function is an eager
+  user-visible root. For provider composition, the parent owns typed child
+  operation objects as discriminant-constrained record components, starts one
+  through its public `in out` overload, and calls `Continue_After`. The set
+  drives the child but hides it from user batches and gates, then resumes the
+  parent with `Dependency_Changed`. The parent must call the child's typed
+  `Finish` and `Release` before starting another child or completing itself.
+  Cancellation must propagate through the active child and drain it before the
+  parent terminalizes. A driver must not nest a completion-set wait, call a
+  blocking synchronous wrapper, invoke user code on the scheduler stack, or
+  release a kernel-owned buffer before terminal completion.
+- A runtime-selected class-wide transport cannot store a concrete child
+  operation whose type and completion-set discriminant are unknown. Its
+  concrete adapter instead stores a definite, set-independent bounded driver
+  capability. The higher-level operation owns the sole set slot and passes
+  itself transiently when the capability arms readiness or its shared
+  deadline. The capability must retain no access to that operation or set.
+- Current scoped providers cover descriptor readiness, timers, raw stream and
+  datagram socket arrays, Internet and Unix-stream connection attempts and
+  accepts, unique-buffer stream operations, and lightweight positional file
+  arrays and ownership-transferring unique buffers, high-level connection data
+  operations over plaintext or TLS, high-level connection TLS `Upgrade`,
+  standalone TLS handshake/data/shutdown operations, nonrecursive and recursive
+  file-watcher `Next`, and retained task-result `Wait`. Recursive `Next` is a
+  disclosed exception to the immediate-step rule: after its hidden watcher child
+  becomes ready, its owner-stack driver performs capacity-bounded directory
+  discovery and registration metadata calls before the parent terminalizes.
+  Those calls
+  never run on the scheduler stack, but they can occupy a lightweight event
+  loop on a slow filesystem. A
+  `Flyology.Channels.Bounded` instance also provides scoped `Send` and
+  `Receive`: initiation uses attempt, caller-owned subscription, and recheck
+  so channel state cannot change in a lost-wake gap. Subscription storage is
+  intrusive and address-bucketed per generic instance; the protected channel
+  API exposes no separate arm hook. A pending send owns its copied element,
+  while a successful receive retains its element until typed `Finish`.
+  `Flyology.Buffers.Channels` follows the same subscribe/recheck protocol with
+  ownership-transferring `Send_Move` and `Receive_Move` operations. A pending
+  send owns its moved buffer; failure or cancellation returns it through typed
+  `Finish`. A successful receive owns its dequeued buffer until typed `Finish`
+  moves it into a vacant same-pool handle. The pool and controlled channel must
+  outlive every associated operation.
+  A successful scoped accept owns the accepted descriptor until typed `Finish`
+  transfers it; finalization closes an abandoned accepted descriptor. A scoped
+  datagram receive retains its addressing,
+  truncation, and ECN metadata until typed `Finish`; an empty array still
+  receives or sends one zero-length datagram. The file provider uses one
+  caller-owned runtime node per
+  operation and one lazily created completion wake source per set. Transient
+  kernel submission pressure queues those nodes without failing the operation;
+  queued cancellation terminalizes without submitting the borrowed buffer.
+  Scoped watcher waits borrow the serialized watcher and use its existing
+  readiness descriptor; interruption composes as a separate readiness
+  operation. Recursive watcher reconciliation remains caller-lane metadata
+  work.
+  Scoped task-result waits retain the target sidecar, subscribe a caller-owned
+  intrusive node to its persistent completion gate, and signal the completion
+  set's shared wake source on publication. They do not retain the task object
+  or source monitor after initiation and introduce no polling or helper task.
+  Keep native synchronous file calls direct; do not imply that the scoped file
+  overload is concurrent on a native task until a native completion engine
+  exists.
 - TLS provider choice is per connection through the provider-neutral SPI.
   OpenSSL is an optional dynamically loaded provider. Provider steps must never
   block: return `Want_Read` or `Want_Write` and let Flyology wait for readiness.
   A provider session borrows the descriptor while `TLS.Connection` retains sole
-  closing ownership.
+  closing ownership. `TLS.Drivers.Capability` is the definite, set-independent
+  composition boundary for a runtime-selected standalone TLS transport; it
+  retains no operation or completion-set access.
 - Socket readiness uses `kqueue` on Darwin and `epoll` on Linux. Cross-thread
   wakes use `EVFILT_USER` or `eventfd` respectively.
 - Timers use the group poller’s next timeout and a monotonic deadline heap.
@@ -140,8 +237,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - A `Flyology.Buffers.Unique_Buffer` has exactly one owner. Buffer channels
   transfer the slot token without copying payload bytes; timeout, close, or
   abort before acceptance must restore sender ownership. Pool storage outlives
-  every buffer and channel tied to it, and mutation remains exclusive rather
-  than reference-counted or atomically shared.
+  every buffer, channel, and owning file operation tied to it, and mutation
+  remains exclusive rather than reference-counted or atomically shared.
+- A scoped file operation that accepts a `Unique_Buffer` moves its token into
+  the operation. The caller's handle remains vacant until typed `Finish` moves
+  the token back. Provider failure still restores the token before raising;
+  abandoned operations cancel and drain before releasing it to the pool.
 
 ## Relocatable data-structure invariants
 

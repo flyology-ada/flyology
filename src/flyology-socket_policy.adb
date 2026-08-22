@@ -4,6 +4,9 @@ is
    function Family_Code (IPv6 : Boolean) return C.int is
      (if IPv6 then 6 else 4);
 
+   function Retry_IO_Immediately (Attempt : Positive) return Boolean is
+     (Attempt < Immediate_IO_Retry_Limit);
+
    function Mode_Code (Datagram : Boolean) return C.int is
      (if Datagram then 2 else 1);
 

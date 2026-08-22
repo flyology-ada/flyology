@@ -1,5 +1,6 @@
 with Flyology.Wall_Clock_Policy;
 with Flyology.Wall_Clock_Waits;
+with Flyology.Operations.Drivers;
 #if FLYOLOGY_WALL_CLOCK_TEST_HOOKS then
 with Flyology.Wall_Clock_Testing;
 #end if;
@@ -8,6 +9,7 @@ package body Flyology.IO.Timers is
    use type Ada.Calendar.Time;
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
+   use type Flyology.Operations.Driver_Event;
 
    package Timer_Policy renames Flyology.Timer_Set_Policy;
 
@@ -95,6 +97,97 @@ package body Flyology.IO.Timers is
    begin
       delay until Deadline;
    end Sleep_Until;
+
+   procedure Sleep_For
+     (Interval  : Duration;
+      Operation : in out Timer_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Start (Operation);
+      Flyology.Operations.Drivers.Arm_Deadline (Operation, Interval);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
+   end Sleep_For;
+
+   function Sleep_For
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Interval : Duration) return Timer_Operation
+   is
+   begin
+      return Result : Timer_Operation (Set) do
+         Sleep_For (Interval, Result);
+      end return;
+   end Sleep_For;
+
+   procedure Sleep_Until
+     (Deadline  : Ada.Real_Time.Time;
+      Operation : in out Timer_Operation)
+   is
+      Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
+      Sleep_For
+        ((if Deadline <= Now
+          then 0.0
+          else Ada.Real_Time.To_Duration (Deadline - Now)),
+         Operation);
+   end Sleep_Until;
+
+   function Sleep_Until
+     (Set      : not null access Flyology.Operations.Completion_Set'Class;
+      Deadline : Ada.Real_Time.Time) return Timer_Operation
+   is
+   begin
+      return Result : Timer_Operation (Set) do
+         Sleep_Until (Deadline, Result);
+      end return;
+   end Sleep_Until;
+
+   procedure Rearm
+     (Interval  : Duration;
+      Operation : in out Timer_Operation)
+   is
+   begin
+      Sleep_For (Interval, Operation);
+   end Rearm;
+
+   overriding procedure Drive
+     (Item  : in out Timer_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item,
+         (if Event = Flyology.Operations.Deadline_Reached
+          then Flyology.Operations.Succeeded
+          else Flyology.Operations.Failed));
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Timer_Operation)
+   is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   procedure Finish (Operation : in out Timer_Operation) is
+      Result : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Result is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Flyology.Operations.Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            raise Flyology.IO.Device_Error with "timer operation failed";
+      end case;
+   end Finish;
 
    procedure Arm
      (Timers   : in out Timer_Set;

@@ -1,5 +1,7 @@
 with Ada.Finalization;
 with Ada.Task_Identification;
+with Flyology.Operations;
+with Interfaces.C;
 with System;
 
 package Flyology.Task_Results with Preelaborate is
@@ -7,6 +9,10 @@ package Flyology.Task_Results with Preelaborate is
    --  Provides fixed task-owned records of Ada task termination. The
    --  facility observes task exit only; it does not catch, resume, restart,
    --  or otherwise supervise a terminated task.
+
+   --  Raised by Finish after a scoped task-result wait is cancelled.
+   Operation_Cancelled : exception renames
+     Flyology.Operations.Operation_Cancelled;
 
    --  Maximum retained exception-name bytes.
    Exception_Name_Capacity : constant := 96;
@@ -126,7 +132,7 @@ package Flyology.Task_Results with Preelaborate is
    --  task-result sidecar; it neither retains the Ada task object nor follows
    --  another task that later occupies related application state. Finalization
    --  detaches automatically and never affects the observed task.
-   type Monitor is limited private;
+   type Monitor is tagged limited private;
 
    --  Attach Item to the exact task represented by T. The caller must keep
    --  T's task object alive for this call and obey Task_Id lifetime rules.
@@ -176,6 +182,65 @@ package Flyology.Task_Results with Preelaborate is
      (Item    : Monitor;
       Timeout : Duration := -1.0) return Task_Observation;
 
+   --  First-class wait for one retained task result. The operation owns a
+   --  sidecar reference after initiation, so the target task object and a
+   --  source Monitor need not remain alive while the operation is pending.
+   type Wait_Operation is new Flyology.Operations.Operation with private;
+
+   --  Start a task-result wait without suspending the owner.
+   --  @param Set Completion set that owns the operation slot
+   --  @param T Exact task identity, valid throughout this initiating call
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @return Started limited task-result operation
+   function Wait
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      T       : Ada.Task_Identification.Task_Id;
+      Timeout : Duration := -1.0) return Wait_Operation;
+
+   --  Start a task-result wait from an attached retained monitor.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Attached source monitor retained by the new operation
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @return Started limited task-result operation
+   function Wait
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : Monitor'Class;
+      Timeout : Duration := -1.0) return Wait_Operation;
+
+   --  Start or restart a task-id wait in an established operation object.
+   --  @param T Exact task identity, valid throughout this initiating call
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @param Operation Fresh or consumed task-result operation
+   procedure Wait
+     (T         : Ada.Task_Identification.Task_Id;
+      Timeout   : Duration := -1.0;
+      Operation : in out Wait_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start or restart a retained-monitor wait in an established operation.
+   --  @param Item Attached source monitor
+   --  @param Timeout Maximum relative wait; negative means indefinitely
+   --  @param Operation Fresh or consumed task-result operation
+   procedure Wait
+     (Item      : Monitor'Class;
+      Timeout   : Duration := -1.0;
+      Operation : in out Wait_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume one terminal task-result operation. Timeout succeeds with a
+   --  Not_Terminal observation; cancellation raises after consuming.
+   --  @param Operation Terminal task-result operation
+   --  @param Observation Copied terminal result or Not_Terminal on timeout
+   --  @exception Program_Error Runtime observation or subscription failed
+   --  @exception Operation_Cancelled Operation was cancelled
+   procedure Finish
+     (Operation   : in out Wait_Operation;
+      Observation : out Task_Observation);
+
 private
    type Monitor is limited new Ada.Finalization.Limited_Controlled with record
       Storage : System.Address := System.Null_Address;
@@ -184,5 +249,35 @@ private
    --  @exclude
    --  @param Item Monitor whose retained sidecar reference is released
    overriding procedure Finalize (Item : in out Monitor);
+
+   type Subscription_Node is record
+      Version           : Interfaces.C.unsigned := 1;
+      Next              : System.Address := System.Null_Address;
+      Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Attached          : Interfaces.C.int := 0;
+   end record with Convention => C;
+
+   type Wait_Failure is
+     (No_Failure, Attach_Failure, Subscription_Failure, Observation_Failure);
+
+   type Wait_Operation is new Flyology.Operations.Operation with record
+      Target       : Monitor;
+      Subscription : aliased Subscription_Node;
+      Status       : Observation_Status := Not_Terminal;
+      Result       : Task_Result;
+      Failure      : Wait_Failure := No_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Task-result operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Wait_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Task-result operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Wait_Operation);
 
 end Flyology.Task_Results;

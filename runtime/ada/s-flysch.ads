@@ -227,6 +227,29 @@ package System.Flyology.Scheduler is
       return Interfaces.C.int;
    pragma Export (C, Wait_IO_Many, "flyology_runtime_wait_io_many");
 
+   --  Start one completion-driven positional file operation without parking
+   --  the current lightweight fiber. Node is caller-owned ABI storage that
+   --  remains live through terminal completion.
+   function Start_Async_File
+     (Node        : System.Address;
+      Node_Size   : Interfaces.C.size_t;
+      Descriptor  : Interfaces.C.int;
+      Buffer      : System.Address;
+      Length      : Interfaces.C.size_t;
+      Offset      : Interfaces.C.long_long;
+      For_Write   : Interfaces.C.int;
+      Signal_FD   : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export
+     (C, Start_Async_File, "flyology_runtime_start_async_file");
+
+   --  Request cancellation of one asynchronous file node. Terminal state is
+   --  published only after the backend relinquishes its buffer.
+   function Cancel_Async_File
+     (Node      : System.Address;
+      Node_Size : Interfaces.C.size_t) return Interfaces.C.int;
+   pragma Export
+     (C, Cancel_Async_File, "flyology_runtime_cancel_async_file");
+
    function File_IO
      (Descriptor  : Interfaces.C.int;
       Buffer      : System.Address;

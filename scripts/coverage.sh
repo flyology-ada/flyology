@@ -111,6 +111,12 @@ loop_thread_placement_smoke
 memory_regions_smoke
 observability_native_smoke
 observability_smoke
+operations_smoke
+operation_gates_smoke
+operation_return_boundary_smoke
+connection_operations_smoke
+buffer_channel_operations_smoke
+channel_operations_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
 process_exec_child_smoke
@@ -137,6 +143,7 @@ thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke
 tls_smoke
+tls_operations_smoke
 tls_state_model
 tcp_native_smoke
 wake_source_state_model

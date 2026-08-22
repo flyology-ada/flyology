@@ -30,6 +30,12 @@ package Flyology.Wake_Sources is
    --  @param Item Serialized source with a pending signal
    --  @exception Program_Error No signal is pending or reading fails
    procedure Consume (Item : in out Source);
+   --  Consume every signal currently pending while retaining the descriptor
+   --  generation. This is intended for coalesced completion notifications;
+   --  use Consume when each byte represents one independently counted event.
+   --  @param Item Serialized source with at least one pending signal
+   --  @exception Program_Error No signal is pending or reading fails
+   procedure Consume_All (Item : in out Source);
    --  Close both owned descriptors. Repeated calls are harmless. A later
    --  Ensure creates a new descriptor generation.
    --  @param Item Serialized source whose descriptors are released
@@ -38,6 +44,13 @@ package Flyology.Wake_Sources is
    --  @param Item Source to inspect
    --  @return Read descriptor, or -1 before Ensure or after Release
    function Descriptor (Item : Source) return Interfaces.C.int;
+
+   --  Borrow the descriptor used to signal Item. This is an internal provider
+   --  boundary; callers must not read, close, or retain it after Item leaves
+   --  scope.
+   --  @param Item Initialized source to inspect
+   --  @return Signal descriptor, or -1 before Ensure or after Release
+   function Signal_Descriptor (Item : Source) return Interfaces.C.int;
 
 private
    type Source is new Ada.Finalization.Limited_Controlled with record

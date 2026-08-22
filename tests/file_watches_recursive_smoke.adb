@@ -6,12 +6,14 @@ with Flyology;
 with Flyology.IO;
 with Flyology.IO.File_Watches;
 with Flyology.IO.File_Watches.Recursive;
+with Flyology.Operations;
 with Interfaces.C;
 with System;
 
 procedure File_Watches_Recursive_Smoke is
    package Watches renames Flyology.IO.File_Watches;
    package Recursive renames Flyology.IO.File_Watches.Recursive;
+   package Operations renames Flyology.Operations;
 
    use type Flyology.IO.Wait_Outcome;
    use type Interfaces.C.int;
@@ -105,7 +107,7 @@ procedure File_Watches_Recursive_Smoke is
          --  symbolic link that would otherwise form a traversal cycle.
          declare
             Before : constant Interfaces.C.int := Open_FD_Count;
-            Item   : Recursive.Recursive_Watcher (Capacity => 8);
+            Item   : aliased Recursive.Recursive_Watcher (Capacity => 8);
             Rejected : Boolean := False;
          begin
             Item.Open (Tree_Root);
@@ -125,8 +127,27 @@ procedure File_Watches_Recursive_Smoke is
             Lane_Require
               (Rejected, "open recursive watcher accepted another root");
 
-            Ada.Directories.Create_Directory (Third);
-            Item.Next (Event, Outcome, Timeout => 2.0);
+            --  The recursive overload is a real composite operation: its
+            --  hidden ordinary-watcher child occupies one slot, while only
+            --  the reconciled parent participates in the public success gate.
+            declare
+               Set : aliased Operations.Completion_Set (3);
+               Watch : aliased Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access, Timeout => 2.0);
+               Ready_Gate : Operations.Gate_Operation :=
+                 Operations.Wait_For_Success
+                   (Set'Access, [1 => Operations.Reference (Watch)]);
+               Matches : Operations.Completion_Batch (Set.Capacity);
+            begin
+               Ada.Directories.Create_Directory (Third);
+               Operations.Wait_All (Set);
+               Operations.Finish (Ready_Gate, Matches);
+               Recursive.Finish (Watch, Event, Outcome);
+               Lane_Require
+                 (Matches.Count = 1,
+                  "recursive success gate exposed its hidden child");
+            end;
             Lane_Require
               (Outcome = Flyology.IO.Ready,
                "new subdirectory did not wake recursive watcher");
@@ -195,6 +216,104 @@ procedure File_Watches_Recursive_Smoke is
             Lane_Require
               (Outcome = Flyology.IO.Timed_Out,
                "recursive watcher did not quiesce after bounded drain");
+
+            --  Immediate timeout and pending cancellation both drain and
+            --  release the hidden child before returning the watcher borrow.
+            declare
+               Set : aliased Operations.Completion_Set (2);
+               Watch : Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access, Timeout => 0.0);
+            begin
+               Operations.Wait_All (Set);
+               Recursive.Finish (Watch, Event, Outcome);
+               Lane_Require
+                 (Outcome = Flyology.IO.Timed_Out,
+                  "recursive operation did not retain immediate timeout");
+            end;
+            declare
+               Set : aliased Operations.Completion_Set (2);
+               Watch : Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access,
+                    Timeout => Flyology.IO.Infinite);
+               Was_Cancelled : Boolean := False;
+            begin
+               Operations.Cancel (Watch);
+               Operations.Wait_All (Set);
+               begin
+                  Recursive.Finish (Watch, Event, Outcome);
+               exception
+                  when Operations.Operation_Cancelled =>
+                     Was_Cancelled := True;
+               end;
+               Lane_Require
+                 (Was_Cancelled,
+                  "recursive operation cancellation was not retained");
+            end;
+
+            --  A watcher has one serialized scoped borrow. A second root can
+            --  terminalize as failed without disturbing the pending first
+            --  operation or leaking its own set slot.
+            declare
+               Set : aliased Operations.Completion_Set (3);
+               First_Watch : Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access,
+                    Timeout => Flyology.IO.Infinite);
+               Second_Watch : Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access,
+                    Timeout => Flyology.IO.Infinite);
+               Borrow_Rejected : Boolean := False;
+               Borrow_Preserved : Boolean := False;
+               First_Cancelled : Boolean := False;
+            begin
+               begin
+                  Recursive.Finish (Second_Watch, Event, Outcome);
+               exception
+                  when Flyology.IO.Device_Error =>
+                     Borrow_Rejected := True;
+               end;
+               Lane_Require
+                 (Borrow_Rejected,
+                  "second recursive scoped borrow was not rejected");
+               begin
+                  Item.Refresh (Event);
+               exception
+                  when Flyology.IO.Device_Error =>
+                     Borrow_Preserved := True;
+               end;
+               Lane_Require
+                 (Borrow_Preserved,
+                  "rejected recursive operation released another borrow");
+               Operations.Cancel (First_Watch);
+               Operations.Wait_All (Set);
+               begin
+                  Recursive.Finish (First_Watch, Event, Outcome);
+               exception
+                  when Operations.Operation_Cancelled =>
+                     First_Cancelled := True;
+               end;
+               Lane_Require
+                 (First_Cancelled,
+                  "first recursive operation did not remain cancellable");
+            end;
+
+            --  Controlled finalization is the safety net for an abandoned
+            --  pending parent and its hidden child. It must release the
+            --  watcher borrow before the next synchronous operation.
+            declare
+               Set : aliased Operations.Completion_Set (2);
+               Watch : Recursive.Next_Operation :=
+                 Recursive.Next
+                   (Set'Access, Item'Unchecked_Access,
+                    Timeout => Flyology.IO.Infinite);
+               pragma Unreferenced (Watch);
+            begin
+               null;
+            end;
+            Item.Refresh (Event);
             Item.Close;
             Lane_Require
               (Open_FD_Count = Before,

@@ -7,28 +7,33 @@ with Ada.Unchecked_Deallocation;
 with Fault_Control;
 with Flyology.IO.Sockets;
 with Flyology;
+with Flyology.Buffers;
 with Flyology.Dormancy;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Files;
 with Flyology.Observability;
+with Flyology.Operations;
 with Interfaces;
 with Interfaces.C;
 
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element;
+   use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type Fault_Control.File_Cancel_Backend;
    use type Fault_Control.Point;
    use type Interfaces.Unsigned_64;
    use type Interfaces.C.int;
+   use type Flyology.Operations.Terminal_Outcome;
 
    package Dormancy renames Flyology.Dormancy;
    package IO renames Flyology.IO;
    package Connections renames Flyology.IO.Connections;
    package Files renames Flyology.IO.Files;
    package Observation renames Flyology.Observability;
+   package Operations renames Flyology.Operations;
 
    function Selected_Linux_Backend return Interfaces.C.int;
    pragma Import
@@ -375,6 +380,272 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_File_Saturation;
+
+   procedure Test_Scoped_File_Saturation is
+      Path : constant String := "/tmp/flyology-scoped-file-saturation.data";
+      File : Files.File_Descriptor := Files.Invalid_File;
+      Passed : Boolean := False with Atomic;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : aliased Ada.Streams.Stream_Element_Array :=
+           [1 => 1, 2 => 2, 3 => 3, 4 => 4];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         --  A transiently full submission queue must retain the operation and
+         --  eventually publish its ordinary completion.
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 0, Data'Access, 1.0);
+            Batch : Operations.Completion_Batch (Set.Capacity);
+         begin
+            Operations.Wait_For_Success (Set, Batch);
+            Files.Finish (Write, Last);
+            Passed := Last = Data'Last;
+         end;
+
+         --  Cancellation of a queued write must terminalize the operation
+         --  before its borrowed source buffer can leave scope.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 4, Data'Access, 1.0);
+            Cancelled : Boolean := False;
+         begin
+            Operations.Cancel (Write);
+            Operations.Wait_All (Set);
+            begin
+               Files.Finish (Write, Last);
+            exception
+               when Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+
+         --  Reads use the same queued-node cancellation path, but retain a
+         --  writable borrow and distinct Finish result.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 4 => 0];
+            Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+            Cancelled : Boolean := False;
+         begin
+            Operations.Cancel (Read);
+            Operations.Wait_All (Set);
+            begin
+               Files.Finish (Read, Last);
+            exception
+               when Operations.Operation_Cancelled =>
+                  Cancelled := True;
+            end;
+            Passed := Passed and then Cancelled;
+         end;
+
+         --  A deadline on a definitely queued request must be retained as a
+         --  provider failure and reported only by Finish.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Write : Files.Write_Operation :=
+              Files.Write_At (Set'Access, File, 4, Data'Access, 0.01);
+            Timed_Out : Boolean := False;
+         begin
+            Operations.Wait_All (Set);
+            Passed := Passed
+              and then Operations.Outcome (Write) = Operations.Failed;
+            begin
+               Files.Finish (Write, Last);
+            exception
+               when IO.Timeout_Error =>
+                  Timed_Out := True;
+            end;
+            Passed := Passed and then Timed_Out;
+         end;
+
+         --  Leaving a queued operation's inner scope exercises controlled
+         --  cancel-and-drain. Reusing the capacity-one set proves that the
+         --  abandoned operation released its slot and runtime node.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Input : aliased Ada.Streams.Stream_Element_Array :=
+              [1 .. 4 => 0];
+         begin
+            declare
+               Abandoned : Files.Read_Operation :=
+                 Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+               pragma Unreferenced (Abandoned);
+            begin
+               null;
+            end;
+            Fault_Control.Reset;
+            declare
+               Replacement : Files.Read_Operation :=
+                 Files.Read_At (Set'Access, File, 0, Input'Access, 1.0);
+            begin
+               Operations.Wait_All (Set);
+               Files.Finish (Replacement, Last);
+               Passed := Passed
+                 and then Last = Input'Last
+                 and then Input = Data;
+            end;
+         end;
+
+         --  An owning operation must follow the same deterministic queued
+         --  cancel-and-drain path before its detached buffer slot is released.
+         Fault_Control.Reset;
+         Fault_Control.Arm
+           (Fault_Control.File_Submission_Full, Count => 1_000_000);
+         declare
+            Storage : aliased Flyology.Buffers.Pool
+              (Block_Size => 4, Capacity => 1);
+            Item : Flyology.Buffers.Unique_Buffer (Storage'Access);
+            Set : aliased Operations.Completion_Set (1);
+            Acquired : Boolean;
+         begin
+            Flyology.Buffers.Acquire (Item);
+            Flyology.Buffers.Copy_From (Item, [9, 8, 7, 6]);
+            declare
+               Abandoned : Files.Write_Operation :=
+                 Files.Write_At (Set'Access, File, 8, Item, 1.0);
+               pragma Unreferenced (Abandoned);
+            begin
+               Passed := Passed
+                 and then not Flyology.Buffers.Has_Buffer (Item);
+            end;
+            Fault_Control.Reset;
+            Flyology.Buffers.Try_Acquire (Item, Acquired);
+            Passed := Passed
+              and then Acquired
+              and then Flyology.Buffers.Has_Buffer (Item);
+         end;
+
+         --  Invalid initiation is a deterministic submission failure. The
+         --  set wait reports terminal state; the provider exception remains
+         --  retained until Finish.
+         declare
+            Set : aliased Operations.Completion_Set (1);
+            Failed_Write : Files.Write_Operation :=
+              Files.Write_At
+                (Set'Access, Files.Invalid_File, 0, Data'Access, 1.0);
+            Failed : Boolean := False;
+         begin
+            Operations.Wait_All (Set);
+            Passed := Passed
+              and then Operations.Outcome (Failed_Write) = Operations.Failed;
+            begin
+               Files.Finish (Failed_Write, Last);
+            exception
+               when IO.Device_Error =>
+                  Failed := True;
+            end;
+            Passed := Passed and then Failed;
+         end;
+
+         --  EOF and a short positional read are successful terminal results,
+         --  with Last retaining the synchronous overload's arithmetic.
+         declare
+            Set : aliased Operations.Completion_Set (2);
+            Short_Data : aliased Ada.Streams.Stream_Element_Array :=
+              [3 .. 8 => 0];
+            EOF_Data : aliased Ada.Streams.Stream_Element_Array :=
+              [5 .. 8 => 0];
+            Short_Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 2, Short_Data'Access, 1.0);
+            EOF_Read : Files.Read_Operation :=
+              Files.Read_At (Set'Access, File, 100, EOF_Data'Access, 1.0);
+            Short_Last, EOF_Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            Operations.Wait_All (Set);
+            Files.Finish (Short_Read, Short_Last);
+            Files.Finish (EOF_Read, EOF_Last);
+            Passed := Passed
+              and then Short_Last = Short_Data'First + 1
+              and then Short_Data (3 .. 4) = Data (3 .. 4)
+              and then EOF_Last = EOF_Data'First - 1;
+         end;
+
+         --  Repeated full-capacity batches exercise one shared completion
+         --  source with the maximum number of file operation slots. This
+         --  catches stale wake counts surviving a completed batch and reuse.
+         declare
+            Capacity : constant Positive := 32;
+            Set : aliased Operations.Completion_Set (Capacity);
+            subtype Scoped_Write is Files.Write_Operation (Set'Access);
+            type Write_Array is array (Positive range <>) of Scoped_Write;
+            Writes : Write_Array (1 .. Capacity);
+            One_Byte : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+         begin
+            for Round in 1 .. 16 loop
+               One_Byte (1) :=
+                 Ada.Streams.Stream_Element (Round mod 251);
+               for Index in Writes'Range loop
+                  Files.Write_At
+                    (File,
+                     Files.File_Offset (128 + Index - 1),
+                     One_Byte'Access,
+                     1.0,
+                     Writes (Index));
+               end loop;
+               Operations.Wait_All (Set);
+               for Index in Writes'Range loop
+                  Files.Finish (Writes (Index), Last);
+                  Passed := Passed and then Last = One_Byte'Last;
+               end loop;
+            end loop;
+         end;
+      exception
+         when others =>
+            Passed := False;
+      end Writer;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open
+        (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm
+        (Fault_Control.File_Submission_Full, Count => 8);
+      declare
+         Item : Writer;
+         pragma Unreferenced (Item);
+      begin
+         null;
+      end;
+      if not Passed then
+         raise Program_Error with
+           "scoped file operation did not survive submission pressure";
+      end if;
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Scoped_File_Saturation;
 
    procedure Test_File_Dormancy_Exclusion is
       Path : constant String := "/tmp/flyology-file-dormancy.data";
@@ -1627,6 +1898,8 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "scoped-file-saturation" then
+      Test_Scoped_File_Saturation;
    elsif Case_Name = "file-dormancy-exclusion" then
       Test_File_Dormancy_Exclusion;
    elsif Case_Name = "file-uring-cq-backpressure" then

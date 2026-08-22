@@ -1301,7 +1301,7 @@ the pool block under the same completion and cancellation rules as an ordinary
 that a socket backend also avoids the kernel's network copy.
 
 `Flyology.Buffers.Channels.Channel` is a fixed-capacity MPMC FIFO specialized
-for these handles. Its protected storage contains only scalar ownership tokens,
+for these handles. Its protected storage contains only fixed ownership records,
 not payloads. Successful `Send_Move` leaves the sender vacant. A full, timed
 out, closed, or aborted send restores ownership to the sender; a channel being
 finalized returns undelivered buffers to its pool. Close-and-drain behavior
@@ -1310,6 +1310,15 @@ atomically with the token and remains separate from the buffer's application
 tag. `Transfer_Metadata` is a distinct 64-bit modular type so it cannot mix
 implicitly with unrelated integers. Each consumer owns its encoding and
 validation; `No_Metadata` is the default zero value, not a presence marker.
+
+The channel also provides operation-producing `Send_Move` and `Receive_Move`
+overloads. Starting a scoped send moves the buffer into the operation. Success
+moves it onward to the channel, so typed `Finish` leaves the caller's handle
+vacant; timeout, close, cancellation, or driver failure moves it back before
+raising. A scoped receive takes no destination while pending. Once it succeeds,
+the operation owns the dequeued buffer and typed `Finish` moves it into a vacant
+same-pool handle. Abandoning either operation cancels or drains it and releases
+any buffer it still owns. The pool and channel must outlive the operations.
 
 One `Pool` has one protected free list and one contiguous payload allocation.
 A shared pool therefore keeps all free capacity available to every caller but
@@ -1415,6 +1424,8 @@ Flyology exposes synchronous operations in:
   admitted plaintext connection.
 - `Flyology.IO.TLS`: provider-neutral nonblocking TLS sessions with owned
   sockets, shared deadlines, cancellation, and orderly shutdown.
+- `Flyology.IO.TLS.Drivers`: set-independent bounded progress for composing a
+  standalone TLS connection behind a higher-level transport interface.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
 - The `flyology_http` crate's `Flyology.HTTP.Client`: origin-bound HTTP/1.1 requests, streaming response
@@ -1539,9 +1550,223 @@ caller-provided array of read/write interests. It allocates neither in the
 public library nor while registering a lightweight fiber, returns the exact array
 index that became ready, and returns zero on timeout. Repeated descriptors and
 separate read/write interests for one descriptor are valid; when multiple
-entries are ready together the lowest index wins. The fixed limit of 32 keeps
-per-fiber scheduler storage predictable and is intended for protocol engines,
-not as a replacement for ownership-aware connection APIs.
+entries are ready together the lowest index wins. The fixed limit of 128
+supports 32 scoped operations with four lifecycle or readiness interests each.
+The lightweight RTS allocates only the link count used by the current wait on
+the suspended fiber's stack.
+
+`Flyology.Operations` adds a bounded scoped-operation layer without replacing
+the synchronous API. A caller declares one `Completion_Set` and limited
+operation objects that refer to it. Additive operation-producing overloads
+cover raw descriptor readiness, monotonic timers, raw stream and datagram
+socket operations, Internet and Unix-stream connection attempts and accepts,
+buffer-owning stream operations, high-level plaintext-or-TLS connection data
+operations, and completion-driven positional file reads and writes over aliased
+arrays or ownership-transferred unique buffers, plus nonrecursive and recursive
+file-watcher `Next`, standalone TLS handshake, receive, send, and shutdown, and
+retained task-result `Wait`.
+Instances of `Flyology.Channels.Bounded` likewise add operation-producing
+`Send` and `Receive` overloads without changing their protected entries or
+nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
+`Send_Move` and `Receive_Move` operations with the same completion-set and gate
+protocol.
+Initiation does not create a helper task,
+per-operation stack, callback thread, or steady-state heap allocation.
+
+`Wait_Some` returns all newly terminal operations observed in a batch; its
+counted overload and `Wait_At_Least` wait for a requested number of terminal
+operations. `Wait_All` waits until none remain pending. `Wait_For_Success`
+waits for one successful operation, while `Wait_For_Successes` accepts a
+success count. Both success gates return when their threshold is reached or can
+no longer be reached.
+
+The same wait names also have function overloads that return a limited
+`Gate_Operation`. A gate consumes one set slot and is otherwise an ordinary
+operation: it can be observed by a later gate, appears in completion batches,
+has a terminal outcome, and is consumed with `Finish`. `Wait_Some` and
+`Wait_All` gates count every terminal member outcome. `Wait_For_Success` and
+`Wait_For_Successes` gates count only successful members and fail as soon as
+their threshold becomes impossible. Gate construction takes fixed
+generation-stamped value references to already-started operations or gates in
+the same set. Those references contain no Ada access value, do not extend an
+operation or set lifetime, and naturally make the construction graph acyclic.
+A member result remains retained until every observing gate terminalizes.
+Cancelling a gate detaches only that observer; it does not cancel its members.
+
+Every started operation should normally reach exactly one provider-specific
+`Finish`. That call releases the set slot, commits outputs such as `Last` or a
+unique buffer's readable length, and raises the provider's retained exception.
+Gate `Finish` returns the member identities in its stable scheduler snapshot.
+If gate `Finish` raises `Operation_Cancelled`, its `out` batch is undefined, as
+for any Ada `out` parameter on exceptional return. Explicit `Consume` discards
+a terminal provider result when no outputs or exception are wanted. Leaving an
+operation's scope without either call is safe but exceptional: finalization
+cancels and drains pending work, discards any retained result, and releases the
+slot. A terminal result otherwise continues occupying capacity.
+
+Cancellation terminalizes the current readiness and timer providers
+immediately. Socket providers run one nonblocking step on the owner task after
+each readiness notification. A submitted file operation uses a caller-owned
+runtime request node and does not become terminal until the kernel has
+relinquished its borrowed array. File operations currently require a
+lightweight owner; the existing synchronous file procedures remain lane-neutral.
+On Darwin, a submitted scoped POSIX AIO request that is cancelled or expires is
+left registered until its natural completion notification; this avoids reusing
+an `aiocb` address while kqueue may still associate it with the prior request.
+The completion set creates one shared wake pipe lazily when its first external
+file completion is started, rather than one descriptor per operation.
+
+Fresh user roots are limited build-in-place function results. Every current
+provider also has a same-name procedure overload taking an established
+operation as `in out`; composite providers use that form for child record
+components. The older readiness and relative-timer `Rearm` names remain aliases
+for the same route. Array and socket actuals passed through explicit access
+parameters must outlive the operation and remain untouched while it is pending.
+The owner of a scoped high-level connection operation must finish it or cancel
+and drain it before that same task calls synchronous `Connections.Close`;
+`Close` may wait for registered work, while only the owner task can drive its
+scoped operation. A concurrent closer is instead observed through the
+operation's close wake source. The same rule applies to scoped standalone
+`TLS.Connection` operations and `TLS.Close`.
+The unique-buffer socket overloads retain the owning handle but enter its data
+callback only for an immediate nonblocking socket step, so a callback view never
+escapes. Unique-buffer file overloads instead move the buffer token into the
+operation because the kernel retains its address across submission. Their typed
+`Finish` moves the buffer back before reporting a retained provider exception;
+abandonment cancels and drains before releasing the token to its pool. The pool
+must outlive the owning operation, just as it must outlive an ordinary buffer
+handle. Scope exit requests cancellation and drains providers with
+kernel-owned buffers before releasing the operation slot.
+
+Provider libraries implement an owner-stack driver, not an `Arm` function in
+their user API. Their operation-producing overload constructs a typed root
+operation and calls `Flyology.Operations.Drivers.Start`. Each `Drive`
+invocation normally performs a bounded immediate step, then arms readiness or a
+deadline, waits for its external completion source, or publishes a terminal
+outcome. `Drive` never calls a blocking synchronous API and never runs on the
+scheduler stack. Recursive watcher `Next` is the documented exception: its
+owner-stack driver performs capacity-bounded directory discovery and watch
+registration after its hidden readiness child completes. These metadata calls
+can occupy a lightweight event loop on a slow filesystem. The recursive parent
+does not terminalize until reconciliation finishes. `Request_Cancellation`
+removes observational waits immediately
+or starts a cancel-and-drain transition for retained kernel input.
+
+A zero-time operation deadline is an immediate poll, not a prohibition on the
+provider's first bounded step. If descriptor readiness and that operation's
+deadline are both visible in the same scheduler poll, readiness drives one
+bounded step before the deadline is classified. Expired deadlines belonging to
+other operations still terminalize in that snapshot. This matches the
+synchronous I/O wait contract while preventing an already-ready TLS `WANT_READ`
+or `WANT_WRITE` transition from losing merely because its budget is zero.
+
+Higher-level providers compose the same public operation values rather than
+reaching into another provider's internal state. A composite operation owns
+typed child operation objects as record components constrained by the same set.
+It starts one child through that provider's public `in out` overload and calls
+`Continue_After (Parent, Child)`. The child consumes a bounded slot and is
+driven normally, but it is internal: user waits, batches, references, and gates
+see only the parent. When the child terminalizes, the set drives the parent with
+`Dependency_Changed` on the owner task's stack. The parent calls the child's
+typed `Finish`, calls `Release` so a child of another type can reuse the slot,
+and either starts its next child or completes. Parent cancellation propagates
+to the active child and does not terminalize the parent until the child is
+drained. Thus a sequential protocol such as request-send, response-receive can
+be one visible operation with two bounded slots and no helper task, nested wait,
+second stack, callback, or access to private I/O implementation state. The
+synthetic third-party-provider example is
+[`tests/operation_composition_smoke.adb`](tests/operation_composition_smoke.adb).
+
+That typed-child pattern is appropriate when the child operation type is known
+statically. A class-wide protocol transport cannot embed a runtime-selected
+socket, connection, or TLS child without allocation or type erasure.
+`Flyology.IO.Connections.Drivers.Capability` and
+`Flyology.IO.TLS.Drivers.Capability` cover that case for admitted connections
+and standalone TLS connections respectively. A concrete transport adapter
+stores one definite, set-independent capability, while the higher-level HTTP-
+or database-operation owns the only set slot. Bounded acquisition, immediate
+transport steps, and arm calls advance the outer operation directly; `Release`
+discharges the connection lease before the outer result becomes terminal. The
+capabilities expose neither descriptors nor TLS provider state and create no
+child operation, helper task, or allocation. Synthetic regressions are in
+[`tests/connection_operations_smoke.adb`](tests/connection_operations_smoke.adb)
+and [`tests/tls_operations_smoke.adb`](tests/tls_operations_smoke.adb).
+
+The executable provider-by-gate matrix is in
+[`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,
+lifecycle, generation, capacity, and threshold cases are in
+[`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb), and the
+generic channel rows are in
+[`tests/channel_operations_smoke.adb`](tests/channel_operations_smoke.adb).
+Standalone TLS operations and their set-independent capability are covered by
+[`tests/tls_operations_smoke.adb`](tests/tls_operations_smoke.adb).
+
+| Scoped operation-producing overload | First-class gate coverage | Lanes |
+| --- | --- | --- |
+| descriptor `Wait` | counted `Wait_Some`, `Wait_All` | native and lightweight |
+| `Timers.Sleep_For` | nested some/success/all | native and lightweight |
+| `Timers.Sleep_Until` | nested some/success/all | native and lightweight |
+| socket array `Receive` | success quorum | native and lightweight |
+| socket array `Receive_Exactly` | all and failed success | native and lightweight |
+| socket array `Send` | success | native and lightweight |
+| socket array `Send_All` | all | native and lightweight |
+| unique-buffer socket `Receive` | all | native and lightweight |
+| unique-buffer socket `Send` | all | native and lightweight |
+| unique-buffer socket `Send_All` | all | native and lightweight |
+| high-level Connection `Receive`, `Receive_Exactly`, `Send_All`, and TLS `Upgrade` | success and all, including handshake WANT_READ/WANT_WRITE | native and lightweight |
+| standalone TLS `Handshake`, `Receive`, `Receive_Exactly`, `Send_All`, and `Shutdown` | counted waits, success quorum, and all, including queued leases and WANT_READ/WANT_WRITE | native and lightweight |
+| socket array `Receive_Datagram` | success quorum and all | native and lightweight |
+| socket array `Send_Datagram` | success quorum and all | native and lightweight |
+| Internet-stream socket `Connect` | success quorum and all | native and lightweight |
+| Internet-stream socket `Accept_Connection` | success quorum and all | native and lightweight |
+| Unix-stream socket `Connect` | success quorum and all | native and lightweight |
+| Unix-stream socket `Accept_Connection` | success quorum and all | native and lightweight |
+| positional file `Read_At` | all | lightweight; empty and rejection cases native |
+| positional file `Write_At` | success quorum | lightweight; empty and rejection cases native |
+| owned-buffer file `Read_At` | success quorum | lightweight; ownership-return rejection native |
+| owned-buffer file `Write_At` | success quorum | lightweight; ownership-return rejection native |
+| file-watcher `Next` | success and all | native and lightweight |
+| recursive file-watcher `Next` | success and all after reconciliation | native and lightweight; reconciliation metadata runs on the owner lane |
+| task-result `Wait` | success and all | native and lightweight |
+| bounded-channel `Send` and `Receive` | success and all | native and lightweight |
+| buffer-channel `Send_Move` and `Receive_Move` | success and all | native and lightweight |
+
+The same programs cover cancellation, timeout, EOF, zero-length stream and
+datagram operations, datagram metadata and source selection, retained connect
+failure, accept timeout and cancellation, Unix queue-saturation retry,
+abandoned accepted-socket and watcher-wait cleanup, retained-monitor fan-out,
+same-channel receive fan-out, pending send capacity wakeup, channel close,
+channel timeout, cancellation, and subscription cleanup,
+descriptor-direction fan-out, failed success thresholds, terminal-before-gate
+construction, nested and fanned-out gates, stale and cross-set references,
+slot reuse, implicit finalization, initiation rollback, ascending stable
+batches, the 32-slot dependency-mask boundary, and one-shot `Finish` behavior.
+
+The final audit of the remaining blocking public primitives records these
+decisions. “Add later” means that the primitive has a terminal result that can
+compose usefully, but no operation-producing overload exists yet. Such an
+overload must use a real readiness, completion, or subscription protocol; it
+must not wrap the synchronous call inside `Drive`.
+
+| Remaining primitive | Decision | Reason |
+| --- | --- | --- |
+| high-level connection admission and high-level connection TLS `Shutdown` | add later | Admission and close-notify have useful terminal results and existing nonblocking readiness steps; scoped `Upgrade`, high-level data operations, and standalone TLS `Shutdown` compose today. |
+| wall-clock `Wait_Until` and `Timer_Set.Wait_Next` | add later | Both return useful terminal observations. Their providers must retain the wall-clock source or the timer-set arm state instead of calling the synchronous waits from `Drive`; ordinary monotonic timer roots already compose today. |
+| cancellation-token `Await_Request` | add later | A token already has retained one-shot state and a readiness source, so a typed no-result operation can hide the descriptor adapter and compose directly with gates. |
+| DNS `Resolve` and `Resolve_Using` | add later | A resolver operation can compose its bounded UDP/TCP attempts and retain the address result; calling the synchronous resolver from a driver would nest waits. |
+| subprocess pipe I/O and `Wait` | add later | Pipe operations have descriptor readiness and the process owns a persistent exit wake source with a stable retained status. |
+| `Subprocesses.Capture.Run` | add later | Capture is a useful higher-level composite of stdin, stdout, stderr, and process-exit children; synchronous spawn remains an explicitly documented initiation cost. |
+| `Files.Transfers.Send_Chunk` | add later | The transfer naturally composes a file-read child with socket-send progress while retaining scratch-buffer ownership and one deadline. |
+| `Native_Executors.Await` | add later | Submission is already split phase; an adapter can subscribe to the accepted handle without adding a worker or stack. |
+| supervision `Wait_Termination` for exact child generations | add later | Static and dynamic supervisors retain generation-stamped terminal observations; a subscription operation would avoid polling without following replacements. |
+| buffer-pool and capacity-gate acquisition | add later | Acquisition has an atomic try/subscribe/recheck shape, and typed `Finish` can transfer the permit or buffer ownership. |
+| shared-memory Unix-socket handoff `Send`/`Receive` | add later | Descriptor transfer has a useful terminal result, but its dedicated-channel poison and ownership rules require purpose-built providers. |
+| `Task_Scopes.Join` | keep synchronous | Join is the structured lexical cleanup boundary. Individual retained task results already compose through `Task_Results.Wait`. |
+| capacity, channel, executor, and service-loop drain waits | keep synchronous | These are structured teardown boundaries. Compose the individual work and shutdown sources; do not race cleanup itself as an independently consumable result. |
+| structured-server `Serve`, connection-driver `Run`, and supervision service loops | keep synchronous | These calls own long-running service lifecycles rather than one independently consumable result. Compose their shutdown and retained results instead. |
+| legacy `Bounded_Channels` entries | keep synchronous | `Flyology.Channels.Bounded` is the operation-capable generic; duplicating the protocol in the older compatibility surface would add two ways to express the same channel. |
+| local timed data-structure retries and execution-group migration | keep synchronous | They are cooperative caller actions without a stable external completion source; turning them into immediate reschedule loops would not create useful concurrency. |
+| metadata and VM calls such as open, close, map, flush, spawn, and recursive `Refresh` | keep synchronous | They have no portable readiness completion source. Use an explicit native-task boundary when caller-lane occupation is unacceptable. |
 
 Created and accepted Darwin sockets have `SO_NOSIGPIPE` applied before they are
 exposed to the caller; Linux sends use `MSG_NOSIGNAL`. The nonblocking hot path
@@ -1795,6 +2020,12 @@ plaintext operations are cancelled, creates a provider session over the same
 descriptor, and performs the handshake under one deadline. Later `Receive`,
 `Receive_Exactly`, and `Send_All` calls use TLS transparently.
 
+The additive scoped overload returns an `Upgrade_Operation` in a completion
+set. Provider-session creation is still an eager initiation step, while lease
+waiting and every handshake `Want_Read` or `Want_Write` step compose with
+timers, gates, and other operations. Provider, timeout, and cancellation
+failures are retained until `Flyology.IO.Connections.TLS.Finish`.
+
 Plaintext fallback is a protocol decision made before calling `Upgrade`. Once
 the transport enters its upgrade state, provider setup failure, handshake
 failure, timeout, cancellation, manager shutdown, concurrent close, or task
@@ -1838,9 +2069,16 @@ The child package contains no HTTP framing, stream, compression, retry, or
 pooling policy.
 
 The standalone `Flyology.IO.TLS.Connection` API remains available for sockets
-that start as TLS before connection admission. It retains its existing source
-and ownership behavior; it is not a route for extracting a socket from an
-admitted `Connections.Connection`.
+that start as TLS before connection admission. Its `Handshake`, `Receive`,
+`Receive_Exactly`, `Send_All`, and `Shutdown` names have additive operation-
+producing overloads and reusable `in out` forms. Each shares one deadline across
+lease acquisition and provider retries, retains failure for typed `Finish`, and
+releases the TLS lease before publishing its terminal result. A protocol whose
+transport is selected at runtime can instead embed one definite
+`Flyology.IO.TLS.Drivers.Capability`; the outer protocol operation owns the only
+completion-set slot and drives bounded handshake, receive, send, or shutdown
+steps itself. The standalone owner is not a route for extracting a socket from
+an admitted `Connections.Connection`.
 
 The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception
@@ -2242,7 +2480,7 @@ group lock and applies these states:
 | --- | --- | --- |
 | Token already requested | No request is submitted | Immediate |
 | Waiting for kernel queue capacity | Remove the request from the per-group FIFO | Immediate |
-| Darwin POSIX AIO submitted | Call `aio_cancel`; distinguish `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE` | Immediate `EVFILT_AIO` deletion and `aio_return` for `AIO_CANCELED`; otherwise the normal terminal event |
+| Darwin POSIX AIO submitted | A synchronous wait calls `aio_cancel` and distinguishes `AIO_CANCELED`, `AIO_NOTCANCELED`, and `AIO_ALLDONE`; a scoped operation records cancellation and leaves the request registered | Immediate `EVFILT_AIO` deletion and `aio_return` for a synchronously cancelled request; otherwise the normal terminal event |
 | Linux `io_uring` submitted | Submit `IORING_OP_ASYNC_CANCEL`; consume its administrative CQE separately | The original operation's terminal CQE |
 | Linux native AIO submitted | Call `io_cancel`; positional read and write iocbs have had no kernel cancel handler since Linux 3.11 and report `EINVAL`, which is recorded as not-cancelable | The normal completion event |
 | Cancellation unsupported, already completing, or not cancelable | Record the disposition and retain ownership | The normal completion event |
@@ -2425,7 +2663,7 @@ end;
 A snapshot reports thread startup state and whether the group is dedicated or
 reserved; total and thread-pinned members; members in ready, waiting, running,
 migrating, and finished states;
-active timer, descriptor, interrupt-enabled, and file waits; file submissions queued behind kernel
+active timer, descriptor, interrupt-enabled, and file-operation waits; file submissions queued behind kernel
 backpressure; timer-only dormancy candidates and their usable stack bytes; and
 lifetime cold-stack state and advice outcomes; dispatch, poll-batch,
 delivered-event, GNARL-wakeup, and migration-in/out counters; and the loop's
@@ -2435,8 +2673,12 @@ kernel-owned buffer are outside its stack. Wait categories overlap: for
 example, a
 descriptor wait with a deadline contributes to both `Descriptor_Waits` and
 `Timer_Waits`; a connection wait also contributes to `Interrupt_Waits` when it
-has a cancellation or shutdown wake source. `Pending_File_Submissions` is the subset of `File_Waits` not yet
-accepted by the bounded kernel queue.
+has a cancellation or shutdown wake source. `File_Waits` counts operations,
+including several scoped file operations owned by one task.
+`Pending_File_Submissions` is the subset of synchronous and scoped file
+operations not yet accepted by the bounded kernel queue. Scoped operations
+remain pending in their caller-owned runtime nodes; cancellation can remove a
+queued node without ever lending its buffer to the kernel.
 
 `Uptime_Nanoseconds` and `Idle_Nanoseconds` describe the group's event loop
 rather than its tasks. A loop enters its poller only when no task of its own is

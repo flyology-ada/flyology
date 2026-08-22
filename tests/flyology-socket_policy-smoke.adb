@@ -1,5 +1,10 @@
 procedure Flyology.Socket_Policy.Smoke is
 begin
+   pragma Assert
+     (Retry_IO_Immediately (Immediate_IO_Retry_Limit - 1));
+   pragma Assert
+     (not Retry_IO_Immediately (Immediate_IO_Retry_Limit));
+
    pragma Assert (not Should_Enable_Datagram_Metadata (1));
    pragma Assert (Should_Enable_Datagram_Metadata (2));
 

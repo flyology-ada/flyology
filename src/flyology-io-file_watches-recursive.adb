@@ -1,9 +1,12 @@
 with Ada.Directories;
 with Ada.Unchecked_Deallocation;
+with Flyology.Operations.Drivers;
 with GNAT.OS_Lib;
 
 package body Flyology.IO.File_Watches.Recursive is
    use type Ada.Directories.File_Kind;
+   use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Terminal_Outcome;
 
    type Candidate_Array is array (Positive range <>) of String_Access;
 
@@ -20,14 +23,239 @@ package body Flyology.IO.File_Watches.Recursive is
    procedure Free_Candidates
      (Candidates : in out Candidate_Array);
    function Find_Path
-     (Item : Recursive_Watcher; Path : String) return Natural;
+     (Item : Recursive_Watcher'Class; Path : String) return Natural;
    function Has_Candidate
      (Candidates : Candidate_Array;
       Count      : Natural;
       Path       : String) return Boolean;
    procedure Reconcile
-     (Item   : in out Recursive_Watcher;
+     (Item   : in out Recursive_Watcher'Class;
       Result : out Recursive_Event);
+   procedure Close_Internal
+     (Item           : in out Recursive_Watcher;
+      Allow_Borrowed : Boolean);
+
+   procedure Complete_Operation
+     (Item   : in out Next_Operation;
+      Result : Flyology.Operations.Terminal_Outcome);
+
+   procedure Complete_Operation
+     (Item   : in out Next_Operation;
+      Result : Flyology.Operations.Terminal_Outcome) is
+   begin
+      if Item.State.Owns_Borrow and then Item.State.Item /= null then
+         Item.State.Item.Scoped_Borrowed := False;
+         Item.State.Owns_Borrow := False;
+      end if;
+      Flyology.Operations.Drivers.Complete (Item, Result);
+   end Complete_Operation;
+
+   procedure Finish_Child
+     (Item       : in out Next_Operation;
+      Raw        : out File_Event;
+      Outcome    : out Wait_Outcome;
+      Succeeded  : out Boolean;
+      Cancelled  : out Boolean)
+   is
+   begin
+      Raw := (Watch => No_Watch, Changes => No_Changes);
+      Outcome := Timed_Out;
+      Succeeded := False;
+      Cancelled := False;
+      begin
+         File_Watches.Finish (Item.State.Child, Raw, Outcome);
+         Succeeded := True;
+      exception
+         when Flyology.Operations.Operation_Cancelled =>
+            Cancelled := True;
+         when others =>
+            null;
+      end;
+      Flyology.Operations.Release (Item.State.Child);
+      Item.State.Child_Live := False;
+   exception
+      when others =>
+         Item.State.Child_Live := False;
+         Succeeded := False;
+   end Finish_Child;
+
+   overriding procedure Drive
+     (Item  : in out Next_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Raw : File_Event;
+      Child_Outcome : Wait_Outcome;
+      Child_Succeeded : Boolean;
+      Child_Cancelled : Boolean;
+      Reconciled : Recursive_Event;
+   begin
+      if Event /= Flyology.Operations.Dependency_Changed
+        or else not Item.State.Child_Live
+      then
+         Item.State.Failure := State_Failure;
+         Complete_Operation (Item, Flyology.Operations.Failed);
+         return;
+      end if;
+
+      Finish_Child
+        (Item, Raw, Child_Outcome, Child_Succeeded, Child_Cancelled);
+      if Item.State.Cancelling or else Child_Cancelled then
+         Complete_Operation (Item, Flyology.Operations.Cancelled);
+      elsif not Child_Succeeded then
+         Item.State.Failure := Child_Failure;
+         Complete_Operation (Item, Flyology.Operations.Failed);
+      elsif Child_Outcome = Timed_Out then
+         Item.State.Outcome := Timed_Out;
+         Complete_Operation (Item, Flyology.Operations.Succeeded);
+      else
+         begin
+            Reconcile (Item.State.Item.all, Reconciled);
+            Item.State.Result := Reconciled;
+            for Kind in Change_Kind loop
+               Item.State.Result.Changes (Kind) :=
+                 Item.State.Result.Changes (Kind) or else Raw.Changes (Kind);
+            end loop;
+            Item.State.Outcome := Ready;
+            Complete_Operation (Item, Flyology.Operations.Succeeded);
+         exception
+            when others =>
+               Item.State.Failure := Reconcile_Failure;
+               Complete_Operation (Item, Flyology.Operations.Failed);
+         end;
+      end if;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Next_Operation) is
+   begin
+      Item.State.Cancelling := True;
+      if Item.State.Child_Live then
+         Flyology.Operations.Cancel (Item.State.Child);
+      else
+         Complete_Operation (Item, Flyology.Operations.Cancelled);
+      end if;
+   exception
+      when others =>
+         Item.State.Failure := Child_Failure;
+         Complete_Operation (Item, Flyology.Operations.Failed);
+   end Request_Cancellation;
+
+   procedure Start_Scoped_Next
+     (Item      : not null access Recursive_Watcher'Class;
+      Timeout   : Duration;
+      Operation : in out Next_Operation)
+   is
+   begin
+      Operation.State.Item := Item.all'Unchecked_Access;
+      Operation.State.Result :=
+        (Changes               => No_Changes,
+         Registrations_Changed => False,
+         Directory_Count       => Item.Count,
+         Coverage_Complete     => Item.Complete_Coverage);
+      Operation.State.Outcome := Timed_Out;
+      Operation.State.Failure := No_Failure;
+      Operation.State.Child_Live := False;
+      Operation.State.Cancelling := False;
+      Operation.State.Owns_Borrow := False;
+      Flyology.Operations.Drivers.Start (Operation);
+      if not Is_Open (Item.all) or else Item.Scoped_Borrowed then
+         Operation.State.Failure := State_Failure;
+         Complete_Operation (Operation, Flyology.Operations.Failed);
+         return;
+      end if;
+
+      Item.Scoped_Borrowed := True;
+      Operation.State.Owns_Borrow := True;
+      File_Watches.Next
+        (Item.Source'Unchecked_Access, Timeout, Operation.State.Child);
+      Operation.State.Child_Live := True;
+      Flyology.Operations.Continue_After (Operation, Operation.State.Child);
+   exception
+      when others =>
+         if Operation.State.Owns_Borrow then
+            Item.Scoped_Borrowed := False;
+            Operation.State.Owns_Borrow := False;
+         end if;
+         if Flyology.Operations.Is_Active (Operation.State.Child) then
+            Flyology.Operations.Cancel (Operation.State.Child);
+         end if;
+         if Flyology.Operations.Is_Terminal (Operation.State.Child) then
+            declare
+               Raw : File_Event;
+               Child_Outcome : Wait_Outcome;
+            begin
+               begin
+                  File_Watches.Finish
+                    (Operation.State.Child, Raw, Child_Outcome);
+               exception
+                  when others =>
+                     null;
+               end;
+               if Flyology.Operations.Id (Operation.State.Child) /= 0 then
+                  Flyology.Operations.Release (Operation.State.Child);
+               end if;
+            end;
+         end if;
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
+   end Start_Scoped_Next;
+
+   function Next
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Recursive_Watcher'Class;
+      Timeout : Duration := Infinite) return Next_Operation
+   is
+   begin
+      return Result : Next_Operation (Set) do
+         Start_Scoped_Next (Item, Timeout, Result);
+      end return;
+   end Next;
+
+   procedure Next
+     (Item      : not null access Recursive_Watcher'Class;
+      Timeout   : Duration := Infinite;
+      Operation : in out Next_Operation) is
+   begin
+      Start_Scoped_Next (Item, Timeout, Operation);
+   end Next;
+
+   procedure Finish
+     (Operation : in out Next_Operation;
+      Result    : out Recursive_Event;
+      Outcome   : out Wait_Outcome)
+   is
+      Terminal : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Saved_Result : constant Recursive_Event := Operation.State.Result;
+      Saved_Outcome : constant Wait_Outcome := Operation.State.Outcome;
+      Failure : constant Recursive_Failure := Operation.State.Failure;
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Terminal is
+         when Flyology.Operations.Succeeded =>
+            Result := Saved_Result;
+            Outcome := Saved_Outcome;
+         when Flyology.Operations.Cancelled =>
+            raise Flyology.Operations.Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            case Failure is
+               when State_Failure =>
+                  raise Device_Error with
+                    "recursive watcher is closed or already borrowed";
+               when Child_Failure =>
+                  raise Device_Error with
+                    "recursive watcher readiness wait failed";
+               when Reconcile_Failure =>
+                  raise Device_Error with
+                    "recursive watcher reconciliation failed";
+               when No_Failure =>
+                  raise Device_Error with
+                    "recursive watcher operation failed";
+            end case;
+      end case;
+   end Finish;
 
    procedure Clear_Metadata (Item : in out Recursive_Watcher) is
    begin
@@ -49,7 +277,7 @@ package body Flyology.IO.File_Watches.Recursive is
    end Free_Candidates;
 
    function Find_Path
-     (Item : Recursive_Watcher; Path : String) return Natural is
+     (Item : Recursive_Watcher'Class; Path : String) return Natural is
    begin
       for Index in Item.Directories'Range loop
          if Item.Directories (Index).Path /= null
@@ -236,6 +464,10 @@ package body Flyology.IO.File_Watches.Recursive is
             raise;
       end Open_Canonical;
    begin
+      if Item.Scoped_Borrowed then
+         raise Device_Error with
+           "recursive watcher is borrowed by a scoped operation";
+      end if;
       Open_Canonical (Ada.Directories.Full_Name (Root));
    exception
       when Ada.Directories.Name_Error | Ada.Directories.Use_Error =>
@@ -243,7 +475,7 @@ package body Flyology.IO.File_Watches.Recursive is
    end Open;
 
    procedure Reconcile
-     (Item   : in out Recursive_Watcher;
+     (Item   : in out Recursive_Watcher'Class;
       Result : out Recursive_Event)
    is
       Candidates : Candidate_Array (1 .. Item.Capacity) := (others => null);
@@ -269,7 +501,8 @@ package body Flyology.IO.File_Watches.Recursive is
          Result.Changes (Identity_Changed) := True;
          Result.Changes (Watch_Invalidated) := True;
          Result.Registrations_Changed := Item.Count > 0;
-         Close (Item);
+         Close_Internal
+           (Recursive_Watcher (Item), Allow_Borrowed => True);
          Result.Directory_Count := 0;
          Result.Coverage_Complete := False;
          return;
@@ -349,7 +582,10 @@ package body Flyology.IO.File_Watches.Recursive is
      (Item   : in out Recursive_Watcher;
       Result : out Recursive_Event) is
    begin
-      if not Is_Open (Item) then
+      if Item.Scoped_Borrowed then
+         raise Device_Error with
+           "recursive watcher is borrowed by a scoped operation";
+      elsif not Is_Open (Item) then
          raise Device_Error with "cannot refresh a closed recursive watcher";
       end if;
       Reconcile (Item, Result);
@@ -370,7 +606,10 @@ package body Flyology.IO.File_Watches.Recursive is
          Registrations_Changed => False,
          Directory_Count       => Item.Count,
          Coverage_Complete     => Item.Complete_Coverage);
-      if not Is_Open (Item) then
+      if Item.Scoped_Borrowed then
+         raise Device_Error with
+           "recursive watcher is borrowed by a scoped operation";
+      elsif not Is_Open (Item) then
          raise Device_Error with "cannot wait on a closed recursive watcher";
       end if;
 
@@ -387,9 +626,16 @@ package body Flyology.IO.File_Watches.Recursive is
       end loop;
    end Next;
 
-   procedure Close (Item : in out Recursive_Watcher) is
+   procedure Close_Internal
+     (Item           : in out Recursive_Watcher;
+      Allow_Borrowed : Boolean)
+   is
       Failed : Boolean := False;
    begin
+      if Item.Scoped_Borrowed and then not Allow_Borrowed then
+         raise Device_Error with
+           "recursive watcher is borrowed by a scoped operation";
+      end if;
       if not Is_Open (Item) then
          Clear_Metadata (Item);
          return;
@@ -404,6 +650,11 @@ package body Flyology.IO.File_Watches.Recursive is
       if Failed then
          raise Device_Error with "recursive watcher close failed";
       end if;
+   end Close_Internal;
+
+   procedure Close (Item : in out Recursive_Watcher) is
+   begin
+      Close_Internal (Item, Allow_Borrowed => False);
    end Close;
 
    function Is_Open (Item : Recursive_Watcher) return Boolean is

@@ -27,6 +27,21 @@ package body Flyology.IO.TLS_Driver is
       raise TLS.TLS_Error with TLS.Error_Message (Item);
    end Raise_Provider_Error;
 
+   procedure Handshake_Once
+     (Item   : in out TLS.Session'Class;
+      Status : out TLS.Step_Status) is
+   begin
+      Status := TLS.Handshake_Step (Item);
+      case Status is
+         when TLS.Peer_Closed =>
+            raise TLS.TLS_Error with "TLS peer closed during handshake";
+         when TLS.Failed =>
+            Raise_Provider_Error (Item);
+         when others =>
+            null;
+      end case;
+   end Handshake_Once;
+
    procedure Receive_Once
      (Item   : in out TLS.Session'Class;
       Data   : out Ada.Streams.Stream_Element_Array;
@@ -92,6 +107,22 @@ package body Flyology.IO.TLS_Driver is
             Raise_Provider_Error (Item);
       end case;
    end Send_Once;
+
+   procedure Shutdown_Once
+     (Item   : in out TLS.Session'Class;
+      Status : out TLS.Step_Status) is
+   begin
+      Status := TLS.Shutdown_Step (Item);
+      case Status is
+         when TLS.Peer_Closed =>
+            raise TLS.TLS_Error with
+              "TLS peer closed before shutdown completed";
+         when TLS.Failed =>
+            Raise_Provider_Error (Item);
+         when others =>
+            null;
+      end case;
+   end Shutdown_Once;
 
    procedure Handshake
      (Item        : in out TLS.Session'Class;

@@ -1,4 +1,6 @@
+with Ada.Finalization;
 with Ada.Streams;
+with Flyology.Operations;
 private with Ada.Real_Time;
 private with Flyology.Wake_Sources;
 
@@ -6,9 +8,17 @@ private with Flyology.Wake_Sources;
 --  connection without exposing its descriptor or transport ownership.
 package Flyology.IO.Connections.Drivers is
 
-   --  Scoped capability passed only while Run holds the Connection operation
-   --  lease. It cannot be copied or constructed by an application.
-   type Capability (<>) is limited private;
+   --  Set-independent connection driver state. A higher-level protocol may
+   --  store one Capability in its concrete transport adapter while its outer
+   --  operation owns the only completion-set slot. The capability is limited,
+   --  reusable after Release, and allocation-free. It never exposes the
+   --  connection descriptor or TLS provider session.
+   type Capability is new Ada.Finalization.Limited_Controlled with private;
+
+   --  Result of one nonblocking connection-lease acquisition step.
+   --  @enum Acquired The capability may perform transport steps
+   --  @enum Need_Acquire_Readiness Arm_Acquisition and retry after wakeup
+   type Acquisition_Result is (Acquired, Need_Acquire_Readiness);
 
    --  Result of one bounded transport step.
    --  @enum Made_Progress At least one byte was transferred, or the input was
@@ -48,6 +58,83 @@ package Flyology.IO.Connections.Drivers is
    type Wait_Result is
      (Transport_Ready, Outbound_Ready, Wait_Timed_Out);
 
+   --  Start borrowing Item for a higher-level operation and attempt its lease
+   --  once. Capability must be fresh or released. No wait occurs. Item and
+   --  Token remain borrowed until Release or finalization.
+   --  @param Item Open admitted plaintext or TLS connection
+   --  @param IO Fresh or released set-independent capability
+   --  @param Result Immediate lease result
+   --  @param Timeout Shared acquisition and transport deadline
+   --  @param Token Optional cancellation source that outlives the capability
+   --  @exception Operation_Cancelled Shutdown, Token, or Close is active
+   --  @exception Socket_Error Socket preparation fails after acquisition
+   --  @exception Program_Error IO is active or Item is closed
+   procedure Start
+     (IO      : in out Capability;
+      Item    : not null access Connection'Class;
+      Result  : out Acquisition_Result;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null);
+
+   --  Retry one lease acquisition after its armed source becomes ready.
+   --  @param IO Started capability awaiting the connection lease
+   --  @param Result Immediate lease result
+   --  @exception Operation_Cancelled Shutdown, Token, or Close is active
+   --  @exception Socket_Error Socket preparation fails after acquisition
+   --  @exception Program_Error IO is fresh, released, or already acquired
+   procedure Poll_Acquisition
+     (IO     : in out Capability;
+      Result : out Acquisition_Result);
+
+   --  Arm the outer provider operation for connection lease availability and
+   --  every applicable lifecycle source. The capability owns no set slot.
+   --  @param IO Started capability awaiting its lease
+   --  @param Operation Outer user-visible provider operation
+   --  @exception Program_Error IO is not awaiting acquisition
+   procedure Arm_Acquisition
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class);
+
+   --  Arm the outer provider operation for the single readiness direction
+   --  returned by Receive or Send, plus close, manager shutdown, and Token.
+   --  @param IO Acquired capability
+   --  @param Operation Outer user-visible provider operation
+   --  @param Required Need_Read or Need_Write returned by a transport step
+   --  @exception Program_Error IO is not acquired or Required is not a wait
+   procedure Arm_Transport
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Step_Result);
+
+   --  Arm the outer provider operation with the unused portion of the shared
+   --  Start deadline. An infinite deadline adds no timer source.
+   --  @param IO Engaged capability
+   --  @param Operation Outer user-visible provider operation
+   procedure Arm_Deadline
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class);
+
+   --  Release or abandon the connection lease and every retained borrow. Call
+   --  this before publishing the outer operation's terminal outcome. Repeating
+   --  Release on a released capability is harmless.
+   --  @param IO Capability whose connection borrow is discharged
+   procedure Release (IO : in out Capability);
+
+   --  Cancellation has the same ownership transition as Release; the outer
+   --  provider chooses and publishes its own terminal cancellation outcome.
+   --  @param IO Capability whose connection borrow is discharged
+   procedure Cancel (IO : in out Capability) renames Release;
+
+   --  Report whether IO retains a registered or acquired connection borrow.
+   --  @param IO Capability to inspect
+   --  @return True until Release, Cancel, or finalization completes
+   function Is_Engaged (IO : Capability) return Boolean;
+
+   --  Report whether IO currently owns the connection operation lease.
+   --  @param IO Capability to inspect
+   --  @return True when transport steps are permitted
+   function Is_Acquired (IO : Capability) return Boolean;
+
    --  Thread-safe, reusable protocol-output notification. It owns its wake
    --  descriptor and never exposes it. Signals coalesce until Wait consumes
    --  them. The object must outlive Run and every task that can call Signal.
@@ -71,8 +158,8 @@ package Flyology.IO.Connections.Drivers is
    --  @param Result Progress, required readiness, or orderly peer closure
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts the driver
-   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when Run's
-   --     deadline expires
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared Start deadline expires
    --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the TLS
    --     provider fails or reports invalid progress
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
@@ -93,8 +180,8 @@ package Flyology.IO.Connections.Drivers is
    --  @param Result Progress, required readiness, or peer closure
    --  @exception Operation_Cancelled Shutdown, token cancellation, or Close
    --     interrupts the driver
-   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when Run's
-   --     deadline expires
+   --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when the
+   --     shared Start deadline expires
    --  @exception TLS_Error Flyology.IO.TLS.TLS_Error is raised when the TLS
    --     provider fails or reports invalid progress
    --  @exception Socket_Error Flyology.IO.Sockets.Socket_Error is raised when
@@ -172,17 +259,23 @@ private
       Controller : Wakeup_Controller;
    end record;
 
-   type Capability
-     (Item  : not null access Connection;
-      Token : access Cancellation_Token)
-   is limited record
-      Guard        : Operation_Guard (Item);
+   type Capability is new Ada.Finalization.Limited_Controlled with record
+      Item         : Connection_Access := null;
+      Token        : Cancellation_Access := null;
+      Guard        : Scoped_Operation_Guard;
       FD           : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Lease_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Initial_Close_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
       Close_Source : Flyology.IO.Descriptor := Invalid_Descriptor;
       Owner        : Server_Access := null;
       Transport    : Transport_Kind := No_Transport;
       Started      : Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Deadline     : Duration := Infinite;
    end record;
+
+   --  Release an engaged capability during scope finalization.
+   --  @exclude
+   --  @param IO Capability being finalized
+   overriding procedure Finalize (IO : in out Capability);
 
 end Flyology.IO.Connections.Drivers;

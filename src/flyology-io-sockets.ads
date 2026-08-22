@@ -1,6 +1,9 @@
 with Ada.Exceptions;
+with Ada.Finalization;
+with Ada.Real_Time;
 with Ada.Streams;
 with Flyology.Buffers;
+with Flyology.Operations;
 with Interfaces.C;
 
 --  Owns Flyology's portable socket, Internet-address, and endpoint types.
@@ -695,6 +698,468 @@ package Flyology.IO.Sockets is
      with Pre => Flyology.Buffers.Has_Buffer (Item)
        and then Interrupts'Length < Max_Wait_Requests;
 
+   --  Common limited base for scoped stream operations. Concrete operations
+   --  borrow an aliased socket and buffer until Finish consumes their result.
+   type Socket_Operation is
+     abstract new Flyology.Operations.Operation with private;
+   --  Scoped one-step stream receive.
+   type Receive_Operation is new Socket_Operation with private;
+   --  Scoped stream receive that fills its array.
+   type Receive_Exactly_Operation is new Socket_Operation with private;
+   --  Scoped one-step stream send.
+   type Send_Operation is new Socket_Operation with private;
+   --  Scoped stream send that transfers its complete array.
+   type Send_All_Operation is new Socket_Operation with private;
+   --  Scoped receive into a uniquely owned buffer.
+   type Buffer_Receive_Operation is new Socket_Operation with private;
+   --  Scoped one-step send from a uniquely owned buffer.
+   type Buffer_Send_Operation is new Socket_Operation with private;
+   --  Scoped complete send from a uniquely owned buffer.
+   type Buffer_Send_All_Operation is new Socket_Operation with private;
+   --  Common limited base for scoped datagram operations.
+   type Datagram_Operation is abstract new Socket_Operation with private;
+   --  Scoped receive of one complete datagram and its metadata.
+   type Receive_Datagram_Operation is new Datagram_Operation with private;
+   --  Scoped send of one complete datagram.
+   type Send_Datagram_Operation is new Datagram_Operation with private;
+   --  Scoped Internet-stream connection attempt.
+   type Connect_Operation is new Socket_Operation with private;
+   --  Scoped acceptance of one Internet-stream connection. A successful
+   --  operation owns the accepted socket until typed Finish transfers it.
+   type Accept_Operation is new Socket_Operation with private;
+   --  Scoped acceptance of one Unix-stream connection.
+   type Unix_Accept_Operation is new Socket_Operation with private;
+
+   --  Start one nonblocking receive operation. Socket and Item must outlive
+   --  the returned operation. Item is exclusively borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Operation;
+
+   --  Start or restart a receive in an established operation object. This
+   --  form lets a higher-level provider retain the child as a record component
+   --  and compose it with Operations.Continue_After.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed receive operation
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Operation);
+
+   --  Start a nonblocking operation that fills Item. The operation rearms
+   --  read readiness after partial progress.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer to fill
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited exact-receive operation
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Exactly_Operation;
+
+   --  Start or restart an exact receive in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased destination buffer to fill
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed exact-receive operation
+   procedure Receive_Exactly
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Exactly_Operation);
+
+   --  Start one nonblocking partial send operation. Item is read-only while
+   --  borrowed even though its access value designates a variable array.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_Operation;
+
+   --  Start or restart a partial send in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_Operation);
+
+   --  Start a nonblocking operation that sends all of Item.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited complete-send operation
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Send_All_Operation;
+
+   --  Start or restart a complete send in an established operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed complete-send operation
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Send_All_Operation);
+
+   --  Start one receive into an acquired unique buffer. The driver enters the
+   --  buffer's writable callback only for each immediate socket step and does
+   --  not retain the callback view. Finish commits the new readable length.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited unique-buffer receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Receive_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start or restart a unique-buffer receive in an established operation.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-receive operation
+   procedure Receive
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Receive_Operation)
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start one partial send from an acquired unique buffer.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited unique-buffer send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start or restart a unique-buffer send in an established operation.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-send operation
+   procedure Send
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_Operation)
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start a complete send from an acquired unique buffer.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @return Started limited complete unique-buffer send operation
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout : Duration := Infinite) return Buffer_Send_All_Operation
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start or restart a complete unique-buffer send in an established
+   --  operation object.
+   --  @param Socket Aliased open connected socket
+   --  @param Item Aliased acquired source buffer
+   --  @param Timeout Shared relative deadline in seconds
+   --  @param Operation Fresh, released, or consumed buffer-send operation
+   procedure Send_All
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Flyology.Buffers.Unique_Buffer;
+      Timeout   : Duration := Infinite;
+      Operation : in out Buffer_Send_All_Operation)
+     with Pre => Flyology.Buffers.Has_Buffer (Item.all);
+
+   --  Start one datagram receive. A zero-length Item still consumes one
+   --  zero-length datagram. Socket and Item remain borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram receive operation
+   function Receive_Datagram
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Item    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite) return Receive_Datagram_Operation;
+
+   --  Start or restart one datagram receive in an established operation.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed receive operation
+   procedure Receive_Datagram
+     (Socket    : not null access Socket_Type;
+      Item      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Operation : in out Receive_Datagram_Operation);
+
+   --  Start one datagram send using the kernel-selected local source.
+   --  Socket and Item remain borrowed until Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram send operation
+   function Send_Datagram
+      (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation;
+
+   --  Start or restart one destination-only datagram send.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation);
+
+   --  Start one datagram send with an explicit local source selection.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Source Local source endpoint and interface selection
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited datagram send operation
+   function Send_Datagram
+     (Set         : not null access Flyology.Operations.Completion_Set'Class;
+      Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite) return Send_Datagram_Operation
+     with Pre => Source.Family = Destination.Family;
+
+   --  Start or restart one source-selected datagram send.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased source buffer
+   --  @param Destination Remote destination endpoint
+   --  @param Source Local source endpoint and interface selection
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed send operation
+   procedure Send_Datagram
+     (Socket      : not null access Socket_Type;
+      Item        : not null access constant Ada.Streams.Stream_Element_Array;
+      Destination : Endpoint;
+      Source      : Endpoint;
+      Timeout     : Duration := Infinite;
+      Operation   : in out Send_Datagram_Operation)
+     with Pre => Source.Family = Destination.Family;
+
+   --  Start one Internet-stream connection attempt. Socket remains borrowed
+   --  until Finish; cancellation does not roll back kernel connection effects.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open unconnected Internet socket
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited connect operation
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Server  : Endpoint;
+      Timeout : Duration := Infinite) return Connect_Operation;
+
+   --  Start or restart one Internet-stream connection attempt in an
+   --  established operation object.
+   --  @param Socket Aliased open unconnected Internet socket
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed connect operation
+   procedure Connect
+     (Socket    : not null access Socket_Type;
+      Server    : Endpoint;
+      Timeout   : Duration := Infinite;
+      Operation : in out Connect_Operation);
+
+   --  Start one Unix-stream connection attempt.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open unconnected Unix-stream socket
+   --  @param Server Validated destination pathname copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited connect operation
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Socket  : not null access Socket_Type;
+      Server  : Unix_Path;
+      Timeout : Duration := Infinite) return Connect_Operation;
+
+   --  Start or restart one Unix-stream connection attempt.
+   --  @param Socket Aliased open unconnected Unix-stream socket
+   --  @param Server Validated destination pathname copied into the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed connect operation
+   procedure Connect
+     (Socket    : not null access Socket_Type;
+      Server    : Unix_Path;
+      Timeout   : Duration := Infinite;
+      Operation : in out Connect_Operation);
+
+   --  Start one Internet-stream accept. Server remains borrowed until Finish;
+   --  the accepted socket and peer endpoint are retained by the operation.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Server Aliased open Internet-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited accept operation
+   function Accept_Connection
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Server  : not null access Socket_Type;
+      Timeout : Duration := Infinite) return Accept_Operation;
+
+   --  Start or restart one Internet-stream accept in an established object.
+   --  @param Server Aliased open Internet-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed accept operation
+   procedure Accept_Connection
+     (Server    : not null access Socket_Type;
+      Timeout   : Duration := Infinite;
+      Operation : in out Accept_Operation);
+
+   --  Start one Unix-stream accept. The result type distinguishes this
+   --  overload from the Internet form with the same familiar parameters.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Server Aliased open Unix-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited Unix accept operation
+   function Accept_Connection
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Server  : not null access Socket_Type;
+      Timeout : Duration := Infinite) return Unix_Accept_Operation;
+
+   --  Start or restart one Unix-stream accept in an established object.
+   --  @param Server Aliased open Unix-stream listener
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed Unix accept operation
+   procedure Accept_Connection
+     (Server    : not null access Socket_Type;
+      Timeout   : Duration := Infinite;
+      Operation : in out Unix_Accept_Operation);
+
+   --  Consume one terminal partial receive and publish its Last value.
+   --  @param Operation Terminal receive operation
+   --  @param Last Last received element, or Item'First - 1 on closure
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal exact receive.
+   --  @param Operation Terminal exact-receive operation
+   procedure Finish (Operation : in out Receive_Exactly_Operation);
+
+   --  Consume one terminal partial send and publish its Last value.
+   --  @param Operation Terminal send operation
+   --  @param Last Last sent element, or Item'First - 1 when none
+   procedure Finish
+     (Operation : in out Send_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal complete send.
+   --  @param Operation Terminal complete-send operation
+   procedure Finish (Operation : in out Send_All_Operation);
+
+   --  Consume one unique-buffer receive and commit its readable length.
+   --  @param Operation Terminal unique-buffer receive operation
+   --  @param Received Number of received bytes; zero on closure
+   procedure Finish
+     (Operation : in out Buffer_Receive_Operation;
+      Received  : out Natural);
+
+   --  Consume one partial unique-buffer send.
+   --  @param Operation Terminal unique-buffer send operation
+   --  @param Sent Number of bytes sent
+   procedure Finish
+     (Operation : in out Buffer_Send_Operation;
+      Sent      : out Natural);
+
+   --  Consume one complete unique-buffer send.
+   --  @param Operation Terminal complete unique-buffer send operation
+   procedure Finish (Operation : in out Buffer_Send_All_Operation);
+
+   --  Consume a terminal datagram receive and publish its payload bounds and
+   --  addressing metadata.
+   --  @param Operation Terminal datagram receive operation
+   --  @param Last Last copied element, or Item'First - 1 when none was copied
+   --  @param Metadata Peer, local destination, length, truncation, and ECN
+   procedure Finish
+     (Operation : in out Receive_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset;
+      Metadata  : out Datagram_Metadata);
+
+   --  Consume a terminal datagram send and publish its Last value.
+   --  @param Operation Terminal datagram send operation
+   --  @param Last Last sent element, or Item'First - 1 for an empty datagram
+   procedure Finish
+     (Operation : in out Send_Datagram_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset);
+
+   --  Consume one terminal Internet-stream connection attempt.
+   --  @param Operation Terminal connect operation
+   procedure Finish (Operation : in out Connect_Operation);
+
+   --  Consume one successful Internet-stream accept and transfer ownership.
+   --  Socket must be closed. Provider failure is retained until this call.
+   --  @param Operation Terminal accept operation
+   --  @param Socket Closed target that receives the accepted socket
+   --  @param Address Accepted peer endpoint
+   procedure Finish
+     (Operation : in out Accept_Operation;
+      Socket    : in out Socket_Type;
+      Address   : out Endpoint)
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
+
+   --  Consume one successful Unix-stream accept and transfer ownership.
+   --  @param Operation Terminal Unix accept operation
+   --  @param Socket Closed target that receives the accepted socket
+   procedure Finish
+     (Operation : in out Unix_Accept_Operation;
+      Socket    : in out Socket_Type)
+     with Pre => not Is_Open (Socket),
+          Post => Is_Open (Socket);
+
    --  Accept one connection and configure it for Flyology I/O. Transient
    --  admission errors are retried and descriptor pressure uses bounded
    --  interruptible backoff.
@@ -791,4 +1256,138 @@ private
       Value       : Interfaces.C.int := -1;
       Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;
    end record;
+
+   type Scoped_IO_Kind is
+     (Receive_One,
+      Receive_Exact,
+      Send_One,
+      Send_Complete,
+      Buffer_Receive_One,
+      Buffer_Send_One,
+      Buffer_Send_Complete,
+      Datagram_Receive,
+      Datagram_Send,
+      Connect_Internet,
+      Connect_Unix,
+      Accept_Internet,
+      Accept_Unix);
+   type Scoped_Failure is
+     (No_Failure, Socket_Failure, Deadline_Failure,
+      Peer_Closed_Failure, No_Progress_Failure,
+      Partial_Datagram_Failure);
+
+   type Socket_Operation is
+     abstract new Flyology.Operations.Operation with record
+      Kind        : Scoped_IO_Kind := Receive_One;
+      Socket      : access Socket_Type := null;
+      Array_Item  : access Ada.Streams.Stream_Element_Array := null;
+      Buffer_Item : access Flyology.Buffers.Unique_Buffer := null;
+      Cursor      : Ada.Streams.Stream_Element_Offset := 1;
+      Transferred : Natural := 0;
+      Error_Code  : Interfaces.C.int := 0;
+      Failure     : Scoped_Failure := No_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Socket operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Socket_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Socket operation to cancel
+   overriding procedure Request_Cancellation
+     (Item : in out Socket_Operation);
+
+   type Datagram_Operation is abstract new Socket_Operation with record
+      Datagram_Item       : access constant
+        Ada.Streams.Stream_Element_Array := null;
+      Source_Family       : aliased Interfaces.C.unsigned_char := 0;
+      Source_Address      : aliased IPv6_Octets := (others => 0);
+      Source_Port         : aliased Interfaces.C.unsigned := 0;
+      Source_Scope        : aliased Interfaces.C.unsigned := 0;
+      Destination_Family  : aliased Interfaces.C.unsigned_char := 0;
+      Destination_Address : aliased IPv6_Octets := (others => 0);
+      Destination_Port    : aliased Interfaces.C.unsigned := 0;
+      Destination_Scope   : aliased Interfaces.C.unsigned := 0;
+      Datagram_ECN        : aliased Interfaces.C.int := -1;
+      Datagram_Length     : Natural := 0;
+      Select_Source       : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item Datagram operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Datagram_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Connect_Operation is new Socket_Operation with record
+      Destination      : Endpoint := No_Endpoint;
+      Unix_Destination : Unix_Path;
+      Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Timeout          : Duration := Infinite;
+      Retry_Due        : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item Connect operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Connect_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Socket_Owner is new Ada.Finalization.Limited_Controlled with record
+      Socket : Socket_Type;
+   end record;
+
+   --  @exclude
+   --  @param Item Accepted-socket owner to close during finalization
+   overriding procedure Finalize (Item : in out Socket_Owner);
+
+   type Accept_State is record
+      Accepted         : Socket_Owner;
+      Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Timeout          : Duration := Infinite;
+      Pressure_Backoff : Duration := 0.001;
+      Retry_Due        : Boolean := False;
+      Decode_Address   : Boolean := True;
+      Peer_Family      : aliased Interfaces.C.unsigned_char := 0;
+      Peer_Address     : aliased IPv6_Octets := (others => 0);
+      Peer_Port        : aliased Interfaces.C.unsigned := 0;
+      Peer_Scope       : aliased Interfaces.C.unsigned := 0;
+   end record;
+
+   type Accept_Operation is new Socket_Operation with record
+      State : aliased Accept_State;
+   end record;
+
+   --  @exclude
+   --  @param Item Accept operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Accept_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Unix_Accept_Operation is new Socket_Operation with record
+      State : aliased Accept_State;
+   end record;
+
+   --  @exclude
+   --  @param Item Unix accept operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Unix_Accept_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   type Receive_Operation is new Socket_Operation with null record;
+   type Receive_Exactly_Operation is new Socket_Operation with null record;
+   type Send_Operation is new Socket_Operation with null record;
+   type Send_All_Operation is new Socket_Operation with null record;
+   type Buffer_Receive_Operation is new Socket_Operation with null record;
+   type Buffer_Send_Operation is new Socket_Operation with null record;
+   type Buffer_Send_All_Operation is new Socket_Operation with null record;
+   type Receive_Datagram_Operation is new Datagram_Operation with null record;
+   type Send_Datagram_Operation is new Datagram_Operation with null record;
 end Flyology.IO.Sockets;
