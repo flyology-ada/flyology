@@ -409,7 +409,7 @@ begin
       end;
    end;
    declare
-      Before   : constant Natural := Counter;
+      Before   : constant Interfaces.Unsigned_64 := Counter;
       Rejected : Boolean := False;
       Discarded : Flyology_Bench.Measurement;
    begin
