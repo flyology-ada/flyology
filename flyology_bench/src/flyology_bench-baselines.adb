@@ -8,6 +8,7 @@ with Ada.Numerics.Long_Elementary_Functions;
 with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Flyology_Bench.Baseline_Math;
+with Flyology_Bench.Internal_Statistics;
 with Flyology_Bench.Metadata;
 with Interfaces;
 with Interfaces.C;
@@ -25,8 +26,8 @@ package body Flyology_Bench.Baselines is
    Footer : constant String := "flyology_bench baseline v2";
    Legacy_Magic : constant String := "flyology_bench baseline v1";
    Bootstrap_Method_Text : constant String := "circular_block_mean_ratio";
-   Default_Confidence_Level_Percent : constant Long_Float := 95.0;
-   Default_Bootstrap_Resamples : constant Positive := 2_000;
+   Default_Confidence_Level_Percent : constant Confidence_Percentage := 95.0;
+   Default_Bootstrap_Resamples : constant Bootstrap_Resample_Count := 2_000;
    FNV_Offset : constant Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
    FNV_Prime  : constant Interfaces.Unsigned_64 := 16#0000_0100_0000_01B3#;
 
@@ -604,7 +605,10 @@ package body Flyology_Bench.Baselines is
       Current    : Measurement;
       Fingerprint : String := "";
       Practical_Threshold_Percent : Long_Float := 1.0;
-      Random_Seed : Long_Long_Integer := 1) return Regression
+      Random_Seed : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
+      return Regression
    is
       Result : Regression;
       Current_Count : constant Positive := Positive (Samples (Current));
@@ -613,7 +617,8 @@ package body Flyology_Bench.Baselines is
       Current_Sum : Long_Float := 0.0;
       Saved_Mean : Long_Float;
       Current_Mean : Long_Float;
-      Bootstrap : Float_Array (1 .. Default_Bootstrap_Resamples);
+      Bootstrap : Float_Array (1 .. Bootstrap_Resamples);
+      Work : Internal_Statistics.Bootstrap_Work_Count := 0;
       State : Interfaces.Unsigned_64 :=
         16#94D0_49BB_1331_11EB# xor Interfaces.Unsigned_64 (Random_Seed);
       Effective_Fingerprint : constant String :=
@@ -643,6 +648,12 @@ package body Flyology_Bench.Baselines is
       if not Result.Is_Compatible then
          return Result;
       end if;
+      Internal_Statistics.Add_Bootstrap_Work
+        (Total     => Work,
+         Samples   => Saved_Count + Current_Count,
+         Resamples => Bootstrap_Resamples,
+         Intervals => 1,
+         Context   => "saved baseline comparison");
 
       for Index in 1 .. Saved_Count loop
          declare
@@ -791,7 +802,7 @@ package body Flyology_Bench.Baselines is
       Sort (Bootstrap);
       declare
          Tail : constant Long_Float :=
-           (100.0 - Default_Confidence_Level_Percent) / 200.0;
+           Internal_Statistics.Lower_Tail (Confidence_Level_Percent);
       begin
          Result.CI_Low := Percentile (Bootstrap, Tail);
          Result.CI_High := Percentile (Bootstrap, 1.0 - Tail);
@@ -859,7 +870,10 @@ package body Flyology_Bench.Baselines is
       Current      : Measurement;
       Fingerprint  : String := "";
       Policy       : Gate_Policy := Permissive_Gate_Policy;
-      Random_Seed  : Long_Long_Integer := 1) return Gate_Result
+      Random_Seed  : Long_Long_Integer := 1;
+      Confidence_Level_Percent : Confidence_Percentage := 95.0;
+      Bootstrap_Resamples : Bootstrap_Resample_Count := 2_000)
+      return Gate_Result
    is
       Result : Gate_Result;
       Effective_Fingerprint : constant String :=
@@ -897,8 +911,8 @@ package body Flyology_Bench.Baselines is
       Result.Current_Name_Data := Unbounded.To_Unbounded_String (Current_Name);
       Result.Threshold_Value := Policy.Practical_Threshold_Percent;
       Result.Bootstrap_Method_Value := Circular_Block_Mean_Ratio;
-      Result.Confidence_Level_Value := Default_Confidence_Level_Percent;
-      Result.Bootstrap_Resample_Total := Default_Bootstrap_Resamples;
+      Result.Confidence_Level_Value := Confidence_Level_Percent;
+      Result.Bootstrap_Resample_Total := Bootstrap_Resamples;
       Result.Random_Seed_Value := Random_Seed;
 
       if not Ada.Directories.Exists (Path) then
@@ -942,7 +956,9 @@ package body Flyology_Bench.Baselines is
               Fingerprint => Effective_Fingerprint,
               Practical_Threshold_Percent =>
                 Policy.Practical_Threshold_Percent,
-              Random_Seed => Random_Seed);
+              Random_Seed => Random_Seed,
+              Confidence_Level_Percent => Confidence_Level_Percent,
+              Bootstrap_Resamples => Bootstrap_Resamples);
          Result.Statistics_Ready := True;
          case Verdict (Result.Regression_Data) is
             when Contender_Faster =>
