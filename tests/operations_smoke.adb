@@ -976,6 +976,159 @@ procedure Operations_Smoke is
             Passed := Passed and then Interrupted;
          end;
 
+         --  The additive root overload combines UDP read readiness, three
+         --  readable lifecycle sources, and one direction-sensitive caller
+         --  source at H3's five-source maximum. A latched signal published
+         --  before arming remains visible and is not consumed by the socket
+         --  operation.
+         declare
+            Set      : aliased Flyology.Operations.Completion_Set (1);
+            Input    : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Receive  : Flyology.IO.Sockets.Receive_Datagram_Operation (Set'Access);
+            Rejected : Boolean := False;
+         begin
+            begin
+               Flyology.IO.Sockets.Receive_Datagram
+                 (Server'Access,
+                  Input'Access,
+                  1.0,
+                  Receive,
+                  Flyology.IO.No_Interrupts,
+                  Flyology.IO.Invalid_Descriptor,
+                  False);
+            exception
+               when Program_Error =>
+                  Rejected := True;
+            end;
+            Passed := Passed and then Rejected and then not Flyology.Operations.Is_Active (Receive);
+         end;
+
+         declare
+            type Wake_Array is
+              array (Positive range <>) of Flyology.Wake_Sources.Source;
+            Wake        : Wake_Array (1 .. 4);
+            Interrupts  : Flyology.IO.Interrupt_Set (1 .. 3);
+            Set         : aliased Flyology.Operations.Completion_Set (1);
+            Input       : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Last        : Ada.Streams.Stream_Element_Offset;
+            Metadata    : Flyology.IO.Sockets.Datagram_Metadata;
+            Interrupted : Boolean := False;
+         begin
+            for Index in Wake'Range loop
+               Flyology.Wake_Sources.Ensure (Wake (Index));
+            end loop;
+            for Index in Interrupts'Range loop
+               Interrupts (Index) :=
+                 Flyology.Wake_Sources.Descriptor (Wake (Index));
+            end loop;
+            Flyology.Wake_Sources.Signal (Wake (4));
+            declare
+               Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+                 Flyology.IO.Sockets.Receive_Datagram
+                   (Set'Access,
+                    Server'Access,
+                    Input'Access,
+                    1.0,
+                    Interrupts,
+                    Flyology.Wake_Sources.Descriptor (Wake (4)),
+                    False);
+            begin
+               Flyology.Operations.Wait_All (Set);
+               begin
+                  Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+               exception
+                  when Flyology.IO.Sockets.Operation_Interrupted =>
+                     Interrupted := True;
+               end;
+            end;
+            Flyology.Wake_Sources.Consume (Wake (4));
+            Passed := Passed and then Interrupted;
+         end;
+         Check (Passed, "five-source datagram root readiness failed");
+
+         --  The established overload retains a later caller-source signal
+         --  racing with UDP readiness. The typed interrupt result wins after
+         --  the combined set wakes, and the caller consumes its own latch.
+         declare
+            Wake        : Flyology.Wake_Sources.Source;
+            Set         : aliased Flyology.Operations.Completion_Set (2);
+            Input       : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Output      : aliased Ada.Streams.Stream_Element_Array :=
+              [1 => 91];
+            Receive     :
+              Flyology.IO.Sockets.Receive_Datagram_Operation (Set'Access);
+            Send        :
+              Flyology.IO.Sockets.Send_Datagram_Operation (Set'Access);
+            Last        : Ada.Streams.Stream_Element_Offset;
+            Metadata    : Flyology.IO.Sockets.Datagram_Metadata;
+            Interrupted : Boolean := False;
+         begin
+            Flyology.Wake_Sources.Ensure (Wake);
+            Flyology.IO.Sockets.Receive_Datagram
+              (Server'Access,
+               Input'Access,
+               1.0,
+               Receive,
+               Flyology.IO.No_Interrupts,
+               Flyology.Wake_Sources.Descriptor (Wake),
+               False);
+            Flyology.IO.Sockets.Send_Datagram
+              (Client'Access, Output'Access, Destination, 1.0, Send);
+            Flyology.Wake_Sources.Signal (Wake);
+            Flyology.Operations.Wait_All (Set);
+            Flyology.IO.Sockets.Finish (Send, Last);
+            begin
+               Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+            exception
+               when Flyology.IO.Sockets.Operation_Interrupted =>
+                  Interrupted := True;
+            end;
+            Flyology.Wake_Sources.Consume (Wake);
+            Flyology.IO.Sockets.Receive_Datagram
+              (Server, Input, Last, Metadata, Timeout => 1.0);
+            Passed := Passed and then Interrupted;
+         end;
+         Check (Passed, "datagram additional-source race failed");
+
+         --  A writable additional descriptor is armed for write rather than
+         --  treated as another readable Interrupt_Set member.
+         declare
+            Source, Source_Peer : aliased Flyology.IO.Sockets.Socket_Type;
+            Set                 :
+              aliased Flyology.Operations.Completion_Set (1);
+            Input               : aliased Ada.Streams.Stream_Element_Array :=
+              [1 => 0];
+            Last                : Ada.Streams.Stream_Element_Offset;
+            Metadata            : Flyology.IO.Sockets.Datagram_Metadata;
+            Interrupted         : Boolean := False;
+         begin
+            Flyology.IO.Sockets.Create_Socket_Pair (Source, Source_Peer);
+            Flyology.IO.Sockets.Prepare (Source);
+            declare
+               Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+                 Flyology.IO.Sockets.Receive_Datagram
+                   (Set'Access,
+                    Server'Access,
+                    Input'Access,
+                    1.0,
+                    Flyology.IO.No_Interrupts,
+                    Flyology.IO.Sockets.Native_Descriptor (Source),
+                    True);
+            begin
+               Flyology.Operations.Wait_All (Set);
+               begin
+                  Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+               exception
+                  when Flyology.IO.Sockets.Operation_Interrupted =>
+                     Interrupted := True;
+               end;
+            end;
+            Flyology.IO.Sockets.Close_Socket (Source_Peer);
+            Flyology.IO.Sockets.Close_Socket (Source);
+            Passed := Passed and then Interrupted;
+         end;
+         Check (Passed, "datagram additional write readiness failed");
+
          declare
             Set       : aliased Flyology.Operations.Completion_Set (1);
             Input     : aliased Ada.Streams.Stream_Element_Array := [1 => 0];

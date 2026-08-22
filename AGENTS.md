@@ -192,6 +192,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   capability. The higher-level operation owns the sole set slot and passes
   itself transiently when the capability arms readiness or its shared
   deadline. The capability must retain no access to that operation or set.
+  One operation may arm at most six descriptor interests; connection
+  capabilities may combine hidden transport, outbound, close, manager, and
+  token sources with one caller-borrowed direction-sensitive latched source.
+  The caller owns and consumes that added source after the combined wait is
+  disarmed.
 - Current scoped providers cover descriptor readiness, timers, raw stream and
   datagram socket arrays, Internet and Unix-stream connection attempts and
   accepts, unique-buffer stream operations, and lightweight positional file
@@ -221,9 +226,11 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   transfers it; finalization closes an abandoned accepted descriptor. A scoped
   datagram receive retains its addressing,
   truncation, and ECN metadata until typed `Finish`; an empty array still
-  receives or sends one zero-length datagram. The file provider uses one
-  caller-owned runtime node per
-  operation and one lazily created completion wake source per set. Transient
+  receives or sends one zero-length datagram. Its readable lifecycle interrupt
+  set can compose with one separate caller-borrowed read-or-write latched
+  descriptor in the same wait; the socket operation never consumes it. The
+  file provider uses one caller-owned runtime node per operation and one lazily
+  created completion wake source per set. Transient
   kernel submission pressure queues those nodes without failing the operation;
   queued cancellation terminalizes without submitting the borrowed buffer.
   Scoped watcher waits borrow the serialized watcher and use its existing

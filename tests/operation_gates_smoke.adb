@@ -8,6 +8,7 @@ with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
 with Flyology.Operations.Drivers;
+with Flyology.Wake_Sources;
 
 procedure Operation_Gates_Smoke is
    use type Flyology.Execution_Model;
@@ -170,6 +171,76 @@ procedure Operation_Gates_Smoke is
          Flyology.Operations.Consume (Item);
       end;
 
+      --  The documented maximum is a real one-operation capability: six
+      --  latched descriptors coexist with an independently armed deadline.
+      --  Exercise a signal present at arm, a signal published after arm, the
+      --  caller's consume-before-reuse protocol, and cancellation after the
+      --  complete set has been armed.
+      declare
+         type Wake_Source_Array is
+           array (Positive range <>) of Flyology.Wake_Sources.Source;
+         Wake    :
+           Wake_Source_Array
+             (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation);
+         Sources :
+           Flyology.Operations.Drivers.Readiness_Source_Array (Wake'Range);
+         Set     : aliased Flyology.Operations.Completion_Set (1);
+         Item    : Deadline_Readiness_Operation (Set'Access);
+      begin
+         for Index in Wake'Range loop
+            Flyology.Wake_Sources.Ensure (Wake (Index));
+            Sources (Index) :=
+              (Flyology.Wake_Sources.Descriptor (Wake (Index)), False);
+         end loop;
+
+         Flyology.Operations.Drivers.Start (Item);
+         Flyology.Operations.Drivers.Arm_Deadline (Item, 1.0);
+         Flyology.Wake_Sources.Signal (Wake (2));
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+         Flyology.Operations.Wait_All (Set);
+         Passed :=
+           Passed
+           and then Flyology.Operations.Outcome (Item)
+                    = Flyology.Operations.Succeeded;
+         Flyology.Operations.Consume (Item);
+         Flyology.Wake_Sources.Consume (Wake (2));
+
+         Flyology.Operations.Drivers.Start (Item);
+         Flyology.Operations.Drivers.Arm_Deadline (Item, 1.0);
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+         Flyology.Wake_Sources.Signal (Wake (5));
+         Flyology.Operations.Wait_All (Set);
+         Passed :=
+           Passed
+           and then Flyology.Operations.Outcome (Item)
+                    = Flyology.Operations.Succeeded;
+         Flyology.Operations.Consume (Item);
+         Flyology.Wake_Sources.Consume (Wake (5));
+
+         --  Consuming the latched source after the operation disarms its
+         --  combined wait prevents the prior generation from waking reuse.
+         Flyology.Operations.Drivers.Start (Item);
+         Flyology.Operations.Drivers.Arm_Deadline (Item, 0.01);
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+         Flyology.Operations.Wait_All (Set);
+         Passed :=
+           Passed
+           and then Flyology.Operations.Outcome (Item)
+                    = Flyology.Operations.Failed;
+         Flyology.Operations.Consume (Item);
+
+         Flyology.Operations.Drivers.Start (Item);
+         Flyology.Operations.Drivers.Arm_Deadline (Item, 1.0);
+         Flyology.Operations.Drivers.Arm_Readiness (Item, Sources);
+         Flyology.Operations.Cancel (Item);
+         Flyology.Wake_Sources.Signal (Wake (4));
+         Passed :=
+           Passed
+           and then Flyology.Operations.Outcome (Item)
+                    = Flyology.Operations.Cancelled;
+         Flyology.Operations.Consume (Item);
+         Flyology.Wake_Sources.Consume (Wake (4));
+      end;
       --  A provider may request another immediate owner-stack step after
       --  partial progress. Such a member must not hide an already-completed
       --  sibling from Wait_Some, even when it keeps rescheduling itself.

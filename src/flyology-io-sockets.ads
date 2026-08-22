@@ -931,6 +931,50 @@ package Flyology.IO.Sockets is
       Interrupts : Interrupt_Set := No_Interrupts)
    with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
+   --  Start one datagram receive while also observing one caller-borrowed
+   --  latched descriptor in its requested direction. This additive overload
+   --  keeps the readable Interrupt_Set unchanged and never consumes or closes
+   --  Additional. The caller must disarm its source borrow after wakeup before
+   --  querying or releasing that source again.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
+   --  @param Additional Valid caller-borrowed latched descriptor
+   --  @param Additional_For_Write True to observe Additional write readiness
+   --  @return Started limited datagram receive operation
+   --  @exception Program_Error Additional is invalid
+   function Receive_Datagram
+     (Set                  : not null access Flyology.Operations.Completion_Set'Class;
+      Socket               : not null access Socket_Type;
+      Item                 : not null access Ada.Streams.Stream_Element_Array;
+      Timeout              : Duration;
+      Interrupts           : Interrupt_Set;
+      Additional           : Flyology.IO.Descriptor;
+      Additional_For_Write : Boolean) return Receive_Datagram_Operation
+   with Pre => Interrupts'Length + 1 < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+
+   --  Start or restart one datagram receive with a direction-sensitive
+   --  caller-borrowed latched descriptor in an established operation.
+   --  @param Socket Aliased open datagram socket
+   --  @param Item Aliased destination buffer
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh, released, or consumed receive operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
+   --  @param Additional Valid caller-borrowed latched descriptor
+   --  @param Additional_For_Write True to observe Additional write readiness
+   --  @exception Program_Error Additional is invalid
+   procedure Receive_Datagram
+     (Socket               : not null access Socket_Type;
+      Item                 : not null access Ada.Streams.Stream_Element_Array;
+      Timeout              : Duration;
+      Operation            : in out Receive_Datagram_Operation;
+      Interrupts           : Interrupt_Set;
+      Additional           : Flyology.IO.Descriptor;
+      Additional_For_Write : Boolean)
+   with Pre => Interrupts'Length + 1 < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
+
    --  Start one datagram send using the kernel-selected local source.
    --  Socket and Item remain borrowed until Finish.
    --  @param Set Completion set that owns the operation slot
@@ -1275,17 +1319,21 @@ private
       Partial_Datagram_Failure);
 
    type Socket_Operation is abstract new Flyology.Operations.Operation with record
-      Kind            : Scoped_IO_Kind := Receive_One;
-      Socket          : access Socket_Type := null;
-      Array_Item      : access Ada.Streams.Stream_Element_Array := null;
-      Buffer_Item     : access Flyology.Buffers.Unique_Buffer := null;
-      Cursor          : Ada.Streams.Stream_Element_Offset := 1;
-      Transferred     : Natural := 0;
-      Error_Code      : Interfaces.C.int := 0;
-      Failure         : Scoped_Failure := No_Failure;
-      Interrupts      : Interrupt_Set (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
-        (others => Invalid_Descriptor);
-      Interrupt_Count : Natural range 0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
+      Kind                 : Scoped_IO_Kind := Receive_One;
+      Socket               : access Socket_Type := null;
+      Array_Item           : access Ada.Streams.Stream_Element_Array := null;
+      Buffer_Item          : access Flyology.Buffers.Unique_Buffer := null;
+      Cursor               : Ada.Streams.Stream_Element_Offset := 1;
+      Transferred          : Natural := 0;
+      Error_Code           : Interfaces.C.int := 0;
+      Failure              : Scoped_Failure := No_Failure;
+      Interrupts           :
+        Interrupt_Set (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
+          (others => Invalid_Descriptor);
+      Interrupt_Count      : Natural range 0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 :=
+        0;
+      Additional           : Descriptor := Invalid_Descriptor;
+      Additional_For_Write : Boolean := False;
    end record;
 
    --  @exclude

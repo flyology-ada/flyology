@@ -17,8 +17,9 @@ is
    --  Maximum number of operations in one completion set.
    Max_Operations                      : constant := 32;
    --  Maximum descriptor interests armed by one operation. This covers a
-   --  primary transport plus bounded lifecycle and cancellation sources.
-   Max_Readiness_Sources_Per_Operation : constant := 4;
+   --  primary transport, protocol and source wakeups, and bounded lifecycle
+   --  and cancellation sources.
+   Max_Readiness_Sources_Per_Operation : constant := 6;
    --  Valid caller-selected completion-set capacity.
    subtype Operation_Capacity is Positive range 1 .. Max_Operations;
 
