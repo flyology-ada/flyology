@@ -158,11 +158,12 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   accepts, unique-buffer stream operations, and lightweight positional file
   arrays and ownership-transferring unique buffers, high-level connection data
   operations over plaintext or TLS, high-level connection TLS `Upgrade`,
-  nonrecursive and recursive file-watcher `Next`, and retained task-result
-  `Wait`. Recursive `Next` is a disclosed
-  exception to the immediate-step rule: after its hidden watcher child becomes
-  ready, its owner-stack driver performs capacity-bounded directory discovery
-  and registration metadata calls before the parent terminalizes. Those calls
+  standalone TLS handshake/data/shutdown operations, nonrecursive and recursive
+  file-watcher `Next`, and retained task-result `Wait`. Recursive `Next` is a
+  disclosed exception to the immediate-step rule: after its hidden watcher child
+  becomes ready, its owner-stack driver performs capacity-bounded directory
+  discovery and registration metadata calls before the parent terminalizes.
+  Those calls
   never run on the scheduler stack, but they can occupy a lightweight event
   loop on a slow filesystem. A
   `Flyology.Channels.Bounded` instance also provides scoped `Send` and
@@ -189,7 +190,7 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   Scoped watcher waits borrow the serialized watcher and use its existing
   readiness descriptor; interruption composes as a separate readiness
   operation. Recursive watcher reconciliation remains caller-lane metadata
-  work and is not yet an operation-producing overload.
+  work.
   Scoped task-result waits retain the target sidecar, subscribe a caller-owned
   intrusive node to its persistent completion gate, and signal the completion
   set's shared wake source on publication. They do not retain the task object
@@ -201,7 +202,9 @@ scripts remain authoritative for commands, proof totals, and test coverage.
   OpenSSL is an optional dynamically loaded provider. Provider steps must never
   block: return `Want_Read` or `Want_Write` and let Flyology wait for readiness.
   A provider session borrows the descriptor while `TLS.Connection` retains sole
-  closing ownership.
+  closing ownership. `TLS.Drivers.Capability` is the definite, set-independent
+  composition boundary for a runtime-selected standalone TLS transport; it
+  retains no operation or completion-set access.
 - Socket readiness uses `kqueue` on Darwin and `epoll` on Linux. Cross-thread
   wakes use `EVFILT_USER` or `eventfd` respectively.
 - Timers use the group poller’s next timeout and a monotonic deadline heap.

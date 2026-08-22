@@ -1,6 +1,8 @@
-with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
 with Flyology.Time_Math;
+with Flyology.Connection_Policy;
+with Flyology.IO.TLS_Driver;
+with Flyology.Operations.Drivers;
 with Flyology.TLS_Policy;
 #if FLYOLOGY_TLS_TEST_HOOKS then
 with Flyology.TLS_Test_Hooks;
@@ -18,10 +20,12 @@ package body Flyology.IO.TLS is
    end Release;
    package Sockets renames Flyology.IO.Sockets;
    package Policy renames Flyology.TLS_Policy;
+   package Lease_Policy renames Flyology.Connection_Policy;
 
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
    use type Descriptor;
+   use type Flyology.Operations.Driver_Event;
 
    procedure Free is new Ada.Unchecked_Deallocation
      (Session'Class, Session_Access);
@@ -61,15 +65,8 @@ package body Flyology.IO.TLS is
       Outcome : not null access Close_Outcome)
    is new Ada.Finalization.Limited_Controlled with null record;
 
-   type Operation_Guard (Item : not null access Connection) is
-     new Ada.Finalization.Limited_Controlled with record
-      Generation : aliased Descriptor_Generation := 0;
-      Armed      : aliased Boolean := False;
-   end record;
-
    overriding procedure Initialize (Guard : in out Close_Guard);
    overriding procedure Finalize (Guard : in out Close_Guard);
-   overriding procedure Finalize (Guard : in out Operation_Guard);
 
    protected body Descriptor_Controller is
       procedure Adopt (FD : Descriptor) is
@@ -83,53 +80,131 @@ package body Flyology.IO.TLS is
               "TLS descriptor controller already owns a resource";
          end if;
          Wake_Sources.Ensure (Close_Wake);
+         Wake_Sources.Ensure (Lease_Wake);
          Current_FD := FD;
          Current_Generation := Current_Generation + 1;
       end Adopt;
 
-      entry Acquire
-        (Expected     : Descriptor_Generation;
+      procedure Start_Operation
+        (Generation   : not null access Descriptor_Generation;
+         State        : not null access Operation_State;
          FD           : out Descriptor;
-         Generation   : not null access Descriptor_Generation;
-         Armed        : not null access Boolean;
-         Close_Source : out Descriptor;
-         Result       : out Acquire_Result)
-        when not Active
+         Lease_Source : out Descriptor;
+         Close_Source : out Descriptor)
       is
       begin
-         FD := Invalid_Descriptor;
+         if State.all /= Unregistered then
+            raise Program_Error with "TLS operation already registered";
+         elsif Current_FD < 0 or else Close_In_Progress then
+            raise Program_Error with "TLS connection is not open";
+         elsif Started_Operations = Natural'Last then
+            raise Program_Error with "too many TLS operations";
+         end if;
+         Started_Operations :=
+           Lease_Policy.Started_After_Register (Started_Operations);
          Generation.all := Current_Generation;
-         Armed.all := False;
-         Close_Source := Invalid_Descriptor;
-         case Policy.Classify_Acquire
-           (Generation_Matches => Expected = Current_Generation,
-            Closing            => Close_In_Progress,
-            Descriptor_Open    => Current_FD >= 0)
-         is
-            when Policy.Reject_Replaced =>
-               Result := Replaced;
-            when Policy.Reject_Closing =>
-               Result := Closing;
-            when Policy.Reject_Closed =>
-               Result := Closed;
-            when Policy.Acquire_Operation =>
-               Result := Acquired;
-               Active := True;
-               FD := Current_FD;
-               Close_Source := Wake_Sources.Descriptor (Close_Wake);
-               --  Arm cleanup while abort is still deferred by the protected
-               --  action. The end of this entry call is an abort completion
-               --  point, so arming after return would leave an ownership gap.
-               Armed.all := True;
-         end case;
-      end Acquire;
+         FD := Current_FD;
+         Lease_Source := Wake_Sources.Descriptor (Lease_Wake);
+         Close_Source := Wake_Sources.Descriptor (Close_Wake);
+         State.all := Registered;
+      end Start_Operation;
 
-      procedure Release (Generation : Descriptor_Generation) is
+      procedure Try_Acquire
+        (Expected_Generation : Descriptor_Generation;
+         State               : not null access Operation_State;
+         Result              : out Lease_Result;
+         FD                  : in out Descriptor;
+         Close_Source        : in out Descriptor)
+      is
+      begin
+         if State.all /= Registered then
+            raise Program_Error with "TLS operation is not registered";
+         end if;
+         case Lease_Policy.Classify_Acquire
+           (Generation_Matches =>
+              Expected_Generation = Current_Generation,
+            Resources_Open => Current_FD >= 0,
+            Closing        => Close_In_Progress,
+            Active         => Active)
+         is
+            when Lease_Policy.Cancel_Lease =>
+               if Started_Operations = 0 then
+                  raise Program_Error with "missing TLS operation";
+               end if;
+               Started_Operations :=
+                 Lease_Policy.Started_After_Release (Started_Operations);
+               State.all := Unregistered;
+               Result := Lease_Cancelled;
+               return;
+            when Lease_Policy.Wait_For_Lease =>
+               Result := Lease_Busy;
+               return;
+            when Lease_Policy.Acquire_Lease =>
+               null;
+         end case;
+         if Lease_Signalled then
+            Wake_Sources.Consume (Lease_Wake);
+            Lease_Signalled := False;
+         end if;
+         Active := True;
+         FD := Current_FD;
+         Close_Source := Wake_Sources.Descriptor (Close_Wake);
+         State.all := Acquired;
+         Result := Lease_Acquired;
+      end Try_Acquire;
+
+      procedure Abandon_Operation
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State)
+      is
+         pragma Unreferenced (Generation);
+      begin
+         if State.all /= Registered or else Started_Operations = 0 then
+            raise Program_Error with "stale TLS operation withdrawal";
+         end if;
+         Started_Operations :=
+           Lease_Policy.Started_After_Release (Started_Operations);
+         State.all := Unregistered;
+         if Lease_Policy.Should_Wake_Next
+           (Active, Close_In_Progress, Started_Operations, Lease_Signalled)
+         then
+            Wake_Sources.Signal (Lease_Wake);
+            Lease_Signalled := True;
+         end if;
+      end Abandon_Operation;
+
+      procedure Check_Operation (Generation : Descriptor_Generation) is
       begin
          if not Active or else Generation /= Current_Generation then
+            raise Program_Error with "stale TLS operation";
+         elsif Close_In_Progress then
+            raise Operation_Cancelled with
+              "TLS connection closed during its operation";
+         end if;
+      end Check_Operation;
+
+      procedure Release
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State)
+      is
+      begin
+         if State.all /= Acquired
+           or else not Active
+           or else Generation /= Current_Generation
+           or else Started_Operations = 0
+         then
             raise Program_Error with "stale TLS operation release";
          end if;
          Active := False;
+         Started_Operations :=
+           Lease_Policy.Started_After_Release (Started_Operations);
+         State.all := Unregistered;
+         if Lease_Policy.Should_Wake_Next
+           (Active, Close_In_Progress, Started_Operations, Lease_Signalled)
+         then
+            Wake_Sources.Signal (Lease_Wake);
+            Lease_Signalled := True;
+         end if;
       end Release;
 
       procedure Begin_Close
@@ -143,7 +218,7 @@ package body Flyology.IO.TLS is
          Leader := Policy.Close_Leader
            (Current_FD >= 0, Close_In_Progress);
          if Leader then
-            if Active then
+            if Started_Operations > 0 then
                Wake_Sources.Signal (Close_Wake);
             end if;
             --  Publish the close only after the wake is known to be usable. If
@@ -153,7 +228,7 @@ package body Flyology.IO.TLS is
          end if;
       end Begin_Close;
 
-      entry Await_Drained when not Active is
+      entry Await_Drained when not Active and then Started_Operations = 0 is
       begin
          null;
       end Await_Drained;
@@ -167,43 +242,23 @@ package body Flyology.IO.TLS is
       begin
          if not Policy.Finish_Close_Allowed
            (Close_In_Progress,
-            Active,
+            Active or else Started_Operations /= 0,
             Generation = Current_Generation)
          then
             raise Program_Error with "stale TLS close completion";
          end if;
          Current_FD := Invalid_Descriptor;
          begin
+            Wake_Sources.Release (Lease_Wake);
             Wake_Sources.Release (Close_Wake);
          exception
             when others =>
                Close_In_Progress := False;
                raise;
          end;
+         Lease_Signalled := False;
          Close_In_Progress := False;
       end Finish_Close;
-
-      procedure Snapshot_Acquisition
-        (State      : out Acquire_Result;
-         Generation : out Descriptor_Generation)
-      is
-      begin
-         Generation := Current_Generation;
-         case Policy.Classify_Acquire
-           (Generation_Matches => True,
-            Closing            => Close_In_Progress,
-            Descriptor_Open    => Current_FD >= 0)
-         is
-            when Policy.Reject_Closing =>
-               State := Closing;
-            when Policy.Reject_Closed =>
-               State := Closed;
-            when Policy.Acquire_Operation =>
-               State := Acquired;
-            when Policy.Reject_Replaced =>
-               raise Program_Error with "invalid TLS acquisition snapshot";
-         end case;
-      end Snapshot_Acquisition;
 
       function Is_Open_State return Boolean is
         (Policy.Is_Open (Current_FD >= 0, Close_In_Progress));
@@ -219,13 +274,197 @@ package body Flyology.IO.TLS is
          Guard.Outcome.Leader);
    end Initialize;
 
+   procedure Release_Operation (Guard : in out Operation_Guard) is
+   begin
+      case Guard.State is
+         when Unregistered =>
+            null;
+         when Registered =>
+            Guard.Item.Controller.Abandon_Operation
+              (Guard.Generation, Guard.State'Access);
+         when Acquired =>
+            Guard.Item.Controller.Release
+              (Guard.Generation, Guard.State'Access);
+      end case;
+      if Guard.State = Unregistered then
+         Guard.Item := null;
+      end if;
+   end Release_Operation;
+
    overriding procedure Finalize (Guard : in out Operation_Guard) is
    begin
-      if Guard.Armed then
-         Guard.Item.Controller.Release (Guard.Generation);
-         Guard.Armed := False;
-      end if;
+      Release_Operation (Guard);
    end Finalize;
+
+   function Driver_Remaining (State : Driver_State) return Duration is
+     (if State.Deadline < 0.0 then Infinite
+      else Time_Math.Remaining
+        (State.Deadline,
+         Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - State.Started)));
+
+   procedure Release_Driver (State : in out Driver_State) is
+      procedure Clear is
+      begin
+         State.Item := null;
+         State.Token := null;
+         State.FD := Invalid_Descriptor;
+         State.Lease_Source := Invalid_Descriptor;
+         State.Close_Source := Invalid_Descriptor;
+         State.Deadline := Infinite;
+      end Clear;
+   begin
+      begin
+         Release_Operation (State.Guard);
+      exception
+         when others =>
+            if State.Guard.State = Unregistered then
+               Clear;
+            end if;
+            raise;
+      end;
+      if State.Guard.State = Unregistered then
+         Clear;
+      end if;
+   end Release_Driver;
+
+   procedure Check_Driver (State : in out Driver_State) is
+   begin
+      if State.Item = null or else State.Guard.State /= Acquired then
+         raise Program_Error with "TLS driver is not acquired";
+      end if;
+      State.Item.Controller.Check_Operation (State.Guard.Generation);
+      if State.Token /= null and then State.Token.Requested then
+         raise Operation_Cancelled;
+      end if;
+   end Check_Driver;
+
+   procedure Poll_Driver
+     (State  : in out Driver_State;
+      Result : out Lease_Result) is
+   begin
+      if State.Item = null or else State.Guard.State /= Registered then
+         raise Program_Error with "TLS driver is not awaiting acquisition";
+      elsif State.Token /= null and then State.Token.Requested then
+         raise Operation_Cancelled;
+      end if;
+      State.Item.Controller.Try_Acquire
+        (State.Guard.Generation,
+         State.Guard.State'Access,
+         Result,
+         State.FD,
+         State.Close_Source);
+      if Result = Lease_Acquired and then State.Item.Session = null then
+         raise Program_Error with "TLS connection has no provider session";
+      elsif Result = Lease_Busy
+        and then State.Deadline >= 0.0
+        and then Driver_Remaining (State) = 0.0
+      then
+         raise Timeout_Error with "TLS driver timed out";
+      end if;
+   end Poll_Driver;
+
+   procedure Start_Driver
+     (State   : in out Driver_State;
+      Item    : not null access Connection'Class;
+      Result  : out Lease_Result;
+      Timeout : Duration;
+      Token   : access Flyology.Cancellation.Token)
+   is
+   begin
+      if State.Guard.State /= Unregistered then
+         raise Program_Error with "TLS driver is already engaged";
+      end if;
+      begin
+         State.Item := Item.all'Unchecked_Access;
+         State.Token :=
+           (if Token = null then null else Token.all'Unchecked_Access);
+         State.Guard.Item := Item.all'Unchecked_Access;
+         State.Started := Ada.Real_Time.Clock;
+         State.Deadline := Timeout;
+         State.Item.Controller.Start_Operation
+           (State.Guard.Generation'Access,
+            State.Guard.State'Access,
+            State.FD,
+            State.Lease_Source,
+            State.Close_Source);
+         Poll_Driver (State, Result);
+      exception
+         when others =>
+            Release_Driver (State);
+            raise;
+      end;
+   end Start_Driver;
+
+   procedure Append_Driver_Token
+     (State   : in out Driver_State;
+      Sources : in out Flyology.Operations.Drivers.Readiness_Source_Array;
+      Count   : in out Natural)
+   is
+      FD        : Descriptor;
+      Cancelled : Boolean;
+   begin
+      if State.Token /= null then
+         State.Token.Wait_Source (FD, Cancelled);
+         if Cancelled then
+            raise Operation_Cancelled;
+         end if;
+         Count := Count + 1;
+         Sources (Count) := (Descriptor => FD, For_Write => False);
+      end if;
+   end Append_Driver_Token;
+
+   procedure Arm_Driver_Acquisition
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class)
+   is
+      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 3);
+      Count   : Natural := 2;
+   begin
+      if State.Guard.State /= Registered then
+         raise Program_Error with "TLS driver is not awaiting acquisition";
+      end if;
+      Sources (1) :=
+        (Descriptor => State.Lease_Source, For_Write => False);
+      Sources (2) :=
+        (Descriptor => State.Close_Source, For_Write => False);
+      Append_Driver_Token (State, Sources, Count);
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Operation, Sources (1 .. Count));
+   end Arm_Driver_Acquisition;
+
+   procedure Arm_Driver_Transport
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Status    : Step_Status)
+   is
+      Sources : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 3);
+      Count   : Natural := 2;
+   begin
+      if State.Guard.State /= Acquired
+        or else Status not in Want_Read | Want_Write
+      then
+         raise Program_Error with "invalid TLS readiness request";
+      end if;
+      Sources (1) :=
+        (Descriptor => State.FD, For_Write => Status = Want_Write);
+      Sources (2) :=
+        (Descriptor => State.Close_Source, For_Write => False);
+      Append_Driver_Token (State, Sources, Count);
+      Flyology.Operations.Drivers.Arm_Readiness
+        (Operation, Sources (1 .. Count));
+   end Arm_Driver_Transport;
+
+   procedure Arm_Driver_Deadline
+     (State     : in out Driver_State;
+      Operation : in out Flyology.Operations.Operation'Class) is
+   begin
+      if State.Guard.State = Unregistered then
+         raise Program_Error with "TLS driver is not engaged";
+      elsif State.Deadline >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline
+           (Operation, Driver_Remaining (State));
+      end if;
+   end Arm_Driver_Deadline;
 
    overriding procedure Finalize (Guard : in out Close_Guard) is
    begin
@@ -274,21 +513,6 @@ package body Flyology.IO.TLS is
          Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started));
    end Remaining;
 
-   function Invalid_Progress_Bound
-     (First : Ada.Streams.Stream_Element_Offset;
-      Last  : Ada.Streams.Stream_Element_Offset)
-      return Ada.Streams.Stream_Element_Offset
-   is
-      Choice : constant Policy.Sentinel_Choice :=
-        Policy.Invalid_Progress_Sentinel (First, Last);
-   begin
-      if not Choice.Available then
-         raise TLS_Error with
-           "TLS buffer range leaves no invalid progress sentinel";
-      end if;
-      return Choice.Value;
-   end Invalid_Progress_Bound;
-
    procedure Await_Ready
      (FD           : Descriptor;
       Status       : Step_Status;
@@ -329,35 +553,16 @@ package body Flyology.IO.TLS is
    end Await_Ready;
 
    procedure Check_Cancelled
-     (Item  : Connection;
+     (Item  : in out Connection;
+      Generation : Descriptor_Generation;
       Token : access Flyology.Cancellation.Token)
    is
    begin
-      if Item.Controller.Close_Requested
-        or else (Token /= null and then Token.Requested)
-      then
+      Item.Controller.Check_Operation (Generation);
+      if Token /= null and then Token.Requested then
          raise Operation_Cancelled;
       end if;
    end Check_Cancelled;
-
-   procedure Snapshot_Operation
-     (Item       : in out Connection;
-      Generation : out Descriptor_Generation)
-   is
-      State : Acquire_Result;
-   begin
-      Item.Controller.Snapshot_Acquisition (State, Generation);
-      case State is
-         when Acquired =>
-            null;
-         when Closing =>
-            raise Operation_Cancelled;
-         when Closed =>
-            raise Program_Error with "TLS connection is not open";
-         when Replaced =>
-            raise Program_Error with "invalid TLS acquisition snapshot";
-      end case;
-   end Snapshot_Operation;
 
    procedure Acquire_Operation
      (Item         : in out Connection;
@@ -368,63 +573,61 @@ package body Flyology.IO.TLS is
       Guard        : in out Operation_Guard;
       Close_Source : out Descriptor)
    is
-      Wait_Slice    : Duration;
       Left          : Duration;
-      Acquire_State : Acquire_Result;
-      Expected      : Descriptor_Generation;
+      Result        : Lease_Result;
+      Lease_Source  : Descriptor;
+      Interrupts    : Interrupt_Set (1 .. 2);
+      Count         : Positive := 1;
+      Cancelled     : Boolean := False;
+      Outcome       : Wait_Outcome;
    begin
-      Snapshot_Operation (Item, Expected);
+      Guard.Item := Item'Unchecked_Access;
+      Item.Controller.Start_Operation
+        (Guard.Generation'Access,
+         Guard.State'Access,
+         FD,
+         Lease_Source,
+         Close_Source);
+      Interrupts (1) := Close_Source;
+      if Token /= null then
+         Token.Wait_Source (Interrupts (2), Cancelled);
+         if Cancelled then
+            raise Operation_Cancelled;
+         end if;
+         Count := 2;
+      end if;
 
       loop
-         Check_Cancelled (Item, Token);
+         if Token /= null and then Token.Requested then
+            raise Operation_Cancelled;
+         end if;
          Left := Remaining (Started, Timeout);
-         if Left = 0.0 then
-            select
-               Item.Controller.Acquire
-                 (Expected,
-                  FD,
-                  Guard.Generation'Access,
-                  Guard.Armed'Access,
-                  Close_Source,
-                  Acquire_State);
-               case Acquire_State is
-                  when Acquired =>
-                     return;
-                  when Closing | Closed | Replaced =>
+         Item.Controller.Try_Acquire
+           (Guard.Generation,
+            Guard.State'Access,
+            Result,
+            FD,
+            Close_Source);
+         case Result is
+            when Lease_Acquired =>
+               return;
+            when Lease_Cancelled =>
+               raise Operation_Cancelled;
+            when Lease_Busy =>
+               Outcome := Wait_Interruptibly
+                 (Lease_Source, For_Read, Left, Interrupts (1 .. Count));
+               case Outcome is
+                  when Ready =>
+                     null;
+                  when Timed_Out =>
+                     raise Timeout_Error with
+                       "TLS operation timed out waiting for the connection";
+                  when Interrupted =>
                      raise Operation_Cancelled;
                end case;
-            else
-               raise Timeout_Error with
-                 "TLS operation timed out waiting for the connection";
-            end select;
-         end if;
-
-         Wait_Slice :=
-           (if Left < 0.0 then 0.010 else Duration'Min (Left, 0.010));
-         select
-            Item.Controller.Acquire
-              (Expected,
-               FD,
-               Guard.Generation'Access,
-               Guard.Armed'Access,
-               Close_Source,
-               Acquire_State);
-            case Acquire_State is
-               when Acquired =>
-                  return;
-               when Closing | Closed | Replaced =>
-                  raise Operation_Cancelled;
-            end case;
-         or
-            delay Wait_Slice;
-         end select;
+         end case;
       end loop;
    end Acquire_Operation;
-
-   procedure Raise_Provider_Error (Item : Session'Class) is
-   begin
-      raise TLS_Error with Error_Message (Item);
-   end Raise_Provider_Error;
 
    procedure Take_With_Factory
      (Backend     : in out Provider'Class;
@@ -543,7 +746,7 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
    begin
       Acquire_Operation
@@ -559,27 +762,22 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
-      Status       : Step_Status;
+      procedure Check is
+      begin
+         Check_Cancelled (Item, Guard.Generation, Token);
+      end Check;
+      procedure Await (Status : Step_Status) is
+      begin
+         Await_Ready
+           (FD, Status, Started, Timeout, Close_Source, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
-      loop
-         Check_Cancelled (Item, Token);
-         Status := Handshake_Step (Item.Session.all);
-         case Status is
-            when Complete =>
-               exit;
-            when Want_Read | Want_Write =>
-               Await_Ready
-                 (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed =>
-               raise TLS_Error with "TLS peer closed during handshake";
-            when Failed =>
-               Raise_Provider_Error (Item.Session.all);
-         end case;
-      end loop;
+      TLS_Driver.Handshake
+        (Item.Session.all, Check'Access, Await'Access);
    end Handshake;
 
    procedure Receive
@@ -591,47 +789,22 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
-      Status       : Step_Status;
-      Before_Last  : Ada.Streams.Stream_Element_Offset;
+      procedure Check is
+      begin
+         Check_Cancelled (Item, Guard.Generation, Token);
+      end Check;
+      procedure Await (Status : Step_Status) is
+      begin
+         Await_Ready
+           (FD, Status, Started, Timeout, Close_Source, Token);
+      end Await;
    begin
-      Last := Data'First - 1;
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
-      if Data'Length = 0 then
-         return;
-      end if;
-      loop
-         Check_Cancelled (Item, Token);
-         Before_Last := Last;
-         Status := Receive_Step (Item.Session.all, Data, Last);
-         case Status is
-            when Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (Data'First, Data'Last, Last)
-               then
-                  raise TLS_Error with
-                    "TLS provider returned an invalid receive bound";
-               end if;
-               exit;
-            when Peer_Closed =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed receive output on peer close";
-               end if;
-               exit;
-            when Want_Read | Want_Write =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed receive output while waiting";
-               end if;
-               Await_Ready
-                 (FD, Status, Started, Timeout, Close_Source, Token);
-            when Failed =>
-               Raise_Provider_Error (Item.Session.all);
-         end case;
-      end loop;
+      TLS_Driver.Receive
+        (Item.Session.all, Data, Last, Check'Access, Await'Access);
    end Receive;
 
    procedure Receive_Exactly
@@ -642,52 +815,22 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
-      Status       : Step_Status;
-      First        : Ada.Streams.Stream_Element_Offset := Data'First;
-      Last         : Ada.Streams.Stream_Element_Offset;
-      Before_Last  : Ada.Streams.Stream_Element_Offset;
+      procedure Check is
+      begin
+         Check_Cancelled (Item, Guard.Generation, Token);
+      end Check;
+      procedure Await (Status : Step_Status) is
+      begin
+         Await_Ready
+           (FD, Status, Started, Timeout, Close_Source, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
-      if Data'Length = 0 then
-         return;
-      end if;
-      while First <= Data'Last loop
-         Check_Cancelled (Item, Token);
-         Before_Last := Invalid_Progress_Bound (First, Data'Last);
-         Last := Before_Last;
-         Status := Receive_Step
-           (Item.Session.all, Data (First .. Data'Last), Last);
-         case Status is
-            when Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (First, Data'Last, Last)
-               then
-                  raise TLS_Error with
-                    "TLS provider made no receive progress";
-               end if;
-               exit when Last = Data'Last;
-               First := Policy.Next_Offset (Last);
-            when Want_Read | Want_Write =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed receive output while waiting";
-               end if;
-               Await_Ready
-                 (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed receive output on peer close";
-               end if;
-               raise TLS_Error with
-                 "TLS peer closed before receive completed";
-            when Failed =>
-               Raise_Provider_Error (Item.Session.all);
-         end case;
-      end loop;
+      TLS_Driver.Receive_Exactly
+        (Item.Session.all, Data, Check'Access, Await'Access);
    end Receive_Exactly;
 
    procedure Send_All
@@ -698,51 +841,22 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
-      Status       : Step_Status;
-      First        : Ada.Streams.Stream_Element_Offset := Data'First;
-      Last         : Ada.Streams.Stream_Element_Offset;
-      Before_Last  : Ada.Streams.Stream_Element_Offset;
+      procedure Check is
+      begin
+         Check_Cancelled (Item, Guard.Generation, Token);
+      end Check;
+      procedure Await (Status : Step_Status) is
+      begin
+         Await_Ready
+           (FD, Status, Started, Timeout, Close_Source, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
-      if Data'Length = 0 then
-         return;
-      end if;
-      while First <= Data'Last loop
-         Check_Cancelled (Item, Token);
-         Before_Last := Invalid_Progress_Bound (First, Data'Last);
-         Last := Before_Last;
-         Status := Send_Step
-           (Item.Session.all, Data (First .. Data'Last), Last);
-         case Status is
-            when Complete =>
-               if not Policy.Complete_Progress_Valid
-                 (First, Data'Last, Last)
-               then
-                  raise TLS_Error with "TLS provider made no send progress";
-               end if;
-               exit when Last = Data'Last;
-               First := Policy.Next_Offset (Last);
-            when Want_Read | Want_Write =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed send output while waiting";
-               end if;
-               Await_Ready
-                 (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed =>
-               if not Policy.Progress_Preserved (Before_Last, Last) then
-                  raise TLS_Error with
-                    "TLS provider changed send output on peer close";
-               end if;
-               raise TLS_Error with
-                 "TLS peer closed before send completed";
-            when Failed =>
-               Raise_Provider_Error (Item.Session.all);
-         end case;
-      end loop;
+      TLS_Driver.Send_All
+        (Item.Session.all, Data, Check'Access, Await'Access);
    end Send_All;
 
    procedure Shutdown
@@ -752,29 +866,468 @@ package body Flyology.IO.TLS is
    is
       Started      : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       FD           : Descriptor;
-      Guard        : Operation_Guard (Item'Unchecked_Access);
+      Guard        : Operation_Guard;
       Close_Source : Descriptor;
-      Status       : Step_Status;
+      procedure Check is
+      begin
+         Check_Cancelled (Item, Guard.Generation, Token);
+      end Check;
+      procedure Await (Status : Step_Status) is
+      begin
+         Await_Ready
+           (FD, Status, Started, Timeout, Close_Source, Token);
+      end Await;
    begin
       Acquire_Operation
         (Item, Started, Timeout, Token, FD, Guard, Close_Source);
-      loop
-         Check_Cancelled (Item, Token);
-         Status := Shutdown_Step (Item.Session.all);
-         case Status is
-            when Complete =>
-               exit;
-            when Want_Read | Want_Write =>
-               Await_Ready
-                 (FD, Status, Started, Timeout, Close_Source, Token);
-            when Peer_Closed =>
-               raise TLS_Error with
-                 "TLS peer closed before shutdown completed";
-            when Failed =>
-               Raise_Provider_Error (Item.Session.all);
-         end case;
-      end loop;
+      TLS_Driver.Shutdown
+        (Item.Session.all, Check'Access, Await'Access);
    end Shutdown;
+
+   procedure Save_Scoped_Failure
+     (Item       : in out Connection_Operation'Class;
+      Occurrence : Ada.Exceptions.Exception_Occurrence) is
+   begin
+      Ada.Exceptions.Save_Occurrence (Item.Failure, Occurrence);
+      Item.Has_Failure := True;
+   end Save_Scoped_Failure;
+
+   procedure Complete_Scoped
+     (Item   : in out Connection_Operation'Class;
+      Result : Flyology.Operations.Terminal_Outcome)
+   is
+      Published : Flyology.Operations.Terminal_Outcome := Result;
+   begin
+      begin
+         Release_Driver (Item.State);
+      exception
+         when Occurrence : others =>
+            if not Item.Has_Failure then
+               Save_Scoped_Failure (Item, Occurrence);
+            end if;
+            Published := Flyology.Operations.Failed;
+      end;
+      Flyology.Operations.Drivers.Complete (Item, Published);
+   end Complete_Scoped;
+
+   procedure Drive_Scoped_Provider
+     (Item : in out Connection_Operation'Class)
+   is
+      Status : Step_Status := Complete;
+      First  : Ada.Streams.Stream_Element_Offset := Item.Cursor;
+      Last   : Ada.Streams.Stream_Element_Offset := Item.Cursor;
+   begin
+      Check_Driver (Item.State);
+      case Item.Kind is
+         when Handshake_IO =>
+            TLS_Driver.Handshake_Once
+              (Item.State.Item.Session.all, Status);
+         when Shutdown_IO =>
+            TLS_Driver.Shutdown_Once
+              (Item.State.Item.Session.all, Status);
+         when Receive_One | Receive_Complete =>
+            if Item.Data.all'Length = 0 then
+               Item.Last := Item.Data.all'First - 1;
+               Complete_Scoped (Item, Flyology.Operations.Succeeded);
+               return;
+            end if;
+            First :=
+              (if Item.Kind = Receive_One
+               then Item.Data.all'First
+               else Item.Cursor);
+            TLS_Driver.Receive_Once
+              (Item.State.Item.Session.all,
+               Item.Data.all (First .. Item.Data.all'Last),
+               Last,
+               Status);
+         when Send_Complete =>
+            if Item.Send_Data.all'Length = 0 then
+               Complete_Scoped (Item, Flyology.Operations.Succeeded);
+               return;
+            end if;
+            TLS_Driver.Send_Once
+              (Item.State.Item.Session.all,
+               Item.Send_Data.all (First .. Item.Send_Data.all'Last),
+               Last,
+               Status);
+      end case;
+
+      case Status is
+         when Want_Read | Want_Write =>
+            Arm_Driver_Transport (Item.State, Item, Status);
+         when Peer_Closed =>
+            if Item.Kind = Receive_One then
+               Item.Last := First - 1;
+               Complete_Scoped (Item, Flyology.Operations.Succeeded);
+            else
+               raise TLS_Error with
+                 "TLS peer closed before operation completed";
+            end if;
+         when Failed =>
+            raise Program_Error with "TLS provider failure was not raised";
+         when Complete =>
+            case Item.Kind is
+               when Handshake_IO | Shutdown_IO =>
+                  Complete_Scoped (Item, Flyology.Operations.Succeeded);
+               when Receive_One =>
+                  Item.Last := Last;
+                  Complete_Scoped (Item, Flyology.Operations.Succeeded);
+               when Receive_Complete =>
+                  Item.Last := Last;
+                  if Last = Item.Data.all'Last then
+                     Complete_Scoped (Item, Flyology.Operations.Succeeded);
+                  else
+                     Item.Cursor := Last + 1;
+                     Flyology.Operations.Drivers.Reschedule (Item);
+                  end if;
+               when Send_Complete =>
+                  if Last = Item.Send_Data.all'Last then
+                     Complete_Scoped (Item, Flyology.Operations.Succeeded);
+                  else
+                     Item.Cursor := Last + 1;
+                     Flyology.Operations.Drivers.Reschedule (Item);
+                  end if;
+            end case;
+      end case;
+   end Drive_Scoped_Provider;
+
+   procedure Continue_Scoped_Acquisition
+     (Item : in out Connection_Operation'Class)
+   is
+      Result : Lease_Result;
+   begin
+      Poll_Driver (Item.State, Result);
+      case Result is
+         when Lease_Busy =>
+            Arm_Driver_Acquisition (Item.State, Item);
+         when Lease_Cancelled =>
+            Complete_Scoped (Item, Flyology.Operations.Cancelled);
+         when Lease_Acquired =>
+            Drive_Scoped_Provider (Item);
+      end case;
+   end Continue_Scoped_Acquisition;
+
+   overriding procedure Drive
+     (Item  : in out Connection_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Result : Lease_Result;
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         raise Timeout_Error with "TLS operation timed out";
+      elsif Event = Flyology.Operations.Start_Operation then
+         Start_Driver
+           (Item.State,
+            Item.State.Item,
+            Result,
+            Item.State.Deadline,
+            Item.State.Token);
+         case Result is
+            when Lease_Busy =>
+               Arm_Driver_Deadline (Item.State, Item);
+               Arm_Driver_Acquisition (Item.State, Item);
+            when Lease_Cancelled =>
+               Complete_Scoped (Item, Flyology.Operations.Cancelled);
+            when Lease_Acquired =>
+               Arm_Driver_Deadline (Item.State, Item);
+               Drive_Scoped_Provider (Item);
+         end case;
+      elsif Event in
+        Flyology.Operations.Source_Ready |
+        Flyology.Operations.Continue_Operation
+      then
+         if Item.State.Guard.State = Registered then
+            Continue_Scoped_Acquisition (Item);
+         elsif Item.State.Guard.State = Acquired then
+            Drive_Scoped_Provider (Item);
+         else
+            raise Program_Error with "TLS operation has no driver state";
+         end if;
+      else
+         raise Program_Error with "invalid TLS operation event";
+      end if;
+   exception
+      when Operation_Cancelled =>
+         Complete_Scoped (Item, Flyology.Operations.Cancelled);
+      when Occurrence : others =>
+         Save_Scoped_Failure (Item, Occurrence);
+         Complete_Scoped (Item, Flyology.Operations.Failed);
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Connection_Operation) is
+   begin
+      Complete_Scoped (Item, Flyology.Operations.Cancelled);
+   exception
+      when others =>
+         null;
+   end Request_Cancellation;
+
+   procedure Launch_Scoped
+     (Operation : in out Connection_Operation'Class)
+   is
+   begin
+      Flyology.Operations.Drivers.Start (Operation);
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Operation),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Cancel (Operation);
+         end if;
+         if Flyology.Operations.Is_Terminal (Operation) then
+            Flyology.Operations.Consume (Operation);
+         end if;
+         raise;
+   end Launch_Scoped;
+
+   procedure Start_Scoped
+     (Operation : in out Connection_Operation'Class;
+      Item      : not null access Connection'Class;
+      Kind      : Scoped_TLS_Kind;
+      Timeout   : Duration;
+      Token     : access Flyology.Cancellation.Token)
+   is
+   begin
+      if Operation.State.Guard.State /= Unregistered then
+         raise Flyology.Operations.Operation_Error with
+           "TLS operation still owns its connection lease";
+      end if;
+      Operation.State.Item := Item.all'Unchecked_Access;
+      Operation.State.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.State.Deadline := Timeout;
+      Operation.Kind := Kind;
+      Operation.Data := null;
+      Operation.Send_Data := null;
+      Operation.Cursor := 1;
+      Operation.Last := 0;
+      Operation.Has_Failure := False;
+      Launch_Scoped (Operation);
+   end Start_Scoped;
+
+   procedure Start_Scoped_Receive
+     (Operation : in out Connection_Operation'Class;
+      Item      : not null access Connection'Class;
+      Kind      : Scoped_TLS_Kind;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration;
+      Token     : access Flyology.Cancellation.Token) is
+   begin
+      if Operation.State.Guard.State /= Unregistered then
+         raise Flyology.Operations.Operation_Error with
+           "TLS operation still owns its connection lease";
+      end if;
+      Operation.State.Item := Item.all'Unchecked_Access;
+      Operation.State.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.State.Deadline := Timeout;
+      Operation.Kind := Kind;
+      Operation.Data := Data.all'Unchecked_Access;
+      Operation.Send_Data := null;
+      Operation.Cursor := Data.all'First;
+      Operation.Last := Data.all'First - 1;
+      Operation.Has_Failure := False;
+      Launch_Scoped (Operation);
+   end Start_Scoped_Receive;
+
+   procedure Start_Scoped_Send
+     (Operation : in out Send_All_Operation;
+      Item      : not null access Connection'Class;
+      Data      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration;
+      Token     : access Flyology.Cancellation.Token) is
+   begin
+      if Operation.State.Guard.State /= Unregistered then
+         raise Flyology.Operations.Operation_Error with
+           "TLS operation still owns its connection lease";
+      end if;
+      Operation.State.Item := Item.all'Unchecked_Access;
+      Operation.State.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.State.Deadline := Timeout;
+      Operation.Kind := Send_Complete;
+      Operation.Data := null;
+      Operation.Send_Data := Data.all'Unchecked_Access;
+      Operation.Cursor := Data.all'First;
+      Operation.Last := Data.all'First;
+      Operation.Has_Failure := False;
+      Launch_Scoped (Operation);
+   end Start_Scoped_Send;
+
+   function Handshake
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Handshake_Operation
+   is
+   begin
+      return Result : Handshake_Operation (Set) do
+         Start_Scoped (Result, Item, Handshake_IO, Timeout, Token);
+      end return;
+   end Handshake;
+
+   procedure Handshake
+     (Item      : not null access Connection'Class;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Handshake_Operation) is
+   begin
+      Start_Scoped (Operation, Item, Handshake_IO, Timeout, Token);
+   end Handshake;
+
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Receive_Operation
+   is
+   begin
+      return Result : Receive_Operation (Set) do
+         Start_Scoped_Receive
+           (Result, Item, Receive_One, Data, Timeout, Token);
+      end return;
+   end Receive;
+
+   procedure Receive
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Receive_Operation) is
+   begin
+      Start_Scoped_Receive
+        (Operation, Item, Receive_One, Data, Timeout, Token);
+   end Receive;
+
+   function Receive_Exactly
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Receive_Exactly_Operation
+   is
+   begin
+      return Result : Receive_Exactly_Operation (Set) do
+         Start_Scoped_Receive
+           (Result, Item, Receive_Complete, Data, Timeout, Token);
+      end return;
+   end Receive_Exactly;
+
+   procedure Receive_Exactly
+     (Item      : not null access Connection'Class;
+      Data      : not null access Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Receive_Exactly_Operation) is
+   begin
+      Start_Scoped_Receive
+        (Operation, Item, Receive_Complete, Data, Timeout, Token);
+   end Receive_Exactly;
+
+   function Send_All
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Data    : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Send_All_Operation
+   is
+   begin
+      return Result : Send_All_Operation (Set) do
+         Start_Scoped_Send (Result, Item, Data, Timeout, Token);
+      end return;
+   end Send_All;
+
+   procedure Send_All
+     (Item      : not null access Connection'Class;
+      Data      : not null access constant Ada.Streams.Stream_Element_Array;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Send_All_Operation) is
+   begin
+      Start_Scoped_Send (Operation, Item, Data, Timeout, Token);
+   end Send_All;
+
+   function Shutdown
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connection'Class;
+      Timeout : Duration := Infinite;
+      Token   : access Flyology.Cancellation.Token := null)
+      return Shutdown_Operation
+   is
+   begin
+      return Result : Shutdown_Operation (Set) do
+         Start_Scoped (Result, Item, Shutdown_IO, Timeout, Token);
+      end return;
+   end Shutdown;
+
+   procedure Shutdown
+     (Item      : not null access Connection'Class;
+      Timeout   : Duration := Infinite;
+      Token     : access Flyology.Cancellation.Token := null;
+      Operation : in out Shutdown_Operation) is
+   begin
+      Start_Scoped (Operation, Item, Shutdown_IO, Timeout, Token);
+   end Shutdown;
+
+   procedure Finish_Scoped
+     (Operation : in out Connection_Operation'Class)
+   is
+      Result : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failed : constant Boolean := Operation.Has_Failure;
+   begin
+      Flyology.Operations.Consume (Operation);
+      case Result is
+         when Flyology.Operations.Succeeded =>
+            null;
+         when Flyology.Operations.Cancelled =>
+            raise Operation_Cancelled;
+         when Flyology.Operations.Failed =>
+            if Failed then
+               Ada.Exceptions.Reraise_Occurrence (Operation.Failure);
+            else
+               raise Program_Error with "TLS operation failed";
+            end if;
+      end case;
+   end Finish_Scoped;
+
+   procedure Finish (Operation : in out Handshake_Operation) is
+   begin
+      Finish_Scoped (Operation);
+   end Finish;
+
+   procedure Finish
+     (Operation : in out Receive_Operation;
+      Last      : out Ada.Streams.Stream_Element_Offset)
+   is
+      Saved_Last : constant Ada.Streams.Stream_Element_Offset :=
+        Operation.Last;
+   begin
+      Finish_Scoped (Operation);
+      Last := Saved_Last;
+   end Finish;
+
+   procedure Finish (Operation : in out Receive_Exactly_Operation) is
+   begin
+      Finish_Scoped (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Send_All_Operation) is
+   begin
+      Finish_Scoped (Operation);
+   end Finish;
+
+   procedure Finish (Operation : in out Shutdown_Operation) is
+   begin
+      Finish_Scoped (Operation);
+   end Finish;
 
    procedure Close (Item : in out Connection) is
       Outcome : aliased Close_Outcome;

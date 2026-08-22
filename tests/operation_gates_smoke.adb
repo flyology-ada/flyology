@@ -36,6 +36,17 @@ procedure Operation_Gates_Smoke is
    overriding procedure Request_Cancellation
      (Item : in out Rescheduling_Operation);
 
+   type Deadline_Readiness_Operation
+     (Set : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Set) with null record;
+
+   overriding procedure Drive
+     (Item  : in out Deadline_Readiness_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   overriding procedure Request_Cancellation
+     (Item : in out Deadline_Readiness_Operation);
+
    overriding procedure Drive
      (Item  : in out Multi_Source_Operation;
       Event : Flyology.Operations.Driver_Event) is
@@ -66,6 +77,30 @@ procedure Operation_Gates_Smoke is
 
    overriding procedure Request_Cancellation
      (Item : in out Rescheduling_Operation) is
+   begin
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   end Request_Cancellation;
+
+   overriding procedure Drive
+     (Item  : in out Deadline_Readiness_Operation;
+      Event : Flyology.Operations.Driver_Event) is
+   begin
+      case Event is
+         when Flyology.Operations.Source_Ready =>
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
+         when Flyology.Operations.Deadline_Reached =>
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
+         when others =>
+            raise Program_Error with
+              "unexpected deadline-readiness driver event";
+      end case;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Deadline_Readiness_Operation) is
    begin
       Flyology.Operations.Drivers.Complete
         (Item, Flyology.Operations.Cancelled);
@@ -178,6 +213,36 @@ procedure Operation_Gates_Smoke is
          Passed := Passed
            and then Flyology.Operations.Outcome (Busy) =
              Flyology.Operations.Cancelled;
+         Flyology.Operations.Consume (Busy);
+      end;
+
+      --  A provider that continually requests immediate progress must not
+      --  starve a different descriptor operation's zero-time readiness poll
+      --  or expired deadline.
+      declare
+         package Sockets renames Flyology.IO.Sockets;
+         Left, Right : Sockets.Socket_Type;
+         Set : aliased Flyology.Operations.Completion_Set (2);
+         Busy : Rescheduling_Operation (Set'Access);
+         Expiring : Deadline_Readiness_Operation (Set'Access);
+         Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+      begin
+         Sockets.Create_Socket_Pair (Left, Right);
+         Sockets.Prepare (Left);
+         Flyology.Operations.Drivers.Start (Busy);
+         Flyology.Operations.Drivers.Reschedule (Busy);
+         Flyology.Operations.Drivers.Start (Expiring);
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Expiring, Sockets.Native_Descriptor (Left), False);
+         Flyology.Operations.Drivers.Arm_Deadline (Expiring, 0.0);
+         Flyology.Operations.Wait_Some (Set, Batch);
+         Passed := Passed
+           and then Contains (Batch, Flyology.Operations.Id (Expiring))
+           and then Flyology.Operations.Outcome (Expiring) =
+             Flyology.Operations.Failed
+           and then Flyology.Operations.Is_Active (Busy);
+         Flyology.Operations.Consume (Expiring);
+         Flyology.Operations.Cancel (Busy);
          Flyology.Operations.Consume (Busy);
       end;
 

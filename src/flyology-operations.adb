@@ -587,13 +587,23 @@ package body Flyology.Operations is
       return Count;
    end Unreported_Success_Count;
 
-   procedure Expire_Timers (Set : in out Completion_Set) is
+   procedure Expire_Timers
+     (Set               : in out Completion_Set;
+      Only              : Interfaces.Unsigned_32 :=
+        Interfaces.Unsigned_32'Last;
+      Preserve_Progress : Boolean := False)
+   is
       Now : constant Duration := Clock;
    begin
       for Id in Set.Slots'Range loop
          if Set.Slots (Id).State = Pending
            and then Set.Slots (Id).Has_Deadline
            and then Set.Slots (Id).Deadline <= Now
+           and then Contains (Only, Id)
+           and then
+             (not Preserve_Progress
+              or else Set.Slots (Id).Source not in
+                Descriptor_Source | Immediate_Source)
          then
             Clear_Source (Set.Slots (Id));
             Set.Slots (Id).Has_Deadline := False;
@@ -608,14 +618,16 @@ package body Flyology.Operations is
       end loop;
    end Expire_Timers;
 
-   function Drive_Immediate (Set : in out Completion_Set) return Boolean is
-      Drove : Boolean := False;
+   function Drive_Immediate
+     (Set : in out Completion_Set) return Interfaces.Unsigned_32
+   is
+      Drove : Interfaces.Unsigned_32 := 0;
    begin
       for Id in Set.Slots'Range loop
          if Set.Slots (Id).State = Pending
            and then Set.Slots (Id).Source = Immediate_Source
          then
-            Drove := True;
+            Drove := Drove or Bit (Id);
             Clear_Source (Set.Slots (Id));
             if Set.Slots (Id).Owner = null then
                raise Operation_Error with "pending operation has no driver";
@@ -644,6 +656,7 @@ package body Flyology.Operations is
       Completed : out Completion_Batch;
       Gate      : Gate_Kind)
    is
+      Immediate_Mask : Interfaces.Unsigned_32;
       Drove_Immediate : Boolean;
 
       function Active_Request_Count return Natural is
@@ -662,8 +675,16 @@ package body Flyology.Operations is
       loop
          Begin_Propagation_Batch (Set);
          begin
-            Expire_Timers (Set);
-            Drove_Immediate := Drive_Immediate (Set);
+            --  A due operation that can still make an immediate or descriptor
+            --  probe gets one bounded progress step. Timer-only and otherwise
+            --  unarmed operations expire before any provider is driven.
+            Expire_Timers (Set, Preserve_Progress => True);
+            Immediate_Mask := Drive_Immediate (Set);
+            Drove_Immediate := Immediate_Mask /= 0;
+            --  An immediate provider has now consumed its one zero-time
+            --  progress concession. If it remains pending at an expired
+            --  deadline, classify that deadline before another reschedule.
+            Expire_Timers (Set, Only => Immediate_Mask);
          exception
             when others =>
                End_Propagation_Batch (Set);
@@ -681,13 +702,6 @@ package body Flyology.Operations is
          then
             Publish_Unreported (Set, Completed);
             return;
-         elsif Drove_Immediate then
-            --  One bounded immediate-drive pass is enough before giving the
-            --  owner task a fairness point. A provider may reschedule itself
-            --  after partial progress; it must not hide a terminal member
-            --  from a partial wait or monopolize a lightweight event loop.
-            delay 0.0;
-            goto Continue_Wait;
          end if;
 
          declare
@@ -722,8 +736,12 @@ package body Flyology.Operations is
                      when Dependency_Source =>
                         null;
                      when Immediate_Source =>
-                        raise Operation_Error with
-                          "immediate operation was not driven";
+                        --  This operation rescheduled itself during the
+                        --  bounded immediate pass. Keep it runnable for the
+                        --  next pass, but first give descriptor operations a
+                        --  zero-time poll so an unrelated immediate provider
+                        --  cannot starve their readiness or deadlines.
+                        null;
                      when No_Source =>
                         if not Set.Slots (Id).Has_Deadline then
                            raise Operation_Error with
@@ -742,14 +760,18 @@ package body Flyology.Operations is
             end loop;
 
             if Request_Count = 0 then
-               if not Have_Timer then
+               if Drove_Immediate then
+                  null;
+               elsif not Have_Timer then
                   raise Operation_Error with "completion set cannot progress";
                end if;
-               declare
-                  Remaining : constant Duration := Earliest - Clock;
-               begin
-                  delay (if Remaining > 0.0 then Remaining else 0.0);
-               end;
+               if not Drove_Immediate then
+                  declare
+                     Remaining : constant Duration := Earliest - Clock;
+                  begin
+                     delay (if Remaining > 0.0 then Remaining else 0.0);
+                  end;
+               end if;
             else
                declare
                   Ready : Flyology.IO.Wait_Batch (Request_Count);
@@ -757,7 +779,12 @@ package body Flyology.Operations is
                   Processed : array (Set.Slots'Range) of Boolean :=
                     (others => False);
                begin
-                  if Have_Timer then
+                  if Drove_Immediate then
+                     --  The immediate pass has already consumed this loop's
+                     --  bounded provider work. Probe every descriptor without
+                     --  blocking before the cooperative fairness point.
+                     Wait_For := 0.0;
+                  elsif Have_Timer then
                      declare
                         Now : constant Duration := Clock;
                      begin
@@ -817,6 +844,11 @@ package body Flyology.Operations is
                            end if;
                         end;
                      end loop;
+                     --  Every ready operation received one bounded provider
+                     --  step. Any operation still pending at an expired
+                     --  deadline now terminalizes in this same snapshot, so a
+                     --  level-ready source cannot postpone expiry forever.
+                     Expire_Timers (Set);
                   exception
                      when others =>
                         End_Propagation_Batch (Set);
@@ -826,8 +858,12 @@ package body Flyology.Operations is
                end;
             end if;
          end;
-         <<Continue_Wait>>
-         null;
+         if Drove_Immediate then
+            --  A provider may reschedule itself after partial progress. The
+            --  zero-time descriptor pass above prevents cross-operation
+            --  starvation; this checkpoint prevents owner-loop starvation.
+            delay 0.0;
+         end if;
       end loop;
    end Wait_For_Gate;
 

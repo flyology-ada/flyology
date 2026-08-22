@@ -196,8 +196,11 @@ package Flyology.Operations with Preelaborate is
 
    --  Return every unreported terminal operation. If none is terminal, wait
    --  until descriptor readiness or a monotonic deadline terminalizes at
-   --  least one operation. The set and its operations are single-owner and
-   --  must be used by one task.
+   --  least one operation. When readiness and that operation's deadline are
+   --  both observable in one zero-time poll, readiness drives one bounded
+   --  provider step first; unrelated expired operations still terminalize in
+   --  the same snapshot. The set and its operations are single-owner and must
+   --  be used by one task.
    --  @param Set Completion set to wait on
    --  @param Completed Newly published terminal identities
    procedure Wait_Some

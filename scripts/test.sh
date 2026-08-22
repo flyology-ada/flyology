@@ -385,6 +385,7 @@ observability_utilization_smoke
 operations_smoke
 operation_gates_smoke
 operation_composition_smoke
+operation_return_boundary_smoke
 poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
@@ -417,6 +418,7 @@ thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke
 tls_smoke
+tls_operations_smoke
 tls_alpn_smoke
 tls_state_model
 tls_take_abort

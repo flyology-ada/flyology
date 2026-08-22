@@ -1424,6 +1424,8 @@ Flyology exposes synchronous operations in:
   admitted plaintext connection.
 - `Flyology.IO.TLS`: provider-neutral nonblocking TLS sessions with owned
   sockets, shared deadlines, cancellation, and orderly shutdown.
+- `Flyology.IO.TLS.Drivers`: set-independent bounded progress for composing a
+  standalone TLS connection behind a higher-level transport interface.
 - `Flyology.IO.Structured_Servers`: scoped listener ownership, bounded handler
   task pools, graceful drain, deadline cancellation, and failure propagation.
 - The `flyology_http` crate's `Flyology.HTTP.Client`: origin-bound HTTP/1.1 requests, streaming response
@@ -1561,7 +1563,8 @@ socket operations, Internet and Unix-stream connection attempts and accepts,
 buffer-owning stream operations, high-level plaintext-or-TLS connection data
 operations, and completion-driven positional file reads and writes over aliased
 arrays or ownership-transferred unique buffers, plus nonrecursive and recursive
-file-watcher `Next` and retained task-result `Wait`.
+file-watcher `Next`, standalone TLS handshake, receive, send, and shutdown, and
+retained task-result `Wait`.
 Instances of `Flyology.Channels.Bounded` likewise add operation-producing
 `Send` and `Receive` overloads without changing their protected entries or
 nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
@@ -1623,7 +1626,8 @@ The owner of a scoped high-level connection operation must finish it or cancel
 and drain it before that same task calls synchronous `Connections.Close`;
 `Close` may wait for registered work, while only the owner task can drive its
 scoped operation. A concurrent closer is instead observed through the
-operation's close wake source.
+operation's close wake source. The same rule applies to scoped standalone
+`TLS.Connection` operations and `TLS.Close`.
 The unique-buffer socket overloads retain the owning handle but enter its data
 callback only for an immediate nonblocking socket step, so a callback view never
 escapes. Unique-buffer file overloads instead move the buffer token into the
@@ -1648,6 +1652,14 @@ does not terminalize until reconciliation finishes. `Request_Cancellation`
 removes observational waits immediately
 or starts a cancel-and-drain transition for retained kernel input.
 
+A zero-time operation deadline is an immediate poll, not a prohibition on the
+provider's first bounded step. If descriptor readiness and that operation's
+deadline are both visible in the same scheduler poll, readiness drives one
+bounded step before the deadline is classified. Expired deadlines belonging to
+other operations still terminalize in that snapshot. This matches the
+synchronous I/O wait contract while preventing an already-ready TLS `WANT_READ`
+or `WANT_WRITE` transition from losing merely because its budget is zero.
+
 Higher-level providers compose the same public operation values rather than
 reaching into another provider's internal state. A composite operation owns
 typed child operation objects as record components constrained by the same set.
@@ -1668,15 +1680,17 @@ synthetic third-party-provider example is
 That typed-child pattern is appropriate when the child operation type is known
 statically. A class-wide protocol transport cannot embed a runtime-selected
 socket, connection, or TLS child without allocation or type erasure.
-`Flyology.IO.Connections.Drivers.Capability` covers that case: a concrete
-transport adapter stores one definite, set-independent capability, while the
-higher-level HTTP- or database-operation owns the only set slot. Bounded
-`Start`/`Poll_Acquisition`, `Receive`/`Send`, and arm calls advance the outer
-operation directly; `Release` discharges the connection lease before the outer
-result becomes terminal. The capability exposes neither the descriptor nor TLS
-provider state and creates no child operation, helper task, or allocation. The
-synthetic class-wide regression is in
-[`tests/connection_operations_smoke.adb`](tests/connection_operations_smoke.adb).
+`Flyology.IO.Connections.Drivers.Capability` and
+`Flyology.IO.TLS.Drivers.Capability` cover that case for admitted connections
+and standalone TLS connections respectively. A concrete transport adapter
+stores one definite, set-independent capability, while the higher-level HTTP-
+or database-operation owns the only set slot. Bounded acquisition, immediate
+transport steps, and arm calls advance the outer operation directly; `Release`
+discharges the connection lease before the outer result becomes terminal. The
+capabilities expose neither descriptors nor TLS provider state and create no
+child operation, helper task, or allocation. Synthetic regressions are in
+[`tests/connection_operations_smoke.adb`](tests/connection_operations_smoke.adb)
+and [`tests/tls_operations_smoke.adb`](tests/tls_operations_smoke.adb).
 
 The executable provider-by-gate matrix is in
 [`tests/operations_smoke.adb`](tests/operations_smoke.adb); gate graph,
@@ -1684,6 +1698,8 @@ lifecycle, generation, capacity, and threshold cases are in
 [`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb), and the
 generic channel rows are in
 [`tests/channel_operations_smoke.adb`](tests/channel_operations_smoke.adb).
+Standalone TLS operations and their set-independent capability are covered by
+[`tests/tls_operations_smoke.adb`](tests/tls_operations_smoke.adb).
 
 | Scoped operation-producing overload | First-class gate coverage | Lanes |
 | --- | --- | --- |
@@ -1698,6 +1714,7 @@ generic channel rows are in
 | unique-buffer socket `Send` | all | native and lightweight |
 | unique-buffer socket `Send_All` | all | native and lightweight |
 | high-level Connection `Receive`, `Receive_Exactly`, `Send_All`, and TLS `Upgrade` | success and all, including handshake WANT_READ/WANT_WRITE | native and lightweight |
+| standalone TLS `Handshake`, `Receive`, `Receive_Exactly`, `Send_All`, and `Shutdown` | counted waits, success quorum, and all, including queued leases and WANT_READ/WANT_WRITE | native and lightweight |
 | socket array `Receive_Datagram` | success quorum and all | native and lightweight |
 | socket array `Send_Datagram` | success quorum and all | native and lightweight |
 | Internet-stream socket `Connect` | success quorum and all | native and lightweight |
@@ -1733,7 +1750,7 @@ must not wrap the synchronous call inside `Drive`.
 
 | Remaining primitive | Decision | Reason |
 | --- | --- | --- |
-| high-level connection admission and TLS `Shutdown` | add later | Admission and close-notify have useful terminal results and existing nonblocking readiness steps; scoped `Upgrade` and the high-level data operations compose today. |
+| high-level connection admission and high-level connection TLS `Shutdown` | add later | Admission and close-notify have useful terminal results and existing nonblocking readiness steps; scoped `Upgrade`, high-level data operations, and standalone TLS `Shutdown` compose today. |
 | wall-clock `Wait_Until` and `Timer_Set.Wait_Next` | add later | Both return useful terminal observations. Their providers must retain the wall-clock source or the timer-set arm state instead of calling the synchronous waits from `Drive`; ordinary monotonic timer roots already compose today. |
 | cancellation-token `Await_Request` | add later | A token already has retained one-shot state and a readiness source, so a typed no-result operation can hide the descriptor adapter and compose directly with gates. |
 | DNS `Resolve` and `Resolve_Using` | add later | A resolver operation can compose its bounded UDP/TCP attempts and retain the address result; calling the synchronous resolver from a driver would nest waits. |
@@ -2052,9 +2069,16 @@ The child package contains no HTTP framing, stream, compression, retry, or
 pooling policy.
 
 The standalone `Flyology.IO.TLS.Connection` API remains available for sockets
-that start as TLS before connection admission. It retains its existing source
-and ownership behavior; it is not a route for extracting a socket from an
-admitted `Connections.Connection`.
+that start as TLS before connection admission. Its `Handshake`, `Receive`,
+`Receive_Exactly`, `Send_All`, and `Shutdown` names have additive operation-
+producing overloads and reusable `in out` forms. Each shares one deadline across
+lease acquisition and provider retries, retains failure for typed `Finish`, and
+releases the TLS lease before publishing its terminal result. A protocol whose
+transport is selected at runtime can instead embed one definite
+`Flyology.IO.TLS.Drivers.Capability`; the outer protocol operation owns the only
+completion-set slot and drives bounded handshake, receive, send, or shutdown
+steps itself. The standalone owner is not a route for extracting a socket from
+an admitted `Connections.Connection`.
 
 The limited owner cannot be copied and closes its socket while releasing the
 admission permit during explicit `Close`, normal scope exit, or exception
