@@ -384,7 +384,7 @@ memory-burst request           70     0       2  140.3 us     358.2 us
 wait-bound request             64     1       2   19.01 ms     64.03 ms</pre>
               </div>
             </figure>
-            <p>And the recorder refuses to borrow the runner's statistics, which is what keeps the whole thing coherent. Recorded percentiles describe individual spans, and the output marks that contract as <code>sample_semantics=individual_span</code>. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#5ba052e7e20ef2b82786892f0c697cf67542df68ec5230cc0475e794bd5fc3be"><code>Compare_Independent</code></a> resamples independently and is marked <code>comparison_design=independent</code>, because two separately observed distributions are not a paired design, and reusing the paired bootstrap on them would hand you a category error with a confidence interval attached.</p>
+            <p>And the recorder refuses to borrow the runner's statistics, which is what keeps the whole thing coherent. Recorded percentiles describe individual spans, and the output marks that contract as <code>sample_semantics=individual_span</code>. <a href="../../api/flyology_bench/eaf033f8054842a7c8df9742b97e72feaaaba12d026ff3cef307da26338831e4.html#ca49694723032b139c9bcac0606f64a19737943ea92989163dad73de9a858663"><code>Compare_Independent</code></a> resamples independently and is marked <code>comparison_design=independent</code>, because two separately observed distributions are not a paired design, and reusing the paired bootstrap on them would hand you a category error with a confidence interval attached.</p>
           </section>
 
           <section id="sum">
