@@ -1562,11 +1562,11 @@ the synchronous API. A caller declares one `Completion_Set` and limited
 operation objects that refer to it. Additive operation-producing overloads
 cover raw descriptor readiness, monotonic timers, raw stream and datagram
 socket operations, Internet and Unix-stream connection attempts and accepts,
-buffer-owning stream operations, high-level plaintext-or-TLS connection data
-operations, and completion-driven positional file reads and writes over aliased
-arrays or ownership-transferred unique buffers, plus nonrecursive and recursive
-file-watcher `Next`, standalone TLS handshake, receive, send, and shutdown, and
-retained task-result `Wait`.
+buffer-owning stream operations, managed Internet connection construction,
+high-level plaintext-or-TLS connection data operations, and completion-driven
+positional file reads and writes over aliased arrays or ownership-transferred
+unique buffers, plus nonrecursive and recursive file-watcher `Next`, standalone
+TLS handshake, receive, send, and shutdown, and retained task-result `Wait`.
 Instances of `Flyology.Channels.Bounded` likewise add operation-producing
 `Send` and `Receive` overloads without changing their protected entries or
 nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
@@ -2006,6 +2006,35 @@ the foundational public API for simple synchronous clients, datagrams, Unix
 sockets, custom socket setup, and protocol adapters that operate directly on a
 socket. Managed connections do not deprecate that layer.
 
+Use the operation-producing `Connections.Connect` overload when connection
+construction must join a `Completion_Set`. It retains the admission permit and
+temporary socket until typed `Finish` transfers both to a closed `Connection`.
+The operation does not borrow that target while it is pending, so the caller
+can select it at `Finish` time.
+
+```ada
+declare
+   Set : aliased Flyology.Operations.Completion_Set (2);
+   Attempt : Flyology.IO.Connections.Connect_Operation :=
+     Flyology.IO.Connections.Connect
+       (Set'Access,
+        Manager'Access,
+        Database_Endpoint,
+        Timeout => 5.0);
+begin
+   Flyology.Operations.Wait_All (Set);
+   Flyology.IO.Connections.Finish (Attempt, Client);
+end;
+```
+
+The parent and its hidden raw-socket child temporarily use two set slots while
+the kernel connects. Admission waiting and a retained terminal result use one.
+Cancellation, deadline expiry, manager shutdown, or abandoned operation scope
+drains the child before it closes the socket and releases admission. After
+`Finish`, a protocol operation can drive the public set-independent
+`Connections.Drivers.Capability` over the managed `Connection`; it does not
+need a second transport-driver mechanism.
+
 `Accept_Connection` acquires capacity before accepting from the listener, so
 overload remains in the kernel backlog instead of becoming an unbounded
 user-space task or socket queue. Its one monotonic `Timeout` covers both a
@@ -2136,7 +2165,8 @@ The raw I/O boundary represents these independent wake descriptors as an
 `Interrupt_Set` rather than fixed close/shutdown/token parameters. This keeps
 owner-specific policy in `Connections`, TLS, and other structured layers while
 allowing low-level callers to compose a bounded set of lifecycle sources. Raw
-waits observe set members for readability but never consume or close them.
+waits and scoped socket connection attempts observe set members for readability
+but never consume or close them.
 
 A raw wait borrows its descriptor rather than owning it, so another task may
 close that descriptor while a poller interest is still armed. The kernel then

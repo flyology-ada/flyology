@@ -19,7 +19,10 @@ package Flyology.IO.Connections.Testing is
       Before_HTTP_Client_DNS,
       Before_HTTP_Client_Connect,
       Close_Leadership_Taken,
-      Managed_Connect_Connected);
+      Managed_Connect_Connected,
+      Managed_Connect_Child_Started,
+      Managed_Connect_Child_Detached,
+      Raw_Scoped_Connect_Armed);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.

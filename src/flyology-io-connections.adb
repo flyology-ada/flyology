@@ -6,6 +6,7 @@ with Flyology.Operations.Drivers;
 with Flyology.Socket_Policy;
 with Flyology.Time_Math;
 with Interfaces.C;
+with System.Soft_Links;
 
 package body Flyology.IO.Connections is
    package Policy renames Flyology.Connection_Policy;
@@ -467,13 +468,21 @@ package body Flyology.IO.Connections is
          raise;
    end Release_Operation;
 
-   overriding procedure Finalize (Guard : in out Admission_Guard) is
+   procedure Release_Admission_Ownership
+     (Owner  : Server_Access;
+      Armed  : aliased in out Boolean;
+      Socket : in out Sockets.Socket_Type)
+   is
       Failure : Ada.Exceptions.Exception_Occurrence;
       Failed  : Boolean := False;
    begin
-      if Guard.Armed then
+      if Armed then
          begin
-            Guard.Owner.Release (Guard.Armed'Access);
+            if Owner = null then
+               raise Program_Error with
+                 "admission cleanup has no owning manager";
+            end if;
+            Owner.Release (Armed'Access);
          exception
             when Occurrence : others =>
                Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
@@ -483,9 +492,9 @@ package body Flyology.IO.Connections is
       --  Both obligations are attempted independently. Release clears Armed
       --  in the protected action before its fallible wake, and Close_Socket
       --  invalidates Socket even when close reports an error.
-      if Sockets.Is_Open (Guard.Socket) then
+      if Sockets.Is_Open (Socket) then
          begin
-            Sockets.Close_Socket (Guard.Socket);
+            Sockets.Close_Socket (Socket);
          exception
             when Occurrence : others =>
                if not Failed then
@@ -496,6 +505,21 @@ package body Flyology.IO.Connections is
       end if;
       if Failed then
          Ada.Exceptions.Reraise_Occurrence (Failure);
+      end if;
+   end Release_Admission_Ownership;
+
+   overriding procedure Finalize (Guard : in out Admission_Guard) is
+   begin
+      Release_Admission_Ownership
+        (Guard.Owner, Guard.Armed, Guard.Socket);
+   end Finalize;
+
+   overriding procedure Finalize (Item : in out Pending_Connect_Owner) is
+   begin
+      Release_Admission_Ownership
+        (Item.Manager, Item.Armed, Item.Socket);
+      if not Item.Armed and then not Sockets.Is_Open (Item.Socket) then
+         Item.Manager := null;
       end if;
    end Finalize;
 
@@ -844,7 +868,7 @@ package body Flyology.IO.Connections is
    --  Admitting it through any other Server would reinstate an unchecked
    --  borrow, so reject that before any permit is reserved.
    procedure Check_Binding
-     (Item    : Connection;
+     (Item    : Connection'Class;
       Manager : Server_Access) is
    begin
       if not Policy.Binding_Accepted
@@ -925,6 +949,435 @@ package body Flyology.IO.Connections is
          Guard.Owner,
          Guard.Armed'Access);
    end Connect;
+
+   procedure Complete_Managed_Connect
+     (Item    : in out Connect_Operation;
+      Result  : Flyology.Operations.Terminal_Outcome;
+      Failure : Connect_Failure := No_Connect_Failure)
+   is
+   begin
+      if Result /= Flyology.Operations.Succeeded then
+         begin
+            Release_Admission_Ownership
+              (Item.State.Resources.Manager,
+               Item.State.Resources.Armed,
+               Item.State.Resources.Socket);
+            Item.State.Resources.Manager := null;
+         exception
+            when others =>
+               if not Item.State.Resources.Armed
+                 and then not Sockets.Is_Open (Item.State.Resources.Socket)
+               then
+                  Item.State.Resources.Manager := null;
+               end if;
+               Item.State.Failure := Connect_Cleanup_Failure;
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Failed);
+               return;
+         end;
+      end if;
+      Item.State.Failure := Failure;
+      if Result = Flyology.Operations.Succeeded then
+         Item.State.Phase := Connection_Ready;
+      end if;
+      Flyology.Operations.Drivers.Complete (Item, Result);
+   end Complete_Managed_Connect;
+
+   procedure Arm_Admission_Sources
+     (Item       : in out Connect_Operation;
+      Acquire_FD : Descriptor)
+   is
+      Token_FD  : Descriptor := Invalid_Descriptor;
+      Cancelled : Boolean := False;
+   begin
+      if Item.State.Token = null then
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Item, Acquire_FD, For_Write => False);
+      else
+         Item.State.Token.Wait_Source (Token_FD, Cancelled);
+         if Cancelled then
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Cancelled);
+            return;
+         end if;
+         Flyology.Operations.Drivers.Arm_Readiness
+           (Item,
+            (1 => (Descriptor => Acquire_FD, For_Write => False),
+             2 => (Descriptor => Token_FD, For_Write => False)));
+      end if;
+   exception
+      when others =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+   end Arm_Admission_Sources;
+
+   procedure Start_Managed_Connect_Child
+     (Item : in out Connect_Operation)
+   is
+      Interrupts : Interrupt_Set (1 .. 2);
+      Count      : Natural;
+
+      procedure Cancel_Unlinked_Child is
+      begin
+         if Flyology.Operations.Is_Active (Item.State.Child) then
+            Flyology.Operations.Cancel (Item.State.Child);
+         end if;
+         if Flyology.Operations.Is_Terminal (Item.State.Child) then
+            begin
+               Sockets.Finish (Item.State.Child);
+            exception
+               when others =>
+                  null;
+            end;
+            if Flyology.Operations.Id (Item.State.Child) /= 0 then
+               Flyology.Operations.Release (Item.State.Child);
+            end if;
+         end if;
+         Item.State.Child_Live := False;
+      end Cancel_Unlinked_Child;
+   begin
+      Interrupt_Sources
+        (Item.State.Resources.Manager, Item.State.Token, Interrupts, Count);
+      Sockets.Create_Socket
+        (Item.State.Resources.Socket,
+         Family => Item.State.Destination.Family,
+         Mode   => Sockets.Socket_Stream);
+      Item.State.Phase := Waiting_For_Connect;
+
+      --  Starting the child and publishing its continuation relation form one
+      --  ownership transition. An abort before the relation is visible must
+      --  not leave either an unowned child or a parent with no wait source.
+      System.Soft_Links.Abort_Defer.all;
+      begin
+         Sockets.Connect
+           (Socket     => Item.State.Resources.Socket'Access,
+            Server     => Item.State.Destination,
+            Timeout    => Remaining (Item.State.Started, Item.State.Timeout),
+            Operation  => Item.State.Child,
+            Interrupts => Interrupts (1 .. Count));
+         Item.State.Child_Live := True;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         Test_Barrier (19);
+#end if;
+         Flyology.Operations.Continue_After (Item, Item.State.Child);
+      exception
+         when others =>
+            Cancel_Unlinked_Child;
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
+   exception
+      when Operation_Cancelled =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Cancelled);
+      when Flyology.Operations.Capacity_Error =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_Capacity_Failure);
+      when Sockets.Socket_Error =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
+      when others =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+   end Start_Managed_Connect_Child;
+
+   procedure Try_Managed_Admission
+     (Item : in out Connect_Operation)
+   is
+      Result      : Flyology.Capacity.Acquire_Result;
+      Acquire_FD  : Descriptor;
+      Can_Acquire : Boolean;
+   begin
+      Item.State.Resources.Manager.Try_Acquire
+        (Result, Item.State.Resources.Armed'Access);
+      case Result is
+         when Flyology.Capacity.Permit_Acquired =>
+            if Item.State.Resources.Manager.Shutdown_Requested
+              or else
+                (Item.State.Token /= null and then Item.State.Token.Requested)
+            then
+               Complete_Managed_Connect
+                 (Item, Flyology.Operations.Cancelled);
+            else
+               Start_Managed_Connect_Child (Item);
+            end if;
+         when Flyology.Capacity.Gate_Closed =>
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Failed, Admission_Failure);
+         when Flyology.Capacity.Gate_Full =>
+            Item.State.Resources.Manager.Acquire_Wait_Source
+              (Acquire_FD, Can_Acquire);
+            if Can_Acquire then
+               Flyology.Operations.Drivers.Reschedule (Item);
+            else
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+               Test_Barrier (9);
+#end if;
+               Arm_Admission_Sources (Item, Acquire_FD);
+            end if;
+         when Flyology.Capacity.Acquire_Timed_Out =>
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+      end case;
+   exception
+      when others =>
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+   end Try_Managed_Admission;
+
+   procedure Finish_Managed_Connect_Child
+     (Item : in out Connect_Operation)
+   is
+      Succeeded   : Boolean := False;
+      Interrupted : Boolean := False;
+      Timed_Out   : Boolean := False;
+      Socket_Failed : Boolean := False;
+   begin
+      --  Consuming the typed child detaches the parent's dependency; releasing
+      --  the slot and clearing Child_Live must therefore be abort-atomic with
+      --  that detach.
+      System.Soft_Links.Abort_Defer.all;
+      begin
+         begin
+            Sockets.Finish (Item.State.Child);
+            Succeeded := True;
+         exception
+            when Sockets.Operation_Interrupted =>
+               Interrupted := True;
+            when Timeout_Error =>
+               Timed_Out := True;
+            when Sockets.Socket_Error =>
+               Socket_Failed := True;
+            when others =>
+               null;
+         end;
+         Flyology.Operations.Release (Item.State.Child);
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+         Test_Barrier (20);
+#end if;
+         Item.State.Child_Live := False;
+      exception
+         when others =>
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
+#if FLYOLOGY_CONNECTION_TEST_HOOKS then
+      if Succeeded then
+         Test_Barrier (18);
+      end if;
+#end if;
+
+      if Item.State.Cancelling then
+         Complete_Managed_Connect
+           (Item,
+            (if Item.State.Timed_Out
+             then Flyology.Operations.Failed
+             else Flyology.Operations.Cancelled),
+            (if Item.State.Timed_Out
+             then Connect_Timeout_Failure
+             else No_Connect_Failure));
+      elsif Interrupted
+        or else Item.State.Resources.Manager.Shutdown_Requested
+        or else
+          (Item.State.Token /= null and then Item.State.Token.Requested)
+      then
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Cancelled);
+      elsif Timed_Out then
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
+      elsif Socket_Failed then
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_Socket_Failure);
+      elsif Succeeded then
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Succeeded);
+      else
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+      end if;
+   exception
+      when others =>
+         Item.State.Child_Live := False;
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+   end Finish_Managed_Connect_Child;
+
+   overriding procedure Drive
+     (Item  : in out Connect_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      if Event = Flyology.Operations.Deadline_Reached then
+         Item.State.Cancelling := True;
+         Item.State.Timed_Out := True;
+         if Item.State.Child_Live then
+            Flyology.Operations.Cancel (Item.State.Child);
+         else
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Failed, Connect_Timeout_Failure);
+         end if;
+      elsif Event = Flyology.Operations.Dependency_Changed
+        and then Item.State.Child_Live
+      then
+         Finish_Managed_Connect_Child (Item);
+      elsif Item.State.Phase = Waiting_For_Admission
+        and then Event in
+          Flyology.Operations.Start_Operation |
+          Flyology.Operations.Source_Ready |
+          Flyology.Operations.Continue_Operation
+      then
+         Try_Managed_Admission (Item);
+      else
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Failed, Connect_State_Failure);
+      end if;
+   exception
+      when others =>
+         if Item.State.Child_Live then
+            Item.State.Cancelling := True;
+            Flyology.Operations.Cancel (Item.State.Child);
+         else
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         end if;
+   end Drive;
+
+   overriding procedure Request_Cancellation
+     (Item : in out Connect_Operation)
+   is
+   begin
+      Item.State.Cancelling := True;
+      if Item.State.Child_Live then
+         Flyology.Operations.Cancel (Item.State.Child);
+      else
+         Complete_Managed_Connect
+           (Item, Flyology.Operations.Cancelled);
+      end if;
+   exception
+      when others =>
+         if not Item.State.Child_Live then
+            Complete_Managed_Connect
+              (Item, Flyology.Operations.Failed, Connect_State_Failure);
+         end if;
+   end Request_Cancellation;
+
+   procedure Start_Scoped_Managed_Connect
+     (Operation : in out Connect_Operation;
+      Manager   : not null access Server;
+      Server    : Sockets.Endpoint;
+      Timeout   : Duration;
+      Token     : access Cancellation_Token)
+   is
+   begin
+      if Operation.State.Resources.Armed
+        or else Sockets.Is_Open (Operation.State.Resources.Socket)
+        or else Operation.State.Child_Live
+      then
+         raise Flyology.Operations.Operation_Error with
+           "managed connect operation still owns resources";
+      end if;
+      Operation.State.Resources.Manager := Manager.all'Unchecked_Access;
+      Operation.State.Token :=
+        (if Token = null then null else Token.all'Unchecked_Access);
+      Operation.State.Destination := Server;
+      Operation.State.Started := Ada.Real_Time.Clock;
+      Operation.State.Timeout := Timeout;
+      Operation.State.Phase := Waiting_For_Admission;
+      Operation.State.Child_Live := False;
+      Operation.State.Cancelling := False;
+      Operation.State.Timed_Out := False;
+      Operation.State.Failure := No_Connect_Failure;
+      Flyology.Operations.Drivers.Start (Operation);
+      if Timeout >= 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
+      end if;
+      Flyology.Operations.Drive
+        (Flyology.Operations.Operation'Class (Operation),
+         Flyology.Operations.Start_Operation);
+   exception
+      when others =>
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Cancel (Operation);
+         end if;
+         if Flyology.Operations.Is_Terminal (Operation) then
+            Flyology.Operations.Consume (Operation);
+         end if;
+         raise;
+   end Start_Scoped_Managed_Connect;
+
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Manager : not null access Server;
+      Server  : Sockets.Endpoint;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null) return Connect_Operation
+   is
+   begin
+      return Result : Connect_Operation (Set) do
+         Start_Scoped_Managed_Connect
+           (Result, Manager, Server, Timeout, Token);
+      end return;
+   end Connect;
+
+   procedure Connect
+     (Manager   : not null access Server;
+      Server    : Sockets.Endpoint;
+      Timeout   : Duration := Infinite;
+      Token     : access Cancellation_Token := null;
+      Operation : in out Connect_Operation)
+   is
+   begin
+      Start_Scoped_Managed_Connect
+        (Operation, Manager, Server, Timeout, Token);
+   end Connect;
+
+   procedure Finish
+     (Operation : in out Connect_Operation;
+      Item      : in out Connection'Class)
+   is
+      Result : constant Flyology.Operations.Terminal_Outcome :=
+        Flyology.Operations.Outcome (Operation);
+      Failure : constant Connect_Failure := Operation.State.Failure;
+   begin
+      if Result = Flyology.Operations.Succeeded then
+         Check_Binding (Item, Operation.State.Resources.Manager);
+         if Is_Open (Item) then
+            raise Program_Error with "connection target is open";
+         end if;
+         Item.Controller.Adopt
+           (Sockets.Native_Descriptor (Operation.State.Resources.Socket),
+            Operation.State.Resources.Socket,
+            Operation.State.Resources.Manager,
+            Operation.State.Resources.Armed'Access);
+         Operation.State.Resources.Manager := null;
+         Flyology.Operations.Consume (Operation);
+         return;
+      end if;
+
+      Flyology.Operations.Consume (Operation);
+      if Result = Flyology.Operations.Cancelled then
+         raise Operation_Cancelled;
+      end if;
+      case Failure is
+         when Admission_Failure =>
+            raise Admission_Closed;
+         when Connect_Timeout_Failure =>
+            raise Timeout_Error with "managed connection attempt timed out";
+         when Connect_Socket_Failure =>
+            raise Sockets.Socket_Error with
+              "managed connection socket attempt failed";
+         when Connect_Capacity_Failure =>
+            raise Flyology.Operations.Capacity_Error with
+              "managed connection requires a child operation slot";
+         when Connect_Cleanup_Failure =>
+            raise Program_Error with "managed connection cleanup failed";
+         when Connect_State_Failure | No_Connect_Failure =>
+            raise Program_Error with "managed connection operation failed";
+      end case;
+   end Finish;
 
    procedure Upgrade_TLS
      (Item        : in out Connection;

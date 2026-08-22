@@ -116,6 +116,80 @@ package Flyology.IO.Connections is
       Timeout : Duration := Infinite;
       Token   : access Cancellation_Token := null);
 
+   --  Opaque build-in-place storage for a managed connect's child operation.
+   --  @exclude
+   --  @field Owner Completion set shared with the child operation
+   type Connect_Operation_State
+     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+     limited private;
+
+   --  Scoped managed connection construction. The operation reserves one
+   --  Manager permit, owns its temporary socket, and composes the raw socket
+   --  connection attempt as a hidden child. It does not borrow a Connection;
+   --  typed Finish transfers both resources into a caller-selected closed
+   --  target. Manager and Token must outlive the operation.
+   --
+   --  The parent and its hidden child temporarily consume two completion-set
+   --  slots while the socket is connecting. Admission waiting and a retained
+   --  successful result consume only the parent's slot.
+   --  @field Owner Completion set that owns the parent and hidden child slots
+   --  @field State Opaque build-in-place child and ownership storage
+   type Connect_Operation
+     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+     new Flyology.Operations.Operation (Owner) with record
+      State : Connect_Operation_State (Owner);
+   end record;
+
+   --  Start one managed connection without suspending the owner task.
+   --  @param Set Completion set with room for the parent and hidden child
+   --  @param Manager Admission controller that outlives the operation
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Shared admission-and-connect deadline in seconds
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @return Started limited managed connect operation
+   function Connect
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Manager : not null access Server;
+      Server  : Flyology.IO.Sockets.Endpoint;
+      Timeout : Duration := Infinite;
+      Token   : access Cancellation_Token := null) return Connect_Operation;
+
+   --  Start or restart managed connection construction in an established
+   --  operation object.
+   --  @param Manager Admission controller that outlives the operation
+   --  @param Server Destination endpoint copied into the operation
+   --  @param Timeout Shared admission-and-connect deadline in seconds
+   --  @param Token Optional cancellation source that outlives the operation
+   --  @param Operation Fresh, released, or consumed managed connect operation
+   procedure Connect
+     (Manager   : not null access Server;
+      Server    : Flyology.IO.Sockets.Endpoint;
+      Timeout   : Duration := Infinite;
+      Token     : access Cancellation_Token := null;
+      Operation : in out Connect_Operation)
+     with Pre =>
+       not Flyology.Operations.Is_Active (Operation)
+       and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal managed connect. On success, transfer the operation's
+   --  socket and permit to Item. A mismatched or open Item raises
+   --  Program_Error
+   --  without consuming the result, so Finish can be retried with a valid
+   --  target. Failed and cancelled outcomes leave Item unchanged.
+   --  @param Operation Terminal managed connection attempt
+   --  @param Item Closed Connection that is unbound or bound to Manager
+   --  @exception Admission_Closed Manager closed before admission
+   --  @exception Operation_Cancelled Explicit cancellation, Token, or Manager
+   --     shutdown interrupted an admitted attempt
+   --  @exception Timeout_Error The shared deadline expired
+   --  @exception Socket_Error Socket creation or connection failed
+   --  @exception Capacity_Error Completion-set child capacity was unavailable
+   --  @exception Program_Error Item is open or bound to another Manager, or
+   --     cleanup failed
+   procedure Finish
+     (Operation : in out Connect_Operation;
+      Item      : in out Connection'Class);
+
    --  Acquire capacity before accepting, so a full Manager backpressures the
    --  listening socket. Transient aborted admissions are retried; descriptor
    --  exhaustion uses interruptible bounded backoff. One Timeout deadline
@@ -513,6 +587,57 @@ private
    type Constant_Stream_Array_Access is
      access constant Ada.Streams.Stream_Element_Array;
    type Cancellation_Access is access all Cancellation_Token;
+
+   type Pending_Connect_Owner is
+     new Ada.Finalization.Limited_Controlled with record
+      Manager : Server_Access := null;
+      Armed   : aliased Boolean := False;
+      Socket  : aliased Flyology.IO.Sockets.Socket_Type;
+   end record;
+
+   --  @exclude
+   --  @param Item Pending socket and admission owner to release
+   overriding procedure Finalize (Item : in out Pending_Connect_Owner);
+
+   type Connect_Phase is
+     (Waiting_For_Admission, Waiting_For_Connect, Connection_Ready);
+   type Connect_Failure is
+     (No_Connect_Failure,
+      Admission_Failure,
+      Connect_Timeout_Failure,
+      Connect_Socket_Failure,
+      Connect_Capacity_Failure,
+      Connect_State_Failure,
+      Connect_Cleanup_Failure);
+
+   type Connect_Operation_State
+     (Owner : not null access Flyology.Operations.Completion_Set'Class) is
+     limited record
+      Resources   : Pending_Connect_Owner;
+      Child       : Flyology.IO.Sockets.Connect_Operation (Owner);
+      Token       : Cancellation_Access := null;
+      Destination : Flyology.IO.Sockets.Endpoint :=
+        Flyology.IO.Sockets.No_Endpoint;
+      Started     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Timeout     : Duration := Infinite;
+      Phase       : Connect_Phase := Waiting_For_Admission;
+      Child_Live  : Boolean := False;
+      Cancelling  : Boolean := False;
+      Timed_Out   : Boolean := False;
+      Failure     : Connect_Failure := No_Connect_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Managed connect operation to advance
+   --  @param Event Driver event to process
+   overriding procedure Drive
+     (Item  : in out Connect_Operation;
+      Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Managed connect operation to cancel and drain
+   overriding procedure Request_Cancellation
+     (Item : in out Connect_Operation);
 
    --  @exclude
    --  @param Guard Active lease cleanup scope
