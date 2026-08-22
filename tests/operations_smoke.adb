@@ -12,6 +12,7 @@ with Flyology.IO.Sockets;
 with Flyology.IO.Timers;
 with Flyology.Operations;
 with Flyology.Task_Results;
+with Flyology.Wake_Sources;
 with Interfaces.C;
 
 procedure Operations_Smoke is
@@ -915,6 +916,64 @@ procedure Operations_Smoke is
                   Timed_Out := True;
             end;
             Passed := Passed and then Timed_Out;
+         end;
+
+         --  A source that is already pending terminalizes the root without
+         --  waiting for UDP readiness.
+         declare
+            Wake        : Flyology.Wake_Sources.Source;
+            Set         : aliased Flyology.Operations.Completion_Set (1);
+            Input       : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Last        : Ada.Streams.Stream_Element_Offset;
+            Metadata    : Flyology.IO.Sockets.Datagram_Metadata;
+            Interrupted : Boolean := False;
+         begin
+            Flyology.Wake_Sources.Ensure (Wake);
+            Flyology.Wake_Sources.Signal (Wake);
+            declare
+               Receive : Flyology.IO.Sockets.Receive_Datagram_Operation :=
+                 Flyology.IO.Sockets.Receive_Datagram
+                   (Set'Access,
+                    Server'Access,
+                    Input'Access,
+                    1.0,
+                    (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+            begin
+               begin
+                  Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+               exception
+                  when Flyology.IO.Sockets.Operation_Interrupted =>
+                     Interrupted := True;
+               end;
+            end;
+            Flyology.Wake_Sources.Consume (Wake);
+            Passed := Passed and then Interrupted;
+         end;
+
+         --  A source signalled after the established operation arms UDP and
+         --  interrupt readiness wakes the same owner operation.
+         declare
+            Wake        : Flyology.Wake_Sources.Source;
+            Set         : aliased Flyology.Operations.Completion_Set (1);
+            Input       : aliased Ada.Streams.Stream_Element_Array := [1 => 0];
+            Receive     : Flyology.IO.Sockets.Receive_Datagram_Operation (Set'Access);
+            Last        : Ada.Streams.Stream_Element_Offset;
+            Metadata    : Flyology.IO.Sockets.Datagram_Metadata;
+            Interrupted : Boolean := False;
+         begin
+            Flyology.Wake_Sources.Ensure (Wake);
+            Flyology.IO.Sockets.Receive_Datagram
+              (Server'Access, Input'Access, 1.0, Receive, (1 => Flyology.Wake_Sources.Descriptor (Wake)));
+            Flyology.Wake_Sources.Signal (Wake);
+            Flyology.Operations.Wait_All (Set);
+            begin
+               Flyology.IO.Sockets.Finish (Receive, Last, Metadata);
+            exception
+               when Flyology.IO.Sockets.Operation_Interrupted =>
+                  Interrupted := True;
+            end;
+            Flyology.Wake_Sources.Consume (Wake);
+            Passed := Passed and then Interrupted;
          end;
 
          declare

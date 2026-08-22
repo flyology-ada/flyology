@@ -708,12 +708,15 @@ package Flyology.IO.Sockets is
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased destination buffer
    --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    --  @return Started limited receive operation
    function Receive
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Operation;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Operation
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart a receive in an established operation object. This
    --  form lets a higher-level provider retain the child as a record component
@@ -722,11 +725,14 @@ package Flyology.IO.Sockets is
    --  @param Item Aliased destination buffer
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh, released, or consumed receive operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    procedure Receive
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Operation);
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start a nonblocking operation that fills Item. The operation rearms
    --  read readiness after partial progress.
@@ -734,23 +740,29 @@ package Flyology.IO.Sockets is
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased destination buffer to fill
    --  @param Timeout Shared relative deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    --  @return Started limited exact-receive operation
    function Receive_Exactly
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Exactly_Operation;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Exactly_Operation
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart an exact receive in an established operation object.
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased destination buffer to fill
    --  @param Timeout Shared relative deadline in seconds
    --  @param Operation Fresh, released, or consumed exact-receive operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    procedure Receive_Exactly
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Exactly_Operation);
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Exactly_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one nonblocking partial send operation. Item is read-only while
    --  borrowed even though its access value designates a variable array.
@@ -758,46 +770,58 @@ package Flyology.IO.Sockets is
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased source buffer
    --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    --  @return Started limited send operation
    function Send
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Send_Operation;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Send_Operation
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart a partial send in an established operation object.
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased source buffer
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh, released, or consumed send operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    procedure Send
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Send_Operation);
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Send_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start a nonblocking operation that sends all of Item.
    --  @param Set Completion set that owns the operation slot
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased source buffer
    --  @param Timeout Shared relative deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    --  @return Started limited complete-send operation
    function Send_All
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Send_All_Operation;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Send_All_Operation
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart a complete send in an established operation object.
    --  @param Socket Aliased open connected socket
    --  @param Item Aliased source buffer
    --  @param Timeout Shared relative deadline in seconds
    --  @param Operation Fresh, released, or consumed complete-send operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    procedure Send_All
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Send_All_Operation);
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Send_All_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one receive into an acquired unique buffer. The driver enters the
    --  buffer's writable callback only for each immediate socket step and does
@@ -883,23 +907,29 @@ package Flyology.IO.Sockets is
    --  @param Socket Aliased open datagram socket
    --  @param Item Aliased destination buffer
    --  @param Timeout Relative operation deadline in seconds
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    --  @return Started limited datagram receive operation
    function Receive_Datagram
-     (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Socket  : not null access Socket_Type;
-      Item    : not null access Ada.Streams.Stream_Element_Array;
-      Timeout : Duration := Infinite) return Receive_Datagram_Operation;
+     (Set        : not null access Flyology.Operations.Completion_Set'Class;
+      Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Interrupts : Interrupt_Set := No_Interrupts) return Receive_Datagram_Operation
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start or restart one datagram receive in an established operation.
    --  @param Socket Aliased open datagram socket
    --  @param Item Aliased destination buffer
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh, released, or consumed receive operation
+   --  @param Interrupts Readable lifecycle sources borrowed through completion
    procedure Receive_Datagram
-     (Socket    : not null access Socket_Type;
-      Item      : not null access Ada.Streams.Stream_Element_Array;
-      Timeout   : Duration := Infinite;
-      Operation : in out Receive_Datagram_Operation);
+     (Socket     : not null access Socket_Type;
+      Item       : not null access Ada.Streams.Stream_Element_Array;
+      Timeout    : Duration := Infinite;
+      Operation  : in out Receive_Datagram_Operation;
+      Interrupts : Interrupt_Set := No_Interrupts)
+   with Pre => Interrupts'Length < Flyology.Operations.Max_Readiness_Sources_Per_Operation;
 
    --  Start one datagram send using the kernel-selected local source.
    --  Socket and Item remain borrowed until Finish.
@@ -1239,19 +1269,23 @@ private
       Socket_Failure,
       Deadline_Failure,
       Interrupted_Failure,
+      Device_Failure,
       Peer_Closed_Failure,
       No_Progress_Failure,
       Partial_Datagram_Failure);
 
    type Socket_Operation is abstract new Flyology.Operations.Operation with record
-      Kind        : Scoped_IO_Kind := Receive_One;
-      Socket      : access Socket_Type := null;
-      Array_Item  : access Ada.Streams.Stream_Element_Array := null;
-      Buffer_Item : access Flyology.Buffers.Unique_Buffer := null;
-      Cursor      : Ada.Streams.Stream_Element_Offset := 1;
-      Transferred : Natural := 0;
-      Error_Code  : Interfaces.C.int := 0;
-      Failure     : Scoped_Failure := No_Failure;
+      Kind            : Scoped_IO_Kind := Receive_One;
+      Socket          : access Socket_Type := null;
+      Array_Item      : access Ada.Streams.Stream_Element_Array := null;
+      Buffer_Item     : access Flyology.Buffers.Unique_Buffer := null;
+      Cursor          : Ada.Streams.Stream_Element_Offset := 1;
+      Transferred     : Natural := 0;
+      Error_Code      : Interfaces.C.int := 0;
+      Failure         : Scoped_Failure := No_Failure;
+      Interrupts      : Interrupt_Set (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
+        (others => Invalid_Descriptor);
+      Interrupt_Count : Natural range 0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
    end record;
 
    --  @exclude
@@ -1289,9 +1323,6 @@ private
    type Connect_Operation is new Socket_Operation with record
       Destination      : Endpoint := No_Endpoint;
       Unix_Destination : Unix_Path;
-      Interrupts       : Interrupt_Set (1 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1) :=
-        (others => Invalid_Descriptor);
-      Interrupt_Count  : Natural range 0 .. Flyology.Operations.Max_Readiness_Sources_Per_Operation - 1 := 0;
       Started          : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Timeout          : Duration := Infinite;
       Retry_Due        : Boolean := False;

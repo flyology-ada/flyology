@@ -171,6 +171,46 @@ package body Flyology.IO.Connections.Drivers is
       Flyology.Operations.Drivers.Arm_Readiness (Operation, Sources (1 .. Count));
    end Arm_Transport;
 
+   procedure Arm_Transport
+     (IO        : in out Capability;
+      Operation : in out Flyology.Operations.Operation'Class;
+      Required  : Step_Result;
+      Outbound  : in out Outbound_Wakeup)
+   is
+      Interrupts      : Interrupt_Set (1 .. 2);
+      Interrupt_Count : Natural;
+      Sources         : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 5);
+      Count           : Natural := 3;
+      Outbound_FD     : Descriptor;
+      Already_Pending : Boolean;
+   begin
+      if IO.Item = null or else IO.Guard.State /= Acquired then
+         raise Program_Error with "connection capability is not acquired";
+      elsif Required not in Need_Read | Need_Write then
+         raise Program_Error with "transport arming requires Need_Read or Need_Write";
+      end if;
+
+      Outbound.Controller.Wait_Source (Outbound_FD, Already_Pending);
+      if Already_Pending then
+         --  Consume before rescheduling so the resumed protocol owner cannot
+         --  spin on a stale signal. It must observe every currently published
+         --  output item before it calls Arm_Transport again.
+         Outbound.Controller.Consume;
+         Flyology.Operations.Drivers.Reschedule (Operation);
+         return;
+      end if;
+
+      Sources (1) := (Descriptor => IO.FD, For_Write => Required = Need_Write);
+      Sources (2) := (Descriptor => Outbound_FD, For_Write => False);
+      Sources (3) := (Descriptor => IO.Close_Source, For_Write => False);
+      Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Interrupt_Count);
+      for Index in 1 .. Interrupt_Count loop
+         Count := Count + 1;
+         Sources (Count) := (Descriptor => Interrupts (Index), For_Write => False);
+      end loop;
+      Flyology.Operations.Drivers.Arm_Readiness (Operation, Sources (1 .. Count));
+   end Arm_Transport;
+
    procedure Arm_Deadline (IO : in out Capability; Operation : in out Flyology.Operations.Operation'Class) is
    begin
       if not Is_Engaged (IO) then
