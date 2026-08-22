@@ -22,9 +22,17 @@ is
      (Numerator / Denominator);
 
    function Time_Change (Speedup : Long_Float) return Long_Float is
-     (if Speedup >= 1.0
-      then -100.0 * (1.0 - 1.0 / Speedup)
-      else 100.0 / Speedup - 100.0);
+      Result : Long_Float;
+   begin
+      if Speedup >= 1.0 then
+         Result := -100.0 * (1.0 - 1.0 / Speedup);
+         pragma Assert (Result >= -100.0);
+      else
+         Result := 100.0 / Speedup - 100.0;
+         pragma Assert (Result <= Maximum_Time_Change);
+      end if;
+      return Result;
+   end Time_Change;
 
    function Interpolate
      (Low, High, Weight : Long_Float) return Long_Float is
