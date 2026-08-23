@@ -77,6 +77,7 @@ based on the surviving correspondence.
 - [Portability boundaries](#portability-boundaries)
 - [Repository layout](#repository-layout)
 - [Use as an Alire dependency](#use-as-an-alire-dependency)
+- [Agent setup](#agent-setup)
 - [Build and test](#build-and-test)
   - [AddressSanitizer builds](#addresssanitizer-builds)
   - [CI and releases](#ci-and-releases)
@@ -3357,6 +3358,27 @@ pin:
 alr with flyology --use /path/to/flyology
 alr build
 ```
+
+## Agent setup
+
+Flyology provisions its shared agent instructions and skills through
+[APM](https://microsoft.github.io/apm/). Install the validated APM release and
+the exact dependency revision recorded in `apm.lock.yaml`, then generate
+resources for Codex and Claude:
+
+```sh
+curl -sSL https://aka.ms/apm-unix | sh -s -- @v0.28.0
+apm --version
+
+apm install --frozen
+apm compile --target codex
+```
+
+The generated `AGENTS.md` files remain committed so Codex can use the repository
+without a setup step. Claude-specific rules and both clients' installed skill
+directories are generated locally from the same package graph. Flyology's
+repository and nested-scope rules are local packages under `agent-packages/`;
+only general instructions and skills come from `flyology-ada/agents`.
 
 ## Build and test
 
