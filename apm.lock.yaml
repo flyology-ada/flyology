@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-23T17:51:53.496465+00:00'
+generated_at: '2026-08-23T19:39:04.056297+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/flyology-allocators
@@ -45,7 +45,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/profiles/ada-library
@@ -55,7 +55,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-interface-values
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-interface-values
@@ -71,7 +71,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-source-style
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-source-style
@@ -87,7 +87,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-decision-authority
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/decision-authority
@@ -103,7 +103,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-problem-solution-commits
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/problem-solution-commits
@@ -119,7 +119,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-repository-workflow
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/repository-workflow
@@ -135,7 +135,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-review-cycle
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/review-cycle
@@ -151,7 +151,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-skills
   host: github.com
-  resolved_commit: 1b5f7ec32a8672a92dfe658b62faa2ec98d1abb8
+  resolved_commit: 1c3a5d617152c91be3ad411fadb62ef68a93dbac
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/skills
@@ -191,6 +191,10 @@ dependencies:
   - .agents/skills/alire/references/raspberry-pi-pico.md
   - .agents/skills/alire/references/testing.md
   - .agents/skills/alire/references/zephyr.md
+  - .agents/skills/flyology-crate-spinout
+  - .agents/skills/flyology-crate-spinout/SKILL.md
+  - .agents/skills/flyology-crate-spinout/references/repository-decision.md
+  - .agents/skills/flyology-crate-spinout/references/spinout-execution.md
   - .agents/skills/flyology-website-content
   - .agents/skills/flyology-website-content/SKILL.md
   - .agents/skills/gnatdoc
@@ -271,6 +275,10 @@ dependencies:
   - .claude/skills/alire/references/raspberry-pi-pico.md
   - .claude/skills/alire/references/testing.md
   - .claude/skills/alire/references/zephyr.md
+  - .claude/skills/flyology-crate-spinout
+  - .claude/skills/flyology-crate-spinout/SKILL.md
+  - .claude/skills/flyology-crate-spinout/references/repository-decision.md
+  - .claude/skills/flyology-crate-spinout/references/spinout-execution.md
   - .claude/skills/flyology-website-content
   - .claude/skills/flyology-website-content/SKILL.md
   - .claude/skills/gnatdoc
@@ -324,7 +332,7 @@ dependencies:
     .agents/skills/ada-api-contract-review/SKILL.md: sha256:ee95c75b0cd67f94ffc0644e48f4a904c3c5f801ccd9a4346b14366b8921994d
     .agents/skills/ada-concurrency-ownership-review/SKILL.md: sha256:f10c924e5fd3975b7aadaec91b7e736ff6ad562151ade8c828f84038e7747d6f
     .agents/skills/ada-generated-source-review/SKILL.md: sha256:d0b609df71c5dd9540952107ffb6ac99d5b3fb1532a3b795d11f771ac2198ff9
-    .agents/skills/ada-hardcoded-constants/SKILL.md: sha256:2a094c6b082286bf67df3fd7379eaffeda8c7936f274e05ee2e56f922b72e983
+    .agents/skills/ada-hardcoded-constants/SKILL.md: sha256:e4732330c0821d017c435c74c18b725c83d5b88687842861a2cc1868dc1e9775
     .agents/skills/ada-native-boundary-review/SKILL.md: sha256:e8a8702e3d79daa7bcf67f1832c50be0694f8990858685c40cccd23d11a3b282
     .agents/skills/ada-portability-review/SKILL.md: sha256:b2f9f2b7d5c2cbdb5164a57d7ec22f3d7a38357745a5f15f61e66155f0806da5
     .agents/skills/alire-release-review/SKILL.md: sha256:c073af08522f6e3f287e0a008f7be8acb8d6225484327ce2829503a98fe8f6d6
@@ -344,6 +352,9 @@ dependencies:
     .agents/skills/alire/references/raspberry-pi-pico.md: sha256:f47c5514b09e591581a1cfea7c517c074e707d94d9e9e799e106a0a77722dab9
     .agents/skills/alire/references/testing.md: sha256:da30b1e2fbd15823dd206c1d77f47bb3780b8753593bc6c0e954b772c43a51b8
     .agents/skills/alire/references/zephyr.md: sha256:c9017496759fe5e5a672c0a79dc0dbb18393ba94728f8606482382ea90dba75e
+    .agents/skills/flyology-crate-spinout/SKILL.md: sha256:c703a30046dc69934e6592bb8875fed8e2ebe74ddd7d0f4cd5de84ba0d6ce938
+    .agents/skills/flyology-crate-spinout/references/repository-decision.md: sha256:36b54c6fc01a9ab4535d2d3376a8bc969183d18c71d99e7174ec49e9641f3329
+    .agents/skills/flyology-crate-spinout/references/spinout-execution.md: sha256:814fb2c05571651d40e3e7c82310d42709ac0c362cebe9216c699e550537400e
     .agents/skills/flyology-website-content/SKILL.md: sha256:d06ab4b5b5128de1af10e5adaaed72134100641750caf19562672feb4a2ee921
     .agents/skills/gnatdoc/SKILL.md: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
     .agents/skills/gnatdoc/references/annotations.md: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
@@ -391,7 +402,7 @@ dependencies:
     .claude/skills/ada-api-contract-review/SKILL.md: sha256:ee95c75b0cd67f94ffc0644e48f4a904c3c5f801ccd9a4346b14366b8921994d
     .claude/skills/ada-concurrency-ownership-review/SKILL.md: sha256:f10c924e5fd3975b7aadaec91b7e736ff6ad562151ade8c828f84038e7747d6f
     .claude/skills/ada-generated-source-review/SKILL.md: sha256:d0b609df71c5dd9540952107ffb6ac99d5b3fb1532a3b795d11f771ac2198ff9
-    .claude/skills/ada-hardcoded-constants/SKILL.md: sha256:2a094c6b082286bf67df3fd7379eaffeda8c7936f274e05ee2e56f922b72e983
+    .claude/skills/ada-hardcoded-constants/SKILL.md: sha256:e4732330c0821d017c435c74c18b725c83d5b88687842861a2cc1868dc1e9775
     .claude/skills/ada-native-boundary-review/SKILL.md: sha256:e8a8702e3d79daa7bcf67f1832c50be0694f8990858685c40cccd23d11a3b282
     .claude/skills/ada-portability-review/SKILL.md: sha256:b2f9f2b7d5c2cbdb5164a57d7ec22f3d7a38357745a5f15f61e66155f0806da5
     .claude/skills/alire-release-review/SKILL.md: sha256:c073af08522f6e3f287e0a008f7be8acb8d6225484327ce2829503a98fe8f6d6
@@ -411,6 +422,9 @@ dependencies:
     .claude/skills/alire/references/raspberry-pi-pico.md: sha256:f47c5514b09e591581a1cfea7c517c074e707d94d9e9e799e106a0a77722dab9
     .claude/skills/alire/references/testing.md: sha256:da30b1e2fbd15823dd206c1d77f47bb3780b8753593bc6c0e954b772c43a51b8
     .claude/skills/alire/references/zephyr.md: sha256:c9017496759fe5e5a672c0a79dc0dbb18393ba94728f8606482382ea90dba75e
+    .claude/skills/flyology-crate-spinout/SKILL.md: sha256:c703a30046dc69934e6592bb8875fed8e2ebe74ddd7d0f4cd5de84ba0d6ce938
+    .claude/skills/flyology-crate-spinout/references/repository-decision.md: sha256:36b54c6fc01a9ab4535d2d3376a8bc969183d18c71d99e7174ec49e9641f3329
+    .claude/skills/flyology-crate-spinout/references/spinout-execution.md: sha256:814fb2c05571651d40e3e7c82310d42709ac0c362cebe9216c699e550537400e
     .claude/skills/flyology-website-content/SKILL.md: sha256:d06ab4b5b5128de1af10e5adaaed72134100641750caf19562672feb4a2ee921
     .claude/skills/gnatdoc/SKILL.md: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
     .claude/skills/gnatdoc/references/annotations.md: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
@@ -455,7 +469,7 @@ dependencies:
     .claude/skills/gnattest/references/test-skeletons.md: sha256:baaaf48c32a9dbdd712db7c41848822aa78cf4aa42e807dd04596b4f546342ec
     .claude/skills/gnattest/references/workflow.md: sha256:fe94afe889db7c6476838b4d688962d4c2742c16d6877e813b7eea0817ca6554
     .claude/skills/maintain-agent-instructions/SKILL.md: sha256:688c9f6c4a116826878602c825f360b2dee03fb95232a07923c4def90af77301
-  content_hash: sha256:53c9d0d9da411ca62311f30f33de7404ff66a95351a5627716371a5acc366fc9
+  content_hash: sha256:e4ec337d17860c83db51445108fcdf9040e00f7d61ee46414e196df2a3c09ff0
 deployments:
 - kind: project-relative
   target: claude
@@ -618,7 +632,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:2a094c6b082286bf67df3fd7379eaffeda8c7936f274e05ee2e56f922b72e983
+  content_hash: sha256:e4732330c0821d017c435c74c18b725c83d5b88687842861a2cc1868dc1e9775
 - kind: project-relative
   target: claude
   value: .claude/skills/ada-native-boundary-review
@@ -826,6 +840,42 @@ deployments:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
   content_hash: sha256:c9017496759fe5e5a672c0a79dc0dbb18393ba94728f8606482382ea90dba75e
+- kind: project-relative
+  target: claude
+  value: .claude/skills/flyology-crate-spinout
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/flyology-crate-spinout/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:c703a30046dc69934e6592bb8875fed8e2ebe74ddd7d0f4cd5de84ba0d6ce938
+- kind: project-relative
+  target: claude
+  value: .claude/skills/flyology-crate-spinout/references/repository-decision.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:36b54c6fc01a9ab4535d2d3376a8bc969183d18c71d99e7174ec49e9641f3329
+- kind: project-relative
+  target: claude
+  value: .claude/skills/flyology-crate-spinout/references/spinout-execution.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:814fb2c05571651d40e3e7c82310d42709ac0c362cebe9216c699e550537400e
 - kind: project-relative
   target: claude
   value: .claude/skills/flyology-website-content
@@ -1338,7 +1388,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:2a094c6b082286bf67df3fd7379eaffeda8c7936f274e05ee2e56f922b72e983
+  content_hash: sha256:e4732330c0821d017c435c74c18b725c83d5b88687842861a2cc1868dc1e9775
 - kind: project-relative
   target: codex
   value: .agents/skills/ada-native-boundary-review
@@ -1546,6 +1596,42 @@ deployments:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
   content_hash: sha256:c9017496759fe5e5a672c0a79dc0dbb18393ba94728f8606482382ea90dba75e
+- kind: project-relative
+  target: codex
+  value: .agents/skills/flyology-crate-spinout
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/flyology-crate-spinout/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:c703a30046dc69934e6592bb8875fed8e2ebe74ddd7d0f4cd5de84ba0d6ce938
+- kind: project-relative
+  target: codex
+  value: .agents/skills/flyology-crate-spinout/references/repository-decision.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:36b54c6fc01a9ab4535d2d3376a8bc969183d18c71d99e7174ec49e9641f3329
+- kind: project-relative
+  target: codex
+  value: .agents/skills/flyology-crate-spinout/references/spinout-execution.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:814fb2c05571651d40e3e7c82310d42709ac0c362cebe9216c699e550537400e
 - kind: project-relative
   target: codex
   value: .agents/skills/flyology-website-content
