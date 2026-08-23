@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Coordinate bounded Flyology scoped operations, completion batches, gates, cancellation, and provider composition.">
+    <meta name="theme-color" content="#17213d">
+    <title>Scoped operations · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/scoped-operations/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Scoped operations</li></ol>
+          <h1>Coordinate scoped operations.</h1>
+        </div>
+        <p class="doc-hero-copy">Start several bounded operations, wait for completion batches or gates, and resolve every retained result.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/" aria-current="page">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="scoped-operations">
+            <span class="step-label">STEP 08 · SCOPED OPERATIONS</span>
+            <h2>Wait for a bounded operation group.</h2>
+            <p>A scoped operation starts without suspending its owner. The owner can start several operations and wait on one bounded <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#8a9761c6117d26e0b5eb9144a3943c5afd125efc2dc4fc4815a10cacc75ad211"><code>Completion_Set</code></a>. Additive overloads cover these providers:</p>
+            <ul>
+              <li>Descriptor readiness, monotonic timers, stream and datagram sockets, and Internet or Unix-stream connection attempts and accepts.</li>
+              <li>Managed connections, <a href="../../api/116f99c913a57152fd0f46faea8d03fafe84c2f7c7b97cbdcc23fb842b085115.html#638d3211d62288735d070c67e68d213f18fe70fcca278488fc87413f97d5befd"><code>Unique_Buffer</code></a> streams, high-level connection data, and standalone TLS.</li>
+              <li>Completion-driven positional files, file-watcher <a href="../../api/68cc97e4afe3e99d544ef59c2a83bd6dfeba56f334915048f14994623a886d26.html#9fe2293042451235ca181a414c0720c59a850b6a2aa23398db41cdde815cfb18"><code>Next</code></a>, and retained task-result <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html"><code>Wait</code></a>.</li>
+              <li><a href="../../api/a26a3f906dd199207fb2a884f96a7a549096b4f8d7dcc99ed029004d18c7c7cd.html"><code>Flyology.Channels.Bounded</code></a> send and receive operations, plus <a href="../../api/cd7b73e07515c8738c07ea8b20784685304fde3ffb955b836d45acc5d0b334c0.html"><code>Flyology.Buffers.Channels</code></a> ownership transfers.</li>
+            </ul>
+            <p>These operations create no helper task, per-operation task stack, callback thread, or steady-state heap allocation. A successful accept or managed connect owns its new socket until <code>Finish</code> transfers it, so abandoning the operation closes that socket. Scoped file operations currently require a lightweight owner; the existing synchronous file procedures still work in both lanes.</p>
+            <figure class="code-panel">
+              <figcaption>the familiar I/O names also return scoped operations</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   --  Four root operations plus one gate need five bounded slots.
+   Set : aliased Flyology.Operations.Completion_Set (5);
+
+   --  Supplying Set selects the additive operation-producing overload.
+   --  Without Set, these familiar calls keep their synchronous behavior.
+   --  Each declaration below starts its operation without parking this task.
+   Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+     Flyology.IO.Timers.Sleep_For
+       (Set =&gt; Set'Access, Interval =&gt; 0.050);
+
+   Incoming : aliased Flyology.IO.Sockets.Receive_Operation :=
+     Flyology.IO.Sockets.Receive
+       (Set     =&gt; Set'Access,
+        Socket  =&gt; Peer'Access,
+        Item    =&gt; Network_Buffer'Access,
+        Timeout =&gt; 1.0);
+
+   Loading : aliased Flyology.IO.Files.Read_Operation :=
+     Flyology.IO.Files.Read_At
+       (Set    =&gt; Set'Access,
+        File   =&gt; Input_File,
+        Offset =&gt; 0,
+        Item   =&gt; Read_Buffer'Access);
+
+   Saving : aliased Flyology.IO.Files.Write_Operation :=
+     Flyology.IO.Files.Write_At
+       (Set    =&gt; Set'Access,
+        File   =&gt; Output_File,
+        Offset =&gt; 0,
+        Item   =&gt; Write_Buffer'Access);
+
+   --  A gate is itself an operation and occupies the fifth slot.
+   All_Done : Flyology.Operations.Gate_Operation :=
+     Flyology.Operations.Wait_All
+       (Set =&gt; Set'Access,
+        Members =&gt;
+          [Flyology.Operations.Reference (Alarm),
+           Flyology.Operations.Reference (Incoming),
+           Flyology.Operations.Reference (Loading),
+           Flyology.Operations.Reference (Saving)]);
+
+   Completed : Flyology.Operations.Completion_Batch (Set.Capacity);
+   Received_Last, Read_Last, Written_Last :
+     Ada.Streams.Stream_Element_Offset;
+begin
+   --  Wait_Some parks this task and drives ready operations in batches.
+   while Flyology.Operations.Is_Active (All_Done) loop
+      Flyology.Operations.Wait_Some (Set, Completed);
+   end loop;
+
+   --  Finish consumes each retained result, publishes out values or raises
+   --  its provider exception, and releases that operation's set slot.
+   Flyology.Operations.Finish (All_Done, Completed);
+   Flyology.IO.Timers.Finish (Alarm);
+   Flyology.IO.Sockets.Finish (Incoming, Received_Last);
+   Flyology.IO.Files.Finish (Loading, Read_Last);
+   Flyology.IO.Files.Finish (Saving, Written_Last);
+end;</code></pre>
+            </figure>
+            <p>Without the leading <code>Set</code>, those same names keep their existing synchronous behavior. With a set, they eagerly return typed limited operations and retain their ordinary result or exception until the matching provider <code>Finish</code>. The example assumes the sockets, files, and aliased buffers were declared by the surrounding scope; nonempty scoped file operations currently require a lightweight owner.</p>
+            <p>The <code>Unique_Buffer</code> file overloads use explicit ownership transfer instead of borrowing an aliased array. Starting <code>Read_At</code> or <code>Write_At</code> moves the pool token into the operation and leaves the caller's handle vacant. Typed <code>Finish</code> returns the token after kernel ownership ends, even if <code>Finish</code> then raises a retained timeout, cancellation, or I/O error. Abandoning the operation drains first and releases the token to the pool. The pool must outlive the operation. On Darwin, cancellation or expiry of a submitted scoped POSIX AIO request waits for its natural completion notification before Flyology returns the token.</p>
+            <p>The file-watcher <code>Next</code> overload returns the same event and timeout outcome through typed <code>Finish</code>. It borrows the serialized watcher until terminal completion. Its scoped form leaves interrupt descriptors out deliberately: start each interrupt as an ordinary descriptor-readiness operation and combine it with the watcher through a gate. Recursive <code>Next</code> composes that ordinary watcher operation as a hidden child. The visible parent succeeds only after directory reconciliation finishes. Parent and child use two set slots, and an observing gate uses a third. Reconciliation performs bounded caller-lane metadata work after readiness and can occupy a lightweight event loop on a slow filesystem.</p>
+            <p>The high-level connection <code>Receive</code>, <code>Receive_Exactly</code>, <code>Send_All</code>, and <a href="../../api/ce20584af169f1585f0d19850fbc58b997d3abcb0b56efb59d6e75db340810be.html"><code>Connections.TLS.Upgrade</code></a> overloads acquire their generation-checked connection lease without blocking the owner. Upgrade composes every handshake request for read or write readiness; the data operations drive either plaintext or the installed TLS transport. A terminal result releases the lease before typed <code>Finish</code>, so another queued operation can use the connection while the first result remains retained. Before the owner task calls synchronous <code>Close</code>, finish each pending scoped operation or cancel and drain it. <code>Close</code> can wait for registered work, but only the owner can drive the pending operation. A close from another task is observed through the operation's close wake source.</p>
+            <p>The standalone <a href="../../api/93f5943651029c7a42f38746f4dad8ab88487e27186795789f5ae10c33b2654c.html#26ad91f317296f3309eb2cbc46d3e0d9e4d47a69adaef937c494495325d5c655"><code>Flyology.IO.TLS.Connection</code></a> has the same additive pattern for <code>Handshake</code>, <code>Receive</code>, <code>Receive_Exactly</code>, <code>Send_All</code>, and <code>Shutdown</code>. One deadline spans lease acquisition and every provider retry, including cross-direction <code>WANT_READ</code> and <code>WANT_WRITE</code>. Typed <code>Finish</code> retains provider failures and receive bounds. Before the owner task calls synchronous <code>TLS.Close</code>, finish each pending operation or cancel and drain it. A close from another task wakes and drains the operation.</p>
+            <p><a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html"><code>Flyology.Task_Results.Wait</code></a> likewise accepts a completion set before either a task identity or an attached monitor. The operation retains the exact result sidecar during initiation, so the task object or source monitor may then leave scope; typed <code>Finish</code> returns the familiar <a href="../../api/15aefacf11dac3a508d3dcc6ed3c3903cebd50715984eb6a3352a72ba63ff9cc.html#0f23de936706ce5a0ed3dc3d483712e98a8a56031cee0a9701cd52f34a782cea"><code>Task_Observation</code></a>. Several operations can subscribe to the same task completion and compose through ordinary gates without polling or extra tasks.</p>
+            <p>An instance of <a href="../../api/a26a3f906dd199207fb2a884f96a7a549096b4f8d7dcc99ed029004d18c7c7cd.html"><code>Flyology.Channels.Bounded</code></a> keeps its familiar protected <code>Send</code> and <code>Receive</code> entries and adds same-name overloads that accept a completion set. A scoped send copies its value into the operation, so the source actual may leave scope. A scoped receive retains the dequeued value until typed <code>Finish</code> copies it out. Pending operations subscribe with caller-owned nodes and recheck the channel before parking, so applications do not call or see a separate arm protocol.</p>
+            <figure class="code-panel">
+              <figcaption>compose channel receive with an ordinary timer</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Set : aliased Flyology.Operations.Completion_Set (3);
+   Message : aliased Messages.Receive_Operation :=
+     Messages.Receive (Set'Access, Inbox'Access);
+   Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+     Flyology.IO.Timers.Sleep_For (Set'Access, 0.050);
+   First : Flyology.Operations.Gate_Operation :=
+     Flyology.Operations.Wait_For_Success
+       (Set'Access,
+        [Flyology.Operations.Reference (Message),
+         Flyology.Operations.Reference (Alarm)]);
+   Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+   Value : Message_Type;
+begin
+   while Flyology.Operations.Is_Active (First) loop
+      Flyology.Operations.Wait_Some (Set, Batch);
+   end loop;
+   Flyology.Operations.Finish (First, Batch);
+   if Flyology.Operations.Is_Terminal (Message) then
+      Messages.Finish (Message, Value);
+   else
+      Flyology.Operations.Cancel (Message);
+      begin
+         Messages.Finish (Message, Value);
+      exception
+         when Flyology.Operations.Operation_Cancelled =&gt; null;
+      end;
+   end if;
+   if Flyology.Operations.Is_Active (Alarm) then
+      Flyology.Operations.Cancel (Alarm);
+   end if;
+   begin
+      Flyology.IO.Timers.Finish (Alarm);
+   exception
+      when Flyology.Operations.Operation_Cancelled =&gt; null;
+   end;
+end;</code></pre>
+            </figure>
+            <p><a href="../../api/cd7b73e07515c8738c07ea8b20784685304fde3ffb955b836d45acc5d0b334c0.html"><code>Flyology.Buffers.Channels</code></a> applies the same protocol to single-owner buffers. Starting a scoped <code>Send_Move</code> moves the pool token into the operation and immediately leaves the source handle vacant. On success the channel keeps ownership and typed <code>Finish</code> leaves that handle vacant; on timeout, close, cancellation, or driver failure, <code>Finish</code> first restores the original buffer and then raises. A scoped <code>Receive_Move</code> does not borrow a destination while it waits. The completed operation owns the dequeued buffer until typed <code>Finish</code> moves it into a vacant same-pool handle.</p>
+            <details class="code-foldout">
+              <summary>Own buffers while a receive races a timer</summary>
+              <p><code>Channel</code> is a controlled tagged type, so its same-package operation functions accept a named <code>Channel_Access</code> capability. For a local aliased channel, <code>Unchecked_Access</code> is valid only because this scope finishes or finalizes every operation before the channel and pool leave scope.</p>
+              <figure class="code-panel">
+                <figcaption>buffer ownership follows the operation</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada">declare
+   Pool : aliased Flyology.Buffers.Pool
+     (Block_Size =&gt; 4_096, Capacity =&gt; 4);
+   Queue : aliased Flyology.Buffers.Channels.Channel
+     (Owner =&gt; Pool'Access, Capacity =&gt; 2);
+   Set : aliased Flyology.Operations.Completion_Set (3);
+   Outgoing, Incoming : Flyology.Buffers.Unique_Buffer (Pool'Access);
+
+   Message : aliased Flyology.Buffers.Channels.Receive_Operation :=
+     Flyology.Buffers.Channels.Receive_Move
+       (Set'Access, Queue'Unchecked_Access, Timeout =&gt; 1.0);
+   Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+     Flyology.IO.Timers.Sleep_For (Set'Access, 0.050);
+   First : Flyology.Operations.Gate_Operation :=
+     Flyology.Operations.Wait_For_Success
+       (Set'Access,
+        [Flyology.Operations.Reference (Message),
+         Flyology.Operations.Reference (Alarm)]);
+   Batch : Flyology.Operations.Completion_Batch (Set.Capacity);
+begin
+   Flyology.Buffers.Acquire (Outgoing);
+   Flyology.Buffers.Channels.Send_Move (Queue, Outgoing);
+   --  Outgoing is vacant; Message owns the buffer once it succeeds.
+
+   while Flyology.Operations.Is_Active (First) loop
+      Flyology.Operations.Wait_Some (Set, Batch);
+   end loop;
+   Flyology.Operations.Finish (First, Batch);
+
+   if Flyology.Operations.Is_Terminal (Message) then
+      Flyology.Buffers.Channels.Finish (Message, Incoming);
+      --  Incoming is now the sole owner.
+      Flyology.Buffers.Release (Incoming);
+   else
+      Flyology.Operations.Cancel (Message);
+      begin
+         Flyology.Buffers.Channels.Finish (Message, Incoming);
+      exception
+         when Flyology.Buffers.Channels.Operation_Cancelled =&gt; null;
+      end;
+   end if;
+
+   if Flyology.Operations.Is_Active (Alarm) then
+      Flyology.Operations.Cancel (Alarm);
+   end if;
+   begin
+      Flyology.IO.Timers.Finish (Alarm);
+   exception
+      when Flyology.Operations.Operation_Cancelled =&gt; null;
+   end;
+end;</code></pre>
+              </figure>
+            </details>
+            <p><a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#0e7dcd129a31d6e9932f0d85dbfb95674f2527129e2fcdafccd8678b3d3d3435"><code>Wait_Some</code></a> without a count waits for one newly completed operation and returns the complete observed batch. Its <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#0da6ec57cb7a0af0295773f84d8657ff1a922afe7bb830794e55d4f2d719fc40">counted overload</a> and <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#ec7fc050d3cc18ec942b0c89a656cf0845cb18bf065c50d11d91ac1939e2f04d"><code>Wait_At_Least</code></a> accept a minimum completion count. <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#35a95a6cf4415b2a624f0f16940e79f55e1251b0c9cb10ccb9fd8574c28eef08"><code>Wait_All</code></a> waits until no operation remains pending. <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#5081af3c4cf313de8d16db334e6d7fd1857da98a5f2dc6888a1c0e902ef37882"><code>Wait_For_Success</code></a> waits for one success; <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#ca625c241a1daa5643aa3fb721ae36fc001788b364a1ed51dc639b5c66487f04"><code>Wait_For_Successes</code></a> accepts a success count. The wait returns failures and cancellations, but they do not satisfy a success threshold. The wait returns when the threshold is met or becomes impossible.</p>
+            <p>Those wait names also have function overloads that produce a limited <code>Gate_Operation</code>. A gate consumes one completion-set slot and composes uniformly with provider operations or earlier gates: it appears in batches, has an outcome, and can be referenced by a later gate. Members are a fixed same-set generation snapshot, and their results remain retained until dependent gates terminalize. Cancelling a gate detaches the observer without cancelling its members.</p>
+            <details class="code-foldout">
+              <summary>Advanced: compose a two-success gate</summary>
+              <p>This version turns a success threshold into a first-class operation. The set-level <code>Wait_Some</code> only parks the owner and drives completion batches until the gate publishes its own outcome.</p>
+              <figure class="code-panel">
+                <figcaption>wait for two successful members</figcaption>
+                <button class="copy-button" type="button" data-copy>Copy</button>
+                <pre><code class="language-ada">declare
+   Set : aliased Flyology.Operations.Completion_Set (4);
+
+   Input : aliased Flyology.IO.Readiness_Operation :=
+     Flyology.IO.Wait
+       (Set       =&gt; Set'Access,
+        FD        =&gt; Input_FD,
+        Condition =&gt; Flyology.IO.For_Read);
+
+   Output : aliased Flyology.IO.Readiness_Operation :=
+     Flyology.IO.Wait
+       (Set       =&gt; Set'Access,
+        FD        =&gt; Output_FD,
+        Condition =&gt; Flyology.IO.For_Write);
+
+   Alarm : aliased Flyology.IO.Timers.Timer_Operation :=
+     Flyology.IO.Timers.Sleep_For
+       (Set =&gt; Set'Access, Interval =&gt; 0.050);
+
+   Quorum : Flyology.Operations.Gate_Operation :=
+     Flyology.Operations.Wait_For_Successes
+       (Set      =&gt; Set'Access,
+        Members =&gt;
+          [Flyology.Operations.Reference (Input),
+           Flyology.Operations.Reference (Output),
+           Flyology.Operations.Reference (Alarm)],
+        Required =&gt; 2);
+
+   Done : Flyology.Operations.Completion_Batch (Set.Capacity);
+begin
+   while Flyology.Operations.Is_Active (Quorum) loop
+      Flyology.Operations.Wait_Some (Set, Done);
+   end loop;
+
+   Flyology.Operations.Finish (Quorum, Done);
+   --  Resolve or explicitly discard every root operation afterward.
+end;</code></pre>
+              </figure>
+            </details>
+            <p>Normal code calls the provider-specific <code>Finish</code> exactly once for every started operation. It commits output values, reports the retained provider exception, and releases the slot. Gate <code>Finish</code> returns its stable member snapshot. <code>Consume</code> explicitly discards a terminal result. Scope finalization safely cancels, drains, discards, and releases an abandoned operation, but it is a safety net rather than the normal result path. Because Ada does not copy out an <code>out</code> parameter when a call raises, a gate batch is undefined when gate <code>Finish</code> raises <code>Operation_Cancelled</code>.</p>
+            <p>This is an additive overload of the familiar synchronous call. <code>Flyology.IO.Wait (FD, Condition, Timeout)</code> still waits and returns a <code>Boolean</code>; <code>Flyology.IO.Wait (Set, FD, Condition)</code> starts and returns a limited <code>Readiness_Operation</code>. The explicit set selects the bounded storage that owns the eager operation and gives later gates a stable member identity.</p>
+            <p>The other synchronous overloads remain available too. A pending operation borrows its referenced buffers and resources until terminal completion. Raw array and socket arguments use explicit access parameters so the long-lived borrow is visible at the call site. Unique-buffer socket operations retain the owning handle but enter its data callback only for an immediate nonblocking step. <code>Receive_Datagram</code> retains the complete address, truncation, and ECN metadata for its typed <code>Finish</code>; an empty buffer still consumes one zero-length packet. A submitted file array remains kernel-owned until completion; cancellation and scope exit drain it before the buffer or operation can leave scope.</p>
+            <h3>The user API starts operations; the driver protocol advances them</h3>
+            <p>An application initializes a typed limited operation from the additive function overload and waits on its completion set. It does not call <code>Arm</code>. A provider library calls <a href="../../api/4c0cd302631075ba68bbfd6ad8cf4baffc9b89b9c1a169266005958a23473143.html#1515f4c048bf8611faf8f96a4f31a1a3e5d7ad430743e87022bdb1397065ea25"><code>Flyology.Operations.Drivers.Start</code></a> and performs one bounded immediate step with its <code>Drive</code> primitive. The provider then arms readiness or a deadline, retains an external completion source, or publishes a terminal result. Cancellation is a separate provider primitive and must drain retained kernel input before publishing terminal state.</p>
+            <p>A zero-time operation deadline performs an immediate poll. The provider gets its first bounded step, and descriptor readiness observable in that same poll drives one step before the operation's deadline is classified. Unrelated expired operations still complete in the same snapshot. This keeps scoped socket and TLS behavior aligned with the familiar synchronous wait.</p>
+            <p>Higher-level providers compose the same public operation values; they do not access another provider's internal driver state. A composite operation owns typed child operations constrained by the same set, starts one through the provider's same-name <code>in out</code> overload, and calls <code>Continue_After (Parent, Child)</code>. Readiness, relative and absolute timers, socket transfers, and positional file transfers all provide this form. The child uses a bounded slot and is driven normally, but user waits and gates see only the parent. When the child terminalizes, Flyology drives the parent with <code>Dependency_Changed</code> on the owner's task stack. The parent calls the child's typed <code>Finish</code>, calls <code>Release</code> so another child type can reuse that slot, and then starts its next child or completes. Cancellation propagates through the active child and drains it before the parent terminalizes. A request-send followed by response-receive therefore needs two slots total and no helper task, nested wait, callback, private I/O state, or second stack.</p>
+            <p>Typed children fit providers whose child type is known statically. A class-wide HTTP or database transport cannot embed a runtime-selected socket, connection, or TLS operation without allocation or type erasure. For that case, a concrete adapter stores one definite <code>Flyology.IO.Connections.Drivers.Capability</code> or <code>Flyology.IO.TLS.Drivers.Capability</code> that is independent of every completion set. The higher-level operation owns the only slot and asks the capability to start or poll its lease, perform one bounded transport step, and arm that same outer operation for the required source and shared deadline. <code>Release</code> returns connection ownership before the outer result becomes terminal. Descriptors, TLS sessions, and lease generations remain hidden, and no child operation, helper task, or allocation is introduced.</p>
+            <h3>Choose the operation-producing form from its data flow</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Function result</dt><dd>Use a function when one limited operation is the natural result. Initialize the result in place because a limited operation cannot be assigned later.</dd></div>
+                <div class="decision-row"><dt><code>out</code> operation</dt><dd>Use an <code>out</code> formal only when a procedure produces genuinely fresh caller-owned operation state or several results and never reads prior slot state. It is not a substitute for rearming a limited object whose completion-set discriminant is already fixed.</dd></div>
+                <div class="decision-row"><dt><code>in out</code> operation</dt><dd>Use an <code>in out</code> formal only when initiation reads and mutates established request state. Explicit rearm and restart operations use this mode.</dd></div>
+              </dl>
+            </div>
+            <p>Keep the other formal modes tied to their data flow. Use <code>in</code> for immutable values and read-only borrowed buffers. Use <code>in out</code> for writable buffers or transferred ownership. Use <code>out</code> for values produced without reading their previous state.</p>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../task-aware-io/">Previous: Task-aware I/O</a>. <a href="../resource-budgets/">Next: Resource budgets</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Choose stack sizes for native and lightweight Flyology tasks and inspect effective lightweight stack-pool values.">
+    <meta name="theme-color" content="#17213d">
+    <title>Task stack sizing · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/stacks/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Task stack sizing</li></ol>
+          <h1>Size and measure task stacks.</h1>
+        </div>
+        <p class="doc-hero-copy">Choose a usable stack size, account for guard pages and pool classes, and measure the effective reservation.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/" aria-current="page">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="stacks">
+            <span class="step-label">STEP 05</span>
+            <h2>Choose the requested size.</h2>
+            <p>Ada <code>Storage_Size</code> controls stack size for native and lightweight tasks. Put the pragma in the task or task-type declaration. Use a named constant so reviewers can identify the selected size.</p>
+            <p>Size the stack for the deepest real call path. Include local objects, recursion, exception propagation, and foreign calls in the estimate.</p>
+            <figure class="code-panel">
+              <figcaption>a task type with a 64 KiB requested stack</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Worker_Stack_Size : constant := 64 * 1_024;
+
+task type Worker (Kind : Flyology.Execution_Model) is
+   pragma Task_Info (Kind);
+   pragma Storage_Size (Worker_Stack_Size);
+end Worker;</code></pre>
+            </figure>
+            <p>The discriminant uses <a href="../../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#5550ffdd655377a446bc400485f835addf3e208ba07a230e98d2fa1143821e30"><code>Flyology.Execution_Model</code></a> so one task type can select either execution lane.</p>
+            <p>The requested value is neither the complete task memory footprint nor necessarily the final usable mapping size. The tasking runtime adds an allowance for the alternate signal stack. Flyology then rounds a lightweight stack to the host page size.</p>
+            <p>Flyology places lightweight stacks in guarded arenas. Each slot has at least 64 KiB of inaccessible guard address space. Native tasks retain the host pthread implementation and its platform minimums.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Do not use a guard fault to find the minimum.</strong> A guard improves failure behavior but does not prove that every stack path is safe. Test worst-case nesting and exception paths. Include a margin and repeat the test on every supported compiler and host.</p>
+            </aside>
+            <p><a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#fe93a641b68a9b158ab01eb4525def9fde8d4c7a6ba23c031369acc262122cb1"><code>Flyology.Observability.Stack_Pool</code></a> returns a <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Flyology.Observability.Stack_Pool_Snapshot</code></a> with the effective lightweight stack values. <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Live_Usable_Bytes</code></a> is the total usable size after runtime adjustment and page rounding, while <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Reserved_Bytes</code></a> includes the virtual address space held by live arenas and their guards. Because reserved address space is not resident memory, measure process RSS separately.</p>
+            <figure class="code-panel">
+              <figcaption>inspect the lightweight stack pool</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Pool : constant Flyology.Observability.Stack_Pool_Snapshot :=
+     Flyology.Observability.Stack_Pool;
+begin
+   Ada.Text_IO.Put_Line
+     ("live=" &amp; Pool.Live_Stacks'Image
+      &amp; " usable bytes=" &amp; Pool.Live_Usable_Bytes'Image
+      &amp; " reserved bytes=" &amp; Pool.Reserved_Bytes'Image);
+end;</code></pre>
+            </figure>
+            <p>If all sampled tasks use the same declaration, divide <code>Live_Usable_Bytes</code> by <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Live_Stacks</code></a>. The result is the effective usable size for that declaration. With mixed task sizes, this calculation gives only an average.</p>
+            <p>The current structured-server generic owns its handler task type and uses the compiler runtime default stack size. <code>Storage_Size</code> applies directly to task types declared by the application.</p>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../">Previous: Start here</a>. <a href="../task-memory/">Next: Task memory</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

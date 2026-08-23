@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Manage dormant lightweight-task stacks and task-private region allocations in Flyology Runtime.">
+    <meta name="theme-color" content="#17213d">
+    <title>Task memory · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/task-memory/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Task memory</li></ol>
+          <h1>Manage task memory.</h1>
+        </div>
+        <p class="doc-hero-copy">Control dormant stack reclamation and release task-private allocations at explicit lifetime boundaries.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/" aria-current="page">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="memory">
+            <span class="step-label">STEP 06</span>
+            <h2>Control stack and region memory.</h2>
+            <p>Flyology has separate controls for stack capacity, dormant stack residency, and task-private object lifetime. None of these controls is a process memory limit.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Stack capacity</dt><dd>Use Ada <code>Storage_Size</code> and the stack-pool snapshot described in <a href="../stacks/">Task stack sizing</a>. This controls usable stack sizing; it does not request paging.</dd></div>
+                <div class="decision-row"><dt>Dormant stack residency</dt><dd>Use <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html"><code>Flyology.Dormancy</code></a> for a lightweight task that will wait only on a sufficiently distant timer and can tolerate a slower wake.</dd></div>
+                <div class="decision-row"><dt>Task-private object lifetime</dt><dd>Use <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html"><code>Flyology.Memory_Regions</code></a> when a group of allocations belongs to one task phase and can be finalized and released together.</dd></div>
+                <div class="decision-row"><dt>Shared or transferred data</dt><dd>Keep it in an explicitly shared owner or bounded pool. A task-owned region is not a shared allocator, and references into it must not outlive the region.</dd></div>
+              </dl>
+            </div>
+
+            <h3>Opt a timer sleeper into stack reclamation</h3>
+            <p><a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Prompt</code></a> is the default dormancy policy. On supported Linux hosts, <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Reclaimable</code></a> asks the kernel to mark applicable stack pages as cold. <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Page_Out</code></a> asks the kernel to reclaim applicable pages through the configured swap path.</p>
+            <p><a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#42845ddc79b68aac0f273f05ae2ad3a0f0cd171e508fbe73d5d9698713028176"><code>Set_Policy</code></a> applies the selected policy to the calling task. Both nondefault policies apply only after a lightweight task switches to its scheduler stack. The task must wait only on a timer with at least <code>Minimum_Wait</code> remaining.</p>
+            <figure class="code-panel">
+              <figcaption>latency-tolerant timer wait</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.Dormancy;
+
+Flyology.Dormancy.Set_Policy
+  (Flyology.Dormancy.Page_Out, Minimum_Wait =&gt; 30.0);
+
+delay 300.0;
+
+Flyology.Dormancy.Set_Policy (Flyology.Dormancy.Prompt);</code></pre>
+            </figure>
+            <p>Descriptor waits are excluded because scheduler links can remain on the suspended stack. File waits are excluded because the kernel can own a stack-backed buffer. Native tasks accept only <code>Prompt</code>. On unsupported hosts, the capability queries return false and Flyology requests no page advice.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Page advice trades wake latency for possible memory reclamation.</strong> The kernel can ignore individual pages, and a task can incur page faults after accepted advice. <code>Prompt</code> does not lock a stack into physical memory.</p>
+            </aside>
+            <p>Use <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#6d20531869f4035601cd8538aff053f91c4b87e350c352a3ebe549089b9b59af"><code>Cold_Advice_Supported</code></a> and <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#ef003bd4fd3e13345f6af2a753b6f9be91df1bd27ae063a88188ecb2e5cc0029"><code>Pageout_Advice_Supported</code></a> before you report a host capability. Group snapshots report eligible timer waits, advised stacks and bytes, attempts, accepted calls, and failures.</p>
+
+            <h3>Release task-private allocations as one region</h3>
+            <p>The native or lightweight task that declares <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#734416a493360f7f80aa2f278d78751cf4269ef3cfb220db8ef0a0258031ae62"><code>Flyology.Memory_Regions.Task_Pool</code></a> owns it. Each region grows in backing chunks when named-subpool allocators request storage. Explicit release finalizes controlled objects and returns all backing chunks. Pool finalization releases all regions that remain live.</p>
+            <p><a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#dedfd81536d5ae2f7d3e1a69ddabee29d0f3c186e308a5d021197476e34103e7"><code>Create_Region</code></a> returns a <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#bf4399c677b3bc2caea58149239e4c6e0ce0b75d6cde87931901298ed694ca94"><code>Region_Handle</code></a> for allocations that share one lifetime. A pool declared in a task body is finalized when the task ends, and its live regions are released automatically. Call <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#541acddcbcd692c8e890c69f569bdd52ff194aea0247bb64fa874ed21d7891be"><code>Release</code></a> when the region has an earlier lifetime boundary.</p>
+            <p>Task termination does not reclaim a dynamically allocated pool. The application must finalize and deallocate that pool.</p>
+            <figure class="code-panel">
+              <figcaption>a task-lifetime region released at task termination</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.Memory_Regions;
+
+procedure Memory_Region_Example is
+   task Worker;
+
+   task body Worker is
+      Pool : aliased Flyology.Memory_Regions.Task_Pool;
+
+      type Node is record
+         Value : Integer;
+      end record;
+      type Node_Access is access Node;
+      for Node_Access'Storage_Pool use Pool;
+
+      Region : Flyology.Memory_Regions.Region_Handle :=
+        Flyology.Memory_Regions.Create_Region
+          (Pool, Chunk_Storage =&gt; 64 * 1_024);
+
+      Head : Node_Access := new (Region) Node'(Value =&gt; 42);
+   begin
+      Head.Value := Head.Value + 1;
+
+      --  Worker termination now finalizes Pool and releases Region.
+   end Worker;
+begin
+   null;
+end Memory_Region_Example;</code></pre>
+            </figure>
+            <p>Every allocator for an access type associated with the pool must name a region. An unnamed allocator raises <code>Program_Error</code>. A call from another task raises <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#c703e367fa2b3d0b087282a36f187e93d757a4386383084b2f682d59a1c94c40"><code>Ownership_Error</code></a>. <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#e48a2b28017e6892f7466c8a22537f960f3916aa6aef2301ffd98281d1e8ff0a"><code>Statistics</code></a> reports live regions, consumed storage with allocator overhead, and reserved chunk capacity.</p>
+
+            <h3>Understand the region cost model</h3>
+            <p>Regions group objects that have the same lifetime. The pool allocates these objects from larger chunks and releases them at one cleanup boundary.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Task pool</dt><dd>Stores fixed ownership and accounting state with the Ada subpool controller. Flyology adds no per-pool mutex because only the owning task can use the pool. The tasking runtime briefly locks its subpool list during region attachment and detachment.</dd></div>
+                <div class="decision-row"><dt>Region creation</dt><dd>Allocates one Flyology region descriptor and one runtime registration node while attaching it to the pool. The first object allocation creates the first backing chunk lazily.</dd></div>
+                <div class="decision-row"><dt>Common allocation</dt><dd>Checks task ownership, aligns an address, advances the current chunk offset, and updates counters. The operation takes no region lock. It does not call the underlying heap while the current chunk has room.</dd></div>
+                <div class="decision-row"><dt>Chunk growth</dt><dd>Allocates and links one new chunk when the current chunk is full. The default payload capacity is 64 KiB. A larger object receives enough capacity for its size and alignment.</dd></div>
+                <div class="decision-row"><dt>Bulk cleanup</dt><dd>Finalizes controlled objects and frees the registration node, backing chunks, and region descriptor. Explicit <code>Release</code> cleans one region. Task-end pool finalization cleans all live regions.</dd></div>
+              </dl>
+            </div>
+            <p>For <code>N</code> object allocations in <code>R</code> regions and <code>K</code> chunks, the runtime makes approximately <code>2R + K</code> management allocations: one descriptor and one registration node per region, plus the chunks. Most of the <code>N</code> object allocations are bump operations in an existing chunk, so this arrangement is most useful when <code>R + K</code> is much smaller than <code>N</code>.</p>
+            <p>Reclamation is synchronous and frees the corresponding management allocations, although controlled objects still require individual finalization. A lightweight task with many chunks or expensive finalizers can therefore occupy its event-loop pthread until cleanup finishes. Because the allocator checks only the current chunk, unused space in older chunks remains reserved until release.</p>
+            <p><a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#959b4c7af82611cfd041953335b75120f362d4e388729c10b01f0d43e3f461ad"><code>Reserved_Storage</code></a> counts chunk payload capacity, not region descriptors, chunk headers, or underlying allocator metadata. Use smaller phase regions and explicit release boundaries when cleanup time or unused chunk space matters.</p>
+            <p>The current implementation has no region quota, retained-chunk cache, trimming operation, or connection to dormant-stack advice. It does not redirect ordinary Ada allocation. Set admission limits for potentially large phases and inspect region statistics before release. Every access value into a released region is invalid.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Use regions for parsing trees, temporary metadata, and other task-private object graphs. Do not use them as backing storage for a buffer or object whose ownership moves to another task.</p>
+            </aside>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../stacks/">Previous: Task stack sizing</a>. <a href="../execution-groups/">Next: Execution groups</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

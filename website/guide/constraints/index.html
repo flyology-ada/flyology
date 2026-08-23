@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Choose lightweight, native, or dedicated Flyology execution within the current experimental limits.">
+    <meta name="theme-color" content="#17213d">
+    <title>Execution constraints · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/constraints/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Execution constraints</li></ol>
+          <h1>Choose an execution lane.</h1>
+        </div>
+        <p class="doc-hero-copy">Choose the native lane when work needs OS-thread behavior, forced preemption, affinity, or unpredictable blocking.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/" aria-current="page">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="constraints">
+            <span class="step-label">STEP 12</span>
+            <h2>Keep unsuitable work native.</h2>
+            <p>Flyology Runtime is experimental. If a task requires kernel real-time scheduling, forced preemption, native CPU affinity, or unpredictable foreign blocking, keep it native. Also keep it native on a host and compiler combination outside the verified patch matrix.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Use lightweight</dt><dd>High I/O concurrency with cooperative work, explicit task-aware waits, and ordinary Ada task semantics.</dd></div>
+                <div class="decision-row"><dt>Use native</dt><dd>Blocking foreign libraries, kernel scheduling policies, independent OS-thread execution, or unmodified compatibility behavior.</dd></div>
+                <div class="decision-row"><dt>Use dedicated</dt><dd>A lightweight continuation must temporarily own a stable event-loop thread exclusively.</dd></div>
+              </dl>
+            </div>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Use the <a href="../../api/">API reference</a> for exact contracts and exceptions.</p>
+            </aside>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../verification/">Previous: Verification</a>. <a href="../../architecture/">Next: Architecture</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

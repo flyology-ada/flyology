@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Use synchronous task-aware I/O in both Flyology execution lanes, subject to provider-specific blocking and ownership limits.">
+    <meta name="theme-color" content="#17213d">
+    <title>Task-aware I/O · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/task-aware-io/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Task-aware I/O</li></ol>
+          <h1>Use task-aware I/O.</h1>
+        </div>
+        <p class="doc-hero-copy">Keep synchronous Ada call semantics, or group bounded scoped operations when one task must coordinate concurrent progress.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/" aria-current="page">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="io">
+            <span class="step-label">STEP 08</span>
+            <h2>Keep synchronous call semantics.</h2>
+            <p>Flyology I/O packages provide normal procedure and function calls in both lanes. The example uses <a href="../../api/c10f732af777af5639b22b45944ea40b43b564c25e6d58d66b207a97c11715fa.html#8a9e370645088ab01b24dccb11a21621c47f4688c12f97c7f0edd67224288575"><code>Flyology.IO.Timers.Sleep_For</code></a> and the <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html"><code>Flyology.IO.Sockets.Receive</code></a> and <a href="../../api/1392016671c31e0698fc6e05fdd7609934b54772ad7876f02b66ad5b9be29b67.html"><code>Flyology.IO.Files.Read_At</code></a> overload families. If a lightweight call would block, only the lightweight task waits, so the event-loop thread remains available. If a native call blocks, it blocks only its own OS thread.</p>
+            <figure class="code-panel">
+              <figcaption>task-aware I/O</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Flyology.IO.Timers.Sleep_For (0.050);
+
+Flyology.IO.Sockets.Receive
+  (Socket, Buffer, Last, Timeout =&gt; 1.0);
+
+Flyology.IO.Files.Read_At
+  (File, Offset =&gt; 0, Item =&gt; Buffer, Last =&gt; Last);</code></pre>
+            </figure>
+            <h3 id="client-connections">Choose raw or managed client ownership</h3>
+            <p>Use the public raw socket layer for a simple synchronous client or an adapter that accepts a <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#7f60ea9d1590dc545f7fbd6ebae88361924604cac0ccac4ac6fa6262fdccc314"><code>Socket_Type</code></a>. It also supports datagrams, Unix sockets, and custom socket configuration. Create the socket for the endpoint family, call the task-aware socket <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#6fdaef8bd98aa4f3139c60e6e8657f9e923ff25dc044c559fedba794a3d2ed2e"><code>Connect</code></a>, and close that owner when the protocol session ends. Managed connections do not replace or deprecate this layer.</p>
+            <p>Use <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html"><code>Flyology.IO.Connections</code></a> when a protocol adapter requires connection ownership, cancellation, in-place TLS replacement, or the set-independent driver capability. Its synchronous <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#ff931e616cb6a8ad97fd7451d9f45a041a5e81d7c70dc089c926916f305a5b52"><code>Connect</code></a> procedure reserves admission, creates the Internet stream socket, connects it, and transfers sole ownership to the caller's <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c6b1bbcb41764201a660916f4786908859d4b13d5cdb961e0f32e60f7faa76a9"><code>Connection</code></a>. One deadline covers all three stages. Use this procedure when protocol setup can start after one task-aware connection call.</p>
+            <figure class="code-panel">
+              <figcaption>managed connection for a composable protocol adapter</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">package Connections renames Flyology.IO.Connections;
+
+Manager : aliased Connections.Server (Capacity =&gt; 1);
+Client  : aliased Connections.Connection (Manager'Access);
+
+Connections.Connect
+  (Manager, Server_Endpoint, Client, Timeout =&gt; 5.0);
+
+--  Construct the protocol transport over Client'Access. Its operations can
+--  drive Flyology.IO.Connections.Drivers.Capability in a completion set.</code></pre>
+            </figure>
+            <p>Declare the manager before the connection so the manager outlives every admitted owner. A lightweight caller suspends during admission or socket readiness. A native caller blocks only its pthread. On timeout, cancellation, shutdown, socket failure, or failed adoption, <code>Connect</code> closes the temporary socket and releases the permit. Normal <code>Connection</code> finalization closes the adopted socket and releases that permit.</p>
+            <p>Use the operation-producing <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#73ab1c3e2c360f3535535fff75da322d1853d9dd82832650a72ed8d1d1adf508"><code>Connect</code></a> overload when connection construction must join a <a href="../../api/f37f2b6c574686d16621bfc753ba7bc77c0b00df6c925f3c8c284d3ff6c63068.html#8a9761c6117d26e0b5eb9144a3943c5afd125efc2dc4fc4815a10cacc75ad211"><code>Completion_Set</code></a>. Its <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#6b4fe5f2c19a8a16d0383a004f2818eb49a376351d1eadf6bff782ae44cd2fb0"><code>Connect_Operation</code></a> owns the temporary socket and admission permit. Typed <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#aa9371d769390d256481459c2e6074e673d748db3a75349d1021f539951e0967"><code>Finish</code></a> transfers both resources to a closed connection.</p>
+            <figure class="code-panel">
+              <figcaption>managed connection as a scoped operation</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   Set : aliased Flyology.Operations.Completion_Set (2);
+   Attempt : Connections.Connect_Operation :=
+     Connections.Connect
+       (Set'Access,
+        Manager'Access,
+        Server_Endpoint,
+        Timeout =&gt; 5.0);
+begin
+   Flyology.Operations.Wait_All (Set);
+   Connections.Finish (Attempt, Client);
+end;</code></pre>
+            </figure>
+            <p>The parent and its hidden raw-socket child use two set slots while the kernel connects. Admission waiting and a retained result use one slot. Cancellation or scope exit drains the child before cleanup. The operation does not borrow the target connection while it is pending.</p>
+            <p>Use <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#b903a6a864a1ab920fe617b933e22cc70ba83558b7090e8bc4dd47c048205e27"><code>Take</code></a> instead when the application already owns a connected or specially configured socket. After either construction path, a runtime-selected protocol adapter can store one <a href="../../api/cd7979960c931237797b4e2620ef2cb9e1d30e5316b743f3ed0699713234fe92.html#c8c5915ad12a98e07c2518570a8c5cec0e2bfcb3dec2df2787427f3163a57298"><code>Connections.Drivers.Capability</code></a>. The outer protocol operation still owns the only completion-set slot.</p>
+            <p>When one owner must coordinate concurrent progress, continue with the <a href="../scoped-operations/">scoped operations chapter</a>.</p>
+            <h3 id="unix-sockets">Connect to a pathname Unix socket</h3>
+            <p>Use a <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#180088226241a9ab524ad694fcee75917fa14db078af5938d29c54ae7b203d21"><code>Unix_Path</code></a> for a pathname socket instead of the Internet <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#9f1989e144800f56d7cae428cc26f045c846cb5dca77e1a44d53ac28cd14ff90"><code>Endpoint</code></a> type. <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#68ac23bf4fe8c7b704fbac178d17215c8ea4e4652d62899322a8077410b4bce6"><code>Unix_Pathname</code></a> rejects an empty path, an embedded NUL byte, or a value longer than the host limit. Flyology passes the accepted bytes to the operating system without encoding conversion. <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#cc36d407e2fec51c38fadfeb9f960ef35a0929852a5b8bce702d62c0ff160c01"><code>Maximum_Unix_Path_Length</code></a> reports the maximum pathname byte count, excluding the terminating NUL byte.</p>
+            <p>Create an owned <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#7f60ea9d1590dc545f7fbd6ebae88361924604cac0ccac4ac6fa6262fdccc314"><code>Socket_Type</code></a> with <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#e44f6823772f7ed18b6d72233e1458524aa96a1352c53a08e8395cf922ef3c1a"><code>Create_Unix_Stream_Socket</code></a>, then call the pathname overload of <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#49d8867b031497a598727d25f62890d72baa909c5032f08937634d053f789ff7"><code>Connect</code></a>. The call can block a native task's OS thread, but a lightweight caller suspends while its event loop waits for readiness.</p>
+            <p>The timeout covers the complete connection attempt. A readable interrupt descriptor raises <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#42447da94422f56644dfed3cedf5e9951e7b3ea41272ba9f862ed502bfb1f648"><code>Operation_Interrupted</code></a>. Host socket failures raise <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#4ba7f323eda4780c62dd2a7e0f1fd3f4fc53091ab355a75b92ade1dd2fb7d526"><code>Socket_Error</code></a>. Once created, the caller retains closing ownership and must call <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#1a9dcc6bd4ff19abf526a983aaba9a048fd44097252e4ed115a0e609e72d83a1"><code>Close_Socket</code></a> after connection success or failure.</p>
+            <figure class="code-panel">
+              <figcaption>connect to the Docker Unix socket</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.IO.Sockets;
+
+procedure Use_Docker_Socket is
+   package Sockets renames Flyology.IO.Sockets;
+   Docker : constant Sockets.Unix_Path :=
+     Sockets.Unix_Pathname ("/var/run/docker.sock");
+   Socket : Sockets.Socket_Type;
+begin
+   Sockets.Create_Unix_Stream_Socket (Socket);
+   begin
+      Sockets.Connect (Socket, Docker, Timeout =&gt; 2.0);
+      --  Use Socket for the Docker HTTP exchange here.
+   exception
+      when others =&gt;
+         begin
+            Sockets.Close_Socket (Socket);
+         exception
+            when Sockets.Socket_Error =&gt; null;
+         end;
+         raise;
+   end;
+   Sockets.Close_Socket (Socket);
+end Use_Docker_Socket;</code></pre>
+            </figure>
+            <p>For a local server or a deterministic test, call the pathname overload of <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#d77756d9e4fd7c2713f938c931f0391a92bd8bdc133c7ca0282c9835b7b21025"><code>Bind_Socket</code></a>, then <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#c073e31734e52fe21c46537cad2ab08287b429e70a89472768bc41a75164fb2c"><code>Listen_Socket</code></a> and the address-free <a href="../../api/db75e45b377a30fa4347c2e6c815a6bb605db55d848a3c9b1dfd510d112ef66c.html#35ee8eb86166e656f53b73edba9b0c5cf3af827ff771230e6206660f1d290ee8"><code>Accept_Connection</code></a> overload. Binding creates a filesystem entry under the process umask and directory permissions. Flyology does not unlink an existing path before bind and does not remove the entry when the listener closes. The application owns stale-entry checks, safe replacement, and final unlink.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>Pathname Unix sockets are supported on macOS and Linux. Windows and the Linux abstract namespace are not supported. Filesystem permissions control access to the socket entry, but they do not authenticate the peer. Treat peer credentials and the application protocol as separate security boundaries.</p>
+            </aside>
+            <p>For relative waits, monotonic deadlines, adjustable wall-clock targets, and backward-clock detection, continue with the <a href="../timers/">timers guide</a>.</p>
+            <p>To observe files and directories through bounded, task-aware registrations, continue with the <a href="../file-watching/">file-watching guide</a>.</p>
+            <p>To move positional regular-file regions to connected stream sockets with native <code>sendfile</code>, Linux lightweight <code>SEND_ZC</code>, and completion-driven fallbacks, continue with the <a href="../file-transfers/">file-transfer guide</a>.</p>
+            <p>Use the ownership-aware connection packages when descriptor lifetime, cancellation, and close races matter. Raw descriptor waits deliberately leave lifetime serialization to the caller.</p>
+            <p><a href="../../api/">Browse the generated API reference</a></p>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../execution-groups/">Previous: Execution groups</a>. <a href="../scoped-operations/">Next: Scoped operations</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

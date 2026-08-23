@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Set limits for Flyology concurrency, memory, parallelism, operation deadlines, and cooperative CPU work.">
+    <meta name="theme-color" content="#17213d">
+    <title>Resource budgets · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/resource-budgets/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Resource budgets</li></ol>
+          <h1>Set resource budgets.</h1>
+        </div>
+        <p class="doc-hero-copy">Bound application-owned resources, apply deadlines at operation boundaries, and place checkpoints in cooperative CPU work.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../resource-budgets/" aria-current="page">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="budgets">
+            <span class="step-label">STEP 09</span>
+            <h2>Bound application-owned resources.</h2>
+            <p>No single value defines an application capacity plan. Bound each resource that the application owns and set latency limits at operation boundaries. Then measure the complete configuration under representative peak load.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Concurrency</dt><dd>Use a structured server or <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#f077c71b5270e3325ac03ea53015029cf422e47926e822d158778a6de401cc4b"><code>Connections.Server</code></a> capacity to limit owned connections. A structured server creates exactly <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#faf7e17eb0214e4ddd3cd4cd2e4fb9635edd569aa68e3893932fd713442410a4"><code>Capacity</code></a> handler tasks for the complete <a href="../../api/45f5b24f6f40aac98c80f813a52885a8a96d15eaa644b248a6a6c222fb09b522.html#904f83f05b6ffe80abc8c7db47a2412c039f6ceef2814366fb56d8c7af4bc4b6"><code>Serve</code></a> operation, including idle periods.</dd></div>
+                <div class="decision-row"><dt>Stack memory</dt><dd>For homogeneous lightweight tasks, multiply peak live tasks by the measured effective bytes per task. Use <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#e0bf4d9a156ef95b4fb88c608970a873acde0daf21e05cbfbc54312f263eb628"><code>Reserved_Bytes</code></a> for guarded virtual address space. Measure RSS for resident memory.</dd></div>
+                <div class="decision-row"><dt>Task-owned regions</dt><dd>Region storage grows on demand and has no built-in quota. Limit the number and size of admitted phases. Sample <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#e48a2b28017e6892f7466c8a22537f960f3916aa6aef2301ffd98281d1e8ff0a"><code>Statistics</code></a> and call <a href="../../api/a50cac3f036a09d12fa6d98fb53ff6f5963e1f67db2823605059b554bf284818.html#541acddcbcd692c8e890c69f569bdd52ff194aea0247bb64fa874ed21d7891be"><code>Release</code></a> at the earliest valid lifetime boundary.</dd></div>
+                <div class="decision-row"><dt>Dormant stacks</dt><dd>Choose <code>Minimum_Wait</code> from tolerated wake latency and representative host measurements. Accepted cold or page-out advice does not reduce the configured stack capacity.</dd></div>
+                <div class="decision-row"><dt>Parallelism</dt><dd><code>FLYOLOGY_LOOP_POOL_SIZE</code> selects the initial automatic shared groups, not the task count. Start near the usable CPU parallelism of the workload. Grow with <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#287e3dd835386f2403c442c7827e7a3b07b4e4be9a5b76fd04cc6f4bc17ba8d7"><code>Grow_Configured_Pool</code></a> when measurements support the change. Each created group adds an OS thread, poller, scheduler, and kernel-queue resources.</dd></div>
+                <div class="decision-row"><dt>Latency</dt><dd>Use finite I/O deadlines, a bounded shutdown drain, and checkpoints in CPU loops. These controls are separate. Cancellation is not a timeout. A fairness quantum is not a hard execution deadline.</dd></div>
+              </dl>
+            </div>
+
+            <h3>Bound admission, not just the listen backlog</h3>
+            <p>The structured-server capacity limits active handlers and reserves the handler task resources. Excess work remains in the kernel listen backlog. It does not create an unbounded user-space task or connection queue.</p>
+            <figure class="code-panel">
+              <figcaption>bounded structured service</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Handler_Capacity : constant Positive := 256;
+
+Server : aliased HTTP.Server (Capacity =&gt; Handler_Capacity);
+
+HTTP.Serve
+  (Server, Listener, State, Drain_Timeout =&gt; 5.0);</code></pre>
+            </figure>
+
+            <h3>Use one deadline for the complete operation</h3>
+            <p><a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#c3cee1844eef030ab2ffa44083c3f8d691dbd37db73c29ba022075ece5b63cfc"><code>Receive_Exactly</code></a> and <a href="../../api/e59a43f181bad16362e2c473516ef7f4dfda86db0c52c4c343c0d67192963960.html#76beff4fc687f191ded93f9375c44f9251c99bbf0ead593723d7ec5388a591f2"><code>Send_All</code></a> apply one timeout to the complete multi-step operation. Partial transfers do not restart the timeout. DNS resolution also applies one timeout to family queries, retry rounds, and transport fallback.</p>
+            <p>Prefer finite deadlines at service boundaries. If the scope does not have an explicit shutdown and cancellation path, do not use <a href="../../api/781f70b54a9970c1b153ffbd18e3a7f446a0eb89305429a6a9107ebe72833b8f.html#07bae758725b3ef17c925e949e4d0dd924e667dc9ee2d11c2f53c8bff79a7fb9"><code>Infinite</code></a>.</p>
+
+            <h3 id="checkpoints">Add checkpoints to bounded units of CPU work</h3>
+            <p>A CPU-bound lightweight task can occupy its group until it suspends, executes <code>delay 0.0</code>, or calls a fairness checkpoint. Priorities select among ready fibers in a group, but they do not preempt arbitrary lightweight instructions.</p>
+            <p>A new <a href="../../api/abc652020cc71fd692562fe1fa41e61837df980e9a65feb3b869b4466e67d0d8.html#b5279be1a014e7db47e811bbd83d15f752a1f868d72947b52da03cd659bee6e7"><code>Yield_Budget</code></a> uses a 2 ms quantum. Configure a different quantum when the service requires a different cooperative interval.</p>
+            <figure class="code-panel">
+              <figcaption>time-budgeted fairness</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Budget : Flyology.Fairness.Yield_Budget;
+
+Budget.Configure (Ada.Real_Time.Microseconds (250));
+while More_Work loop
+   Process_One_Item;
+   Budget.Checkpoint;
+end loop;</code></pre>
+            </figure>
+            <p>Choose a quantum below the tolerated same-group scheduling delay, then measure it. The value is elapsed wall-clock time between eligible yields, not reserved CPU time.</p>
+            <p>Put <a href="../../api/abc652020cc71fd692562fe1fa41e61837df980e9a65feb3b869b4466e67d0d8.html#82ea3299bfb1b461042a23b75cb3a8d2371cf54c06f1606bbaa500ae45ad9501"><code>Checkpoint</code></a> after a bounded unit of work. For example, a 250 µs quantum cannot interrupt a <code>Process_One_Item</code> call that runs for 50 ms. The checkpoint takes effect after the call returns. Very small quanta also increase clock reads and scheduler transfers.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p>An arbitrary blocking foreign call can stop every lightweight task in its group. Put unpredictable blocking work on a native task or migrate to a dedicated group first.</p>
+            </aside>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../scoped-operations/">Previous: Scoped operations</a>. <a href="../observability/">Next: Runtime observability</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

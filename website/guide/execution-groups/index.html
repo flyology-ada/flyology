@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Choose automatic placement or a shared or dedicated Flyology execution group, and migrate at explicit safe points.">
+    <meta name="theme-color" content="#17213d">
+    <title>Execution groups · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/execution-groups/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Execution groups</li></ol>
+          <h1>Choose an execution group.</h1>
+        </div>
+        <p class="doc-hero-copy">Choose automatic placement or a shared or dedicated group. Migrate lightweight tasks only at explicit safe points.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/" aria-current="page">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="groups">
+            <span class="step-label">STEP 07</span>
+            <h2>Select placement and ownership.</h2>
+            <p>Flyology places a task designated with <a href="../../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#875ae342f1f8100c941ea7f728e5becae505856cfcf5f1325715baca3a04e2fd"><code>Flyology.Lightweight_Task</code></a> into the shared pool by deterministic round robin when it has no specific Ada CPU. A positive <code>CPU</code> aspect selects an exact execution group. Ada reserves <code>CPU =&gt; 0</code> as <code>Not_A_Specific_CPU</code>. Therefore, zero has the same effect as an absent aspect.</p>
+            <figure class="code-panel">
+              <figcaption>explicit shared groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">task Parser with CPU =&gt; 1 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+end Parser;
+
+task Writer with CPU =&gt; 2 is
+   pragma Task_Info (Flyology.Lightweight_Task);
+end Writer;</code></pre>
+            </figure>
+            <p>Tasks in one group share a stable event-loop thread and schedule cooperatively. Separate groups use separate OS threads and can execute in parallel. Shared group identifiers are <code>0 .. 127</code>. Dedicated group identifiers are <code>128 .. 255</code>.</p>
+            <h3 id="grow-pool">Grow the automatic pool later</h3>
+            <p><a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#287e3dd835386f2403c442c7827e7a3b07b4e4be9a5b76fd04cc6f4bc17ba8d7"><code>Grow_Configured_Pool</code></a> sets a minimum number of groups in the automatic pool. When no reduction is active, concurrent calls converge on the largest request, and calls at or below the current size have no effect. Existing tasks stay in their current groups, while future automatic placements use the larger pool. Growth alone starts no group or OS thread.</p>
+            <figure class="code-panel">
+              <figcaption>grow runtime configuration</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Flyology.Execution_Groups.Grow_Configured_Pool (8);</code></pre>
+            </figure>
+            <p>A growth request raises <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#ca2f30bb12deb30a2ee6a94db92be9b26f6369ee815d4fab9ec10d863a9f6cac"><code>Group_Error</code></a> while a <a href="#reduce-pool">pool reduction</a> still has blockers. Blockers are automatic tasks or placement claims that started before the cutover.</p>
+            <p>The growth call checks the reduction status. If the last blocker has cleared, the call completes the reduction and applies the requested minimum. It also resets <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#c81ba0d929dfa282b5ae431fc3d9026af60c82abecd47965b43fd911549354b7"><code>Pool_Reduction</code></a> to <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#b2a2544887148bc44150ae84487fe09b2617367856af2213ab18eed6cdbfe20b"><code>No_Reduction</code></a>. Tasks that migrated during the reduction stay in their destination group.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Growth changes topology hashing.</strong> <a href="../../api/1b3bd073f729f7d328d1c0d1ec5c5c6f2bc72e73eb3a88dd7f46367c8122c1e4.html#84ea62bb30a2c4c9cc0c07f082c3b4ee24629751097e367cba56b65b0b45d60c"><code>Topology.Shard_For_Hash</code></a> uses the current configured pool size, so persist an independent shard count when keys must keep stable ownership.</p>
+            </aside>
+            <h3 id="reduce-pool">Drain the automatic pool to a smaller size</h3>
+            <p><a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#599d53cf7c9d8754494939cc6990374d8ee706549e86fa97ec35cdb1ba89b8be"><code>Request_Pool_Reduction</code></a> immediately lowers the ceiling for new automatic placements. The scheduler then moves eligible tasks from removed groups to group 0 at cooperative dispatch points.</p>
+            <p>If migration is necessary, the request can start group 0 and wait for its startup. A request that needs no migration starts no group. The call does not wait for the complete reduction. Query <code>Pool_Reduction</code> for the phase and blocker counts.</p>
+            <figure class="code-panel">
+              <figcaption>request and observe cooperative drainage</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Result := Flyology.Execution_Groups.Request_Pool_Reduction (2);
+Status := Flyology.Execution_Groups.Pool_Reduction;
+
+if Status.Phase = Flyology.Execution_Groups.Draining then
+   --  Poll again under an application-defined deadline.
+   null;
+end if;</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>A reduction is cooperative and might not finish.</strong> Waiting tasks move after they wake, and pinned tasks move after they unpin and yield. A CPU-bound task that never suspends can remain indefinitely.</p>
+              <p>Tasks placed with a <code>CPU</code> aspect or moved with <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#bfa7581a08e48bec5ea8815c8365e1a6079ee8e9110f2f13f3ccc04ea505b45b"><code>Migrate</code></a> stay in their assigned groups. A completed reduction retains existing event-loop threads instead of reclaiming them. After completion, <a href="#grow-pool"><code>Grow_Configured_Pool</code></a> can increase the ceiling without moving those tasks back.</p>
+            </aside>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>FLYOLOGY_LOOP_POOL_SIZE</code></dt><dd>Selects <code>1 .. 128</code> shared groups for automatic round-robin placement at application startup. Groups and their OS threads still start lazily.</dd></div>
+                <div class="decision-row"><dt><a href="#grow-pool"><code>Grow_Configured_Pool</code></a></dt><dd>Raises that minimum later without moving existing tasks or starting unused groups.</dd></div>
+                <div class="decision-row"><dt><a href="#reduce-pool"><code>Request_Pool_Reduction</code></a></dt><dd>Lowers the automatic-placement ceiling immediately and drains eligible automatically managed tasks cooperatively.</dd></div>
+              </dl>
+            </div>
+            <h3>Migrate only at an explicit safe point</h3>
+            <p>A lightweight task can call <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#bfa7581a08e48bec5ea8815c8365e1a6079ee8e9110f2f13f3ccc04ea505b45b"><code>Flyology.Execution_Groups.Migrate</code></a> to move to another <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#71d65f68372c8cfb52b136d9019201a86f15f6380d32dcf7aeaec069ce256495"><code>Group_Id</code></a> without changing its Ada task identity, stack, locals, or exception state. <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#c5e1f261ff676b6cf064bdd84fc611e00207ba8b1281ba3452e2c4c9effab60d"><code>Current</code></a> returns the calling lightweight task's group, and <a href="../../api/82ce86d3b5890327e37c07e368a9d1dbf6c08ca19dbf747640a168e41073a619.html#6775319179c7d0a626e7e65a5e61b1185e669314bbc03cfa8c3ceac28722f386"><code>For_CPU</code></a> converts a valid Ada CPU selector. Use a scoped thread pin while the task holds thread-affine foreign state. Use a dedicated group when the task also requires exclusive OS-thread ownership.</p>
+            <figure class="code-panel">
+              <figcaption>explicit migration</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   package Groups renames Flyology.Execution_Groups;
+   Home : constant Groups.Group_Id := Groups.Current;
+begin
+   Groups.Migrate (Groups.For_CPU (2));
+   Handle_Group_Owned_State;
+   Groups.Migrate (Home);
+end;</code></pre>
+            </figure>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../task-memory/">Previous: Task memory</a>. <a href="../task-aware-io/">Next: Task-aware I/O</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

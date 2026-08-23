@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Read Flyology runtime snapshots, event-loop utilization, queue pressure, and memory measurements.">
+    <meta name="theme-color" content="#17213d">
+    <title>Runtime observability · Flyology Runtime Guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/observability/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Runtime observability</li></ol>
+          <h1>Observe runtime behavior.</h1>
+        </div>
+        <p class="doc-hero-copy">Compare coherent snapshots across representative intervals before changing pool, stack, or scheduling settings.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Core runtime guide chapters" tabindex="0">
+          <p class="toc-title">Core runtime guide</p>
+          <ol>
+            <li><a href="../">Start here</a></li>
+            <li><a href="../stacks/">Task stack sizing</a></li>
+            <li><a href="../task-memory/">Task memory</a></li>
+            <li><a href="../execution-groups/">Execution groups</a></li>
+            <li><a href="../task-aware-io/">Task-aware I/O</a></li>
+            <li><a href="../scoped-operations/">Scoped operations</a></li>
+            <li><a href="../resource-budgets/">Resource budgets</a></li>
+            <li><a href="../observability/" aria-current="page">Runtime observability</a></li>
+            <li><a href="../verification/">Verification</a></li>
+            <li><a href="../constraints/">Execution constraints</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section id="observe">
+            <span class="step-label">STEP 10</span>
+            <h2>Compare representative snapshots.</h2>
+            <p>Take snapshots during idle operation, representative load, and recovery. Group snapshots are coherent, but they briefly hold scheduler locks and cost <code>O(group members)</code>. Sample periodically instead of sampling each request.</p>
+            <p>Because lifetime counters wrap and do not reset, compare two samples instead of using one cumulative value as a rate.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Healthy waiting</dt><dd>A high <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Waiting</code></a> count with timer, descriptor, interrupt, or file waits usually means tasks are using the intended kernel-backed wait path.</dd></div>
+                <div class="decision-row"><dt>Runnable pressure</dt><dd>A persistently high <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Ready</code></a> count means runnable work is sharing the group. Compare dispatch progress, CPU use, checkpoint placement, and the result of adding a group.</dd></div>
+                <div class="decision-row"><dt>Loop utilization</dt><dd><a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Idle_Nanoseconds</code></a> is the part of <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Uptime_Nanoseconds</code></a> in which the group had no runnable task. The difference is the time the loop worked. Read it together with <code>Ready</code> before adding a group.</dd></div>
+                <div class="decision-row"><dt>Possible stall</dt><dd>Ready or running work without dispatch or polling progress indicates possible loop lag. <a href="../../api/f6d9a75080afdebcbf9664f2d01c008022931f9310d17c250ae7d2588d88ba6d.html"><code>Stall_Watchdogs</code></a> can sample this condition from a native monitor task. The watchdog diagnoses the condition but does not preempt a task.</dd></div>
+                <div class="decision-row"><dt>File pressure</dt><dd><a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Pending_File_Submissions</code></a> shows file operations waiting behind the bounded kernel completion queue. It is backpressure, not a hidden worker-thread queue.</dd></div>
+                <div class="decision-row"><dt>Stack pressure</dt><dd>Track live stacks, effective usable bytes, guarded virtual reservation, process RSS, and task-creation failures together. None of those values alone is a complete memory limit.</dd></div>
+                <div class="decision-row"><dt>Dormant stack effect</dt><dd>Compare candidate bytes, currently advised bytes, cumulative accepted and failed advice, process RSS, and timer wake lateness. Advice counters do not prove that pages were evicted.</dd></div>
+                <div class="decision-row"><dt>Region growth</dt><dd>Read consumed and reserved region storage before release. Reserved minus consumed shows current chunk slack, not leaked memory.</dd></div>
+              </dl>
+            </div>
+            <h3 id="utilization">Measure how busy an event loop is</h3>
+            <p>A group's event loop blocks in its poller only when no task in that group can run. The runtime times that wait, so a snapshot reports the loop's elapsed time and the part of it the loop spent idle. Subtract one from the other to get the time the loop spent running task code and its own scheduler work.</p>
+            <p>A snapshot never reports more idle time than elapsed time, and it includes a poller wait that is still in progress. The subtraction is therefore always valid, even while the loop is blocked.</p>
+            <figure class="code-panel">
+              <figcaption>read one group's utilization with <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#84a28befe7fbaa8cb206c40d1e9c968a88cc10f26953ac3afd7e41f9208fb907"><code>Snapshot</code></a> into a <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Group_Snapshot</code></a></figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">declare
+   use type Flyology.Observability.Counter;
+   Sample : Flyology.Observability.Group_Snapshot;
+begin
+   if Flyology.Observability.Snapshot (0, Sample) then
+      Ada.Text_IO.Put_Line
+        ("uptime ns=" &amp; Sample.Uptime_Nanoseconds'Image
+         &amp; " idle ns=" &amp; Sample.Idle_Nanoseconds'Image
+         &amp; " busy ns="
+         &amp; Flyology.Observability.Counter'Image
+             (Sample.Uptime_Nanoseconds - Sample.Idle_Nanoseconds)
+         &amp; " poller waits=" &amp; Sample.Idle_Waits'Image);
+   end if;
+end;</code></pre>
+            </figure>
+            <p><a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#8b0158f0676b2348742fb68c615c4f6e426f1d6844a3da836182f0fc265096e9"><code>Counter</code></a> is declared in another package, so its operators need a <code>use type</code> clause before the subtraction.</p>
+            <p>Both values cover the loop's whole lifetime, so one sample reports an average and not current load. Take two samples and subtract each field to measure one interval.</p>
+            <p>The measure describes the event loop, not the tasks on it. Two situations look alike:</p>
+            <ul>
+              <li>A group whose tasks all wait on readiness or a deadline reports mostly idle time, and so does a group with nothing to do. Read <code>Waiting</code> and <a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Members</code></a> to separate them.</li>
+              <li>A task that runs CPU code without reaching a suspension point keeps its loop out of the poller. That group reports as fully busy with one task running, which <a href="../resource-budgets/#checkpoints">cooperative checkpoints</a> address.</li>
+            </ul>
+            <p><a href="../../api/6e05690999d1deeaaebdb277957048bb930da6542663c5cd926190f07561bde9.html#3df828c776bb3d70de4e6d0553b8fbd280077044e0bd5ee9c00986a8fa40950a"><code>Idle_Waits</code></a> counts the blocking poller waits behind those totals. Divide it by the elapsed time to get the rate at which the loop ran out of runnable work.</p>
+            <p>The runtime reads the monotonic clock twice for each blocking poller wait and never during a dispatch. This cost follows how often a loop runs out of work, not how much work it does. On the checked macOS/AArch64 host, one reading costs about 20 ns. A loop that only exchanges socket messages reaches about 32,000 to 38,000 waits per second. Run <code>scripts/bench-runtime.sh</code> to measure both values on the target host.</p>
+            <figure class="code-panel">
+              <figcaption>repeatable sizing and pool comparisons</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>./scripts/showcases.sh
+
+# After the showcase build, choose smaller local counts if needed:
+./showcases/run_connection_density.sh 1000 10000
+./showcases/run_event_loop_pool.sh 1024 20 4
+./showcases/run_dormant_stack_pressure.sh 128 64</code></pre>
+            </figure>
+            <p>The density run compares lightweight and native tasks with the same requested stack size. It reports RSS, virtual address space, thread count, and lightweight stack-pool counters. The pool run compares one event loop with a configured pool under repeated readiness activity.</p>
+            <p>The dormant-stack run compares <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Prompt</code></a>, <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Reclaimable</code></a>, and <a href="../../api/a05c2eb0112b18600c455d23815dda71b6e794ade3d2edef04577f8cb888f9ec.html#3654c5ad96e20f9f7e6d344b27c3aae5567021d29a878d525732390f58b4a6f7"><code>Page_Out</code></a> in separate processes. It verifies every modified stack payload after wake. Treat each result as a measurement of the tested host and workload, not as a universal sizing constant.</p>
+          </section>
+
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p><a href="../resource-budgets/">Previous: Resource budgets</a>. <a href="../verification/">Next: Verification</a>.</p>
+          </aside>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

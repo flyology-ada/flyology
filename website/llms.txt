@@ -42,9 +42,21 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 ## Flyology Runtime documentation
 
 - [Runtime overview](https://flyology.org/runtime/): Execution model, included building blocks, status, and runtime constraints.
-- [Runtime guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, stack and memory policy, execution groups, task-aware I/O, resource budgets, observability, verification, and constraints.
+- [Runtime guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, and an index of core and focused chapters.
 - [Runtime architecture](https://flyology.org/architecture/): GNAT tasking integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
 - [Runtime API reference](https://flyology.org/api/): Generated reference for the main `flyology` crate. This is the API entry under the Runtime navigation, not an aggregate of every Flyology component.
+
+### Core runtime guide chapters
+
+- [Task stack sizing](https://flyology.org/guide/stacks/): Usable stack sizes, guard address space, pool classes, and measurement.
+- [Task memory](https://flyology.org/guide/task-memory/): Dormant stack reclamation and task-private region lifetimes.
+- [Execution groups](https://flyology.org/guide/execution-groups/): Automatic, shared, and dedicated placement, migration, and thread pins.
+- [Task-aware I/O](https://flyology.org/guide/task-aware-io/): Synchronous call semantics, raw and managed connection ownership, and pathname Unix sockets.
+- [Scoped operations](https://flyology.org/guide/scoped-operations/): Bounded completion sets, batches, gates, cancellation, result retention, and provider composition.
+- [Resource budgets](https://flyology.org/guide/resource-budgets/): Concurrency, memory, parallelism, deadlines, and cooperative CPU work.
+- [Runtime observability](https://flyology.org/guide/observability/): Snapshots, event-loop utilization, queue pressure, and memory measurements.
+- [Verification](https://flyology.org/guide/verification/): Behavioral tests, proofs, documentation checks, stress campaigns, and showcases.
+- [Execution constraints](https://flyology.org/guide/constraints/): Lightweight, native, and dedicated execution within current experimental limits.
 
 ### Runtime topic guides
 
