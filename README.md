@@ -3378,7 +3378,18 @@ The generated `AGENTS.md` files remain committed so Codex can use the repository
 without a setup step. Claude-specific rules and both clients' installed skill
 directories are generated locally from the same package graph. Flyology's
 repository and nested-scope rules are local packages under `agent-packages/`;
-only general instructions and skills come from `flyology-ada/agents`.
+only general instructions and skills come from `flyology-ada/agents` `main`.
+`apm.lock.yaml` records the exact dependency commits and content hashes, so
+frozen installs do not float. Review an upstream update explicitly:
+
+```sh
+apm outdated
+apm update flyology-ada/agents
+apm compile --target codex
+apm audit --ci
+```
+
+Commit the reviewed lockfile and generated `AGENTS.md` changes together.
 
 ## Build and test
 

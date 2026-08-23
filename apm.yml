@@ -12,4 +12,4 @@ dependencies:
     - path: ./agent-packages/flyology-allocators-benchmarks
     - git: https://github.com/flyology-ada/agents.git
       path: packages/profiles/ada-library
-      ref: ac2e1793ea620fa567ed3b4f8b7cb9a058c07682
+      ref: main
