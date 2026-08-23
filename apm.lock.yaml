@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-23T16:35:17.350119+00:00'
+generated_at: '2026-08-23T17:18:27.697938+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/flyology-allocators
@@ -45,17 +45,17 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/profiles/ada-library
   is_virtual: true
   package_type: apm_package
-  content_hash: sha256:28e90a9d833591fb251426f25958d885b89623231c55a8457684f0ecf09c6c0c
+  content_hash: sha256:59e734991b0d33ef74017f2db7975ebab3b7c0d156f621f65709dd173c5fe538
 - repo_url: flyology-ada/agents
   name: flyology-ada-interface-values
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-interface-values
@@ -71,7 +71,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-source-style
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-source-style
@@ -87,7 +87,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-decision-authority
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/decision-authority
@@ -103,7 +103,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-problem-solution-commits
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/problem-solution-commits
@@ -119,7 +119,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-repository-workflow
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/repository-workflow
@@ -133,9 +133,25 @@ dependencies:
     .claude/rules/repository-workflow.md: sha256:69bffd5b645f5e5eddb719c54afe6c573a8481228f4bef2096ed8c6c55c98e85
   content_hash: sha256:d059cc87a32e41b2195292b06de437fa7b123e19484d3115edf51c0ee676a275
 - repo_url: flyology-ada/agents
+  name: flyology-review-cycle
+  host: github.com
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
+  resolved_ref: main
+  version: 0.1.0
+  virtual_path: packages/instructions/review-cycle
+  is_virtual: true
+  depth: 2
+  resolved_by: flyology-ada/agents
+  package_type: apm_package
+  deployed_files:
+  - .claude/rules/review-cycle.md
+  deployed_file_hashes:
+    .claude/rules/review-cycle.md: sha256:a69a07a7046aec9488a921f890fb1fb3ef2031ceaa67a7c40980157dfaa7ddbb
+  content_hash: sha256:e2ec56be2f40a80bca2c2006efacb33e47dce64775972fb64825117ae10e0335
+- repo_url: flyology-ada/agents
   name: flyology-ada-skills
   host: github.com
-  resolved_commit: 62eff321af50d7d6162fdcc042c32cb7ee5d5bca
+  resolved_commit: de62e63dbb25fff1b21b71673c9eefd6f5f38c38
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/skills
@@ -513,6 +529,15 @@ deployments:
   - flyology-ada/agents/packages/instructions/repository-workflow
   active_owner: flyology-ada/agents/packages/instructions/repository-workflow
   content_hash: sha256:69bffd5b645f5e5eddb719c54afe6c573a8481228f4bef2096ed8c6c55c98e85
+- kind: project-relative
+  target: claude
+  value: .claude/rules/review-cycle.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/instructions/review-cycle
+  active_owner: flyology-ada/agents/packages/instructions/review-cycle
+  content_hash: sha256:a69a07a7046aec9488a921f890fb1fb3ef2031ceaa67a7c40980157dfaa7ddbb
 - kind: project-relative
   target: claude
   value: .claude/rules/website.md
