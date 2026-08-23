@@ -1,0 +1,4 @@
+name: flyology-allocators-instructions
+version: 0.1.0
+type: instructions
+includes: auto

@@ -24,3 +24,7 @@
 /docs/gnatdoc-cachelines/
 /docs/gnatdoc-numa/
 /coverage/
+.agents/
+.claude/rules/
+.claude/skills/
+apm_modules/

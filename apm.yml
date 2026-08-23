@@ -1,0 +1,15 @@
+name: flyology-agent-context
+version: 0.1.0
+description: Agent instructions and skills for Flyology.
+type: hybrid
+targets: [codex, claude]
+includes: auto
+dependencies:
+  apm:
+    - path: ./agent-packages/repository
+    - path: ./agent-packages/website
+    - path: ./agent-packages/flyology-allocators
+    - path: ./agent-packages/flyology-allocators-benchmarks
+    - git: https://github.com/flyology-ada/agents.git
+      path: packages/profiles/ada-library
+      ref: ac2e1793ea620fa567ed3b4f8b7cb9a058c07682
