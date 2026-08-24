@@ -30,16 +30,17 @@ RUN case "${TARGETARCH}" in \
 ENV ALR=/usr/local/bin/alr
 
 # Keep the compiler download independent of source changes.
-ARG GNAT_VERSION=16.1.0
+ARG GNAT_PROVIDER=gnat_flyology_native
+ARG GNAT_VERSION=16.2.0-patchset.1.1.0
 ARG GPRBUILD_VERSION=26.0.1
 WORKDIR /toolchain
-RUN alr --non-interactive toolchain \
-      --select gnat_native=${GNAT_VERSION} gprbuild=${GPRBUILD_VERSION}
 RUN alr index --reset-community \
     && alr index \
       --add=git+https://github.com/flyology-ada/alire-index.git \
       --name=flyology \
       --before=community
+RUN alr --non-interactive toolchain \
+      --select ${GNAT_PROVIDER}=${GNAT_VERSION} gprbuild=${GPRBUILD_VERSION}
 
 WORKDIR /workspace
 COPY . .

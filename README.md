@@ -96,7 +96,8 @@ based on the surviving correspondence.
 ## Status
 
 Flyology Runtime is experimental. This checkout is verified on macOS/AArch64
-with Alire `gnat_native` 16.2.0. Linux/AArch64 and Linux/x86-64 backends are
+with Alire `gnat_flyology_native` 16.2.0-patchset.1.1.0. Linux/AArch64 and
+Linux/x86-64 backends are
 present; the repository CI configuration includes Linux jobs, while the native
 Docker runner uses Linux/AArch64 by default on an Apple Silicon host.
 Hosted validation status is reported by Actions. Runtime preparation is pinned
@@ -107,8 +108,9 @@ combination.
 The current patch family covers the exact Alire `gnat_native` and
 `gnat_flyology_native` releases from 13 through 16 listed below.
 Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1, 15.1.2,
-15.3.1, 16.1.0, and 16.2.0. macOS supports 13.2.2, 14.1.3, 14.2.1, 16.1.0,
-and 16.2.0.
+15.3.1, and 16.1.0 through either provider, plus
+`gnat_flyology_native` 16.2.0-patchset.1.1.0. macOS supports 13.2.2, 14.1.3,
+14.2.1, and 16.1.0 through either provider, plus the patched 16.2 release.
 The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Lightweight tasks resume
 through the small ABI-specific context switch described below.
@@ -3416,15 +3418,18 @@ cd flyology
 alr build
 ```
 
-Flyology supports Alire 2.1 or newer with the exact `gnat_native` and
-`gnat_flyology_native` releases shown below. Each identity has the same host
-matrix:
+Flyology supports Alire 2.1 or newer with the exact compiler releases shown
+below. The patched provider publishes GNAT 16.2 before the community provider,
+so the newest release is intentionally identity-specific:
 
-| Host | Releases |
-| --- | --- |
-| macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0 |
-| Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0 |
-| Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0 |
+| Identity | Host | Releases |
+| --- | --- | --- |
+| `gnat_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
+| `gnat_native` | Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
+| `gnat_native` | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
+| `gnat_flyology_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+| `gnat_flyology_native` | Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+| `gnat_flyology_native` | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
 
 The crate declares a generic `gnat >=13 & <17` dependency so Alire can select
 either compiler provider; no package-specific dependency is required. Runtime
@@ -3706,12 +3711,13 @@ Silicon host validates Linux/AArch64 without emulation:
 ```
 
 The default image uses Ubuntu 24.04, the matching official AArch64 or x86-64
-Alire 2.1.0 archive, GNAT 16.2, and GPRbuild 26.0.1. The test run deliberately
+Alire 2.1.0 archive, patched GNAT 16.2, and GPRbuild 26.0.1. The test run
+deliberately
 denies `io_uring_setup` at the C bridge and asserts that a real lightweight file
 operation selected Linux native AIO. It also builds and runs the standalone
 `flyology_debug` and `flyology_bench` crates before the main runtime suite.
 `FLYOLOGY_LINUX_ARCH=amd64` requests the x86-64 compatibility target explicitly;
-`FLYOLOGY_GNAT_VERSION` and
+`FLYOLOGY_GNAT_PROVIDER`, `FLYOLOGY_GNAT_VERSION`, and
 `FLYOLOGY_GPRBUILD_VERSION` select another pair, and `FLYOLOGY_LINUX_IMAGE`
 overrides its local image name. The script removes its test image when the run
 finishes, including after a test failure. Set `FLYOLOGY_KEEP_LINUX_IMAGE=1` to
@@ -3731,7 +3737,7 @@ To run every Alire release covered by the patch family:
 `continue-on-error` fallbacks:
 
 - the full behavioral suite and a 1,000-connection showcase smoke on macOS and
-  Linux with GNAT 16.2;
+  Linux with `gnat_flyology_native` 16.2.0-patchset.1.1.0;
 - explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
 - the SPARK proof crate on Linux with GNATprove 16.1; and
 - the bounded TLA+ shared-memory and supervision models, allocator Ada/TLA+

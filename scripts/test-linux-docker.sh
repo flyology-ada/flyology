@@ -2,7 +2,8 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-gnat_version=${FLYOLOGY_GNAT_VERSION:-16.2.0}
+gnat_provider=${FLYOLOGY_GNAT_PROVIDER:-gnat_flyology_native}
+gnat_version=${FLYOLOGY_GNAT_VERSION:-16.2.0-patchset.1.1.0}
 gprbuild_version=${FLYOLOGY_GPRBUILD_VERSION:-26.0.1}
 case "${FLYOLOGY_LINUX_ARCH:-$(uname -m)}" in
   arm64|aarch64)
@@ -79,6 +80,7 @@ trap 'exit 143' TERM
 
 docker build \
   --platform "linux/$linux_arch" \
+  --build-arg "GNAT_PROVIDER=$gnat_provider" \
   --build-arg "GNAT_VERSION=$gnat_version" \
   --build-arg "GPRBUILD_VERSION=$gprbuild_version" \
   -f "$project_root/docker/linux/Dockerfile" \

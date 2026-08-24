@@ -17,7 +17,7 @@ concurrency:
 # six-hour job default, not to police how long healthy work may take.
 jobs:
   test:
-    name: Test / ${{ matrix.os }} / GNAT ${{ matrix.toolchain.gnat }}
+    name: Test / ${{ matrix.os }} / GNAT ${{ matrix.toolchain.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -25,7 +25,10 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
         toolchain: # Add one entry here to extend the supported launch matrix.
-          - { gnat: 16.2.0, gprbuild: 26.0.1 }
+          - provider: gnat_flyology_native
+            gnat: 16.2.0-patchset.1.1.0
+            label: 16.2.0
+            gprbuild: 26.0.1
     steps:
       - name: Check out sources
         timeout-minutes: 10
@@ -35,22 +38,20 @@ jobs:
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           version: 2.1.1
-          toolchain: >-
-            gnat_native=${{ matrix.toolchain.gnat }}
-            gprbuild=${{ matrix.toolchain.gprbuild }}
+          toolchain: --disable-assistant
           cache: true
-      - name: Select toolchain
-        timeout-minutes: 10
-        run: |
-          alr --non-interactive toolchain --select \
-            gnat_native=${{ matrix.toolchain.gnat }} \
-            gprbuild=${{ matrix.toolchain.gprbuild }}
-          printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
         timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            ${{ matrix.toolchain.provider }}=${{ matrix.toolchain.gnat }} \
+            gprbuild=${{ matrix.toolchain.gprbuild }}
+          printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Install OpenSSL 3 on macOS
         if: runner.os == 'macOS'
         timeout-minutes: 10

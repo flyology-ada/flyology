@@ -5,14 +5,16 @@ have been tested. `prepare-rts.sh` reads the active compiler release and
 refuses to continue when no matching family exists; it never guesses or falls
 back to an unverified patch.
 
-`gnat-13-16` is verified against these exact Alire `gnat_native` and
-`gnat_flyology_native` releases. Both compiler identities use the same
-host/release matrix:
+`gnat-13-16` is verified against these exact Alire compiler releases. The
+patched provider publishes GNAT 16.2 before the community `gnat_native`
+provider, so the newest release is intentionally identity-specific:
 
-| Host | Releases |
-| --- | --- |
-| Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0 |
-| Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0 |
+| Identity | Host | Releases |
+| --- | --- | --- |
+| `gnat_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
+| `gnat_native` | Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
+| `gnat_flyology_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+| `gnat_flyology_native` | Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
 
 The Darwin GNARL source bundled with Alire's GNAT 15 releases has a different
 task-primitives shape and needs its own patch family before it can be enabled.
