@@ -63,8 +63,9 @@ package Flyology.Buffers is
    procedure Acquire_For (Item : in out Unique_Buffer; Timeout : Duration)
    with Pre => not Has_Buffer (Item), Post => Has_Buffer (Item) and then Length (Item) = 0;
 
-   --  Return Item's slot to its pool and leave Item vacant. Releasing a vacant
-   --  buffer is harmless.
+   --  Return Item's slot to its pool and leave Item vacant. A slot completing
+   --  its final nonwrapping generation is permanently retired instead of
+   --  becoming available again. Releasing a vacant buffer is harmless.
    --  @param Item Buffer whose ownership is relinquished
    procedure Release (Item : in out Unique_Buffer)
    with Post => not Has_Buffer (Item);

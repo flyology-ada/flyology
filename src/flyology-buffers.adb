@@ -1,4 +1,5 @@
 with Ada.Unchecked_Deallocation;
+with Flyology.Buffer_Test_Hooks;
 
 package body Flyology.Buffers is
    use type Interfaces.Unsigned_64;
@@ -11,16 +12,27 @@ package body Flyology.Buffers is
       begin
          if Free_Count > 0 then
             Selected := Positive (Free_Slots (Free_Count));
-            Free_Slots (Free_Count) := No_Slot;
-            Free_Count := Free_Count - 1;
          else
             Selected := Positive (Next_Unused);
-            Next_Unused := Next_Unused + 1;
+         end if;
+
+         if Flyology.Buffer_Test_Hooks.Enabled
+           and then Flyology.Buffer_Test_Hooks.Consume_Next_Acquisition_Near_Exhaustion
+         then
+            Versions (Selected) := Generation'Last - 2;
          end if;
 
          if Versions (Selected) = Generation'Last then
             raise Program_Error with "buffer generation space exhausted";
          end if;
+
+         if Free_Count > 0 then
+            Free_Slots (Free_Count) := No_Slot;
+            Free_Count := Free_Count - 1;
+         else
+            Next_Unused := Next_Unused + 1;
+         end if;
+
          Versions (Selected) := Versions (Selected) + 1;
          In_Use (Selected) := True;
          Used_Count := Used_Count + 1;
@@ -54,8 +66,10 @@ package body Flyology.Buffers is
          end if;
          In_Use (Slot) := False;
          Used_Count := Used_Count - 1;
-         Free_Count := Free_Count + 1;
-         Free_Slots (Free_Count) := Slot;
+         if Versions (Slot) /= Generation'Last then
+            Free_Count := Free_Count + 1;
+            Free_Slots (Free_Count) := Slot;
+         end if;
       end Release;
 
       function Current return Pool_Snapshot
