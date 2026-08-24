@@ -150,10 +150,19 @@ FLYOLOGY_BENCH_TEST_DIR="$physical_work_dir" \
   "$crate_root/tests/bin/workers_smoke"
 
 cc_command=${CC:-cc}
-"$cc_command" -std=c11 -Wall -Wextra -Werror \
-  "$crate_root/tests/native/workers_abi_probe.c" \
-  "$crate_root/lib/libflyology_bench.a" -lpthread \
-  -o "$work_dir/workers_abi_probe"
+link_abi_probe() {
+  "$cc_command" -std=c11 -Wall -Wextra -Werror \
+    "$crate_root/tests/native/workers_abi_probe.c" \
+    "$crate_root/lib/libflyology_bench.a" -lpthread "$@" \
+    -o "$work_dir/workers_abi_probe"
+}
+if [ "$(uname -s)" = Linux ]; then
+  #  Distribution compilers may create PIE executables by default, while this
+  #  probe intentionally links the crate's ordinary static-library objects.
+  link_abi_probe -no-pie
+else
+  link_abi_probe
+fi
 "$work_dir/workers_abi_probe"
 for symbol in \
   flyology_bench_worker_spawn \
