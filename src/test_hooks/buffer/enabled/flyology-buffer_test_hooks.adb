@@ -20,6 +20,16 @@ package body Flyology.Buffer_Test_Hooks is
       procedure Consume_Acquisition_Pre_Commit_Failure (Fail : out Boolean);
       procedure Arm_Acquisition_Post_Commit_Failure;
       procedure Consume_Acquisition_Post_Commit_Failure (Fail : out Boolean);
+      procedure Arm_Reservation_Final_Generation;
+      procedure Consume_Reservation_Final_Generation (Armed : out Boolean);
+      procedure Arm_Reservation_Publication_Failure;
+      procedure Consume_Reservation_Publication_Failure (Fail : out Boolean);
+      procedure Arm_Release_Claim_Gap_Failure;
+      procedure Consume_Release_Claim_Gap_Failure (Fail : out Boolean);
+      procedure Arm_Prepare_Release_Publication_Failure;
+      procedure Consume_Prepare_Release_Publication_Failure (Fail : out Boolean);
+      procedure Arm_Acknowledge_Post_Commit_Failure;
+      procedure Consume_Acknowledge_Post_Commit_Failure (Fail : out Boolean);
    private
       Acquisition_Armed          : Boolean := False;
       Allocation_Failure_Armed   : Boolean := False;
@@ -31,6 +41,11 @@ package body Flyology.Buffer_Test_Hooks is
       Release_Post_Commit_Armed  : Boolean := False;
       Acquisition_Pre_Armed      : Boolean := False;
       Acquisition_Post_Armed     : Boolean := False;
+      Reservation_Final_Armed    : Boolean := False;
+      Reservation_Publish_Armed  : Boolean := False;
+      Release_Claim_Gap_Armed    : Boolean := False;
+      Prepare_Publish_Armed      : Boolean := False;
+      Acknowledge_Post_Armed     : Boolean := False;
    end State;
 
    protected body State is
@@ -142,6 +157,61 @@ package body Flyology.Buffer_Test_Hooks is
          Fail := Acquisition_Post_Armed;
          Acquisition_Post_Armed := False;
       end Consume_Acquisition_Post_Commit_Failure;
+
+      procedure Arm_Reservation_Final_Generation is
+      begin
+         Reservation_Final_Armed := True;
+      end Arm_Reservation_Final_Generation;
+
+      procedure Consume_Reservation_Final_Generation (Armed : out Boolean) is
+      begin
+         Armed := Reservation_Final_Armed;
+         Reservation_Final_Armed := False;
+      end Consume_Reservation_Final_Generation;
+
+      procedure Arm_Reservation_Publication_Failure is
+      begin
+         Reservation_Publish_Armed := True;
+      end Arm_Reservation_Publication_Failure;
+
+      procedure Consume_Reservation_Publication_Failure (Fail : out Boolean) is
+      begin
+         Fail := Reservation_Publish_Armed;
+         Reservation_Publish_Armed := False;
+      end Consume_Reservation_Publication_Failure;
+
+      procedure Arm_Release_Claim_Gap_Failure is
+      begin
+         Release_Claim_Gap_Armed := True;
+      end Arm_Release_Claim_Gap_Failure;
+
+      procedure Consume_Release_Claim_Gap_Failure (Fail : out Boolean) is
+      begin
+         Fail := Release_Claim_Gap_Armed;
+         Release_Claim_Gap_Armed := False;
+      end Consume_Release_Claim_Gap_Failure;
+
+      procedure Arm_Prepare_Release_Publication_Failure is
+      begin
+         Prepare_Publish_Armed := True;
+      end Arm_Prepare_Release_Publication_Failure;
+
+      procedure Consume_Prepare_Release_Publication_Failure (Fail : out Boolean) is
+      begin
+         Fail := Prepare_Publish_Armed;
+         Prepare_Publish_Armed := False;
+      end Consume_Prepare_Release_Publication_Failure;
+
+      procedure Arm_Acknowledge_Post_Commit_Failure is
+      begin
+         Acknowledge_Post_Armed := True;
+      end Arm_Acknowledge_Post_Commit_Failure;
+
+      procedure Consume_Acknowledge_Post_Commit_Failure (Fail : out Boolean) is
+      begin
+         Fail := Acknowledge_Post_Armed;
+         Acknowledge_Post_Armed := False;
+      end Consume_Acknowledge_Post_Commit_Failure;
    end State;
 
    procedure Arm_Next_Acquisition_Near_Exhaustion is
@@ -252,5 +322,65 @@ package body Flyology.Buffer_Test_Hooks is
       State.Consume_Acquisition_Post_Commit_Failure (Fail);
       return Fail;
    end Consume_Next_Domain_Acquisition_Post_Commit_Failure;
+
+   procedure Arm_Next_Domain_Reservation_Final_Generation is
+   begin
+      State.Arm_Reservation_Final_Generation;
+   end Arm_Next_Domain_Reservation_Final_Generation;
+
+   function Consume_Next_Domain_Reservation_Final_Generation return Boolean is
+      Armed : Boolean;
+   begin
+      State.Consume_Reservation_Final_Generation (Armed);
+      return Armed;
+   end Consume_Next_Domain_Reservation_Final_Generation;
+
+   procedure Arm_Next_Domain_Reservation_Publication_Failure is
+   begin
+      State.Arm_Reservation_Publication_Failure;
+   end Arm_Next_Domain_Reservation_Publication_Failure;
+
+   function Consume_Next_Domain_Reservation_Publication_Failure return Boolean is
+      Fail : Boolean;
+   begin
+      State.Consume_Reservation_Publication_Failure (Fail);
+      return Fail;
+   end Consume_Next_Domain_Reservation_Publication_Failure;
+
+   procedure Arm_Next_Domain_Release_Claim_Gap_Failure is
+   begin
+      State.Arm_Release_Claim_Gap_Failure;
+   end Arm_Next_Domain_Release_Claim_Gap_Failure;
+
+   function Consume_Next_Domain_Release_Claim_Gap_Failure return Boolean is
+      Fail : Boolean;
+   begin
+      State.Consume_Release_Claim_Gap_Failure (Fail);
+      return Fail;
+   end Consume_Next_Domain_Release_Claim_Gap_Failure;
+
+   procedure Arm_Next_Domain_Prepare_Release_Publication_Failure is
+   begin
+      State.Arm_Prepare_Release_Publication_Failure;
+   end Arm_Next_Domain_Prepare_Release_Publication_Failure;
+
+   function Consume_Next_Domain_Prepare_Release_Publication_Failure return Boolean is
+      Fail : Boolean;
+   begin
+      State.Consume_Prepare_Release_Publication_Failure (Fail);
+      return Fail;
+   end Consume_Next_Domain_Prepare_Release_Publication_Failure;
+
+   procedure Arm_Next_Domain_Acknowledge_Post_Commit_Failure is
+   begin
+      State.Arm_Acknowledge_Post_Commit_Failure;
+   end Arm_Next_Domain_Acknowledge_Post_Commit_Failure;
+
+   function Consume_Next_Domain_Acknowledge_Post_Commit_Failure return Boolean is
+      Fail : Boolean;
+   begin
+      State.Consume_Acknowledge_Post_Commit_Failure (Fail);
+      return Fail;
+   end Consume_Next_Domain_Acknowledge_Post_Commit_Failure;
 
 end Flyology.Buffer_Test_Hooks;

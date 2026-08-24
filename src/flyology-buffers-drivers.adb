@@ -46,7 +46,7 @@ package body Flyology.Buffers.Drivers is
    procedure Release (Item : in out Detached_Buffer) is
    begin
       if Has_Buffer (Item) then
-         Release_Token (Item.Owner, Item.Token);
+         Release_Token (Item.Owner, Item.Token'Access);
          Item.Owner := null;
       end if;
    end Release;
