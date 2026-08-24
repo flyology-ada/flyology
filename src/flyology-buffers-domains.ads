@@ -56,9 +56,9 @@ package Flyology.Buffers.Domains is
    --  @enum Acquisition_Timed_Out The admitted timed wait reached its deadline
    --  @enum Pool_Reserved Ordinary acquisition was excluded by a reservation
    --  @enum Reservation_Stale The reservation names an older generation
-   --  @enum Reservation_Not_Active The exact reservation has not been published
+   --  @enum Reservation_Not_Active The exact reservation generation is not active
    --  @enum Reservation_Releasing Release was prepared but not acknowledged
-   --  @enum Claim_Limit_Reached The reservation's bounded claim capacity is full
+   --  @enum Claim_Limit_Reached The pool's bounded claim capacity is full
    --  @enum Pool_Permanently_Exhausted The reservation generation cannot advance
    type Acquisition_Result is
      (Buffer_Acquired,
