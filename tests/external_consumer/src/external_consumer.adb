@@ -3,6 +3,8 @@ with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Buffers.Domains;
+with Flyology.Buffers.Domains.Drivers;
 with Flyology.Cancellation;
 with Flyology.IO;
 with Flyology.IO.Connections;
@@ -15,6 +17,31 @@ with Flyology.Worker_Pools;
 
 procedure External_Consumer is
    Marker_Error : exception;
+
+   package Buffer_Domains renames Flyology.Buffers.Domains;
+   package Domain_Drivers renames Flyology.Buffers.Domains.Drivers;
+
+   procedure Check_Buffer_Domain_Surface is
+      use type Buffer_Domains.Acquisition_Result;
+
+      Domain : aliased Buffer_Domains.Buffer_Domain :=
+        Buffer_Domains.Create
+          (Buffer_Domains.Pool_Configuration_Array'
+             (1 => (Block_Size => 64, Capacity => 1, Maximum_Claims => 1)));
+      Pool   : constant Buffer_Domains.Pool_Reference := Buffer_Domains.Pool_At (Domain, 1);
+      Item   : Buffer_Domains.Owned_Buffer (Domain'Access);
+      Result : Buffer_Domains.Acquisition_Result;
+   begin
+      if Domain_Drivers.Active_Claims (Domain'Access, Pool) /= 0 then
+         raise Program_Error with "new buffer domain has active claims";
+      end if;
+
+      Buffer_Domains.Try_Acquire (Item, Pool, Result);
+      if Result /= Buffer_Domains.Buffer_Acquired or else not Buffer_Domains.Has_Buffer (Item) then
+         raise Program_Error with "external buffer-domain acquisition failed";
+      end if;
+      Buffer_Domains.Release (Item);
+   end Check_Buffer_Domain_Surface;
 
    type Structured_Context is limited null record;
 
@@ -181,6 +208,7 @@ begin
       raise Program_Error with "event loop started before opt-in";
    end if;
 
+   Check_Buffer_Domain_Surface;
    Check_Lightweight_Exception;
 
    declare
