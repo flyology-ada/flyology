@@ -209,7 +209,7 @@ private
 
    type Unique_Buffer (Owner : not null access Pool) is limited new Ada.Finalization.Limited_Controlled
    with record
-      Token : Buffer_Token := No_Token;
+      Token : aliased Buffer_Token := No_Token;
    end record;
 
    --  @exclude

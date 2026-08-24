@@ -10,4 +10,38 @@ private package Flyology.Buffer_Test_Hooks is
 
    function Consume_Next_Acquisition_Near_Exhaustion return Boolean;
 
+   procedure Arm_Domain_Allocation_Failure (After_Successful_Allocations : Natural);
+
+   function Consume_Domain_Allocation_Failure return Boolean;
+
+   procedure Note_Domain_Pool_Allocated;
+
+   procedure Note_Domain_Pool_Freed;
+
+   function Live_Domain_Pools return Natural;
+
+   procedure Arm_Next_Domain_Transfer_Failure;
+
+   function Consume_Next_Domain_Transfer_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Transfer_Post_Commit_Failure;
+
+   function Consume_Next_Domain_Transfer_Post_Commit_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Release_Failure;
+
+   function Consume_Next_Domain_Release_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Release_Post_Commit_Failure;
+
+   function Consume_Next_Domain_Release_Post_Commit_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Acquisition_Pre_Commit_Failure;
+
+   function Consume_Next_Domain_Acquisition_Pre_Commit_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Acquisition_Post_Commit_Failure;
+
+   function Consume_Next_Domain_Acquisition_Post_Commit_Failure return Boolean;
+
 end Flyology.Buffer_Test_Hooks;
