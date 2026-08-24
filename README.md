@@ -3460,7 +3460,9 @@ Generate the public API reference with:
 The [documentation script](scripts/docs.sh) runs GNATdoc with
 undocumented-entity warnings enabled for Flyology Runtime and the standalone
 `flyology_debug`, `flyology_bench`, `flyology_cachelines`, and `flyology_numa`
-crates. It writes the ignored HTML output to `docs/api/index.html`,
+crates. It also rejects GNATdoc internal analysis errors, because GNATdoc 26.0
+can report a Libadalang property error while returning a successful exit
+status. It writes the ignored HTML output to `docs/api/index.html`,
 `docs/api/flyology_debug/index.html`, `docs/api/flyology_bench/index.html`,
 `docs/api/flyology_cachelines/index.html`, and
 `docs/api/flyology_numa/index.html`. It also builds client-side name
@@ -3475,6 +3477,25 @@ published API references, with:
 ./scripts/build-site.sh
 node ./vendor/website-kit/scripts/check-site.mjs build/site
 ```
+
+GNATdoc recursively analyzes every non-excluded project in a root project's
+dependency closure. A downstream crate that publishes only its own API should
+exclude Flyology from that closure instead of asking GNATdoc to analyze
+Flyology's implementation bodies again:
+
+```gpr
+package Documentation is
+   for Excluded_Project_Files use
+     (external ("FLYOLOGY_ROOT", "") & "/flyology.gpr");
+end Documentation;
+```
+
+`FLYOLOGY_ROOT` is exported by the Alire dependency. The attribute must be in
+the downstream root project because GNATdoc does not inherit it from a
+dependency. This keeps the downstream reference scoped to its own API and is
+the deterministic path around GNATdoc 26.0's infinite-recursion defect when it
+resolves the body of `Flyology.Channels.Bounded`; Flyology's own documentation
+project deliberately presents public specifications only.
 
 The build script detects the exact active compiler release, selects its versioned patch
 family and runtime ABI adapter, copies the matching installed runtime sources,
