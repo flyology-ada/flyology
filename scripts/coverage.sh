@@ -63,10 +63,12 @@ FLYOLOGY_TLS_TEST_HOOKS=true
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
 FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
+FLYOLOGY_BUFFER_TEST_HOOKS=true
 export FLYOLOGY_DNS_TEST_HOOKS FLYOLOGY_TLS_TEST_HOOKS
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+export FLYOLOGY_BUFFER_TEST_HOOKS
 
 printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 "$alr" exec -- "$gnatcov" instrument \
@@ -83,6 +85,7 @@ printf '%s\n' "coverage: instrumenting Flyology-owned Ada library units"
 
 ordinary_mains='cancellation_wake_smoke
 unix_stream_socket_smoke
+buffers_smoke
 connection_lifecycle_smoke
 managed_connection_connect_smoke
 connection_state_model

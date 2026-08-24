@@ -132,6 +132,8 @@ FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
 export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+FLYOLOGY_BUFFER_TEST_HOOKS=false
+export FLYOLOGY_BUFFER_TEST_HOOKS
 "$alr" build
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
@@ -161,7 +163,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
+  'flyology__buffer_test_hooks|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -170,6 +172,8 @@ assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'test_waiting_operations|test_operation_active|test_close_requested' \
   "production library exposes connection-controller test symbols"
+FLYOLOGY_BUFFER_TEST_HOOKS=true
+export FLYOLOGY_BUFFER_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
@@ -885,6 +889,7 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
 unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
+unset FLYOLOGY_BUFFER_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \

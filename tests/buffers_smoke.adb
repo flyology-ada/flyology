@@ -3,6 +3,7 @@ with Ada.Streams;
 with Flyology;
 with Flyology.Buffers;
 with Flyology.Buffers.Channels;
+with Flyology.Buffers.Testing;
 with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 with Interfaces;
@@ -112,6 +113,52 @@ procedure Buffers_Smoke is
       Assert (not Buffers.Has_Buffer (Waiting), "timeout attached a slot");
       Buffers.Release (Held);
    end Run_Pool_Exhaustion;
+
+   procedure Run_Generation_Exhaustion is
+      Storage   : aliased Buffers.Pool (Block_Size => 8, Capacity => 2);
+      Item      : Buffers.Unique_Buffer (Storage'Access);
+      Acquired  : Boolean;
+      Timed_Out : Boolean := False;
+   begin
+      Flyology.Buffers.Testing.Arm_Next_Acquisition_Near_Exhaustion;
+      Buffers.Acquire (Item);
+      Buffers.Release (Item);
+      Assert
+        (Buffers.Current (Storage) = (Available => 2, Outstanding => 0),
+         "penultimate buffer generation was not returned");
+
+      Buffers.Acquire (Item);
+      Buffers.Release (Item);
+      Assert
+        (Buffers.Current (Storage) = (Available => 1, Outstanding => 0),
+         "final buffer generation was not retired");
+
+      Buffers.Acquire (Item);
+      Buffers.Release (Item);
+      Assert
+        (Buffers.Current (Storage) = (Available => 1, Outstanding => 0),
+         "retiring one slot hid another available slot");
+
+      Flyology.Buffers.Testing.Arm_Next_Acquisition_Near_Exhaustion;
+      Buffers.Acquire (Item);
+      Buffers.Release (Item);
+      Buffers.Acquire (Item);
+      Buffers.Release (Item);
+      Assert
+        (Buffers.Current (Storage) = (Available => 0, Outstanding => 0),
+         "second final-generation slot was not retired");
+
+      Buffers.Try_Acquire (Item, Acquired);
+      Assert (not Acquired, "retired buffer slot was acquired without waiting");
+      begin
+         Buffers.Acquire_For (Item, 0.01);
+      exception
+         when Buffers.Timeout_Error =>
+            Timed_Out := True;
+      end;
+      Assert (Timed_Out, "retired buffer slot did not remain unavailable");
+      Assert (not Buffers.Has_Buffer (Item), "generation exhaustion attached a retired slot");
+   end Run_Generation_Exhaustion;
 
    procedure Run_Channel_Semantics is
       Storage        : aliased Buffers.Pool (Block_Size => 16, Capacity => 3);
@@ -377,6 +424,7 @@ procedure Buffers_Smoke is
 begin
    Run_Ownership;
    Run_Pool_Exhaustion;
+   Run_Generation_Exhaustion;
    Run_Channel_Semantics;
    Run_Concurrent_Handoff;
    Run_Abort_Safety;
