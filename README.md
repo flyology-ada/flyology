@@ -1353,6 +1353,19 @@ between owners and capabilities transfer the original block without copying,
 and callback-scoped observation preserves the same borrowing rule as
 `Unique_Buffer`.
 
+The excluded provider SPI also has two prevalidated direct-commit operations
+for a higher-level protected publication action. They are not general buffer
+operations. The caller must validate the exact domain and claim, reserve an
+unpublished vacant target, and perform every classification and possible
+failure before the first direct commit. The abort-deferred action may then move
+an owned buffer or capability into provider storage and publish only fixed
+same-subtype metadata. The direct commit performs no domain or protected call,
+allocation, callback, or fault injection, so a context can publish compound
+ownership without nesting its lock with a buffer-domain gate.
+The root test suite rebuilds those helpers with disabled hooks and strict
+unoptimized code generation, then rejects any retained hook reference, call,
+branch, or trap in either helper body.
+
 Each domain pool also has an optional-use exclusive reservation lifecycle for
 components such as remoting sessions. `Maximum_Claims` is a required per-pool
 configuration bound and must be at least `Capacity`. It counts both held

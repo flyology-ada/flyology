@@ -135,6 +135,7 @@ export FLYOLOGY_SUBPROCESS_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
 "$alr" build
+"$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 assert_archive_includes \

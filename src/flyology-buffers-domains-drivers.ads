@@ -107,6 +107,35 @@ package Flyology.Buffers.Domains.Drivers is
    --  as required by those formals; aliasing does not add a stored access.
    type Buffer_Capability is limited private;
 
+   --  Provider-only commit seam for a caller's final protected publication
+   --  action. The caller must already have validated that Source owns a
+   --  current claim in the same domain as its context, that Target is a
+   --  vacant unpublished component exclusively owned by its transition, and
+   --  that no competing operation can mutate either value. The protected
+   --  action must complete every classification, capacity check, and fault
+   --  injection before this call. After this call it may perform only other
+   --  prevalidated commit moves and fixed same-subtype metadata publication.
+   --
+   --  This procedure performs only direct field copies followed by clearing
+   --  Source. It performs no validation, protected call, allocation,
+   --  callback, test hook, or other operation that can raise. It must never
+   --  be used as an ordinary application ownership operation.
+   --  @param Source Exclusively owned domain buffer, vacant after commit
+   --  @param Target Vacant unpublished provider component receiving ownership
+   procedure Commit_Prevalidated_From_Owned
+     (Source : in out Owned_Buffer;
+      Target : in out Buffer_Capability);
+
+   --  Provider-only counterpart for moving one unpublished capability into
+   --  another inside the same final protected publication action. It has the
+   --  identical dynamic requirements and direct, nonraising implementation
+   --  described above.
+   --  @param Source Exclusively owned capability, vacant after commit
+   --  @param Target Vacant unpublished capability receiving ownership
+   procedure Commit_Prevalidated_Move
+     (Source : in out Buffer_Capability;
+      Target : in out Buffer_Capability);
+
    --  Move from a domain-bound public owner into provider storage.
    --  Validation failure raises Program_Error without changing either owner.
    --  Unwinding before the abort-deferred commit restores Item; unwinding

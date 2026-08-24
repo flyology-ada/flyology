@@ -259,6 +259,32 @@ package body Flyology.Buffers.Domains.Drivers is
      (Domain : not null access Buffer_Domain; Item : Buffer_Capability) return Boolean
    is (Has_Buffer (Item) and then Domains.Belongs_To (Domain.all, Item.Reference));
 
+   procedure Commit_Prevalidated_From_Owned
+     (Source : in out Owned_Buffer;
+      Target : in out Buffer_Capability)
+   is
+   begin
+      Target.Reference := Source.Reference;
+      Target.Reservation := Source.Reservation;
+      Target.Token := Source.Token;
+      Source.Reference := Invalid_Pool;
+      Source.Reservation := Invalid_Reservation;
+      Source.Token := No_Token;
+   end Commit_Prevalidated_From_Owned;
+
+   procedure Commit_Prevalidated_Move
+     (Source : in out Buffer_Capability;
+      Target : in out Buffer_Capability)
+   is
+   begin
+      Target.Reference := Source.Reference;
+      Target.Reservation := Source.Reservation;
+      Target.Token := Source.Token;
+      Source.Reference := Invalid_Pool;
+      Source.Reservation := Invalid_Reservation;
+      Source.Token := No_Token;
+   end Commit_Prevalidated_Move;
+
    procedure Validate
      (Domain : not null access Buffer_Domain; Item : Buffer_Capability)
    is
