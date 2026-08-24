@@ -9,7 +9,8 @@ for toolchain in \
   14.2.1:25.0.1 \
   15.1.2:25.0.1 \
   15.3.1:25.0.1 \
-  16.1.0:26.0.1
+  16.1.0:26.0.1 \
+  16.2.0:26.0.1
 do
   gnat_version=${toolchain%%:*}
   gprbuild_version=${toolchain#*:}

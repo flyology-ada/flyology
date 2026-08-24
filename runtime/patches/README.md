@@ -11,8 +11,8 @@ host/release matrix:
 
 | Host | Releases |
 | --- | --- |
-| Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
+| Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0 |
+| Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0 |
 
 The Darwin GNARL source bundled with Alire's GNAT 15 releases has a different
 task-primitives shape and needs its own patch family before it can be enabled.

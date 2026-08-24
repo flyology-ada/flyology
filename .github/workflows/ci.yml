@@ -25,7 +25,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
         toolchain: # Add one entry here to extend the supported launch matrix.
-          - { gnat: 16.1.0, gprbuild: 26.0.1 }
+          - { gnat: 16.2.0, gprbuild: 26.0.1 }
     steps:
       - name: Check out sources
         timeout-minutes: 10

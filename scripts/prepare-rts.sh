@@ -415,7 +415,7 @@ case "$platform:$compiler_release" in
     patch_family=gnat-13-16
     compat_family=gnat-legacy
     ;;
-  darwin:16.1.0|linux:16.1.0)
+  darwin:16.1.0|darwin:16.2.0|linux:16.1.0|linux:16.2.0)
     patch_family=gnat-13-16
     compat_family=gnat-16
     ;;
@@ -423,8 +423,8 @@ case "$platform:$compiler_release" in
     printf '%s\n' \
       "unsupported Flyology host/compiler pair: $platform / GNAT $compiler_release" \
       "selected Alire release: $compiler_release" \
-      "verified on Darwin: 13.2.2, 14.1.3, 14.2.1, 16.1.0" \
-      "verified on Linux: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0" >&2
+      "verified on Darwin: 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0" \
+      "verified on Linux: 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0" >&2
     exit 1
     ;;
 esac
