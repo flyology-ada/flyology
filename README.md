@@ -1335,6 +1335,24 @@ while another is exhausted. Flyology does not silently select a pool from the
 calling execution group: lightweight tasks can migrate, and native tasks have
 no Flyology group identity.
 
+`Flyology.Buffers.Domains` owns a fixed catalogue of heterogeneous pools for
+components that select storage at run time. The complete configuration is
+supplied once to `Create`; failed construction releases every pool already
+created. Opaque pool references include the process-local domain identity,
+catalogue slot, and nonwrapping catalogue generation, so a reference from an
+otherwise identical domain is still rejected before ownership changes.
+
+Public `Owned_Buffer` handles have an access discriminant for their domain.
+Ada accessibility therefore prevents them from outliving the storage their
+finalizers need. The excluded `Domains.Drivers.Buffer_Capability` is a definite
+provider carrier containing only scalar identity and token fields, with no Ada
+access component. Every storage operation takes the domain explicitly and
+validates the complete pool reference. Such a capability must remain inside a
+domain-bound controlled owner; it is not an application buffer type. Moves
+between owners and capabilities transfer the original block without copying,
+and callback-scoped observation preserves the same borrowing rule as
+`Unique_Buffer`.
+
 ```ada
 Pool  : aliased Flyology.Buffers.Pool
   (Block_Size => 64 * 1_024, Capacity => 258);

@@ -321,6 +321,7 @@ ordinary_mains='cancellation_wake_smoke
 unix_stream_socket_smoke
 buffer_channel_cancel_smoke
 buffer_channel_operations_smoke
+buffer_domains_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_operations_smoke
@@ -908,6 +909,26 @@ if run_gprbuild \
 then
   printf '%s\n' \
     "connection outliving its bound server was accepted" >&2
+  exit 1
+fi
+
+#  A domain-bound buffer cannot outlive the heterogeneous storage catalogue
+#  needed by its finalizer. The access discriminant makes this a compile-time
+#  rule rather than a cleanup convention.
+if buffer_lifetime_diagnostic=$(run_gprbuild \
+     --RTS="$project_root/build/rts" \
+     -c -q -p \
+     -P tests/fixtures/buffer_domain_lifetime/buffer_domain_lifetime_rejection.gpr \
+     2>&1)
+then
+  printf '%s\n' "buffer outliving its domain was accepted" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$buffer_lifetime_diagnostic" | \
+     grep -F "prefix of attribute has deeper level than allocator type" >/dev/null
+then
+  printf '%s\n' "buffer lifetime fixture failed for an unexpected reason" >&2
+  printf '%s\n' "$buffer_lifetime_diagnostic" >&2
   exit 1
 fi
 

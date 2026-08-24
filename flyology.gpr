@@ -172,6 +172,7 @@ project Flyology is
             "flyology-capacity.ads",
             "flyology-bounded_channels.ads",
             "flyology-buffers.ads",
+            "flyology-buffers-domains.ads",
             "flyology-buffers-drivers.ads",
             "flyology-buffers-channels.ads",
             "flyology-bytes.ads",
