@@ -1353,6 +1353,58 @@ between owners and capabilities transfer the original block without copying,
 and callback-scoped observation preserves the same borrowing rule as
 `Unique_Buffer`.
 
+Each domain pool also has an optional-use exclusive reservation lifecycle for
+components such as remoting sessions. `Maximum_Claims` is a required per-pool
+configuration bound and must be at least `Capacity`. It counts both held
+buffers and acquisitions already admitted to wait on the underlying pool.
+Consequently even the blocking acquisition form can return
+`Claim_Limit_Reached`; it never creates an unbounded queue outside that bound.
+
+The four reservation states are `Available`, `Reserved`,
+`Released_Pending_Ack`, and `Permanently_Exhausted`. A successful reservation
+of an `Available` pool publishes a complete pool reference plus a nonzero,
+nonwrapping reservation generation. The final generation may be used once. Its
+authorized release acknowledgment makes the pool permanently exhausted, and
+ordinary as well as reservation-qualified acquisition then returns
+`Pool_Permanently_Exhausted`.
+
+Ordinary acquisitions classify the state before touching the underlying pool:
+
+| State | Result before a base-pool attempt |
+| --- | --- |
+| `Available` | admitted subject to `Maximum_Claims` |
+| `Reserved` | `Pool_Reserved` |
+| `Released_Pending_Ack` | `Reservation_Releasing` |
+| `Permanently_Exhausted` | `Pool_Permanently_Exhausted` |
+
+Reservation-qualified acquisition first rejects invalid, foreign, or future
+authority with `Program_Error`. An older generation returns
+`Reservation_Stale`. For the exact current generation, `Available` returns
+`Reservation_Not_Active`, `Reserved` admits the underlying pool attempt,
+`Released_Pending_Ack` returns `Reservation_Releasing`, and exhausted returns
+`Pool_Permanently_Exhausted`. Claim exhaustion precedes base-pool emptiness or
+timeout. `Pool_Empty` is returned only by `Try_Acquire`, and
+`Acquisition_Timed_Out` only by `Acquire_For`.
+
+The excluded driver API separates authority from values that merely identify
+a pool. A limited controlled `Reservation_Claim` owns rollback until the domain
+gate writes the exact reference directly into an unpublished, transition-owned
+context field and clears the claim in one protected action. The context must
+keep that field inaccessible to lookup, close, and liveness paths until a later
+protected action publishes the record active. Admission rollback clears the
+same field through the domain gate before relinquishing the transition claim.
+
+Release is a resumable two-owner protocol. `Prepare_Release` changes an exact
+zero-claim reservation to `Released_Pending_Ack` and writes a limited,
+domain-bound release token. Preparing the same pending generation reissues a
+token. Unauthorized token finalization leaves the pool pending. The context's
+final protected retirement action validates the exact token and performs only
+the no-fail scalar authorization write. `Acknowledge` then runs with no context
+lock, advances or exhausts the generation, and clears the token in the domain
+gate. Authorized token finalization is the nonraising fallback. Older duplicate
+acknowledgments are inert and cannot release a newer reservation; unknown or
+future generations are internal protocol errors.
+
 ```ada
 Pool  : aliased Flyology.Buffers.Pool
   (Block_Size => 64 * 1_024, Capacity => 258);

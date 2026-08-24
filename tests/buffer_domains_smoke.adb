@@ -16,13 +16,14 @@ procedure Buffer_Domains_Smoke is
    use type Ada.Streams.Stream_Element_Array;
    use type Ada.Streams.Stream_Element_Offset;
    use type Buffers.Pool_Snapshot;
+   use type Domains.Acquisition_Result;
    use type Domains.Pool_Reference;
    use type Interfaces.Unsigned_64;
    use type System.Address;
 
    Configuration : constant Domains.Pool_Configuration_Array (3 .. 4) :=
-     [3 => (Block_Size => 8, Capacity => 2),
-      4 => (Block_Size => 32, Capacity => 3)];
+     [3 => (Block_Size => 8, Capacity => 2, Maximum_Claims => 4),
+      4 => (Block_Size => 32, Capacity => 3, Maximum_Claims => 5)];
 
    Domain_A : aliased Domains.Buffer_Domain := Domains.Create (Configuration);
    Domain_B : aliased Domains.Buffer_Domain := Domains.Create (Configuration);
@@ -54,6 +55,40 @@ procedure Buffer_Domains_Smoke is
          raise Program_Error with Message;
       end if;
    end Assert;
+
+   procedure Acquire (Item : in out Domains.Owned_Buffer; Source : Domains.Pool_Reference) is
+      Result : Domains.Acquisition_Result;
+   begin
+      Domains.Acquire (Item, Source, Result);
+      if Result /= Domains.Buffer_Acquired then
+         raise Program_Error with "unexpected domain acquisition rejection";
+      end if;
+   end Acquire;
+
+   procedure Try_Acquire
+     (Item : in out Domains.Owned_Buffer; Source : Domains.Pool_Reference; Acquired : out Boolean)
+   is
+      Result : Domains.Acquisition_Result;
+   begin
+      Domains.Try_Acquire (Item, Source, Result);
+      if Result not in Domains.Buffer_Acquired | Domains.Pool_Empty then
+         raise Program_Error with "unexpected domain try-acquisition rejection";
+      end if;
+      Acquired := Result = Domains.Buffer_Acquired;
+   end Try_Acquire;
+
+   procedure Acquire_For
+     (Item : in out Domains.Owned_Buffer; Source : Domains.Pool_Reference; Timeout : Duration)
+   is
+      Result : Domains.Acquisition_Result;
+   begin
+      Domains.Acquire_For (Item, Source, Timeout, Result);
+      if Result = Domains.Acquisition_Timed_Out then
+         raise Buffers.Timeout_Error;
+      elsif Result /= Domains.Buffer_Acquired then
+         raise Program_Error with "unexpected domain timed-acquisition rejection";
+      end if;
+   end Acquire_For;
 
    procedure Run_Heterogeneous_Ownership is
       Source       : Domains.Owned_Buffer (Domain_A'Access);
@@ -109,7 +144,7 @@ procedure Buffer_Domains_Smoke is
          and then Domains.Belongs_To (Domain_B, Small_B),
          "same-shaped domains were not distinguished");
 
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Domains.Copy_From (Source, [10, 20, 30, 40]);
       Domains.Set_Tag (Source, 42);
       Domains.With_Readable_Data (Source, Remember_Before'Access);
@@ -190,7 +225,7 @@ procedure Buffer_Domains_Smoke is
       Assert (Domains.Tag (Target) = 42, "capability move lost application tag");
       Domains.Release (Target);
 
-      Domains.Acquire (Source, Large_A);
+      Acquire (Source, Large_A);
       Assert (Domains.Buffer_Capacity (Source) = 32, "heterogeneous acquisition chose wrong pool");
       Domains.Release (Source);
    end Run_Heterogeneous_Ownership;
@@ -199,7 +234,7 @@ procedure Buffer_Domains_Smoke is
       Source : Domains.Owned_Buffer (Domain_A'Access);
       Target : Domains.Owned_Buffer (Domain_A'Access);
    begin
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Domains.Copy_From (Source, [1, 2]);
       Domains.Move (Source, Target);
       Assert
@@ -224,7 +259,7 @@ procedure Buffer_Domains_Smoke is
    begin
       Wrong_Domain := False;
       begin
-         Domains.Acquire (Source, Small_B);
+         Acquire (Source, Small_B);
       exception
          when Program_Error =>
             Wrong_Domain := True;
@@ -237,7 +272,7 @@ procedure Buffer_Domains_Smoke is
          and then Domains.Current (Domain_B, Small_B) = (Available => 2, Outstanding => 0),
          "foreign pool reference acquisition changed accounting");
 
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Domains.Copy_From (Source, [5, 6]);
 
       Wrong_Domain := False;
@@ -314,13 +349,13 @@ procedure Buffer_Domains_Smoke is
          Length := 5;
       end Write_Five;
    begin
-      Domains.Try_Acquire (First, Small_A, Acquired);
+      Try_Acquire (First, Small_A, Acquired);
       Assert (Acquired and then Domains.Has_Buffer (First), "domain try-acquire failed");
-      Domains.Acquire (Second, Small_A);
-      Domains.Try_Acquire (Third, Small_A, Acquired);
+      Acquire (Second, Small_A);
+      Try_Acquire (Third, Small_A, Acquired);
       Assert (not Acquired and then not Domains.Has_Buffer (Third), "exhausted try-acquire succeeded");
       begin
-         Domains.Acquire_For (Third, Small_A, 0.01);
+         Acquire_For (Third, Small_A, 0.01);
       exception
          when Buffers.Timeout_Error =>
             Timed_Out := True;
@@ -329,7 +364,7 @@ procedure Buffer_Domains_Smoke is
       Domains.Release (First);
       Domains.Release (Second);
 
-      Domains.Acquire_For (First, Large_A, 0.01);
+      Acquire_For (First, Large_A, 0.01);
       Domains.Copy_From (First, [1, 2, 3]);
       begin
          Domains.With_Writable_Data (First, Excessive_Length'Access);
@@ -348,7 +383,7 @@ procedure Buffer_Domains_Smoke is
       declare
          Item : Domains.Owned_Buffer (Domain_A'Access);
       begin
-         Domains.Acquire (Item, Small_A);
+         Acquire (Item, Small_A);
       end;
       Assert
         (Domains.Current (Domain_A, Small_A) = (Available => 2, Outstanding => 0),
@@ -361,7 +396,7 @@ procedure Buffer_Domains_Smoke is
          Owner  : Capability_Owner (Domain_A'Access, Capacity => 2);
          Source : Domains.Owned_Buffer (Domain_A'Access);
       begin
-         Domains.Acquire (Source, Small_A);
+         Acquire (Source, Small_A);
          Drivers.Move_From (Domain_A'Access, Source, Owner.Items (1));
       end;
       Assert
@@ -376,7 +411,7 @@ procedure Buffer_Domains_Smoke is
          Local : aliased Domains.Buffer_Domain := Domains.Create (Configuration);
          Item  : Domains.Owned_Buffer (Local'Access);
       begin
-         Domains.Acquire (Item, Domains.Pool_At (Local, 1));
+         Acquire (Item, Domains.Pool_At (Local, 1));
          Domains.Release (Item);
       end;
       Assert (Testing.Live_Pools = Baseline, "normal domain finalization leaked pool storage");
@@ -389,7 +424,7 @@ procedure Buffer_Domains_Smoke is
       Second  : Drivers.Buffer_Capability;
       Injected : Boolean := False;
    begin
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Domains.Copy_From (Source, [7, 8, 9]);
       Testing.Arm_Next_Transfer_Failure;
       begin
@@ -440,9 +475,9 @@ procedure Buffer_Domains_Smoke is
       Baseline : constant Natural := Testing.Live_Pools;
       Failed   : Boolean := False;
       Three    : constant Domains.Pool_Configuration_Array :=
-        [(Block_Size => 4, Capacity => 1),
-         (Block_Size => 8, Capacity => 1),
-         (Block_Size => 16, Capacity => 1)];
+        [(Block_Size => 4, Capacity => 1, Maximum_Claims => 2),
+         (Block_Size => 8, Capacity => 1, Maximum_Claims => 2),
+         (Block_Size => 16, Capacity => 1, Maximum_Claims => 2)];
    begin
       Testing.Arm_Allocation_Failure (After_Successful_Allocations => 1);
       begin
@@ -467,7 +502,7 @@ procedure Buffer_Domains_Smoke is
       Second   : aliased Drivers.Buffer_Capability;
       Injected : Boolean;
    begin
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Injected := False;
       Testing.Arm_Next_Transfer_Post_Commit_Failure;
       begin
@@ -483,7 +518,7 @@ procedure Buffer_Domains_Smoke is
          "post-commit public move did not retain target ownership");
       Domains.Release (Target);
 
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Injected := False;
       Testing.Arm_Next_Transfer_Post_Commit_Failure;
       begin
@@ -499,7 +534,7 @@ procedure Buffer_Domains_Smoke is
          "post-commit owner-to-capability move did not retain target ownership");
       Drivers.Release (Domain_A'Access, First);
 
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Drivers.Move_From (Domain_A'Access, Source, First);
       Injected := False;
       Testing.Arm_Next_Transfer_Post_Commit_Failure;
@@ -516,7 +551,7 @@ procedure Buffer_Domains_Smoke is
          "post-commit capability move did not retain target ownership");
       Drivers.Release (Domain_A'Access, Second);
 
-      Domains.Acquire (Source, Small_A);
+      Acquire (Source, Small_A);
       Drivers.Move_From (Domain_A'Access, Source, First);
       Injected := False;
       Testing.Arm_Next_Transfer_Post_Commit_Failure;
@@ -539,7 +574,7 @@ procedure Buffer_Domains_Smoke is
       Capability : aliased Drivers.Buffer_Capability;
       Injected   : Boolean := False;
    begin
-      Domains.Acquire (Item, Small_A);
+      Acquire (Item, Small_A);
       Testing.Arm_Next_Release_Failure;
       begin
          Domains.Release (Item);
@@ -552,7 +587,7 @@ procedure Buffer_Domains_Smoke is
         (Domains.Current (Domain_A, Small_A) = (Available => 2, Outstanding => 0),
          "failed release did not restore pool capacity");
 
-      Domains.Acquire (Item, Small_A);
+      Acquire (Item, Small_A);
       Injected := False;
       Testing.Arm_Next_Release_Post_Commit_Failure;
       begin
@@ -567,7 +602,7 @@ procedure Buffer_Domains_Smoke is
          and then Domains.Current (Domain_A, Small_A) = (Available => 2, Outstanding => 0),
          "post-commit public release did not preserve sole release");
 
-      Domains.Acquire (Item, Small_A);
+      Acquire (Item, Small_A);
       Drivers.Move_From (Domain_A'Access, Item, Capability);
       Injected := False;
       Testing.Arm_Next_Release_Failure;
@@ -583,7 +618,7 @@ procedure Buffer_Domains_Smoke is
          and then Domains.Current (Domain_A, Small_A) = (Available => 2, Outstanding => 0),
          "failed capability release did not restore capacity");
 
-      Domains.Acquire (Item, Small_A);
+      Acquire (Item, Small_A);
       Drivers.Move_From (Domain_A'Access, Item, Capability);
       Injected := False;
       Testing.Arm_Next_Release_Post_Commit_Failure;
@@ -627,7 +662,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Pre_Commit_Failure;
       begin
-         Domains.Acquire (Item, Small_A);
+         Acquire (Item, Small_A);
       exception
          when Program_Error =>
             Injected := True;
@@ -637,7 +672,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Post_Commit_Failure;
       begin
-         Domains.Acquire (Item, Small_A);
+         Acquire (Item, Small_A);
       exception
          when Program_Error =>
             Injected := True;
@@ -647,7 +682,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Pre_Commit_Failure;
       begin
-         Domains.Try_Acquire (Item, Small_A, Acquired);
+         Try_Acquire (Item, Small_A, Acquired);
       exception
          when Program_Error =>
             Injected := True;
@@ -657,7 +692,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Post_Commit_Failure;
       begin
-         Domains.Try_Acquire (Item, Small_A, Acquired);
+         Try_Acquire (Item, Small_A, Acquired);
       exception
          when Program_Error =>
             Injected := True;
@@ -667,7 +702,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Pre_Commit_Failure;
       begin
-         Domains.Acquire_For (Item, Small_A, 0.01);
+         Acquire_For (Item, Small_A, 0.01);
       exception
          when Program_Error =>
             Injected := True;
@@ -677,7 +712,7 @@ procedure Buffer_Domains_Smoke is
       Injected := False;
       Testing.Arm_Next_Acquisition_Post_Commit_Failure;
       begin
-         Domains.Acquire_For (Item, Small_A, 0.01);
+         Acquire_For (Item, Small_A, 0.01);
       exception
          when Program_Error =>
             Injected := True;
@@ -687,7 +722,7 @@ procedure Buffer_Domains_Smoke is
 
    procedure Run_Second_Slot_Slice is
       Local_Configuration : constant Domains.Pool_Configuration_Array :=
-        [1 => (Block_Size => 8, Capacity => 2)];
+        [1 => (Block_Size => 8, Capacity => 2, Maximum_Claims => 3)];
       Local      : aliased Domains.Buffer_Domain := Domains.Create (Local_Configuration);
       Reference  : constant Domains.Pool_Reference := Domains.Pool_At (Local, 1);
       Held       : Domains.Owned_Buffer (Local'Access);
@@ -716,8 +751,8 @@ procedure Buffer_Domains_Smoke is
          After := Data'Address;
       end Observe_After;
    begin
-      Domains.Acquire (Held, Reference);
-      Domains.Acquire (Source, Reference);
+      Acquire (Held, Reference);
+      Acquire (Source, Reference);
       Domains.Copy_From (Source, [31, 32, 33]);
       Domains.With_Readable_Data (Source, Observe_Before'Access);
       Drivers.Move_From (Local'Access, Source, Capability);

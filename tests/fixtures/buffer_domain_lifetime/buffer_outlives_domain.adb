@@ -12,7 +12,7 @@ procedure Buffer_Outlives_Domain is
 begin
    declare
       Configuration : constant Domains.Pool_Configuration_Array :=
-        [1 => (Block_Size => 8, Capacity => 1)];
+        [1 => (Block_Size => 8, Capacity => 1, Maximum_Claims => 1)];
       Domain        : aliased Domains.Buffer_Domain := Domains.Create (Configuration);
    begin
       Held := new Domains.Owned_Buffer (Domain'Access);

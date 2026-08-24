@@ -44,4 +44,24 @@ private package Flyology.Buffer_Test_Hooks is
 
    function Consume_Next_Domain_Acquisition_Post_Commit_Failure return Boolean;
 
+   procedure Arm_Next_Domain_Reservation_Final_Generation;
+
+   function Consume_Next_Domain_Reservation_Final_Generation return Boolean;
+
+   procedure Arm_Next_Domain_Reservation_Publication_Failure;
+
+   function Consume_Next_Domain_Reservation_Publication_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Release_Claim_Gap_Failure;
+
+   function Consume_Next_Domain_Release_Claim_Gap_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Prepare_Release_Publication_Failure;
+
+   function Consume_Next_Domain_Prepare_Release_Publication_Failure return Boolean;
+
+   procedure Arm_Next_Domain_Acknowledge_Post_Commit_Failure;
+
+   function Consume_Next_Domain_Acknowledge_Post_Commit_Failure return Boolean;
+
 end Flyology.Buffer_Test_Hooks;

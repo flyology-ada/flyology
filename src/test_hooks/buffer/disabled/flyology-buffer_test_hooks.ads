@@ -65,4 +65,42 @@ private package Flyology.Buffer_Test_Hooks is
    function Consume_Next_Domain_Acquisition_Post_Commit_Failure return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_acquire_post_consume";
 
+   procedure Arm_Next_Domain_Reservation_Final_Generation
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_reservation_final_arm";
+
+   function Consume_Next_Domain_Reservation_Final_Generation return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_reservation_final_consume";
+
+   procedure Arm_Next_Domain_Reservation_Publication_Failure
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_reservation_publish_arm";
+
+   function Consume_Next_Domain_Reservation_Publication_Failure return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_reservation_publish_consume";
+
+   procedure Arm_Next_Domain_Release_Claim_Gap_Failure
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_claim_gap_arm";
+
+   function Consume_Next_Domain_Release_Claim_Gap_Failure return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_claim_gap_consume";
+
+   procedure Arm_Next_Domain_Prepare_Release_Publication_Failure
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_prepare_publish_arm";
+
+   function Consume_Next_Domain_Prepare_Release_Publication_Failure return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_prepare_publish_consume";
+
+   procedure Arm_Next_Domain_Acknowledge_Post_Commit_Failure
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_ack_post_arm";
+
+   function Consume_Next_Domain_Acknowledge_Post_Commit_Failure return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_buffer_domain_ack_post_consume";
+
 end Flyology.Buffer_Test_Hooks;

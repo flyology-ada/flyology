@@ -7,7 +7,7 @@ package body Flyology.Buffers is
    procedure Free is new Ada.Unchecked_Deallocation (Ada.Streams.Stream_Element_Array, Storage_Access);
 
    protected body Pool_State is
-      procedure Allocate (Slot : out Natural; Version : out Generation) is
+      procedure Allocate (Token : not null access Buffer_Token) is
          Selected : Positive;
       begin
          if Free_Count > 0 then
@@ -36,32 +36,36 @@ package body Flyology.Buffers is
          Versions (Selected) := Versions (Selected) + 1;
          In_Use (Selected) := True;
          Used_Count := Used_Count + 1;
-         Slot := Selected;
-         Version := Versions (Selected);
+         Token.Slot := Selected;
+         Token.Version := Versions (Selected);
       end Allocate;
 
-      entry Acquire (Slot : out Natural; Version : out Generation)
+      entry Acquire (Token : not null access Buffer_Token)
         when Free_Count > 0 or else Next_Unused <= Slot_Count
       is
       begin
-         Allocate (Slot, Version);
+         Allocate (Token);
       end Acquire;
 
-      procedure Try_Acquire (Slot : out Natural; Version : out Generation; Acquired : out Boolean) is
+      procedure Try_Acquire (Token : not null access Buffer_Token; Acquired : out Boolean) is
       begin
          if Free_Count = 0 and then Next_Unused > Slot_Count then
-            Slot := No_Slot;
-            Version := No_Generation;
+            Token.all := No_Token;
             Acquired := False;
             return;
          end if;
-         Allocate (Slot, Version);
+         Allocate (Token);
          Acquired := True;
       end Try_Acquire;
 
-      procedure Release (Slot : Positive; Version : Generation) is
+      procedure Release (Token : not null access Buffer_Token) is
+         Slot : Positive;
       begin
-         if Slot > Slot_Count or else not In_Use (Slot) or else Versions (Slot) /= Version then
+         if Token.Slot = No_Slot or else Token.Slot > Slot_Count then
+            raise Program_Error with "invalid or stale buffer ownership";
+         end if;
+         Slot := Positive (Token.Slot);
+         if not In_Use (Slot) or else Versions (Slot) /= Token.Version then
             raise Program_Error with "invalid or stale buffer ownership";
          end if;
          In_Use (Slot) := False;
@@ -70,6 +74,7 @@ package body Flyology.Buffers is
             Free_Count := Free_Count + 1;
             Free_Slots (Free_Count) := Slot;
          end if;
+         Token.all := No_Token;
       end Release;
 
       function Current return Pool_Snapshot
@@ -85,18 +90,18 @@ package body Flyology.Buffers is
    procedure Finalize (Item : in out Attach_Guard) is
    begin
       if Item.Token.Slot /= No_Slot and then not Owns (Item.Target.all, Item.Token.all) then
-         Release_Token (Item.Target.Owner, Item.Token.all);
+         Release_Token (Item.Target.Owner, Item.Token);
       end if;
    end Finalize;
 
    type Release_Guard (Owner : not null access Pool) is new Ada.Finalization.Limited_Controlled with record
-      Token : Buffer_Token := No_Token;
+      Token : aliased Buffer_Token := No_Token;
    end record;
 
    overriding
    procedure Finalize (Item : in out Release_Guard) is
    begin
-      Release_Token (Item.Owner, Item.Token);
+      Release_Token (Item.Owner, Item.Token'Access);
    end Finalize;
 
    function Has_Buffer (Item : Unique_Buffer) return Boolean
@@ -116,7 +121,7 @@ package body Flyology.Buffers is
       if Has_Buffer (Item) then
          raise Program_Error with "acquire into an occupied buffer";
       end if;
-      Item.Owner.State.Acquire (Token.Slot, Token.Version);
+      Item.Owner.State.Acquire (Token'Access);
       Attach (Item, Token);
    end Acquire;
 
@@ -128,7 +133,7 @@ package body Flyology.Buffers is
       if Has_Buffer (Item) then
          raise Program_Error with "acquire into an occupied buffer";
       end if;
-      Item.Owner.State.Try_Acquire (Token.Slot, Token.Version, Acquired);
+      Item.Owner.State.Try_Acquire (Token'Access, Acquired);
       if Acquired then
          Attach (Item, Token);
       end if;
@@ -151,7 +156,7 @@ package body Flyology.Buffers is
          end if;
       else
          select
-            Item.Owner.State.Acquire (Acquired_Token.Slot, Acquired_Token.Version);
+            Item.Owner.State.Acquire (Acquired_Token'Access);
             Attach (Item, Acquired_Token);
          or
             delay Timeout;
@@ -299,11 +304,12 @@ package body Flyology.Buffers is
       Token := No_Token;
    end Attach;
 
-   procedure Release_Token (Owner : not null access Pool; Token : in out Buffer_Token) is
+   procedure Release_Token
+     (Owner : not null access Pool;
+      Token : not null access Buffer_Token) is
    begin
       if Token.Slot /= No_Slot then
-         Owner.State.Release (Positive (Token.Slot), Token.Version);
-         Token := No_Token;
+         Owner.State.Release (Token);
       end if;
    end Release_Token;
 
@@ -311,8 +317,7 @@ package body Flyology.Buffers is
    procedure Finalize (Item : in out Unique_Buffer) is
    begin
       if Has_Buffer (Item) then
-         Item.Owner.State.Release (Positive (Item.Token.Slot), Item.Token.Version);
-         Item.Token := No_Token;
+         Item.Owner.State.Release (Item.Token'Access);
       end if;
    end Finalize;
 

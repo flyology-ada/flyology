@@ -322,6 +322,7 @@ unix_stream_socket_smoke
 buffer_channel_cancel_smoke
 buffer_channel_operations_smoke
 buffer_domains_smoke
+buffer_domain_reservations_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_operations_smoke

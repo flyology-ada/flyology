@@ -11,6 +11,7 @@ project Runtime_Smoke is
       "buffer_channel_cancel_smoke.adb",
       "buffer_channel_operations_smoke.adb",
       "buffer_domains_smoke.adb",
+      "buffer_domain_reservations_smoke.adb",
       "buffers_smoke.adb",
       "cancellation_wake_smoke.adb",
       "channel_reentrancy_child.adb",

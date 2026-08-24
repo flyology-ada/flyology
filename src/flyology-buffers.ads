@@ -159,15 +159,25 @@ private
    No_Generation : constant Generation := 0;
    No_Slot       : constant Natural := 0;
 
+   type Buffer_Token is record
+      Slot             : Natural := No_Slot;
+      Version          : Generation := No_Generation;
+      Length           : Natural := 0;
+      Tag              : Interfaces.Unsigned_64 := 0;
+      Channel_Metadata : Interfaces.Unsigned_64 := 0;
+   end record;
+
+   No_Token : constant Buffer_Token := (others => <>);
+
    type Slot_Array is array (Positive range <>) of Natural;
    type Generation_Array is array (Positive range <>) of Generation;
    type Boolean_Array is array (Positive range <>) of Boolean;
 
    protected type Pool_State (Slot_Count : Positive) is
-      procedure Allocate (Slot : out Natural; Version : out Generation);
-      entry Acquire (Slot : out Natural; Version : out Generation);
-      procedure Try_Acquire (Slot : out Natural; Version : out Generation; Acquired : out Boolean);
-      procedure Release (Slot : Positive; Version : Generation);
+      procedure Allocate (Token : not null access Buffer_Token);
+      entry Acquire (Token : not null access Buffer_Token);
+      procedure Try_Acquire (Token : not null access Buffer_Token; Acquired : out Boolean);
+      procedure Release (Token : not null access Buffer_Token);
       function Current return Pool_Snapshot;
    private
       Free_Slots  : Slot_Array (1 .. Slot_Count) := (others => No_Slot);
@@ -197,16 +207,6 @@ private
    overriding
    procedure Finalize (Item : in out Pool);
 
-   type Buffer_Token is record
-      Slot             : Natural := No_Slot;
-      Version          : Generation := No_Generation;
-      Length           : Natural := 0;
-      Tag              : Interfaces.Unsigned_64 := 0;
-      Channel_Metadata : Interfaces.Unsigned_64 := 0;
-   end record;
-
-   No_Token : constant Buffer_Token := (others => <>);
-
    type Unique_Buffer (Owner : not null access Pool) is limited new Ada.Finalization.Limited_Controlled
    with record
       Token : aliased Buffer_Token := No_Token;
@@ -228,7 +228,9 @@ private
    --  @exclude
    --  @param Owner Pool receiving its slot
    --  @param Token Ownership token cleared on release
-   procedure Release_Token (Owner : not null access Pool; Token : in out Buffer_Token);
+   procedure Release_Token
+     (Owner : not null access Pool;
+      Token : not null access Buffer_Token);
 
    --  @exclude
    --  @param Item Buffer being finalized
