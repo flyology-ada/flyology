@@ -19,6 +19,7 @@ package Flyology.Buffers.Domains is
       Maximum_Claims : Positive;
    end record;
 
+   --  Ordered, nonempty catalogue used to construct a domain.
    type Pool_Configuration_Array is array (Positive range <>) of Pool_Configuration;
 
    --  Fixed heterogeneous pool catalogue. Create is the only constructor.
@@ -36,18 +37,29 @@ package Flyology.Buffers.Domains is
    --  Opaque, process-local reference to one immutable domain catalogue slot.
    type Pool_Reference is private;
 
+   --  Sentinel that names no pool.
    Invalid_Pool : constant Pool_Reference;
 
    --  Opaque authority for one exact reservation generation of one pool.
    --  The value is definite and contains no Ada access component.
    type Pool_Reservation is private;
 
+   --  Sentinel that carries no reservation authority.
    Invalid_Reservation : constant Pool_Reservation;
 
    --  Total outcome of an ordinary or reservation-qualified acquisition.
    --  Buffer_Acquired is the only outcome that publishes ownership. Pool_Empty
    --  is reachable only from Try_Acquire, while Acquisition_Timed_Out is
    --  reachable only from Acquire_For.
+   --  @enum Buffer_Acquired Ownership was published to the destination
+   --  @enum Pool_Empty No unowned buffer was immediately available
+   --  @enum Acquisition_Timed_Out The admitted timed wait reached its deadline
+   --  @enum Pool_Reserved Ordinary acquisition was excluded by a reservation
+   --  @enum Reservation_Stale The reservation names an older generation
+   --  @enum Reservation_Not_Active The exact reservation has not been published
+   --  @enum Reservation_Releasing Release was prepared but not acknowledged
+   --  @enum Claim_Limit_Reached The reservation's bounded claim capacity is full
+   --  @enum Pool_Permanently_Exhausted The reservation generation cannot advance
    type Acquisition_Result is
      (Buffer_Acquired,
       Pool_Empty,
@@ -116,8 +128,8 @@ package Flyology.Buffers.Domains is
 
    --  Public single-owner handle tied by accessibility to one domain. A
    --  vacant handle does not select a pool until acquisition or movement.
-   type Owned_Buffer (Domain : not null access Buffer_Domain)
-   is limited new Ada.Finalization.Limited_Controlled with private;
+   type Owned_Buffer (Domain : not null access Buffer_Domain) is limited
+     new Ada.Finalization.Limited_Controlled with private;
 
    --  Acquire from Source, waiting until a slot is available.
    --  @param Item Vacant domain-bound owner receiving a slot
@@ -128,8 +140,7 @@ package Flyology.Buffers.Domains is
    --  @exception Program_Error Source is foreign or Item is occupied
    --  Unwinding before the abort-deferred ownership commit leaves Item vacant
    --  and restores the acquired slot. After commit, Item is the sole owner.
-   procedure Acquire
-     (Item : in out Owned_Buffer; Source : Pool_Reference; Result : out Acquisition_Result)
+   procedure Acquire (Item : in out Owned_Buffer; Source : Pool_Reference; Result : out Acquisition_Result)
    with Pre => not Has_Buffer (Item), Post => (Result = Buffer_Acquired) = Has_Buffer (Item);
 
    --  Wait for a slot under one exact active reservation. An older reservation
@@ -142,9 +153,7 @@ package Flyology.Buffers.Domains is
    --  @param Reservation Exact reservation authority
    --  @param Result Total acquisition outcome
    procedure Acquire
-     (Item        : in out Owned_Buffer;
-      Reservation : Pool_Reservation;
-      Result      : out Acquisition_Result)
+     (Item : in out Owned_Buffer; Reservation : Pool_Reservation; Result : out Acquisition_Result)
    with Pre => not Has_Buffer (Item), Post => (Result = Buffer_Acquired) = Has_Buffer (Item);
 
    --  Attempt acquisition without waiting.
@@ -164,10 +173,11 @@ package Flyology.Buffers.Domains is
    --  State classification precedes Pool_Empty; claim exhaustion precedes the
    --  base-pool attempt. Invalid, foreign, or future authority raises
    --  Program_Error before the gate is mutated.
+   --  @param Item Vacant domain-bound owner receiving a slot
+   --  @param Reservation Exact reservation authority
+   --  @param Result Total acquisition outcome
    procedure Try_Acquire
-     (Item        : in out Owned_Buffer;
-      Reservation : Pool_Reservation;
-      Result      : out Acquisition_Result)
+     (Item : in out Owned_Buffer; Reservation : Pool_Reservation; Result : out Acquisition_Result)
    with Pre => not Has_Buffer (Item), Post => (Result = Buffer_Acquired) = Has_Buffer (Item);
 
    --  Acquire within one relative deadline. Negative Timeout waits without a
@@ -191,6 +201,10 @@ package Flyology.Buffers.Domains is
    --  Timed acquisition under one exact active reservation. Claim exhaustion
    --  and reservation-state outcomes reject before waiting; only an admitted
    --  base-pool wait may report Acquisition_Timed_Out.
+   --  @param Item Vacant domain-bound owner receiving a slot
+   --  @param Reservation Exact reservation authority
+   --  @param Timeout Maximum monotonic wait in seconds
+   --  @param Result Total acquisition outcome
    procedure Acquire_For
      (Item        : in out Owned_Buffer;
       Reservation : Pool_Reservation;
@@ -287,7 +301,7 @@ private
    No_Domain : constant Domain_Identity := 0;
 
    type Catalogue_Generation is mod 2**64;
-   No_Catalogue_Generation : constant Catalogue_Generation := 0;
+   No_Catalogue_Generation      : constant Catalogue_Generation := 0;
    Initial_Catalogue_Generation : constant Catalogue_Generation := 1;
 
    type Pool_Reference is record
@@ -299,7 +313,7 @@ private
    Invalid_Pool : constant Pool_Reference := (others => <>);
 
    subtype Reservation_Generation is Interfaces.Unsigned_64;
-   No_Reservation_Generation : constant Reservation_Generation := 0;
+   No_Reservation_Generation      : constant Reservation_Generation := 0;
    Initial_Reservation_Generation : constant Reservation_Generation := 1;
 
    type Pool_Reservation is record
@@ -309,8 +323,7 @@ private
 
    Invalid_Reservation : constant Pool_Reservation := (others => <>);
 
-   type Reservation_State is
-     (Available, Reserved, Released_Pending_Ack, Permanently_Exhausted);
+   type Reservation_State is (Available, Reserved, Released_Pending_Ack, Permanently_Exhausted);
 
    protected type Reservation_Gate (Maximum_Claims : Positive) is
       procedure Begin_Claim
@@ -320,39 +333,38 @@ private
          Claim_Reservation : not null access Pool_Reservation;
          Result            : out Acquisition_Result);
       procedure End_Claim
-        (Reference   : not null access Pool_Reference;
-         Reservation : not null access Pool_Reservation);
+        (Reference : not null access Pool_Reference; Reservation : not null access Pool_Reservation);
       procedure Try_Reserve
-        (Reference  : Pool_Reference;
-         Base_Empty : Boolean;
+        (Reference              : Pool_Reference;
+         Base_Empty             : Boolean;
          Force_Final_Generation : Boolean;
-         Target     : not null access Pool_Reservation;
-         Reserved_Result : out Boolean;
-         In_Use     : out Boolean);
+         Target                 : not null access Pool_Reservation;
+         Reserved_Result        : out Boolean;
+         In_Use                 : out Boolean);
       procedure Commit_Reservation
-        (Source : not null access Pool_Reservation;
-         Target : not null access Pool_Reservation);
+        (Source : not null access Pool_Reservation; Target : not null access Pool_Reservation);
       procedure Rollback_Reservation (Target : not null access Pool_Reservation);
       procedure Prepare_Release
-        (Source     : Pool_Reservation;
-         Base_Empty : Boolean;
-         Target     : not null access Pool_Reservation;
-         Prepared   : out Boolean;
-         Live_Claims : out Boolean;
+        (Source               : Pool_Reservation;
+         Base_Empty           : Boolean;
+         Target               : not null access Pool_Reservation;
+         Prepared             : out Boolean;
+         Live_Claims          : out Boolean;
          Already_Acknowledged : out Boolean);
-      procedure Acknowledge
-        (Target : not null access Pool_Reservation; Authorized : Boolean);
+      procedure Acknowledge (Target : not null access Pool_Reservation; Authorized : Boolean);
       function Valid_Claim (Reservation : Pool_Reservation) return Boolean;
       function State return Reservation_State;
       function Claim_Count return Natural;
    private
-      Lifecycle : Reservation_State := Available;
+      Lifecycle  : Reservation_State := Available;
       Generation : Reservation_Generation := Initial_Reservation_Generation;
-      Claims : Natural := 0;
+      Claims     : Natural := 0;
    end Reservation_Gate;
 
    type Pool_Holder
-     (Block_Size : Positive; Capacity : Positive; Maximum_Claims : Positive)
+     (Block_Size     : Positive;
+      Capacity       : Positive;
+      Maximum_Claims : Positive)
    is limited record
       Storage : aliased Pool (Block_Size, Capacity);
       Gate    : Reservation_Gate (Maximum_Claims);
@@ -361,55 +373,87 @@ private
    type Pool_Holder_Access is access Pool_Holder;
    type Pool_Holder_Access_Array is array (Positive range <>) of Pool_Holder_Access;
 
-   type Buffer_Domain (Number_Of_Pools : Positive)
-   is limited new Ada.Finalization.Limited_Controlled with record
+   type Buffer_Domain (Number_Of_Pools : Positive) is limited new Ada.Finalization.Limited_Controlled
+   with record
       Identity : Domain_Identity := No_Domain;
       Pools    : Pool_Holder_Access_Array (1 .. Number_Of_Pools) := (others => null);
    end record;
 
+   --  @exclude
+   --  @param Domain Domain being initialized
    overriding
    procedure Initialize (Domain : in out Buffer_Domain);
 
+   --  @exclude
+   --  @param Domain Domain being finalized
    overriding
    procedure Finalize (Domain : in out Buffer_Domain);
 
-   type Owned_Buffer (Domain : not null access Buffer_Domain)
-   is limited new Ada.Finalization.Limited_Controlled with record
-      Reference : aliased Pool_Reference := Invalid_Pool;
+   type Owned_Buffer (Domain : not null access Buffer_Domain) is limited
+     new Ada.Finalization.Limited_Controlled
+   with record
+      Reference   : aliased Pool_Reference := Invalid_Pool;
       Reservation : aliased Pool_Reservation := Invalid_Reservation;
       Token       : aliased Buffer_Token := No_Token;
    end record;
 
+   --  @exclude
+   --  @param Item Domain-bound owner being finalized
    overriding
    procedure Finalize (Item : in out Owned_Buffer);
 
-   function Resolve
-     (Domain : Buffer_Domain; Reference : Pool_Reference) return Pool_Holder_Access;
+   --  @exclude
+   --  @param Domain Domain whose catalogue is searched
+   --  @param Reference Exact pool reference to resolve
+   --  @return Process-local pool holder
+   function Resolve (Domain : Buffer_Domain; Reference : Pool_Reference) return Pool_Holder_Access;
 
+   --  @exclude
+   --  @param Domain Domain receiving the released slot
+   --  @param Reference Exact pool reference, cleared on success
+   --  @param Reservation Reservation provenance, cleared on success
+   --  @param Token Detached storage token, cleared on success
    procedure Release_Token
      (Domain      : in out Buffer_Domain;
       Reference   : not null access Pool_Reference;
       Reservation : not null access Pool_Reservation;
       Token       : not null access Buffer_Token);
 
+   --  @exclude
+   --  @param Source_Reference Source pool reference, cleared on success
+   --  @param Source_Reservation Source reservation, cleared on success
+   --  @param Source_Token Source storage token, cleared on success
+   --  @param Target_Reference Vacant target pool reference
+   --  @param Target_Reservation Vacant target reservation
+   --  @param Target_Token Vacant target storage token
    procedure Commit_Transfer
-     (Source_Reference : not null access Pool_Reference;
+     (Source_Reference   : not null access Pool_Reference;
       Source_Reservation : not null access Pool_Reservation;
-      Source_Token     : not null access Buffer_Token;
-      Target_Reference : not null access Pool_Reference;
+      Source_Token       : not null access Buffer_Token;
+      Target_Reference   : not null access Pool_Reference;
       Target_Reservation : not null access Pool_Reservation;
-      Target_Token     : not null access Buffer_Token);
+      Target_Token       : not null access Buffer_Token);
 
+   --  @exclude
+   --  @param Domain Domain whose ownership is validated
+   --  @param Reference Exact candidate pool reference
+   --  @param Reservation Candidate reservation provenance
+   --  @return Process-local pool holder
    function Resolve_Ownership
+     (Domain : Buffer_Domain; Reference : Pool_Reference; Reservation : Pool_Reservation)
+      return Pool_Holder_Access;
+
+   --  @exclude
+   --  @param Domain Domain whose storage is observed
+   --  @param Reference Exact pool reference
+   --  @param Reservation Exact reservation provenance
+   --  @param Token Exact storage token
+   --  @param Process Synchronous payload observer
+   procedure Observe
      (Domain      : Buffer_Domain;
       Reference   : Pool_Reference;
-      Reservation : Pool_Reservation) return Pool_Holder_Access;
-
-   procedure Observe
-     (Domain    : Buffer_Domain;
-      Reference : Pool_Reference;
       Reservation : Pool_Reservation;
-      Token     : Buffer_Token;
-      Process   : not null access procedure (Data : Ada.Streams.Stream_Element_Array));
+      Token       : Buffer_Token;
+      Process     : not null access procedure (Data : Ada.Streams.Stream_Element_Array));
 
 end Flyology.Buffers.Domains;
