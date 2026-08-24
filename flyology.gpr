@@ -2,6 +2,17 @@ with "config/flyology_config.gpr";
 with "flyology_allocators.gpr";
 project Flyology is
 
+   type Buffer_Test_Hooks_Type is ("false", "true");
+   Buffer_Test_Hooks : Buffer_Test_Hooks_Type :=
+     external ("FLYOLOGY_BUFFER_TEST_HOOKS", "false");
+   Buffer_Test_Hook_Source_Dir := "src/test_hooks/buffer/disabled/";
+   case Buffer_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Buffer_Test_Hook_Source_Dir := "src/test_hooks/buffer/enabled/";
+   end case;
+
    type DNS_Test_Hooks_Type is ("false", "true");
    DNS_Test_Hooks : DNS_Test_Hooks_Type :=
      external ("FLYOLOGY_DNS_TEST_HOOKS", "false");
@@ -123,21 +134,24 @@ project Flyology is
       when "linux" =>
          for Source_Dirs use
            ("src/", "src/native/", "src/platform/linux/", "config/",
-            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when "macos" =>
          for Source_Dirs use
            ("src/", "src/native/", "src/platform/darwin/", "config/",
-            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when others =>
          for Source_Dirs use
            ("src/", "src/native/", "config/",
-            DNS_Test_Hook_Source_Dir, TLS_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
@@ -158,6 +172,7 @@ project Flyology is
             "flyology-capacity.ads",
             "flyology-bounded_channels.ads",
             "flyology-buffers.ads",
+            "flyology-buffers-domains.ads",
             "flyology-buffers-drivers.ads",
             "flyology-buffers-channels.ads",
             "flyology-bytes.ads",

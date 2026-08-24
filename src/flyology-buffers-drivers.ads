@@ -91,7 +91,7 @@ private
 
    type Detached_Buffer is limited new Ada.Finalization.Limited_Controlled with record
       Owner : Pool_Access := null;
-      Token : Buffer_Token := No_Token;
+      Token : aliased Buffer_Token := No_Token;
    end record;
 
    --  Release abandoned provider-owned storage to its pool.

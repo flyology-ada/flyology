@@ -1335,6 +1335,89 @@ while another is exhausted. Flyology does not silently select a pool from the
 calling execution group: lightweight tasks can migrate, and native tasks have
 no Flyology group identity.
 
+`Flyology.Buffers.Domains` owns a fixed catalogue of heterogeneous pools for
+components that select storage at run time. The complete configuration is
+supplied once to `Create`; failed construction releases every pool already
+created. Opaque pool references include the process-local domain identity,
+catalogue slot, and nonwrapping catalogue generation, so a reference from an
+otherwise identical domain is still rejected before ownership changes.
+
+Public `Owned_Buffer` handles have an access discriminant for their domain.
+Ada accessibility therefore prevents them from outliving the storage their
+finalizers need. The excluded `Domains.Drivers.Buffer_Capability` is a definite
+provider carrier containing only scalar identity and token fields, with no Ada
+access component. Every storage operation takes the domain explicitly and
+validates the complete pool reference. Such a capability must remain inside a
+domain-bound controlled owner; it is not an application buffer type. Moves
+between owners and capabilities transfer the original block without copying,
+and callback-scoped observation preserves the same borrowing rule as
+`Unique_Buffer`.
+
+The excluded provider SPI also has two prevalidated direct-commit operations
+for a higher-level protected publication action. They are not general buffer
+operations. The caller must validate the exact domain and claim, reserve an
+unpublished vacant target, and perform every classification and possible
+failure before the first direct commit. The abort-deferred action may then move
+an owned buffer or capability into provider storage and publish only fixed
+same-subtype metadata. The direct commit performs no domain or protected call,
+allocation, callback, or fault injection, so a context can publish compound
+ownership without nesting its lock with a buffer-domain gate.
+The root test suite rebuilds those helpers with disabled hooks and strict
+unoptimized code generation, then rejects any retained hook reference, call,
+branch, or trap in either helper body.
+
+Each domain pool also has an optional-use exclusive reservation lifecycle for
+components such as remoting sessions. `Maximum_Claims` is a required per-pool
+configuration bound and must be at least `Capacity`. It counts both held
+buffers and acquisitions already admitted to wait on the underlying pool.
+Consequently even the blocking acquisition form can return
+`Claim_Limit_Reached`; it never creates an unbounded queue outside that bound.
+
+The four reservation states are `Available`, `Reserved`,
+`Released_Pending_Ack`, and `Permanently_Exhausted`. A successful reservation
+of an `Available` pool publishes a complete pool reference plus a nonzero,
+nonwrapping reservation generation. The final generation may be used once. Its
+authorized release acknowledgment makes the pool permanently exhausted, and
+ordinary as well as reservation-qualified acquisition then returns
+`Pool_Permanently_Exhausted`.
+
+Ordinary acquisitions classify the state before touching the underlying pool:
+
+| State | Result before a base-pool attempt |
+| --- | --- |
+| `Available` | admitted subject to `Maximum_Claims` |
+| `Reserved` | `Pool_Reserved` |
+| `Released_Pending_Ack` | `Reservation_Releasing` |
+| `Permanently_Exhausted` | `Pool_Permanently_Exhausted` |
+
+Reservation-qualified acquisition first rejects invalid, foreign, or future
+authority with `Program_Error`. An older generation returns
+`Reservation_Stale`. For the exact current generation, `Available` returns
+`Reservation_Not_Active`, `Reserved` admits the underlying pool attempt,
+`Released_Pending_Ack` returns `Reservation_Releasing`, and exhausted returns
+`Pool_Permanently_Exhausted`. Claim exhaustion precedes base-pool emptiness or
+timeout. `Pool_Empty` is returned only by `Try_Acquire`, and
+`Acquisition_Timed_Out` only by `Acquire_For`.
+
+The excluded driver API separates authority from values that merely identify
+a pool. A limited controlled `Reservation_Claim` owns rollback until the domain
+gate writes the exact reference directly into an unpublished, transition-owned
+context field and clears the claim in one protected action. The context must
+keep that field inaccessible to lookup, close, and liveness paths until a later
+protected action publishes the record active. Admission rollback clears the
+same field through the domain gate before relinquishing the transition claim.
+
+Release is a resumable two-owner protocol. `Prepare_Release` changes an exact
+zero-claim reservation to `Released_Pending_Ack` and writes a limited,
+domain-bound release token. Preparing the same pending generation reissues a
+token. Unauthorized token finalization leaves the pool pending. The context's
+final protected retirement action validates the exact token and performs only
+the no-fail scalar authorization write. `Acknowledge` then runs with no context
+lock, advances or exhausts the generation, and clears the token in the domain
+gate. Authorized token finalization is the nonraising fallback. Older duplicate
+acknowledgments are inert and cannot release a newer reservation; unknown or
+future generations are internal protocol errors.
+
 ```ada
 Pool  : aliased Flyology.Buffers.Pool
   (Block_Size => 64 * 1_024, Capacity => 258);

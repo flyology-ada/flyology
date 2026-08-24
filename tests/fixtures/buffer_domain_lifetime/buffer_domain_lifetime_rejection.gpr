@@ -1,0 +1,14 @@
+with "../../../flyology.gpr";
+
+--  Compile-only fixture that must be rejected by Ada accessibility checks.
+project Buffer_Domain_Lifetime_Rejection is
+   for Source_Dirs use (".");
+   for Object_Dir use "../../obj/buffer_domain_lifetime_rejection";
+   for Main use ("buffer_outlives_domain.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatwa", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+end Buffer_Domain_Lifetime_Rejection;

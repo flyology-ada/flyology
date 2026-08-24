@@ -132,7 +132,10 @@ FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
 export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+FLYOLOGY_BUFFER_TEST_HOOKS=false
+export FLYOLOGY_BUFFER_TEST_HOOKS
 "$alr" build
+"$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 assert_archive_includes \
@@ -161,7 +164,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
+  'flyology_disabled_hook_must_be_elided_buffer_|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -170,6 +173,8 @@ assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'test_waiting_operations|test_operation_active|test_close_requested' \
   "production library exposes connection-controller test symbols"
+FLYOLOGY_BUFFER_TEST_HOOKS=true
+export FLYOLOGY_BUFFER_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 
@@ -317,6 +322,8 @@ ordinary_mains='cancellation_wake_smoke
 unix_stream_socket_smoke
 buffer_channel_cancel_smoke
 buffer_channel_operations_smoke
+buffer_domains_smoke
+buffer_domain_reservations_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_operations_smoke
@@ -885,6 +892,7 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
 unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
+unset FLYOLOGY_BUFFER_TEST_HOOKS || :
 
 #  Leave the worktree with the documented compatibility configuration.
 FLYOLOGY_DEFAULT=native \
@@ -903,6 +911,26 @@ if run_gprbuild \
 then
   printf '%s\n' \
     "connection outliving its bound server was accepted" >&2
+  exit 1
+fi
+
+#  A domain-bound buffer cannot outlive the heterogeneous storage catalogue
+#  needed by its finalizer. The access discriminant makes this a compile-time
+#  rule rather than a cleanup convention.
+if buffer_lifetime_diagnostic=$(run_gprbuild \
+     --RTS="$project_root/build/rts" \
+     -c -q -p \
+     -P tests/fixtures/buffer_domain_lifetime/buffer_domain_lifetime_rejection.gpr \
+     2>&1)
+then
+  printf '%s\n' "buffer outliving its domain was accepted" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$buffer_lifetime_diagnostic" | \
+     grep -F "prefix of attribute has deeper level than allocator type" >/dev/null
+then
+  printf '%s\n' "buffer lifetime fixture failed for an unexpected reason" >&2
+  printf '%s\n' "$buffer_lifetime_diagnostic" >&2
   exit 1
 fi
 
