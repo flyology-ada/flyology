@@ -19,6 +19,8 @@ case "$compiler_package" in
     printf '%s\n' 15.3.1 ;;
   gnat_native_16.1.0_?*|gnat_flyology_native_16.1.0_?*)
     printf '%s\n' 16.1.0 ;;
+  gnat_flyology_native_16.2.0_?*)
+    printf '%s\n' 16.2.0 ;;
   *)
     printf '%s\n' \
       "unsupported or unidentified Alire GNAT compiler prefix: $compiler_prefix" \

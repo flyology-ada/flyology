@@ -61,6 +61,7 @@ then
    cat "$runtime_gnatdoc_log" >&2
    exit 1
 fi
+"$project_root/scripts/check-gnatdoc-log.sh" "$runtime_gnatdoc_log"
 cat "$runtime_gnatdoc_log"
 
 #  GNATdoc updates its destination in place and does not remove pages for
@@ -84,6 +85,7 @@ rm -rf "$project_root/docs/api/flyology_bench"
       cat "$debug_gnatdoc_log" >&2
       exit 1
    fi
+   "$project_root/scripts/check-gnatdoc-log.sh" "$debug_gnatdoc_log"
    #  GNATdoc 26.0 reports documented formals on these child generics as
    #  undocumented. Their exact @formal comments and names still render.
    sed -E \
@@ -109,6 +111,7 @@ rm -rf "$project_root/docs/api/flyology_bench"
       cat "$bench_gnatdoc_log" >&2
       exit 1
    fi
+   "$project_root/scripts/check-gnatdoc-log.sh" "$bench_gnatdoc_log"
    #  GNATdoc 26.0 does not associate leading comments with formals or nested
    #  declarations inside generic units. Their adjacent source comments and
    #  names still render, but --warnings reports them as undocumented. Keep

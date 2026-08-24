@@ -28,7 +28,11 @@ expect_rejection () {
 }
 
 for identity in gnat_native gnat_flyology_native; do
-  for release in 13.2.2 14.1.3 14.2.1 15.1.2 15.3.1 16.1.0; do
+  releases="13.2.2 14.1.3 14.2.1 15.1.2 15.3.1 16.1.0"
+  if [ "$identity" = gnat_flyology_native ]; then
+    releases="$releases 16.2.0"
+  fi
+  for release in $releases; do
     compiler_prefix=$(make_compiler_prefix "${identity}_${release}_test")
     case "$identity" in
       gnat_native)
@@ -56,6 +60,11 @@ for identity in gnat_native gnat_flyology_native; do
     fi
   done
 done
+
+unsupported_native_16_2=$(make_compiler_prefix gnat_native_16.2.0_unpublished)
+expect_rejection unpublished-native-16-2 env -u GNAT_FLYOLOGY_NATIVE_ALIRE_PREFIX \
+  GNAT_NATIVE_ALIRE_PREFIX="$unsupported_native_16_2" \
+  "$project_root/scripts/gnat-native-release.sh"
 
 native_prefix=$(make_compiler_prefix gnat_native_16.1.0_native)
 flyology_prefix=$(make_compiler_prefix \

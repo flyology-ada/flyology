@@ -38,6 +38,7 @@ cd "$project_root"
 
 "$project_root/scripts/test-run-with-timeout.sh"
 "$project_root/scripts/test-compiler-identities.sh"
+"$project_root/scripts/test-gnatdoc-log.sh"
 "$project_root/flyology_cachelines/scripts/test.sh"
 "$project_root/flyology_numa/scripts/test.sh"
 ALR="$alr" "$project_root/flyology_allocators/scripts/test.sh"
