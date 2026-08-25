@@ -703,9 +703,11 @@ adapter preserves the service task's actual task identity and normal, exception,
 or abnormal exit classification in the generation result.
 `Supervision.Families.Prepared_Admissions` is an optional generic child for a
 family whose request must be authorized before execution. `Prepare_Start`
-reserves and copies into the family's existing fixed slot storage,
-`Commit_Start` transfers a one-shot admission owner while keeping the request
-blocked, and only `Release_To_Run` queues it. Rollback, abort, shutdown, and
+reserves and copies into the family's existing fixed slot storage and exposes
+the exact first-generation handle through the active claim. `Commit_Start`
+transfers exact admission ownership to a one-shot admission owner while
+preserving the same first-handle identity value and keeping the request blocked,
+and only `Release_To_Run` queues it. Rollback, abort, shutdown, and
 `Cancel_And_Join` retain one exact owner and never join a later slot generation.
 The child adds no slot or monitor arrays to `Family`; it reuses the configured
 `Maximum_Children` slots and `Monitor_Capacity` tickets. After matching, the

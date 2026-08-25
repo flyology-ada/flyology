@@ -21,6 +21,8 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    is (Item.State.Active);
    function Is_Released (Item : Started_Admission) return Boolean
    is (Item.State.Released);
+   function First_Handle (Item : Start_Claim) return Child_Handle
+   is (Item.State.Handle);
    function First_Handle (Item : Started_Admission) return Child_Handle
    is (Item.State.Handle);
 

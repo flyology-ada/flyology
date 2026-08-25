@@ -11,6 +11,7 @@ procedure Prepared_Admissions_Smoke is
    use Flyology;
    use Flyology.Supervision;
    use type Ada.Real_Time.Time;
+   use type Flyology.Supervision.Child_Handle;
    use type Flyology.Supervision.Generation_Observation_Status;
 
    type Request is new Positive;
@@ -152,25 +153,27 @@ begin
    pragma Warnings (On, "variable ""Item"" is not modified in loop body");
 
    declare
-      Claim             : Prepared.Start_Claim :=
+      Claim              : Prepared.Start_Claim :=
         Prepared.Vacant_Start_Claim (Item'Access);
-      Other             : Prepared.Start_Claim :=
+      Other              : Prepared.Start_Claim :=
         Prepared.Vacant_Start_Claim (Item'Access);
-      Exhausted         : Prepared.Start_Claim :=
+      Exhausted          : Prepared.Start_Claim :=
         Prepared.Vacant_Start_Claim (Item'Access);
-      Admission         : Prepared.Started_Admission :=
+      Admission          : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
-      Occupied          : Prepared.Started_Admission :=
+      Occupied           : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
-      Foreign_Item      : aliased Families.Family;
-      Foreign_Claim     : Prepared.Start_Claim :=
+      Foreign_Item       : aliased Families.Family;
+      Foreign_Claim      : Prepared.Start_Claim :=
         Prepared.Vacant_Start_Claim (Foreign_Item'Access);
-      Foreign_Admission : Prepared.Started_Admission :=
+      Foreign_Admission  : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Foreign_Item'Access);
-      P_Result          : Prepared.Prepare_Result;
-      C_Result          : Prepared.Commit_Result;
-      R_Result          : aliased Prepared.Release_Result :=
+      P_Result           : Prepared.Prepare_Result;
+      C_Result           : Prepared.Commit_Result;
+      R_Result           : aliased Prepared.Release_Result :=
         Prepared.Admission_Cancelled;
+      Rolled_Back_Handle : Child_Handle;
+      Prepared_Handle    : Child_Handle;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       if P_Result /= Prepared.Start_Prepared
@@ -178,6 +181,31 @@ begin
       then
          raise Program_Error
            with "prepared reservation did not publish its owner";
+      end if;
+      Rolled_Back_Handle := Prepared.First_Handle (Claim);
+      if Rolled_Back_Handle /= Families.Latest (Item, 40_000_000_000)
+        or else not Is_Current (Rolled_Back_Handle, 40_000_000_000, 1)
+      then
+         raise Program_Error
+           with "prepared claim did not expose its exact first handle";
+      end if;
+      Prepared.Rollback (Claim);
+      if Prepared.Is_Active (Claim) then
+         raise Program_Error with "prepared rollback retained claim ownership";
+      end if;
+      Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
+      if P_Result /= Prepared.Start_Prepared
+        or else not Prepared.Is_Active (Claim)
+      then
+         raise Program_Error with "prepared slot could not be reserved again";
+      end if;
+      Prepared_Handle := Prepared.First_Handle (Claim);
+      if Prepared_Handle /= Families.Latest (Item, 40_000_000_000)
+        or else Prepared_Handle = Rolled_Back_Handle
+        or else not Is_Current (Prepared_Handle, 40_000_000_000, 2)
+      then
+         raise Program_Error
+           with "reprepared claim did not advance its exact first handle";
       end if;
       declare
          Rejected : Boolean := False;
@@ -267,9 +295,10 @@ begin
       if C_Result /= Prepared.Start_Committed
         or else Prepared.Is_Active (Claim)
         or else not Prepared.Is_Active (Admission)
+        or else Prepared.First_Handle (Admission) /= Prepared_Handle
       then
          raise Program_Error
-           with "prepared commit did not move exact ownership";
+           with "prepared commit did not preserve exact handle identity";
       end if;
       delay 0.01;
       if State.State.Started then

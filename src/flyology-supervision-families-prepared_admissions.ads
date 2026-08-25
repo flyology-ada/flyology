@@ -53,6 +53,13 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Item Admission inspected without changing ownership
    --  @return True only after its successful Release_To_Run cut
    function Is_Released (Item : Started_Admission) return Boolean;
+   --  Return the exact first-generation handle reserved by this prepared
+   --  claim. Commit_Start preserves the identity value when it transfers
+   --  admission ownership to a Started_Admission.
+   --  @param Item Active prepared claim whose first generation is requested
+   --  @return Exact first-generation child handle for Item
+   function First_Handle (Item : Start_Claim) return Child_Handle
+   with Pre => Is_Active (Item);
    --  Return the exact first-generation handle reserved for this admission
    --  epoch. Later replacements retain the same logical child identity but
    --  advance its generation.
