@@ -311,9 +311,11 @@ exit, then their task-object storage is reclaimed only after termination is
 observable.
 The optional `Families.Prepared_Admissions` generic child splits admission into
 three explicit ownership cuts over those same slots. Preparation copies the
-request into a non-runnable slot, commit transfers the claim to a started
-admission owner, and release alone queues a manager. No extra child-capacity or
-monitor table is introduced. After a monitor matches, its no-longer-needed
+request into a non-runnable slot and exposes its exact first-generation handle;
+commit transfers exact admission ownership from the claim to a started owner
+while preserving the same first-handle identity value, and release alone queues
+a manager. No extra child-capacity or monitor table is introduced. After a
+monitor matches, its no-longer-needed
 observed-handle storage carries the borrowed wake descriptor while the coherent
 terminal snapshot remains fixed. One exact nonblocking write and terminal
 ticket publication share a bounded protected cut; an interrupted attempt
