@@ -11,6 +11,15 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    type Barrier_Point is
      (Static_Monitor_Registered,
       Family_Monitor_Registered,
+      Prepared_Admission_Reserved,
+      Prepared_Admission_Published,
+      Prepared_Admission_Committed,
+      Prepared_Admission_Released,
+      Admission_Monitor_Registered,
+      Admission_Before_Manager_Done,
+      Admission_Signal_Claimed,
+      Admission_Signal_Interrupted,
+      Admission_Signal_Finalizing,
       Task_Result_Attached,
       Task_Result_Retained);
 
@@ -24,5 +33,10 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    procedure Note_Reference_Acquired;
    procedure Note_Reference_Released;
    function Outstanding_References return Natural;
+
+   procedure Force_Next_Prepared_Generation_Final;
+   function Consume_Prepared_Generation_Final return Boolean;
+   procedure Interrupt_Next_Admission_Signal;
+   function Consume_Admission_Signal_Interrupted return Boolean;
 
 end Flyology.Task_Lifecycle_Test_Hooks;

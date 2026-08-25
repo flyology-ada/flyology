@@ -5,15 +5,19 @@ with Flyology;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.Observability;
+with Flyology.Wake_Sources;
 with Interfaces;
+with Interfaces.C;
 
 procedure Cancellation_Wake_Smoke is
    package Connections renames Flyology.IO.Connections;
    use type Ada.Real_Time.Time;
    use type Interfaces.Unsigned_64;
+   use type Flyology.Wake_Sources.Signal_Attempt_Result;
 
    Scale : constant Positive := 64;
-   type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+   type Socket_Array is
+     array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
 
    procedure Run_Token_Wake is
       Manager : aliased Connections.Server (Capacity => Scale);
@@ -73,7 +77,8 @@ procedure Cancellation_Wake_Smoke is
          begin
             --  A ten-second legacy quantum makes this an explicit regression
             --  test: scheduler-driven cancellation must not wait for it.
-            Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
+            Owned.Receive_Exactly
+              (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
          exception
             when Connections.Operation_Cancelled =>
                Was_Cancelled := True;
@@ -93,7 +98,8 @@ procedure Cancellation_Wake_Smoke is
       Park_Deadline : Ada.Real_Time.Time;
    begin
       for Index in Servers'Range loop
-         Flyology.IO.Sockets.Create_Socket_Pair (Servers (Index), Peers (Index));
+         Flyology.IO.Sockets.Create_Socket_Pair
+           (Servers (Index), Peers (Index));
       end loop;
       for Index in Servers'Range loop
          Workers (Index) := new Worker (Index, Flyology.Lightweight_Task);
@@ -104,17 +110,23 @@ procedure Cancellation_Wake_Smoke is
          pragma Assert (Flyology.Observability.Snapshot (0, Sample));
          exit when
            Sample.Interrupt_Waits = Flyology.Observability.Counter (Scale)
-           and then Sample.Descriptor_Waits = Flyology.Observability.Counter (Scale);
+           and then Sample.Descriptor_Waits
+                    = Flyology.Observability.Counter (Scale);
          if Ada.Real_Time.Clock >= Park_Deadline then
             Token.Request;
-            raise Program_Error with "lightweight cancellable connections did not reach the poller";
+            raise Program_Error
+              with
+                "lightweight cancellable connections did not reach the poller";
          end if;
          delay 0.001;
       end loop;
       Cancelled_At := Ada.Real_Time.Clock;
       Token.Request;
       Progress.All_Finished;
-      pragma Assert (Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Cancelled_At) < 1.0);
+      pragma
+        Assert
+          (Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Cancelled_At)
+             < 1.0);
       pragma Assert (Progress.Passed);
       pragma Assert (Manager.Active = 0);
       for Peer of Peers loop
@@ -135,7 +147,8 @@ procedure Cancellation_Wake_Smoke is
       Connections.Take (Manager, Server, Owned);
       Token.Request;
       begin
-         Owned.Receive_Exactly (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
+         Owned.Receive_Exactly
+           (Data, Cancellation_Quantum => 10.0, Token => Token'Access);
       exception
          when Connections.Operation_Cancelled =>
             Cancelled := True;
@@ -151,7 +164,8 @@ procedure Cancellation_Wake_Smoke is
       begin
          Connections.Take (Timeout_Manager, Server, Timeout_Owned);
          begin
-            Timeout_Owned.Receive_Exactly (Data, Timeout => 0.030, Cancellation_Quantum => 10.0);
+            Timeout_Owned.Receive_Exactly
+              (Data, Timeout => 0.030, Cancellation_Quantum => 10.0);
          exception
             when Flyology.IO.Timeout_Error =>
                Timed_Out := True;
@@ -229,6 +243,11 @@ procedure Cancellation_Wake_Smoke is
    end Run_Shutdown_Wake;
 
 begin
+   if Flyology.Wake_Sources.Try_Signal_Borrowed (Interfaces.C.int (-1))
+     /= Flyology.Wake_Sources.Signal_Failed
+   then
+      raise Program_Error with "invalid borrowed wake descriptor was accepted";
+   end if;
    Run_Token_Wake;
    Run_Immediate_And_Timeout;
    Run_Shutdown_Wake;

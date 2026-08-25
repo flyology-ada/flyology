@@ -34,22 +34,41 @@ package body Flyology.Wake_Sources is
    end Ensure;
 
    procedure Signal (Item : in out Source) is
+   begin
+      Ensure (Item);
+      Signal_Borrowed (Item.Write_End);
+   end Signal;
+
+   procedure Signal_Borrowed (Descriptor : C.int) is
+      Result : Signal_Attempt_Result;
+   begin
+      loop
+         Result := Try_Signal_Borrowed (Descriptor);
+         exit when Result = Signal_Delivered;
+         if Result = Signal_Failed then
+            raise Program_Error with "cannot signal borrowed wake source";
+         end if;
+      end loop;
+   end Signal_Borrowed;
+
+   function Try_Signal_Borrowed (Descriptor : C.int) return Signal_Attempt_Result is
       Byte   : aliased C.unsigned_char := 1;
       Result : C.long;
    begin
-      Ensure (Item);
-      loop
-         Result := Write (Item.Write_End, Byte'Address, 1);
-         exit when Result >= 0;
-         if GNAT.OS_Lib.Errno = System.OS_Constants.EAGAIN then
-            --  The nonblocking pipe is already readable. Signals coalesce,
-            --  so a full pipe has achieved the notification contract.
-            exit;
-         elsif GNAT.OS_Lib.Errno /= 4 then
-            raise Program_Error with "cannot signal cancellation wake source";
-         end if;
-      end loop;
-   end Signal;
+      if Descriptor < 0 then
+         return Signal_Failed;
+      end if;
+      Result := Write (Descriptor, Byte'Address, 1);
+      if Result = 1 then
+         return Signal_Delivered;
+      elsif Result < 0 and then GNAT.OS_Lib.Errno = System.OS_Constants.EAGAIN then
+         return Signal_Delivered;
+      elsif Result < 0 and then C.int (GNAT.OS_Lib.Errno) = C.int (System.OS_Constants.EINTR) then
+         return Signal_Interrupted;
+      else
+         return Signal_Failed;
+      end if;
+   end Try_Signal_Borrowed;
 
    procedure Consume (Item : in out Source) is
       Byte   : aliased C.unsigned_char;

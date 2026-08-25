@@ -21,7 +21,8 @@ package body Flyology.Task_Lifecycle_Testing is
    end Arm;
 
    procedure Wait_Reached (Point : Barrier_Point) is
-      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while not Test_Hooks.Reached (Convert (Point)) loop
          if Ada.Real_Time.Clock >= Deadline then
@@ -38,5 +39,15 @@ package body Flyology.Task_Lifecycle_Testing is
 
    function Outstanding_References return Natural
    is (Test_Hooks.Outstanding_References);
+
+   procedure Force_Next_Prepared_Generation_Final is
+   begin
+      Test_Hooks.Force_Next_Prepared_Generation_Final;
+   end Force_Next_Prepared_Generation_Final;
+
+   procedure Interrupt_Next_Admission_Signal is
+   begin
+      Test_Hooks.Interrupt_Next_Admission_Signal;
+   end Interrupt_Next_Admission_Signal;
 
 end Flyology.Task_Lifecycle_Testing;

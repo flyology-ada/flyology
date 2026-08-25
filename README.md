@@ -701,6 +701,24 @@ service per generation and bridges blocking worker-pool, structured-server, or
 listener-loop run APIs to readiness and cooperative supervisor shutdown. The
 adapter preserves the service task's actual task identity and normal, exception,
 or abnormal exit classification in the generation result.
+`Supervision.Families.Prepared_Admissions` is an optional generic child for a
+family whose request must be authorized before execution. `Prepare_Start`
+reserves and copies into the family's existing fixed slot storage,
+`Commit_Start` transfers a one-shot admission owner while keeping the request
+blocked, and only `Release_To_Run` queues it. Rollback, abort, shutdown, and
+`Cancel_And_Join` retain one exact owner and never join a later slot generation.
+The child adds no slot or monitor arrays to `Family`; it reuses the configured
+`Maximum_Children` slots and `Monitor_Capacity` tickets. After matching, the
+ticket's no-longer-needed observed-handle storage carries the borrowed wake
+descriptor while the coherent terminal snapshot remains fixed. One exact
+nonblocking write and terminal ticket publication share a bounded protected
+cut; an interrupted single attempt leaves the claim unchanged and retries only
+after leaving that cut. An owner therefore cannot observe terminal state before
+its wake is readable, and the producer retains no descriptor afterward. Its scoped
+`Observe_Exact` operation retains one exact admission epoch. After
+observing one generation's termination, callers rearm that same exact
+generation to learn whether a replacement was coherently published or the
+admission finally joined, without polling or a helper task.
 The website has a focused [supervision guide](https://flyology.org/guide/supervision/).
 
 `Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers
