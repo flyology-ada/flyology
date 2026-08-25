@@ -309,6 +309,23 @@ static node rather than being inferred among otherwise independent family slots.
 Lazily allocated slot managers are stopped and joined on normal and exceptional
 exit, then their task-object storage is reclaimed only after termination is
 observable.
+The optional `Families.Prepared_Admissions` generic child splits admission into
+three explicit ownership cuts over those same slots. Preparation copies the
+request into a non-runnable slot, commit transfers the claim to a started
+admission owner, and release alone queues a manager. No extra child-capacity or
+monitor table is introduced. After a monitor matches, its no-longer-needed
+observed-handle storage carries the borrowed wake descriptor while the coherent
+terminal snapshot remains fixed. One exact nonblocking write and terminal
+ticket publication share a bounded protected cut; an interrupted attempt
+leaves the claim unchanged and retries only after leaving that cut. A generation
+that reaches the
+nonwrapping limit is retired and both prepared and ordinary admission scans skip
+it while considering the remaining slots. Exact-admission scoped observation
+uses one existing monitor ticket and one completion-set slot. It reports a live
+generation's
+termination first; rearming that same generation across backoff reports the
+coherent replacement publication or final termination. Cancellation unlinks
+and drains the ticket before operation or family storage can disappear.
 Dynamic specifications do not silently survive reconstruction of their owning
 supervisor; an application that wants persistence must keep and replay typed
 requests outside the node. The application must treat every reconstructed

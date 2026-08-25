@@ -6,6 +6,7 @@ alr=$("$project_root/scripts/find-alr.sh")
 test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
+task_lifecycle_test_subdir=behavioral-task-lifecycle-hooks
 structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
 socket_test_subdir=behavioral-socket-hooks
@@ -14,6 +15,7 @@ file_watch_test_subdir=behavioral-file-watch-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
+task_lifecycle_test_bin="$project_root/tests/bin/$task_lifecycle_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
 subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
@@ -132,6 +134,8 @@ FLYOLOGY_TLS_TEST_HOOKS=false
 export FLYOLOGY_TLS_TEST_HOOKS
 FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
 export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=false
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
 "$alr" build
@@ -164,7 +168,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology_disabled_hook_must_be_elided_buffer_|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
+  'flyology_disabled_hook_must_be_elided_(buffer|task_lifecycle)_|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__task_lifecycle_test_hooks__(arm|barrier|consume_admission_signal_interrupted|consume_prepared_generation_final|force_next_prepared_generation_final|interrupt_next_admission_signal|note_reference_(acquired|released)|outstanding_references|reached|release|reset)$|flyology__task_lifecycle_testing__|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
@@ -368,6 +372,11 @@ flyology-structured_server_policy-smoke
 flyology-supervision-static_smoke
 flyology-supervision-handle_smoke
 flyology-supervision-families_smoke
+prepared_admissions_smoke
+prepared_admission_observation_smoke
+prepared_admission_abort_smoke
+prepared_admission_blocked_observation_smoke
+prepared_admission_generation_smoke
 flyology-supervision-families_shutdown_smoke
 flyology-supervision-nested_family_restart_smoke
 flyology-supervision-nested_static_shutdown_smoke
@@ -422,6 +431,7 @@ suspension_object_smoke
 task_scope_faults_smoke
 task_scopes_smoke
 task_results_smoke
+task_result_attach_abort_smoke
 task_result_abandon_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
@@ -469,6 +479,13 @@ descriptor_ownership_smoke'
 worker_pool_hook_mains='concurrency_primitives_smoke
 task_scope_faults_smoke'
 
+task_lifecycle_hook_mains='flyology-supervision-static_smoke
+flyology-supervision-families_smoke
+prepared_admission_observation_smoke
+prepared_admission_abort_smoke
+prepared_admission_generation_smoke
+task_result_attach_abort_smoke'
+
 structured_server_hook_mains=structured_server_abort_smoke
 
 wall_clock_hook_mains=flyology-wall_clock_testing-smoke
@@ -483,7 +500,7 @@ file_watch_hook_mains=file_watches_recovery_smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|subprocess_smoke|file_watches_recovery_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_abort_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|subprocess_smoke|file_watches_recovery_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -512,6 +529,7 @@ fi
 #  each compiled ALI closure against the selected RTS before linking.
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
@@ -528,6 +546,11 @@ FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
 compile_test_mains "$worker_pool_test_subdir" "$worker_pool_hook_mains"
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+compile_test_mains "$task_lifecycle_test_subdir" "$task_lifecycle_hook_mains"
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
 
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
 export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
@@ -609,6 +632,13 @@ link_test_mains \
   "$worker_pool_hook_mains"
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
 
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+link_test_mains \
+  "$task_lifecycle_test_subdir" "$project_root/build/rts" \
+  "$task_lifecycle_hook_mains"
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+
 FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 link_test_mains \
@@ -648,6 +678,9 @@ for test_main in $ordinary_mains; do
       ;;
     concurrency_primitives_smoke|task_scope_faults_smoke)
       current_test_bin=$worker_pool_test_bin
+      ;;
+    flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_abort_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
+      current_test_bin=$task_lifecycle_test_bin
       ;;
     subprocess_smoke)
       current_test_bin=$subprocess_test_bin
@@ -888,6 +921,7 @@ fi
 
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
@@ -933,6 +967,28 @@ then
   printf '%s\n' "$buffer_lifetime_diagnostic" >&2
   exit 1
 fi
+
+#  A scoped prepared-admission observer borrows both its Family provider and
+#  Completion_Set through access discriminants. Prove each lifetime dimension
+#  independently so neither can be weakened into a documentation convention.
+for lifetime_main in operation_outlives_family.adb operation_outlives_set.adb; do
+  if prepared_lifetime_diagnostic=$(run_gprbuild \
+       --RTS="$project_root/build/rts" \
+       -c -q -p \
+       -P tests/fixtures/prepared_admission_lifetime/prepared_admission_lifetime_rejection.gpr \
+       "$lifetime_main" 2>&1)
+  then
+    printf '%s\n' "prepared observer lifetime fixture was accepted: $lifetime_main" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$prepared_lifetime_diagnostic" | \
+       grep -F "prefix of attribute has deeper level than allocator type" >/dev/null
+  then
+    printf '%s\n' "prepared observer lifetime fixture failed unexpectedly: $lifetime_main" >&2
+    printf '%s\n' "$prepared_lifetime_diagnostic" >&2
+    exit 1
+  fi
+done
 
 #  A supervisor control task must name one exact shared execution group. CPU
 #  value zero means automatic placement in Ada, so require the public generic

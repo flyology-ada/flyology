@@ -1,9 +1,11 @@
 with Ada.Finalization;
 with Ada.Real_Time;
+with Ada.Synchronous_Task_Control;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Supervision.Families;
 with Flyology.Supervision.Input_Task_Generations;
+with Flyology.Task_Lifecycle_Testing;
 with Interfaces;
 with System.Multiprocessors;
 
@@ -191,7 +193,8 @@ procedure Flyology.Supervision.Families_Smoke is
         Policy              => Child_Policy,
         First_Child_Id      => 4_294_967_296,
         Maximum_Children    => 2,
-        Event_Capacity      => 4);
+        Event_Capacity      => 4,
+        Monitor_Capacity    => 1);
 
    State  : aliased Context;
    Item   : aliased Families.Family;
@@ -294,6 +297,9 @@ begin
       end if;
       delay 0.001;
    end loop;
+   Flyology.Task_Lifecycle_Testing.Reset;
+   Flyology.Task_Lifecycle_Testing.Arm
+     (Flyology.Task_Lifecycle_Testing.Family_Monitor_Registered);
    declare
       Observation : constant Flyology.Supervision.Generation_Observation :=
         Families.Wait_Termination (Item, First, Timeout => 0.0);
@@ -301,6 +307,8 @@ begin
       pragma Assert (Observation.Status = Flyology.Supervision.Generation_Replaced);
       pragma Assert (Observation.Snapshot.Generation = 2);
    end;
+   Flyology.Task_Lifecycle_Testing.Release
+     (Flyology.Task_Lifecycle_Testing.Family_Monitor_Registered);
    Families.Read_Events (Item, Recovery_Cursor, Recovery_Events, Recovery_Event_Count, Recovery_Dropped);
    declare
       Saw_Direct_Start : Boolean := False;
@@ -336,6 +344,38 @@ begin
       delay 0.001;
    end loop;
    First := Families.Latest (Item, Flyology.Supervision.Child (First));
+
+   --  Stop exactly after the capacity-one monitor registration has committed.
+   --  Aborting here must run the armed guard and make the exact slot reusable.
+   declare
+      Start_Waiter : Ada.Synchronous_Task_Control.Suspension_Object;
+
+      task Waiter;
+
+      task body Waiter is
+         Observation : Flyology.Supervision.Generation_Observation;
+         pragma Unreferenced (Observation);
+      begin
+         Ada.Synchronous_Task_Control.Suspend_Until_True (Start_Waiter);
+         Observation := Families.Wait_Termination (Item, First);
+      end Waiter;
+   begin
+      Flyology.Task_Lifecycle_Testing.Reset;
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Family_Monitor_Registered);
+      Ada.Synchronous_Task_Control.Set_True (Start_Waiter);
+      Flyology.Task_Lifecycle_Testing.Wait_Reached
+        (Flyology.Task_Lifecycle_Testing.Family_Monitor_Registered);
+      abort Waiter;
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Family_Monitor_Registered);
+   end;
+   declare
+      Observation : constant Flyology.Supervision.Generation_Observation :=
+        Families.Wait_Termination (Item, First, Timeout => 0.0);
+   begin
+      pragma Assert (Observation.Status = Flyology.Supervision.Observation_Timed_Out);
+   end;
 
    --  Manual restart is an exact-generation recovery command. It consumes
    --  the same incident budgets and produces a fresh task generation.

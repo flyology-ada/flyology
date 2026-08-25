@@ -21,7 +21,7 @@ cleanup () {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-hook_names='dns tls connection worker_pool subprocess structured_server file_watch wall_clock buffer'
+hook_names='dns tls connection worker_pool task_lifecycle subprocess structured_server file_watch wall_clock buffer'
 
 case $(uname -s) in
   Darwin) platform_source_dir="$project_root/src/platform/darwin" ;;
@@ -38,6 +38,7 @@ hook_external () {
     tls) printf '%s\n' FLYOLOGY_TLS_TEST_HOOKS ;;
     connection) printf '%s\n' FLYOLOGY_CONNECTION_TEST_HOOKS ;;
     worker_pool) printf '%s\n' FLYOLOGY_WORKER_POOL_TEST_HOOKS ;;
+    task_lifecycle) printf '%s\n' FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS ;;
     subprocess) printf '%s\n' FLYOLOGY_SUBPROCESS_TEST_HOOKS ;;
     structured_server) printf '%s\n' FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS ;;
     file_watch) printf '%s\n' FLYOLOGY_FILE_WATCH_TEST_HOOKS ;;
@@ -52,6 +53,7 @@ hook_symbol () {
     tls) printf '%s\n' flyology__tls_test_hooks__reset ;;
     connection) printf '%s\n' flyology__connection_test_hooks__barrier ;;
     worker_pool) printf '%s\n' flyology__worker_pool_test_hooks__run_claim_barrier ;;
+    task_lifecycle) printf '%s\n' flyology__task_lifecycle_test_hooks__barrier ;;
     subprocess) printf '%s\n' flyology__subprocess_test_hooks__fail_reaper_allocation ;;
     structured_server) printf '%s\n' flyology__structured_server_test_hooks__barrier ;;
     file_watch) printf '%s\n' flyology__file_watch_test_hooks__consume_events_lost ;;
@@ -167,7 +169,7 @@ compile_probe () {
     hook_index=$((hook_index * 2))
   done
 
-  if [ $(((combination / 128) % 2)) -eq 1 ]; then
+  if [ $(((combination / 256) % 2)) -eq 1 ]; then
     if ! printf '%s\n' "$symbols" | grep -F flyology__wall_clock_io_testing__reset >/dev/null; then
       printf '%s\n' "enabled wall-clock I/O probe call disappeared in $mode combination $combination" >&2
       exit 1
@@ -198,6 +200,7 @@ check_production_archive () {
     -XFLYOLOGY_TLS_TEST_HOOKS=false \
     -XFLYOLOGY_CONNECTION_TEST_HOOKS=false \
     -XFLYOLOGY_WORKER_POOL_TEST_HOOKS=false \
+    -XFLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=false \
     -XFLYOLOGY_SUBPROCESS_TEST_HOOKS=false \
     -XFLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=false \
     -XFLYOLOGY_FILE_WATCH_TEST_HOOKS=false \
@@ -217,12 +220,12 @@ check_production_archive () {
   fi
   symbols=$(undefined_symbols "$archive")
   if printf '%s\n' "$symbols" | grep -E \
-    'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+    'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
     >/dev/null
   then
     printf '%s\n' "production hook reference survived in $mode" >&2
     printf '%s\n' "$symbols" | grep -E \
-      'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+      'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
       >&2 || true
     exit 1
   fi
@@ -233,9 +236,9 @@ if git -C "$project_root" grep -n -E '^#(if|else|end if)' -- '*.adb' '*.ads' >/d
   exit 1
 fi
 
-printf '%s\n' 'test-hook-elision: all 512 project selections and strict -O0 probe combinations'
+printf '%s\n' 'test-hook-elision: all 1024 project selections and strict -O0 probe combinations'
 combination=0
-while [ "$combination" -lt 512 ]; do
+while [ "$combination" -lt 1024 ]; do
   check_project_selection "$combination"
   compile_probe "$combination" O0-strict \
     -O0 -fno-inline -fno-inline-functions -fno-tree-dce -fno-dce

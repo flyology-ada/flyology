@@ -1,6 +1,8 @@
 with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology.Execution_Groups;
+with Flyology.Wake_Sources;
+with Interfaces.C;
 
 --  Runs a bounded homogeneous dynamic child family as one synchronous Ada
 --  scope. Storage is linear in Maximum_Children, no dependency matrix is
@@ -206,20 +208,94 @@ private
    type Event_Buffer is array (Positive range 1 .. Event_Capacity) of Supervisor_Event;
    subtype Monitor_Index is Positive range 1 .. Monitor_Capacity;
    subtype Monitor_Token is Interfaces.Unsigned_64;
-   type Monitor_State is (Monitor_Free, Monitor_Pending, Monitor_Terminated, Monitor_Replaced);
+   type Monitor_State is
+     (Monitor_Free,
+      Monitor_Pending,
+      Monitor_Termination_Signal_Pending,
+      Monitor_Replacement_Signal_Pending,
+      Monitor_Termination_Signal_Claimed,
+      Monitor_Replacement_Signal_Claimed,
+      Monitor_Terminated,
+      Monitor_Replaced);
    type Monitor_State_Array is array (Monitor_Index) of Monitor_State;
    type Monitor_Token_Array is array (Monitor_Index) of Monitor_Token;
    type Monitor_Handle_Array is array (Monitor_Index) of Child_Handle;
    type Monitor_Snapshot_Array is array (Monitor_Index) of Child_Snapshot;
+   type Monitor_Signal_Guard (Owner : not null access Family) is new Ada.Finalization.Limited_Controlled
+   with record
+      Ticket     : aliased Monitor_Index := Monitor_Index'First;
+      Token      : aliased Monitor_Token := 0;
+      Descriptor : aliased Interfaces.C.int := Interfaces.C.int (-1);
+      Claimed    : aliased Boolean := False;
+      Armed      : aliased Boolean := False;
+   end record;
 
-   type Slot_State is (Free, Reserved, Queued, Managed, Reapable);
+   --  @exclude
+   --  @param Item Claimed monitor signal publication to drain
+   procedure Flush_Monitor_Signals (Item : in out Monitor_Signal_Guard);
+   --  @exclude
+   --  @param Item Claimed monitor signal publication finalized on unwinding
+   overriding
+   procedure Finalize (Item : in out Monitor_Signal_Guard);
+
+   --  Prepared-admission states share the existing fixed slot array.  The
+   --  additional literals do not add a second capacity or side allocation.
+   type Slot_State is
+     (Free,
+      Reserved,
+      Preparing,
+      Prepared,
+      Committed_Blocked,
+      Queued,
+      Released_Queued,
+      Managed,
+      Released_Managed,
+      Reapable,
+      Released_Reapable);
+   for Slot_State'Size use 8;
    type Slot_State_Array is array (Slot_Index) of Slot_State;
 
+   type Prepared_Reserve_Status is
+     (Prepared_Reserved,
+      Prepared_Admission_Closed,
+      Prepared_Capacity_Exhausted,
+      Prepared_Generation_Exhausted);
+   type Prepared_Commit_Status is (Prepared_Committed, Prepared_Commit_Closed);
    protected type Family_State is
       procedure Configure (Identity : Controller_Id; Inherited : Incident_Context);
       procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle);
       procedure Commit (Slot : Slot_Index; Handle : Child_Handle);
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle);
+      procedure Reserve_Prepared
+        (Slot   : not null access Slot_Index;
+         Handle : not null access Child_Handle;
+         Active : not null access Boolean;
+         Status : out Prepared_Reserve_Status);
+      procedure Publish_Prepared (Slot : Slot_Index; Handle : Child_Handle);
+      procedure Rollback_Prepared
+        (Slot : Slot_Index; Handle : Child_Handle; Active : not null access Boolean);
+      procedure Commit_Prepared
+        (Slot             : Slot_Index;
+         Handle           : Child_Handle;
+         Claim_Active     : not null access Boolean;
+         Admission_Slot   : not null access Slot_Index;
+         Admission_Handle : not null access Child_Handle;
+         Admission_Active : not null access Boolean;
+         Status           : out Prepared_Commit_Status);
+      procedure Release_Prepared
+        (Slot      : Slot_Index;
+         Handle    : Child_Handle;
+         Released  : not null access Boolean;
+         Succeeded : not null access Boolean);
+      procedure Begin_Admission_Cancel
+        (Slot      : Slot_Index;
+         Handle    : Child_Handle;
+         Active    : not null access Boolean;
+         Released  : not null access Boolean;
+         Signals   : not null access Monitor_Signal_Guard;
+         Completed : out Boolean);
+      entry Await_Admission_Cancel (Slot_Index)
+        (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean);
       procedure Take_Start
         (Available : out Boolean;
          Slot      : out Slot_Index;
@@ -235,7 +311,11 @@ private
       procedure Request_Intervention
         (Handle : Child_Handle; Termination : Termination_Summary; Valid : out Boolean);
       procedure Publish_Starting
-        (Slot : Slot_Index; Handle : Child_Handle; Incident : Incident_Context; Accepted : out Boolean);
+        (Slot     : Slot_Index;
+         Handle   : Child_Handle;
+         Incident : Incident_Context;
+         Signals  : not null access Monitor_Signal_Guard;
+         Accepted : out Boolean);
       function Replacement_Wait_Allowed (Slot : Slot_Index) return Boolean;
       procedure Publish_Ready (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time);
       procedure Publish_Stuck (Slot : Slot_Index; Handle : Child_Handle);
@@ -248,11 +328,17 @@ private
          Restart     : out Boolean;
          Backoff     : out Ada.Real_Time.Time_Span;
          Next        : out Child_Handle;
-         Recovery    : out Incident_Context);
+         Recovery    : out Incident_Context;
+         Signals     : not null access Monitor_Signal_Guard);
       function Incident_Can_Close
         (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time) return Boolean;
-      procedure Manager_Done (Slot : Slot_Index; Handle : Child_Handle);
-      procedure Manager_Failed (Slot : Slot_Index; Handle : Child_Handle; Termination : Termination_Summary);
+      procedure Manager_Done
+        (Slot : Slot_Index; Handle : Child_Handle; Signals : not null access Monitor_Signal_Guard);
+      procedure Manager_Failed
+        (Slot        : Slot_Index;
+         Handle      : Child_Handle;
+         Termination : Termination_Summary;
+         Signals     : not null access Monitor_Signal_Guard);
       procedure Request_Stop;
       function Is_Finished return Boolean;
       function Admission_Is_Open return Boolean;
@@ -265,14 +351,31 @@ private
          Immediate : out Boolean;
          Status    : out Generation_Observation_Status;
          Snapshot  : out Child_Snapshot;
-         Ticket    : out Monitor_Index;
-         Token     : out Monitor_Token;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
          Valid     : out Boolean);
+      procedure Register_Admission_Monitor
+        (Admission : Child_Handle;
+         Observed  : Child_Handle;
+         Signal    : Interfaces.C.int;
+         Immediate : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
+         Valid     : out Boolean);
+      procedure Claim_Monitor_Signal (Signals : not null access Monitor_Signal_Guard);
+      procedure Try_Acknowledge_Monitor_Signal
+        (Signals : not null access Monitor_Signal_Guard;
+         Result  : out Flyology.Wake_Sources.Signal_Attempt_Result);
       entry Await_Monitor (Monitor_Index)
         (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot);
       procedure Cancel_Monitor
         (Ticket    : Monitor_Index;
          Token     : Monitor_Token;
+         Released  : out Boolean;
          Completed : out Boolean;
          Status    : out Generation_Observation_Status;
          Snapshot  : out Child_Snapshot);
@@ -296,7 +399,10 @@ private
          Termination : Termination_Kind := No_Termination;
          Incident    : Incident_Context := No_Incident;
          Backoff     : Ada.Real_Time.Time_Span := Ada.Real_Time.Time_Span_Zero);
-      procedure Complete_Monitors (Slot : Slot_Index; Status : Generation_Observation_Status);
+      procedure Complete_Monitors
+        (Slot    : Slot_Index;
+         Status  : Generation_Observation_Status;
+         Signals : not null access Monitor_Signal_Guard);
       Configured               : Boolean := False;
       Identity                 : Controller_Id := Controller_Id'First;
       Run_Used                 : Boolean := False;
@@ -340,9 +446,9 @@ private
    type Family_State_Access is access all Family_State;
    type Monitor_Guard is limited new Ada.Finalization.Limited_Controlled with record
       State  : Family_State_Access := null;
-      Ticket : Monitor_Index := Monitor_Index'First;
-      Token  : Monitor_Token := 0;
-      Active : Boolean := False;
+      Ticket : aliased Monitor_Index := Monitor_Index'First;
+      Token  : aliased Monitor_Token := 0;
+      Active : aliased Boolean := False;
    end record;
 
    --  @exclude

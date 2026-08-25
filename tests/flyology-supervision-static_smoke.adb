@@ -5,6 +5,7 @@ with Flyology.Cancellation;
 with Flyology.Supervision.Children;
 with Flyology.Supervision.Static;
 with Flyology.Supervision.Task_Generations;
+with Flyology.Task_Lifecycle_Testing;
 with System.Multiprocessors;
 
 procedure Flyology.Supervision.Static_Smoke is
@@ -840,9 +841,12 @@ begin
       --  controlled finalization. Monitor_Capacity is one, so a leaked slot
       --  would make the post-abort zero-time check raise Constraint_Error.
       declare
+         Start_Waiter : Ada.Synchronous_Task_Control.Suspension_Object;
+
          task Waiter;
          task body Waiter is
          begin
+            Ada.Synchronous_Task_Control.Suspend_Until_True (Start_Waiter);
             --  Begin the wait in the statement sequence so task activation
             --  completes before this deliberately blocking call.
             declare
@@ -853,21 +857,16 @@ begin
                null;
             end;
          end Waiter;
-
-         Registered : Boolean := False;
       begin
-         while not Registered loop
-            begin
-               Stable_Observation :=
-                 Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
-            exception
-               when Constraint_Error =>
-                  Registered := True;
-            end;
-            exit when Registered;
-            delay 0.001;
-         end loop;
+         Flyology.Task_Lifecycle_Testing.Reset;
+         Flyology.Task_Lifecycle_Testing.Arm
+           (Flyology.Task_Lifecycle_Testing.Static_Monitor_Registered);
+         Ada.Synchronous_Task_Control.Set_True (Start_Waiter);
+         Flyology.Task_Lifecycle_Testing.Wait_Reached
+           (Flyology.Task_Lifecycle_Testing.Static_Monitor_Registered);
          abort Waiter;
+         Flyology.Task_Lifecycle_Testing.Release
+           (Flyology.Task_Lifecycle_Testing.Static_Monitor_Registered);
       end;
       Stable_Observation :=
         Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
@@ -879,6 +878,16 @@ begin
       pragma Assert (Stable_Observation.Status = Flyology.Supervision.Generation_Terminated);
       pragma Assert (Stable_Observation.Snapshot.Generation = 3);
       pragma Assert (Stable_Observation.Snapshot.Termination.Kind = Flyology.Supervision.Restart_Requested);
+
+      --  An immediate terminal classification owns no monitor registration
+      --  and therefore must not enter the registered-only test barrier.
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Monitor_Registered);
+      Stable_Observation :=
+        Restart_Supervisors.Wait_Termination (Item, Service, Stable_Handle, Timeout => 0.0);
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Static_Monitor_Registered);
+      pragma Assert (Stable_Observation.Status = Flyology.Supervision.Generation_Terminated);
       begin
          Restart_Supervisors.Restart (Item, Service, Stable_Handle);
          raise Program_Error with "stale static restart was accepted";
