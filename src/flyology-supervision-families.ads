@@ -265,8 +265,9 @@ private
          Immediate : out Boolean;
          Status    : out Generation_Observation_Status;
          Snapshot  : out Child_Snapshot;
-         Ticket    : out Monitor_Index;
-         Token     : out Monitor_Token;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
          Valid     : out Boolean);
       entry Await_Monitor (Monitor_Index)
         (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot);
@@ -340,9 +341,9 @@ private
    type Family_State_Access is access all Family_State;
    type Monitor_Guard is limited new Ada.Finalization.Limited_Controlled with record
       State  : Family_State_Access := null;
-      Ticket : Monitor_Index := Monitor_Index'First;
-      Token  : Monitor_Token := 0;
-      Active : Boolean := False;
+      Ticket : aliased Monitor_Index := Monitor_Index'First;
+      Token  : aliased Monitor_Token := 0;
+      Active : aliased Boolean := False;
    end record;
 
    --  @exclude

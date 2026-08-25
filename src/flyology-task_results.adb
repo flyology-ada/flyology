@@ -1,5 +1,6 @@
 with Ada.Unchecked_Conversion;
 with Flyology.Operations.Drivers;
+with Flyology.Task_Lifecycle_Test_Hooks;
 with Flyology.Time_Math;
 with System.Soft_Links;
 
@@ -148,6 +149,11 @@ package body Flyology.Task_Results is
       System.Soft_Links.Abort_Defer.all;
       begin
          Item.Storage := Runtime_Attach_Monitor (To_Address (T));
+         if Item.Storage /= System.Null_Address and then Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+            Flyology.Task_Lifecycle_Test_Hooks.Note_Reference_Acquired;
+            Flyology.Task_Lifecycle_Test_Hooks.Barrier
+              (Flyology.Task_Lifecycle_Test_Hooks.Task_Result_Attached);
+         end if;
       exception
          when others =>
             System.Soft_Links.Abort_Undefer.all;
@@ -175,6 +181,9 @@ package body Flyology.Task_Results is
          begin
             Item.Storage := System.Null_Address;
             Runtime_Release_Monitor (Storage);
+            if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+               Flyology.Task_Lifecycle_Test_Hooks.Note_Reference_Released;
+            end if;
          exception
             when others =>
                System.Soft_Links.Abort_Undefer.all;
@@ -319,11 +328,13 @@ package body Flyology.Task_Results is
       if Attached (Operation.Target) then
          raise Program_Error with "task-result operation still retains a prior target";
       end if;
-      Operation.Target.Storage := Runtime_Attach_Monitor (To_Address (T));
-      if Operation.Target.Storage = System.Null_Address then
-         Operation.Failure := Attach_Failure;
-         raise Program_Error with "invalid or unsupported task-result operation identity";
-      end if;
+      begin
+         Attach (Operation.Target, T);
+      exception
+         when Program_Error =>
+            Operation.Failure := Attach_Failure;
+            raise;
+      end;
    end Attach_Task;
 
    procedure Attach_Monitor (Item : Monitor'Class; Operation : in out Wait_Operation) is
@@ -333,7 +344,22 @@ package body Flyology.Task_Results is
       elsif not Attached (Item) then
          raise Program_Error with "task-result source monitor is detached";
       end if;
-      Operation.Target.Storage := Runtime_Retain_Monitor (Item.Storage);
+      System.Soft_Links.Abort_Defer.all;
+      begin
+         Operation.Target.Storage := Runtime_Retain_Monitor (Item.Storage);
+         if Operation.Target.Storage /= System.Null_Address
+           and then Flyology.Task_Lifecycle_Test_Hooks.Enabled
+         then
+            Flyology.Task_Lifecycle_Test_Hooks.Note_Reference_Acquired;
+            Flyology.Task_Lifecycle_Test_Hooks.Barrier
+              (Flyology.Task_Lifecycle_Test_Hooks.Task_Result_Retained);
+         end if;
+      exception
+         when others =>
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
       if Operation.Target.Storage = System.Null_Address then
          Operation.Failure := Attach_Failure;
          raise Program_Error with "task-result monitor retention failed";

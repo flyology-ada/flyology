@@ -129,6 +129,7 @@ project Runtime_Smoke is
       "task_scope_faults_smoke.adb",
       "task_scopes_smoke.adb",
       "task_results_smoke.adb",
+      "task_result_attach_abort_smoke.adb",
       "task_result_abandon_smoke.adb",
       "task_result_publication_smoke.adb",
       "stall_watchdog_native_smoke.adb",

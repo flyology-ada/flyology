@@ -63,6 +63,19 @@ project Flyology is
            "src/test_hooks/worker_pool/enabled/";
    end case;
 
+   type Task_Lifecycle_Test_Hooks_Type is ("false", "true");
+   Task_Lifecycle_Test_Hooks : Task_Lifecycle_Test_Hooks_Type :=
+     external ("FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS", "false");
+   Task_Lifecycle_Test_Hook_Source_Dir :=
+     "src/test_hooks/task_lifecycle/disabled/";
+   case Task_Lifecycle_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Task_Lifecycle_Test_Hook_Source_Dir :=
+           "src/test_hooks/task_lifecycle/enabled/";
+   end case;
+
    type Subprocess_Test_Hooks_Type is ("false", "true");
    Subprocess_Test_Hooks : Subprocess_Test_Hooks_Type :=
      external ("FLYOLOGY_SUBPROCESS_TEST_HOOKS", "false");
@@ -137,6 +150,7 @@ project Flyology is
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when "macos" =>
@@ -145,6 +159,7 @@ project Flyology is
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when others =>
@@ -153,6 +168,7 @@ project Flyology is
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir,
             Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
    end case;

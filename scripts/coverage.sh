@@ -62,11 +62,13 @@ FLYOLOGY_DNS_TEST_HOOKS=true
 FLYOLOGY_TLS_TEST_HOOKS=true
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
 FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 FLYOLOGY_BUFFER_TEST_HOOKS=true
 export FLYOLOGY_DNS_TEST_HOOKS FLYOLOGY_TLS_TEST_HOOKS
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 export FLYOLOGY_BUFFER_TEST_HOOKS
 
@@ -143,8 +145,11 @@ structured_server_tls_smoke
 subprocess_fixture
 subprocess_smoke
 flyology-supervision-subprocess_smoke
+flyology-supervision-static_smoke
+flyology-supervision-families_smoke
 flyology-supervision-nested_family_restart_smoke
 flyology-supervision-nested_static_shutdown_smoke
+task_result_attach_abort_smoke
 thread_affinity_smoke
 timer_heap_smoke
 timer_set_smoke

@@ -3,6 +3,7 @@ with Ada.Task_Identification;
 with Ada.Unchecked_Deallocation;
 with Flyology.Cancellation;
 with Flyology.Supervision_Policy;
+with Flyology.Task_Lifecycle_Test_Hooks;
 with Interfaces;
 
 package body Flyology.Supervision.Families is
@@ -786,8 +787,9 @@ package body Flyology.Supervision.Families is
          Immediate : out Boolean;
          Status    : out Generation_Observation_Status;
          Snapshot  : out Child_Snapshot;
-         Ticket    : out Monitor_Index;
-         Token     : out Monitor_Token;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
          Valid     : out Boolean)
       is
          Slot     : Slot_Index := Slot_Index'First;
@@ -797,8 +799,9 @@ package body Flyology.Supervision.Families is
       begin
          Immediate := True;
          Status := Observation_Timed_Out;
-         Ticket := Monitor_Index'First;
-         Token := 0;
+         Ticket.all := Monitor_Index'First;
+         Token.all := 0;
+         Active.all := False;
          Valid := False;
          Snapshot := Snapshots (Slot_Index'First);
          if Controller (Handle) /= Identity
@@ -850,8 +853,9 @@ package body Flyology.Supervision.Families is
          Monitor_Handles (Selected) := Handle;
          Monitor_Snapshots (Selected) := Snapshots (Slot);
          Monitor_States (Selected) := Monitor_Pending;
-         Ticket := Selected;
-         Token := Monitor_Tokens (Selected);
+         Ticket.all := Selected;
+         Token.all := Monitor_Tokens (Selected);
+         Active.all := True;
          Immediate := False;
       end Register_Monitor;
 
@@ -1067,38 +1071,44 @@ package body Flyology.Supervision.Families is
       Valid     : Boolean;
       Status    : Generation_Observation_Status;
       Snapshot  : Child_Snapshot;
-      Ticket    : Monitor_Index;
-      Token     : Monitor_Token;
       Guard     : Monitor_Guard;
-      pragma Unreferenced (Guard);
    begin
-      Item.State.Register_Monitor (Handle, Immediate, Status, Snapshot, Ticket, Token, Valid);
+      Guard.State := Item.State'Unchecked_Access;
+      Item.State.Register_Monitor
+        (Handle,
+         Immediate,
+         Status,
+         Snapshot,
+         Guard.Ticket'Access,
+         Guard.Token'Access,
+         Guard.Active'Access,
+         Valid);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Guard.Active then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Family_Monitor_Registered);
+      end if;
       if not Valid then
          raise Stale_Handle;
       elsif Immediate then
          return Completed_Observation (Status, Snapshot);
       end if;
 
-      Guard.State := Item.State'Unchecked_Access;
-      Guard.Ticket := Ticket;
-      Guard.Token := Token;
-      Guard.Active := True;
       if Timeout < 0.0 then
-         Item.State.Await_Monitor (Ticket) (Token, Status, Snapshot);
+         Item.State.Await_Monitor (Guard.Ticket) (Guard.Token, Status, Snapshot);
          Guard.Active := False;
          return Completed_Observation (Status, Snapshot);
       elsif Timeout = 0.0 then
-         Item.State.Cancel_Monitor (Ticket, Token, Completed, Status, Snapshot);
+         Item.State.Cancel_Monitor (Guard.Ticket, Guard.Token, Completed, Status, Snapshot);
          Guard.Active := False;
       else
          select
-            Item.State.Await_Monitor (Ticket) (Token, Status, Snapshot);
+            Item.State.Await_Monitor (Guard.Ticket) (Guard.Token, Status, Snapshot);
             Completed := True;
          or
             delay Timeout;
          end select;
          if not Completed then
-            Item.State.Cancel_Monitor (Ticket, Token, Completed, Status, Snapshot);
+            Item.State.Cancel_Monitor (Guard.Ticket, Guard.Token, Completed, Status, Snapshot);
          end if;
          Guard.Active := False;
       end if;

@@ -4,6 +4,7 @@ with Flyology.DNS_Test_Observations;
 with Flyology.File_Watch_Test_Hooks;
 with Flyology.Structured_Server_Test_Hooks;
 with Flyology.Subprocess_Test_Hooks;
+with Flyology.Task_Lifecycle_Test_Hooks;
 with Flyology.TLS_Test_Hooks;
 with Flyology.Wall_Clock_IO_Testing;
 with Flyology.Wall_Clock_Testing;
@@ -26,6 +27,10 @@ begin
    end if;
    if Flyology.Worker_Pool_Test_Hooks.Enabled then
       Flyology.Worker_Pool_Test_Hooks.Run_Claim_Barrier;
+   end if;
+   if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+      Flyology.Task_Lifecycle_Test_Hooks.Barrier
+        (Flyology.Task_Lifecycle_Test_Hooks.Static_Monitor_Registered);
    end if;
    if Flyology.Subprocess_Test_Hooks.Enabled then
       Observed := Flyology.Subprocess_Test_Hooks.Fail_Reaper_Allocation;
