@@ -143,6 +143,21 @@ package Flyology.Supervision.Families.Prepared_Admissions is
       Claim     : in out Prepared_Observation_Claim;
       Result    : out Observation_Reserve_Result);
 
+   --  Reserve one persistent monitor and publish caller-owned evidence last in
+   --  the same protected success cut. Reserved is False before validation and
+   --  remains False on every failure or exception. A True value proves Claim
+   --  owns the exact reservation even when the call's ordinary return is
+   --  interrupted.
+   --  @param Admission Active committed-blocked admission
+   --  @param Claim Vacant persistent claim target
+   --  @param Reserved Caller-owned exact-cut ownership evidence
+   --  @param Result Reservation outcome on normal return
+   procedure Reserve_Observation
+     (Admission : Started_Admission;
+      Claim     : in out Prepared_Observation_Claim;
+      Reserved  : not null access Boolean;
+      Result    : out Observation_Reserve_Result);
+
    --  Release and, when signal publication is in flight, drain one persistent
    --  claim. Every scoped operation borrowing Claim must first be terminal.
    --  Finish the operation before this call; finalization is only the

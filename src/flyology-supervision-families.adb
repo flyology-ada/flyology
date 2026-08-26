@@ -1371,6 +1371,7 @@ package body Flyology.Supervision.Families is
          Ticket    : not null access Monitor_Index;
          Token     : not null access Monitor_Token;
          Active    : not null access Boolean;
+         Reserved  : not null access Boolean;
          Status    : out Prepared_Monitor_Reserve_Status)
       is
          Slot     : Slot_Index := Slot_Index'First;
@@ -1381,6 +1382,7 @@ package body Flyology.Supervision.Families is
          Ticket.all := Monitor_Index'First;
          Token.all := 0;
          Active.all := False;
+         Reserved.all := False;
          Status := Prepared_Monitor_Admission_Closed;
          if Controller (Admission) /= Identity
            or else Child (Admission) < First_Child_Id
@@ -1398,6 +1400,13 @@ package body Flyology.Supervision.Families is
            or else Shutdown
            or else Terminal
          then
+            return;
+         end if;
+         if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+           and then Flyology.Task_Lifecycle_Test_Hooks
+                      .Consume_Prepared_Monitor_Identity_Exhausted
+         then
+            Status := Prepared_Monitor_Identity_Exhausted;
             return;
          end if;
 
@@ -1433,6 +1442,7 @@ package body Flyology.Supervision.Families is
          Token.all := Monitor_Tokens (Selected);
          Active.all := True;
          Status := Prepared_Monitor_Reserved;
+         Reserved.all := True;
       end Reserve_Prepared_Admission_Monitor;
 
       procedure Activate_Prepared_Admission_Monitor

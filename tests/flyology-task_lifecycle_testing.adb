@@ -45,6 +45,11 @@ package body Flyology.Task_Lifecycle_Testing is
       Test_Hooks.Force_Next_Prepared_Generation_Final;
    end Force_Next_Prepared_Generation_Final;
 
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted is
+   begin
+      Test_Hooks.Force_Next_Prepared_Monitor_Identity_Exhausted;
+   end Force_Next_Prepared_Monitor_Identity_Exhausted;
+
    procedure Interrupt_Next_Admission_Signal is
    begin
       Test_Hooks.Interrupt_Next_Admission_Signal;

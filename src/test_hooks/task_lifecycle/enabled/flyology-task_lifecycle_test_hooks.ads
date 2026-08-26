@@ -14,6 +14,8 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
       Prepared_Admission_Reserved,
       Prepared_Admission_Published,
       Prepared_Admission_Committed,
+      Prepared_Observation_Before_Reserve,
+      Prepared_Observation_Reserved,
       Prepared_Admission_Released,
       Admission_Monitor_Registered,
       Admission_Immediate_Claimed,
@@ -38,6 +40,8 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
 
    procedure Force_Next_Prepared_Generation_Final;
    function Consume_Prepared_Generation_Final return Boolean;
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted;
+   function Consume_Prepared_Monitor_Identity_Exhausted return Boolean;
    procedure Interrupt_Next_Admission_Signal;
    function Consume_Admission_Signal_Interrupted return Boolean;
 

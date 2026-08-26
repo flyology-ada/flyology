@@ -142,8 +142,20 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Claim     : in out Prepared_Observation_Claim;
       Result    : out Observation_Reserve_Result)
    is
+      Reserved : aliased Boolean := False;
+   begin
+      Reserve_Observation (Admission, Claim, Reserved'Access, Result);
+   end Reserve_Observation;
+
+   procedure Reserve_Observation
+     (Admission : Started_Admission;
+      Claim     : in out Prepared_Observation_Claim;
+      Reserved  : not null access Boolean;
+      Result    : out Observation_Reserve_Result)
+   is
       Status : Prepared_Monitor_Reserve_Status;
    begin
+      Reserved.all := False;
       if Claim.Owner /= Admission.Owner then
          raise Program_Error with "observation claim belongs to another family";
       elsif Claim.State.Active then
@@ -152,13 +164,22 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          Result := Observation_Admission_Closed;
          return;
       end if;
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Observation_Before_Reserve);
+      end if;
       Claim.State.Admission := Admission.State.Handle;
       Claim.Owner.State.Reserve_Prepared_Admission_Monitor
         (Claim.State.Admission,
          Claim.State.Ticket'Access,
          Claim.State.Token'Access,
          Claim.State.Active'Access,
+         Reserved,
          Status);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Reserved.all then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Observation_Reserved);
+      end if;
       Result :=
         (case Status is
            when Prepared_Monitor_Reserved            => Observation_Reserved,

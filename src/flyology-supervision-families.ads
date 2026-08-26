@@ -393,6 +393,7 @@ private
          Ticket    : not null access Monitor_Index;
          Token     : not null access Monitor_Token;
          Active    : not null access Boolean;
+         Reserved  : not null access Boolean;
          Status    : out Prepared_Monitor_Reserve_Status);
       procedure Activate_Prepared_Admission_Monitor
         (Admission : Child_Handle;

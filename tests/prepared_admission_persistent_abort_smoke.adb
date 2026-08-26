@@ -130,6 +130,252 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
       end if;
    end Prepare_Admission;
 
+   procedure Exercise_Reservation_Cut_Abort is
+      type Reservation_Cut is (Before_Reserve, After_Reserve);
+   begin
+      for Cut in Reservation_Cut loop
+         declare
+            Admission : Prepared.Started_Admission :=
+              Prepared.Vacant_Started_Admission (Item'Access);
+            Monitor   : Prepared.Prepared_Observation_Claim :=
+              Prepared.Vacant_Observation_Claim (Item'Access);
+            Claim     : Prepared.Start_Claim :=
+              Prepared.Vacant_Start_Claim (Item'Access);
+            P_Result  : Prepared.Prepare_Result;
+            C_Result  : Prepared.Commit_Result;
+            O_Result  : Prepared.Observation_Reserve_Result;
+            Reserved  : aliased Boolean := True;
+            Local_Deadline : constant Ada.Real_Time.Time :=
+              Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+
+            task Worker is
+               entry Start;
+            end Worker;
+
+            task body Worker is
+            begin
+               accept Start;
+               Prepared.Reserve_Observation
+                 (Admission, Monitor, Reserved'Access, O_Result);
+            end Worker;
+         begin
+            Prepared.Prepare_Start (Item'Access, 5, Claim, P_Result);
+            Prepared.Commit_Start (Claim, Admission, C_Result);
+            if P_Result /= Prepared.Start_Prepared
+              or else C_Result /= Prepared.Start_Committed
+            then
+               raise Program_Error with "reservation-cut admission setup failed";
+            end if;
+
+            Flyology.Task_Lifecycle_Testing.Reset;
+            Flyology.Task_Lifecycle_Testing.Arm
+              ((if Cut = Before_Reserve
+                then Flyology.Task_Lifecycle_Testing.Prepared_Observation_Before_Reserve
+                else Flyology.Task_Lifecycle_Testing.Prepared_Observation_Reserved));
+            Worker.Start;
+            Flyology.Task_Lifecycle_Testing.Wait_Reached
+              ((if Cut = Before_Reserve
+                then Flyology.Task_Lifecycle_Testing.Prepared_Observation_Before_Reserve
+                else Flyology.Task_Lifecycle_Testing.Prepared_Observation_Reserved));
+            abort Worker;
+            Flyology.Task_Lifecycle_Testing.Release
+              ((if Cut = Before_Reserve
+                then Flyology.Task_Lifecycle_Testing.Prepared_Observation_Before_Reserve
+                else Flyology.Task_Lifecycle_Testing.Prepared_Observation_Reserved));
+            while not Worker'Terminated loop
+               if Ada.Real_Time.Clock >= Local_Deadline then
+                  raise Program_Error with "reservation-cut worker did not terminate";
+               end if;
+               delay 0.001;
+            end loop;
+            Flyology.Task_Lifecycle_Testing.Reset;
+
+            if Cut = Before_Reserve then
+               if Reserved or else Prepared.Is_Active (Monitor) then
+                  raise Program_Error with "pre-cut abort retained observation ownership";
+               end if;
+               Prepared.Reserve_Observation (Admission, Monitor, O_Result);
+               if O_Result /= Prepared.Observation_Reserved
+                 or else not Prepared.Is_Active (Monitor)
+               then
+                  raise Program_Error with "legacy reserve did not reuse pre-cut capacity";
+               end if;
+            elsif Cut = After_Reserve
+              and then (not Reserved or else not Prepared.Is_Active (Monitor))
+            then
+               raise Program_Error with
+                 "post-cut abort lost observation ownership evidence";
+            end if;
+
+            declare
+               Other          : Prepared.Prepared_Observation_Claim :=
+                 Prepared.Vacant_Observation_Claim (Item'Access);
+               Foreign_Item   : aliased Families.Family;
+               Foreign        : Prepared.Prepared_Observation_Claim :=
+                 Prepared.Vacant_Observation_Claim (Foreign_Item'Access);
+               Other_Reserved : aliased Boolean := True;
+               Other_Result   : Prepared.Observation_Reserve_Result;
+               Rejected       : Boolean := False;
+            begin
+               begin
+                  Prepared.Reserve_Observation
+                    (Admission, Monitor, Other_Reserved'Access, Other_Result);
+               exception
+                  when Program_Error =>
+                     Rejected := True;
+               end;
+               if not Rejected
+                 or else Other_Reserved
+                 or else not Prepared.Is_Active (Monitor)
+               then
+                  raise Program_Error with "occupied reserve changed ownership evidence";
+               end if;
+
+               Other_Reserved := True;
+               Prepared.Reserve_Observation
+                 (Admission, Other, Other_Reserved'Access, Other_Result);
+               if Other_Result /= Prepared.Observation_Capacity_Exhausted
+                 or else Other_Reserved
+                 or else Prepared.Is_Active (Other)
+               then
+                  raise Program_Error with "capacity failure published observation ownership";
+               end if;
+
+               Other_Reserved := True;
+               Rejected := False;
+               begin
+                  Prepared.Reserve_Observation
+                    (Admission, Foreign, Other_Reserved'Access, Other_Result);
+               exception
+                  when Program_Error =>
+                     Rejected := True;
+               end;
+               if not Rejected
+                 or else Other_Reserved
+                 or else Prepared.Is_Active (Foreign)
+               then
+                  raise Program_Error with "foreign reserve changed ownership evidence";
+               end if;
+            end;
+
+            Prepared.Cancel_And_Join (Admission);
+            Prepared.Release_Observation_Claim (Monitor);
+            if Prepared.Is_Active (Monitor) then
+               raise Program_Error with "reservation-cut cleanup retained its claim";
+            end if;
+            Prepared.Release_Observation_Claim (Monitor);
+         exception
+            when others =>
+               Flyology.Task_Lifecycle_Testing.Reset;
+               abort Worker;
+               if Prepared.Is_Active (Admission) then
+                  Prepared.Cancel_And_Join (Admission);
+               end if;
+               if Prepared.Is_Active (Monitor) then
+                  Prepared.Release_Observation_Claim (Monitor);
+               end if;
+               raise;
+         end;
+      end loop;
+
+      declare
+         Admission : Prepared.Started_Admission :=
+           Prepared.Vacant_Started_Admission (Item'Access);
+         Monitor   : Prepared.Prepared_Observation_Claim :=
+           Prepared.Vacant_Observation_Claim (Item'Access);
+         Claim     : Prepared.Start_Claim :=
+           Prepared.Vacant_Start_Claim (Item'Access);
+         P_Result  : Prepared.Prepare_Result;
+         C_Result  : Prepared.Commit_Result;
+         O_Result  : Prepared.Observation_Reserve_Result;
+         R_Result  : aliased Prepared.Release_Result :=
+           Prepared.Admission_Cancelled;
+         Completed : aliased Boolean := False;
+         Reserved  : aliased Boolean := True;
+      begin
+         Prepared.Prepare_Start (Item'Access, 6, Claim, P_Result);
+         Prepared.Commit_Start (Claim, Admission, C_Result);
+         Prepared.Release_To_Run
+           (Admission, R_Result'Access, Completed'Access);
+         if P_Result /= Prepared.Start_Prepared
+           or else C_Result /= Prepared.Start_Committed
+           or else R_Result /= Prepared.Admission_Released
+           or else not Completed
+         then
+            raise Program_Error with "closed-reserve admission setup failed";
+         end if;
+         Prepared.Reserve_Observation
+           (Admission, Monitor, Reserved'Access, O_Result);
+         if O_Result /= Prepared.Observation_Admission_Closed
+           or else Reserved
+           or else Prepared.Is_Active (Monitor)
+         then
+            raise Program_Error with "closed reserve published observation ownership";
+         end if;
+         Prepared.Cancel_And_Join (Admission);
+      exception
+         when others =>
+            if Prepared.Is_Active (Admission) then
+               Prepared.Cancel_And_Join (Admission);
+            end if;
+            if Prepared.Is_Active (Monitor) then
+               Prepared.Release_Observation_Claim (Monitor);
+            end if;
+            raise;
+      end;
+
+      declare
+         Admission : Prepared.Started_Admission :=
+           Prepared.Vacant_Started_Admission (Item'Access);
+         Monitor   : Prepared.Prepared_Observation_Claim :=
+           Prepared.Vacant_Observation_Claim (Item'Access);
+         Claim     : Prepared.Start_Claim :=
+           Prepared.Vacant_Start_Claim (Item'Access);
+         P_Result  : Prepared.Prepare_Result;
+         C_Result  : Prepared.Commit_Result;
+         O_Result  : Prepared.Observation_Reserve_Result;
+         Reserved  : aliased Boolean := True;
+      begin
+         Prepared.Prepare_Start (Item'Access, 7, Claim, P_Result);
+         Prepared.Commit_Start (Claim, Admission, C_Result);
+         if P_Result /= Prepared.Start_Prepared
+           or else C_Result /= Prepared.Start_Committed
+         then
+            raise Program_Error with "identity-reserve admission setup failed";
+         end if;
+         Flyology.Task_Lifecycle_Testing.Force_Next_Prepared_Monitor_Identity_Exhausted;
+         Prepared.Reserve_Observation
+           (Admission, Monitor, Reserved'Access, O_Result);
+         if O_Result /= Prepared.Observation_Identity_Exhausted
+           or else Reserved
+           or else Prepared.Is_Active (Monitor)
+         then
+            raise Program_Error with "identity exhaustion published observation ownership";
+         end if;
+         Prepared.Reserve_Observation
+           (Admission, Monitor, Reserved'Access, O_Result);
+         if O_Result /= Prepared.Observation_Reserved
+           or else not Reserved
+           or else not Prepared.Is_Active (Monitor)
+         then
+            raise Program_Error with
+              "normal reserve did not publish observation ownership";
+         end if;
+         Prepared.Cancel_And_Join (Admission);
+         Prepared.Release_Observation_Claim (Monitor);
+      exception
+         when others =>
+            Flyology.Task_Lifecycle_Testing.Reset;
+            if Prepared.Is_Active (Admission) then
+               Prepared.Cancel_And_Join (Admission);
+            end if;
+            if Prepared.Is_Active (Monitor) then
+               Prepared.Release_Observation_Claim (Monitor);
+            end if;
+            raise;
+      end;
+   end Exercise_Reservation_Cut_Abort;
+
    procedure Observe_Retained_Terminal
      (Monitor : in out Prepared.Prepared_Observation_Claim;
       Observed : Child_Handle)
@@ -529,6 +775,7 @@ begin
       delay 0.001;
    end loop;
 
+   Exercise_Reservation_Cut_Abort;
    Exercise_Registration_Abort;
    Exercise_Claimed_Cancellation;
    Exercise_Claimed_Signal_Order;

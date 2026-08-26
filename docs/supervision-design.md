@@ -325,7 +325,10 @@ monitor ticket while the admission is still committed and blocked. A scoped
 operation arms the completion-set readiness source before the protected
 activation/recheck cut, borrows the claim for one generation, and returns it to
 a descriptor-free dormant state on finish or cancellation. The ticket remains
-reserved across replacement publication and exact rearm. Reserved and dormant
+reserved across replacement publication and exact rearm. The reservation
+overload publishes its caller-aliased `Reserved` evidence last in the protected
+success cut, so interruption before or after ownership transfer is reconciled
+without guessing from an ordinary `out` result. Reserved and dormant
 tickets remain lifecycle subscribers, so a replacement or terminal publication
 cannot disappear while no operation is armed. Operation cancellation preserves
 that retained fact for the next exact rearm. Claim finalization drains an

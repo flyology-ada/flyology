@@ -728,8 +728,11 @@ admission finally joined, without polling or a helper task.
 For a start protocol that must guarantee observation capacity before release,
 `Prepared_Observation_Claim` reserves one persistent monitor ticket while the
 admission remains blocked. Each `Activate_Exact` operation borrows that ticket
-for one generation and returns it to a dormant state on finish or cancellation;
-replacement rearm therefore cannot fail because another observer consumed the
+for one generation and returns it to a dormant state on finish or cancellation.
+The reservation overload publishes its caller-aliased `Reserved` evidence last
+in the protected success cut, so interruption before or after ownership transfer
+can be reconciled without inferring state from an ordinary `out` result.
+Replacement rearm therefore cannot fail because another observer consumed the
 ticket between generations. Reserved and dormant claims continue retaining an
 exact replacement or terminal fact even when no scoped operation is armed, and
 cancelling an operation does not consume that retained fact. Explicit claim
