@@ -268,6 +268,27 @@ package Flyology.Supervision.Families.Prepared_Admissions is
      Pre =>
        not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
+   --  Arm the exact generation within Claim's retained admission identity.
+   --  This overload is equivalent to the Child_Handle form but constructs the
+   --  opaque controller/child-qualified handle inside this package. It remains
+   --  valid for an older retained fact after the Family has already published
+   --  a replacement, and never samples or follows Latest.
+   --  @param Claim Active claim, externally serialized with Operation
+   --  @param Observed Exact generation in Claim's admission epoch
+   --  @param Timeout Relative wait policy in seconds
+   --  @param Operation Vacant operation bound to the same Family
+   --  @exception Program_Error Claim is vacant/foreign or Operation has a foreign owner
+   --  @exception Stale_Handle Observed or the retained admission epoch is invalid
+   --  @exception Flyology.Operations.Capacity_Error Completion-set capacity exhausted
+   procedure Activate_Exact
+     (Claim     : in out Prepared_Observation_Claim;
+      Observed  : Flyology.Supervision.Generation;
+      Timeout   : Duration := -1.0;
+      Operation : in out Observation_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
+
    --  Consume one terminal operation and publish its copied observation.
    --  @param Operation Terminal observation to release
    --  @param Observation Exact terminal/replacement fact or timeout

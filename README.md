@@ -729,6 +729,9 @@ For a start protocol that must guarantee observation capacity before release,
 `Prepared_Observation_Claim` reserves one persistent monitor ticket while the
 admission remains blocked. Each `Activate_Exact` operation borrows that ticket
 for one generation and returns it to a dormant state on finish or cancellation.
+Its generation overload qualifies an older retained fact with the claim's
+opaque admission identity without sampling or following the Family's latest
+generation.
 `Request_Cancellation` applies only to the supplied exact current generation
 inside that admission, without exposing a handle constructor, waiting, or
 following a replacement.

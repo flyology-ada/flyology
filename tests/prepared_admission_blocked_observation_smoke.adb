@@ -152,6 +152,36 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
       end if;
 
       Prepared.Cancel_And_Join (Admission);
+      if Shutdown_First
+        and then Current_Generation (Handle) = Generation'First
+      then
+         raise Program_Error
+           with "second same-slot admission did not advance its first generation";
+      end if;
+      if Shutdown_First then
+         declare
+            Stale : Boolean := False;
+         begin
+            begin
+               Prepared.Activate_Exact
+                 (Observation_Claim,
+                  Generation'Pred (Current_Generation (Handle)),
+                  Timeout   => 0.0,
+                  Operation => Wait);
+            exception
+               when Families.Stale_Handle =>
+                  Stale := True;
+            end;
+            if not Stale
+              or else Flyology.Operations.Is_Active (Wait)
+              or else Flyology.Operations.Is_Terminal (Wait)
+              or else not Prepared.Is_Active (Observation_Claim)
+            then
+               raise Program_Error
+                 with "generation overload accepted a fact below the admission epoch";
+            end if;
+         end;
+      end if;
       Prepared.Activate_Exact (Observation_Claim, Handle, 0.0, Wait);
       Flyology.Operations.Wait_All (Set);
       Prepared.Finish (Wait, Observation);

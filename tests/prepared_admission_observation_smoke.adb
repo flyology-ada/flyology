@@ -294,6 +294,28 @@ procedure Prepared_Admission_Observation_Smoke is
                Ended_Before_Consumption : Boolean := False;
                Final_Already_Observed : Boolean := False;
             begin
+               declare
+                  Stale : Boolean := False;
+               begin
+                  begin
+                     Prepared.Activate_Exact
+                       (Observation_Claim,
+                        Flyology.Supervision.Generation'Last,
+                        Timeout   => 0.0,
+                        Operation => Wait);
+                  exception
+                     when Families.Stale_Handle =>
+                        Stale := True;
+                  end;
+                  if not Stale
+                    or else Flyology.Operations.Is_Active (Wait)
+                    or else Flyology.Operations.Is_Terminal (Wait)
+                    or else not Prepared.Is_Active (Observation_Claim)
+                  then
+                     raise Program_Error
+                       with "generation overload accepted a fact above its retained boundary";
+                  end if;
+               end;
                Prepared.Activate_Exact
                  (Observation_Claim,
                   First,
@@ -537,7 +559,7 @@ procedure Prepared_Admission_Observation_Smoke is
                   if Expect_Replacement or else not Final_Already_Observed then
                      Prepared.Activate_Exact
                        (Observation_Claim,
-                        First,
+                        Current_Generation (First),
                         Timeout   => -1.0,
                         Operation => Wait);
                      Flyology.Operations.Wait_All (Set);
@@ -684,7 +706,7 @@ procedure Prepared_Admission_Observation_Smoke is
                            begin
                               Prepared.Activate_Exact
                                 (Observation_Claim,
-                                 Reused,
+                                 Current_Generation (Reused),
                                  Timeout   => 0.0,
                                  Operation => Wait);
                            exception

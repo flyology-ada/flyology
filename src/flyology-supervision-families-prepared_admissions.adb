@@ -587,6 +587,21 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Start_Prepared_Observation (Claim, Observed, Timeout, Operation);
    end Activate_Exact;
 
+   procedure Activate_Exact
+     (Claim     : in out Prepared_Observation_Claim;
+      Observed  : Flyology.Supervision.Generation;
+      Timeout   : Duration := -1.0;
+      Operation : in out Observation_Operation) is
+   begin
+      Start_Prepared_Observation
+        (Claim,
+         (Controller => Claim.State.Admission.Controller,
+          Id         => Claim.State.Admission.Id,
+          Generation => Observed),
+         Timeout,
+         Operation);
+   end Activate_Exact;
+
    procedure Drive_Prepared_Observation
      (Item : in out Observation_Operation;
       Event : Flyology.Operations.Driver_Event)
