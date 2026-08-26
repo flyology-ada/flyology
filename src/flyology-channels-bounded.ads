@@ -86,6 +86,21 @@ package Flyology.Channels.Bounded is
       --  @param Result Item_Sent, Channel_Full, or Send_Closed
       procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result);
 
+      --  Attempt to append without waiting and publish abort-stable ownership
+      --  evidence. Accepted is set False before validation and True only after
+      --  the complete item and queue state have been installed. Unlike Result,
+      --  the caller-aliased evidence remains authoritative if the calling task
+      --  is aborted after the protected acceptance cut but before ordinary
+      --  return copy-out. True means the channel owns exactly one copy of Value;
+      --  False means it owns none. Once True is published, a later propagated
+      --  internal notification failure does not revoke acceptance; ordinary
+      --  Result copy-out may then be unavailable.
+      --  @param Value Value to copy if capacity is available
+      --  @param Accepted Caller-owned evidence that the channel accepted Value
+      --  @param Result Item_Sent, Channel_Full, or Send_Closed
+      procedure Try_Send
+        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result);
+
       --  Attempt to remove the oldest value without waiting. Value is assigned
       --  only when Result is Item_Received.
       --  @param Value Receives the oldest buffered value on success

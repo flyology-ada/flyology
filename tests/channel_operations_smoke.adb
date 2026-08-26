@@ -50,6 +50,99 @@ procedure Channel_Operations_Smoke is
    task body Runner is
       Passed : Boolean := True;
    begin
+      --  Caller-aliased send evidence survives abort after the protected
+      --  acceptance cut even though ordinary out copy-out never completes.
+      declare
+         Channel : aliased Integer_Channels.Channel (Capacity => 1);
+
+         protected Barrier is
+            procedure Arrive;
+            entry Wait_Until_Arrived;
+            entry Wait_For_Release;
+            procedure Release;
+         private
+            Arrived  : Boolean := False;
+            Released : Boolean := False;
+         end Barrier;
+
+         protected body Barrier is
+            procedure Arrive is
+            begin
+               Arrived := True;
+            end Arrive;
+
+            entry Wait_Until_Arrived when Arrived is
+            begin
+               null;
+            end Wait_Until_Arrived;
+
+            entry Wait_For_Release when Released is
+            begin
+               null;
+            end Wait_For_Release;
+
+            procedure Release is
+            begin
+               Released := True;
+            end Release;
+         end Barrier;
+
+         Accepted         : aliased Boolean := False;
+         Published_Result : Integer_Channels.Try_Send_Result := Integer_Channels.Send_Closed;
+
+         procedure Send_Then_Publish (Result : out Integer_Channels.Try_Send_Result) is
+            Local_Result : Integer_Channels.Try_Send_Result;
+         begin
+            Channel.Try_Send (17, Accepted'Access, Local_Result);
+            Barrier.Arrive;
+            Barrier.Wait_For_Release;
+            Result := Local_Result;
+         end Send_Then_Publish;
+
+         task Sender;
+
+         task body Sender is
+         begin
+            Send_Then_Publish (Published_Result);
+         end Sender;
+
+         Value  : Integer := 0;
+         Status : Integer_Channels.Try_Receive_Result;
+      begin
+         Barrier.Wait_Until_Arrived;
+         abort Sender;
+         Barrier.Release;
+         while not Sender'Terminated loop
+            delay 0.0;
+         end loop;
+         Passed := Passed and then Accepted and then Published_Result = Integer_Channels.Send_Closed;
+         Channel.Try_Receive (Value, Status);
+         Passed := Passed and then Status = Integer_Channels.Item_Received and then Value = 17;
+      end;
+
+      --  Rejection always clears a stale caller token and retains no value.
+      declare
+         Channel  : Integer_Channels.Channel (Capacity => 1);
+         Accepted : aliased Boolean := True;
+         Status   : Integer_Channels.Try_Send_Result;
+         Received : Integer_Channels.Try_Receive_Result;
+         Value    : Integer := 0;
+      begin
+         Channel.Try_Send (1, Accepted'Access, Status);
+         Passed := Passed and then Accepted and then Status = Integer_Channels.Item_Sent;
+         Accepted := True;
+         Channel.Try_Send (2, Accepted'Access, Status);
+         Passed := Passed and then not Accepted and then Status = Integer_Channels.Channel_Full;
+         Channel.Close;
+         Accepted := True;
+         Channel.Try_Send (3, Accepted'Access, Status);
+         Passed := Passed and then not Accepted and then Status = Integer_Channels.Send_Closed;
+         Channel.Try_Receive (Value, Received);
+         Passed := Passed and then Received = Integer_Channels.Item_Received and then Value = 1;
+         Channel.Try_Receive (Value, Received);
+         Passed := Passed and then Received = Integer_Channels.Receive_Closed;
+      end;
+
       --  A familiar Receive overload composes with a timer through a success
       --  gate. Publishing after initiation but before the set wait exercises
       --  the atomic subscribe/recheck path rather than a helper task.

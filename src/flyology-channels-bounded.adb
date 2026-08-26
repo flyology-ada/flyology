@@ -148,13 +148,22 @@ package body Flyology.Channels.Bounded is
       end Receive;
 
       procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result) is
+         Ignored : aliased Boolean := False;
       begin
+         Try_Send (Value, Ignored'Access, Result);
+      end Try_Send;
+
+      procedure Try_Send
+        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result) is
+      begin
+         Accepted.all := False;
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send  =>
                Buffer (Tail) := Value;
                Tail := Policy.Advance (Tail, Capacity);
                Count := Policy.Count_After_Send (Count, Capacity);
                Result := Item_Sent;
+               Accepted.all := True;
                Signal_Scoped;
 
             when Policy.Wait_To_Send =>
