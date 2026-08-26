@@ -683,10 +683,11 @@ package body Flyology.Supervision.Families is
          Incident := Inherited_Incident;
       end Take_Start;
 
-      procedure Stop_One (Handle : Child_Handle; Valid : out Boolean) is
+      procedure Stop_One
+        (Handle : Child_Handle; Applied : not null access Boolean) is
          Slot : Slot_Index;
       begin
-         Valid := False;
+         Applied.all := False;
          if Child (Handle) < First_Child_Id
            or else Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id)
                    >= Interfaces.Unsigned_64 (Maximum_Children)
@@ -695,15 +696,15 @@ package body Flyology.Supervision.Families is
          end if;
          Slot :=
            Slot_Index (Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id) + 1);
-         Valid :=
-           Kernel.Family_Stop_Command_Allowed
-             (Current =>
-                Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation),
-              Queued  => Slots (Slot) in Queued | Released_Queued,
-              Managed => Slots (Slot) in Managed | Released_Managed,
-              Live    => Snapshots (Slot).Live);
-         if Valid then
+         if Kernel.Family_Stop_Command_Allowed
+              (Current =>
+                 Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation),
+               Queued  => Slots (Slot) in Queued | Released_Queued,
+               Managed => Slots (Slot) in Managed | Released_Managed,
+               Live    => Snapshots (Slot).Live)
+         then
             Stop_Requested (Slot) := True;
+            Applied.all := True;
          end if;
       end Stop_One;
 
@@ -2044,10 +2045,10 @@ package body Flyology.Supervision.Families is
    end Start;
 
    procedure Stop (Item : in out Family; Handle : Child_Handle) is
-      Valid : Boolean;
+      Applied : aliased Boolean := False;
    begin
-      Item.State.Stop_One (Handle, Valid);
-      if not Valid then
+      Item.State.Stop_One (Handle, Applied'Access);
+      if not Applied then
          raise Stale_Handle;
       end if;
    end Stop;
@@ -2506,6 +2507,10 @@ package body Flyology.Supervision.Families is
          loop
             if Parent_Stop /= null and then Parent_Stop.Requested then
                Item.State.Request_Stop;
+            end if;
+            if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+               Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                 (Flyology.Task_Lifecycle_Test_Hooks.Family_Before_Take_Start);
             end if;
             Item.State.Take_Start (Available, Slot, Handle, Incident);
             if Available then

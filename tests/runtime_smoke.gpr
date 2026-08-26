@@ -69,6 +69,7 @@ project Runtime_Smoke is
       "prepared_admission_abort_smoke.adb",
       "prepared_admission_persistent_abort_smoke.adb",
       "prepared_admission_blocked_observation_smoke.adb",
+      "prepared_admission_cancellation_smoke.adb",
       "prepared_admission_generation_smoke.adb",
       "flyology-supervision-families_shutdown_smoke.adb",
       "flyology-supervision-nested_family_restart_smoke.adb",

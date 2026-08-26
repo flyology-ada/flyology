@@ -729,6 +729,9 @@ For a start protocol that must guarantee observation capacity before release,
 `Prepared_Observation_Claim` reserves one persistent monitor ticket while the
 admission remains blocked. Each `Activate_Exact` operation borrows that ticket
 for one generation and returns it to a dormant state on finish or cancellation.
+`Request_Cancellation` applies only to the supplied exact current generation
+inside that admission, without exposing a handle constructor, waiting, or
+following a replacement.
 The reservation overload publishes its caller-aliased `Reserved` evidence last
 in the protected success cut, so interruption before or after ownership transfer
 can be reconciled without inferring state from an ordinary `out` result.

@@ -323,7 +323,8 @@ private
          Slot      : out Slot_Index;
          Handle    : out Child_Handle;
          Incident  : out Incident_Context);
-      procedure Stop_One (Handle : Child_Handle; Valid : out Boolean);
+      procedure Stop_One
+        (Handle : Child_Handle; Applied : not null access Boolean);
       procedure Stop_Status
         (Slot     : Slot_Index;
          Handle   : Child_Handle;

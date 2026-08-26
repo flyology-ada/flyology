@@ -174,6 +174,21 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Admission Admission owner cleared after its exact epoch joins
    procedure Cancel_And_Join (Admission : in out Started_Admission);
 
+   --  Promptly request cancellation of Generation only when it is the exact
+   --  current generation within Admission. The call never waits, follows a
+   --  replacement, or exposes a constructed Child_Handle. Applied is False
+   --  before validation and becomes True only in the Family stop cut. A
+   --  vacant, blocked, joined, stale, or replaced target leaves it False.
+   --  For valid lifetime actuals the call is total and nonraising.
+   --  The caller externally serializes Admission with its other operations.
+   --  @param Admission Exact admission epoch containing the target
+   --  @param Generation Provider generation to cancel without following
+   --  @param Applied Caller-owned exact-cut result
+   procedure Request_Cancellation
+     (Admission  : Started_Admission;
+      Generation : Flyology.Supervision.Generation;
+      Applied    : not null access Boolean);
+
    --  First-class wait for one exact generation within Admission's exact
    --  admission epoch. Set and Owner storage must outlive Operation. Admission
    --  must be active, released, and owned by Owner only during initiation; the

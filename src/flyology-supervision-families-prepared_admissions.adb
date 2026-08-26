@@ -256,6 +256,26 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       end if;
    end Cancel_And_Join;
 
+   procedure Request_Cancellation
+     (Admission  : Started_Admission;
+      Generation : Flyology.Supervision.Generation;
+      Applied    : not null access Boolean) is
+   begin
+      Applied.all := False;
+      if not Admission.State.Active or else not Admission.State.Released then
+         return;
+      end if;
+      Admission.Owner.State.Stop_One
+        ((Controller => Admission.State.Handle.Controller,
+          Id         => Admission.State.Handle.Id,
+          Generation => Generation),
+         Applied);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Applied.all then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Admission_Cancellation_Requested);
+      end if;
+   end Request_Cancellation;
+
    overriding
    procedure Finalize (Item : in out Claim_Owner) is
    begin
