@@ -142,6 +142,9 @@ procedure Prepared_Admission_Abort_Smoke is
    procedure Exercise_Abort (Stage : Abort_Stage) is
       Point : constant Flyology.Task_Lifecycle_Testing.Barrier_Point :=
         Point_For (Stage);
+      Release_Result    : aliased Prepared.Release_Result :=
+        Prepared.Admission_Cancelled;
+      Release_Completed : aliased Boolean := False;
 
       task Worker is
          entry Start;
@@ -154,8 +157,6 @@ procedure Prepared_Admission_Abort_Smoke is
            Prepared.Vacant_Started_Admission (Item'Access);
          P_Result  : Prepared.Prepare_Result;
          C_Result  : Prepared.Commit_Result;
-         R_Result  : aliased Prepared.Release_Result :=
-           Prepared.Admission_Cancelled;
       begin
          accept Start;
          Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
@@ -163,7 +164,10 @@ procedure Prepared_Admission_Abort_Smoke is
             Prepared.Commit_Start (Claim, Admission, C_Result);
          end if;
          if Stage = After_Release then
-            Prepared.Release_To_Run (Admission, R_Result'Access);
+            Prepared.Release_To_Run
+              (Admission,
+               Release_Result'Access,
+               Release_Completed'Access);
          end if;
       end Worker;
    begin
@@ -186,6 +190,13 @@ procedure Prepared_Admission_Abort_Smoke is
       while not Worker'Terminated loop
          delay 0.001;
       end loop;
+      if Stage = After_Release
+        and then (Release_Result /= Prepared.Admission_Released
+                  or else not Release_Completed)
+      then
+         raise Program_Error
+           with "aborted post-cut release lost its completed publication";
+      end if;
       Flyology.Task_Lifecycle_Testing.Reset;
       Assert_Reusable;
    end Exercise_Abort;

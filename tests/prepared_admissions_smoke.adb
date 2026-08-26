@@ -174,6 +174,7 @@ begin
         Prepared.Admission_Cancelled;
       Rolled_Back_Handle : Child_Handle;
       Prepared_Handle    : Child_Handle;
+      Release_Completed  : aliased Boolean := False;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       if P_Result /= Prepared.Start_Prepared
@@ -306,16 +307,22 @@ begin
            with "committed blocked request executed before release";
       end if;
 
-      Prepared.Release_To_Run (Admission, R_Result'Access);
+      Prepared.Release_To_Run
+        (Admission, R_Result'Access, Release_Completed'Access);
       if R_Result /= Prepared.Admission_Released
+        or else not Release_Completed
         or else not Prepared.Is_Released (Admission)
       then
          raise Program_Error
            with "release did not publish execution ownership";
       end if;
       R_Result := Prepared.Admission_Cancelled;
-      Prepared.Release_To_Run (Admission, R_Result'Access);
-      if R_Result /= Prepared.Admission_Released then
+      Release_Completed := False;
+      Prepared.Release_To_Run
+        (Admission, R_Result'Access, Release_Completed'Access);
+      if R_Result /= Prepared.Admission_Released
+        or else not Release_Completed
+      then
          raise Program_Error with "repeated release was not idempotent";
       end if;
       loop

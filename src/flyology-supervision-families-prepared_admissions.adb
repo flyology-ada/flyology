@@ -5,6 +5,26 @@ with Interfaces.C;
 package body Flyology.Supervision.Families.Prepared_Admissions is
    use type Flyology.Operations.Driver_Event;
 
+   type Immediate_Claim_Guard (Owner : not null access Family) is
+     new Ada.Finalization.Limited_Controlled with record
+      Ticket : Monitor_Index := Monitor_Index'First;
+      Token  : Monitor_Token := 0;
+      Active : aliased Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Immediate_Claim_Guard) is
+      Resolved : Boolean;
+   begin
+      if Item.Active then
+         Item.Owner.State.Resolve_Prepared_Immediate_Claim
+           (Item.Ticket, Item.Token, False, Item.Active'Access, Resolved);
+      end if;
+   exception
+      when others =>
+         null;
+   end Finalize;
+
    function Vacant_Start_Claim (Owner : not null access Family) return Start_Claim is
    begin
       return Result : Start_Claim (Owner);
@@ -15,9 +35,17 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       return Result : Started_Admission (Owner);
    end Vacant_Started_Admission;
 
+   function Vacant_Observation_Claim
+     (Owner : not null access Family) return Prepared_Observation_Claim is
+   begin
+      return Result : Prepared_Observation_Claim (Owner);
+   end Vacant_Observation_Claim;
+
    function Is_Active (Item : Start_Claim) return Boolean
    is (Item.State.Active);
    function Is_Active (Item : Started_Admission) return Boolean
+   is (Item.State.Active);
+   function Is_Active (Item : Prepared_Observation_Claim) return Boolean
    is (Item.State.Active);
    function Is_Released (Item : Started_Admission) return Boolean
    is (Item.State.Released);
@@ -102,8 +130,67 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Result := (if Status = Prepared_Committed then Start_Committed else Start_Admission_Closed);
    end Commit_Start;
 
-   procedure Release_To_Run (Admission : in out Started_Admission; Result : not null access Release_Result) is
+   procedure Release_To_Run
+     (Admission : in out Started_Admission; Result : not null access Release_Result) is
+      Completed : aliased Boolean := False;
    begin
+      Release_To_Run (Admission, Result, Completed'Access);
+   end Release_To_Run;
+
+   procedure Reserve_Observation
+     (Admission : Started_Admission;
+      Claim     : in out Prepared_Observation_Claim;
+      Result    : out Observation_Reserve_Result)
+   is
+      Status : Prepared_Monitor_Reserve_Status;
+   begin
+      if Claim.Owner /= Admission.Owner then
+         raise Program_Error with "observation claim belongs to another family";
+      elsif Claim.State.Active then
+         raise Program_Error with "observation claim is occupied";
+      elsif not Admission.State.Active or else Admission.State.Released then
+         Result := Observation_Admission_Closed;
+         return;
+      end if;
+      Claim.State.Admission := Admission.State.Handle;
+      Claim.Owner.State.Reserve_Prepared_Admission_Monitor
+        (Claim.State.Admission,
+         Claim.State.Ticket'Access,
+         Claim.State.Token'Access,
+         Claim.State.Active'Access,
+         Status);
+      Result :=
+        (case Status is
+           when Prepared_Monitor_Reserved            => Observation_Reserved,
+           when Prepared_Monitor_Admission_Closed    => Observation_Admission_Closed,
+           when Prepared_Monitor_Capacity_Exhausted  => Observation_Capacity_Exhausted,
+           when Prepared_Monitor_Identity_Exhausted  => Observation_Identity_Exhausted);
+   end Reserve_Observation;
+
+   procedure Release_Observation_Claim
+     (Claim : in out Prepared_Observation_Claim) is
+      Released : Boolean;
+   begin
+      if not Claim.State.Active then
+         return;
+      end if;
+      Claim.Owner.State.Release_Prepared_Monitor
+        (Claim.State.Ticket,
+         Claim.State.Token,
+         Claim.State.Active'Access,
+         Released);
+      if not Released then
+         Claim.Owner.State.Await_Prepared_Monitor_Release (Claim.State.Ticket)
+           (Claim.State.Token, Claim.State.Active'Access);
+      end if;
+   end Release_Observation_Claim;
+
+   procedure Release_To_Run
+     (Admission : in out Started_Admission;
+      Result    : not null access Release_Result;
+      Completed : not null access Boolean) is
+   begin
+      Completed.all := False;
       if not Admission.State.Active then
          raise Program_Error with "started admission is vacant";
       end if;
@@ -111,7 +198,8 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
         (Admission.State.Slot,
          Admission.State.Handle,
          Admission.State.Released'Access,
-         Result.Succeeded'Access);
+         Result.Succeeded'Access,
+         Completed);
       if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Admission.State.Released then
          Flyology.Task_Lifecycle_Test_Hooks.Barrier
            (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Admission_Released);
@@ -177,6 +265,23 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          null;
    end Finalize;
 
+   overriding
+   procedure Finalize (Item : in out Observation_Claim_Owner) is
+      Released : Boolean;
+   begin
+      if Item.Active then
+         Item.Owner.State.Release_Prepared_Monitor
+           (Item.Ticket, Item.Token, Item.Active'Access, Released);
+         if not Released then
+            Item.Owner.State.Await_Prepared_Monitor_Release (Item.Ticket)
+              (Item.Token, Item.Active'Access);
+         end if;
+      end if;
+   exception
+      when others =>
+         null;
+   end Finalize;
+
    function Complete_Observation
      (Status : Generation_Observation_Status; Snapshot : Child_Snapshot) return Generation_Observation is
    begin
@@ -216,6 +321,7 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Operation.Provider.Status := Observation_Timed_Out;
       Operation.Provider.Failure := No_Failure;
       Operation.Provider.Cancellation_Pending := False;
+      Operation.Provider.Prepared := False;
       Flyology.Operations.Drivers.Completion_Source (Operation, Read_Descriptor, Signal_Descriptor);
       Operation.Owner.State.Register_Admission_Monitor
         (Operation.Provider.Admission,
@@ -292,6 +398,121 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          raise;
    end Start_Observation;
 
+   procedure Start_Prepared_Observation
+     (Claim     : in out Prepared_Observation_Claim;
+      Observed  : Child_Handle;
+      Timeout   : Duration;
+      Operation : in out Observation_Operation)
+   is
+      Immediate                          : Boolean;
+      Valid                              : Boolean;
+      Completed                          : Boolean;
+      Released                           : Boolean;
+      Immediate_Guard                    : Immediate_Claim_Guard (Claim.Owner);
+      Immediate_Resolved                 : Boolean;
+      Read_Descriptor, Signal_Descriptor : Interfaces.C.int;
+   begin
+      if Operation.Owner /= Claim.Owner then
+         raise Program_Error with "observation operation belongs to another family";
+      elsif not Claim.State.Active then
+         raise Program_Error with "prepared observation claim is vacant";
+      end if;
+      Flyology.Operations.Drivers.Start (Operation);
+      Operation.Provider.Admission := Claim.State.Admission;
+      Operation.Provider.Observed := Observed;
+      Operation.Provider.Ticket := Claim.State.Ticket;
+      Operation.Provider.Token := Claim.State.Token;
+      Operation.Provider.Active := False;
+      Operation.Provider.Prepared := True;
+      Operation.Provider.Status := Observation_Timed_Out;
+      Operation.Provider.Failure := No_Failure;
+      Operation.Provider.Cancellation_Pending := False;
+      Immediate_Guard.Ticket := Operation.Provider.Ticket;
+      Immediate_Guard.Token := Operation.Provider.Token;
+      Flyology.Operations.Drivers.Completion_Source (Operation, Read_Descriptor, Signal_Descriptor);
+      Flyology.Operations.Drivers.Arm_Readiness (Operation, Read_Descriptor, False);
+      Operation.Owner.State.Activate_Prepared_Admission_Monitor
+        (Operation.Provider.Admission,
+         Operation.Provider.Ticket,
+         Operation.Provider.Token,
+         Observed,
+         Signal_Descriptor,
+         Immediate,
+         Operation.Provider.Status,
+         Operation.Provider.Snapshot,
+         Operation.Provider.Active'Access,
+         Immediate_Guard.Active'Access,
+         Valid);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+        and then Operation.Provider.Active
+      then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Admission_Monitor_Registered);
+      end if;
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+        and then Immediate
+        and then Immediate_Guard.Active
+      then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Admission_Immediate_Claimed);
+      end if;
+      if not Valid then
+         Operation.Provider.Failure := Invalid_Admission;
+         Flyology.Operations.Drivers.Rollback_Start (Operation);
+         raise Stale_Handle with "prepared admission observation is stale";
+      elsif Immediate then
+         Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
+         Operation.Owner.State.Resolve_Prepared_Immediate_Claim
+           (Operation.Provider.Ticket,
+            Operation.Provider.Token,
+            True,
+            Immediate_Guard.Active'Access,
+            Immediate_Resolved);
+         if not Immediate_Resolved then
+            raise Program_Error with "prepared immediate observation claim is inconsistent";
+         end if;
+      elsif Timeout = 0.0 then
+         Operation.Owner.State.Take_Prepared_Monitor
+           (Operation.Provider.Ticket,
+            Operation.Provider.Token,
+            False,
+            Released,
+            Completed,
+            Operation.Provider.Status,
+            Operation.Provider.Snapshot);
+         Operation.Provider.Active := not Released;
+         if Released then
+            Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
+         end if;
+      elsif Timeout > 0.0 then
+         Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
+      end if;
+   exception
+      when others =>
+         if Operation.Provider.Active then
+            Operation.Owner.State.Take_Prepared_Monitor
+              (Operation.Provider.Ticket,
+               Operation.Provider.Token,
+               True,
+               Released,
+               Completed,
+               Operation.Provider.Status,
+               Operation.Provider.Snapshot);
+            if not Released then
+               Operation.Owner.State.Await_Prepared_Monitor (Operation.Provider.Ticket)
+                 (Operation.Provider.Token,
+                  True,
+                  Operation.Provider.Status,
+                  Operation.Provider.Snapshot);
+            end if;
+            Operation.Provider.Active := False;
+         end if;
+         if Flyology.Operations.Is_Active (Operation) then
+            Flyology.Operations.Drivers.Rollback_Start (Operation);
+         end if;
+         raise;
+   end Start_Prepared_Observation;
+
    function Observe_Exact
      (Set       : not null access Flyology.Operations.Completion_Set'Class;
       Owner     : not null access Family;
@@ -316,6 +537,148 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Start_Observation (Admission, Observed, Timeout, Operation);
    end Observe_Exact;
 
+   procedure Activate_Exact
+     (Claim     : in out Prepared_Observation_Claim;
+      Observed  : Child_Handle;
+      Timeout   : Duration := -1.0;
+      Operation : in out Observation_Operation) is
+   begin
+      Start_Prepared_Observation (Claim, Observed, Timeout, Operation);
+   end Activate_Exact;
+
+   procedure Drive_Prepared_Observation
+     (Item : in out Observation_Operation;
+      Event : Flyology.Operations.Driver_Event)
+   is
+      Completed                          : Boolean;
+      Released                           : Boolean := True;
+      Immediate                          : Boolean;
+      Immediate_Guard                    : Immediate_Claim_Guard (Item.Owner);
+      Immediate_Resolved                 : Boolean;
+      Valid                              : Boolean;
+      Read_Descriptor, Signal_Descriptor : Interfaces.C.int;
+   begin
+      case Event is
+         when Flyology.Operations.Source_Ready | Flyology.Operations.Deadline_Reached =>
+            Item.Owner.State.Take_Prepared_Monitor
+              (Item.Provider.Ticket,
+               Item.Provider.Token,
+               Item.Provider.Cancellation_Pending,
+               Released,
+               Completed,
+               Item.Provider.Status,
+               Item.Provider.Snapshot);
+            Item.Provider.Active := not Released;
+            if not Released then
+               Flyology.Operations.Drivers.Clear_Deadline (Item);
+               Flyology.Operations.Drivers.Completion_Source
+                 (Item, Read_Descriptor, Signal_Descriptor);
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Read_Descriptor, False);
+            elsif Item.Provider.Cancellation_Pending then
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Cancelled);
+            elsif Item.Provider.Failure /= No_Failure then
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Failed);
+            elsif Completed or else Event = Flyology.Operations.Deadline_Reached then
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Succeeded);
+            else
+               Flyology.Operations.Drivers.Completion_Source
+                 (Item, Read_Descriptor, Signal_Descriptor);
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Read_Descriptor, False);
+               Immediate_Guard.Ticket := Item.Provider.Ticket;
+               Immediate_Guard.Token := Item.Provider.Token;
+               Item.Owner.State.Activate_Prepared_Admission_Monitor
+                 (Item.Provider.Admission,
+                  Item.Provider.Ticket,
+                  Item.Provider.Token,
+                  Item.Provider.Observed,
+                  Signal_Descriptor,
+                  Immediate,
+                  Item.Provider.Status,
+                  Item.Provider.Snapshot,
+                  Item.Provider.Active'Access,
+                  Immediate_Guard.Active'Access,
+                  Valid);
+               if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+                 and then Immediate
+                 and then Immediate_Guard.Active
+               then
+                  Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                    (Flyology.Task_Lifecycle_Test_Hooks.Admission_Immediate_Claimed);
+               end if;
+               if not Valid then
+                  Item.Provider.Failure := Invalid_Admission;
+                  Flyology.Operations.Drivers.Complete
+                    (Item, Flyology.Operations.Failed);
+               elsif Immediate then
+                  Flyology.Operations.Drivers.Complete
+                    (Item, Flyology.Operations.Succeeded);
+                  Item.Owner.State.Resolve_Prepared_Immediate_Claim
+                    (Item.Provider.Ticket,
+                     Item.Provider.Token,
+                     True,
+                     Immediate_Guard.Active'Access,
+                     Immediate_Resolved);
+                  if not Immediate_Resolved then
+                     raise Program_Error
+                       with "prepared immediate observation claim is inconsistent";
+                  end if;
+               end if;
+            end if;
+
+         when others =>
+            if Item.Provider.Active then
+               Item.Owner.State.Take_Prepared_Monitor
+                 (Item.Provider.Ticket,
+                  Item.Provider.Token,
+                  True,
+                  Released,
+                  Completed,
+                  Item.Provider.Status,
+                  Item.Provider.Snapshot);
+               Item.Provider.Active := not Released;
+            end if;
+            Item.Provider.Failure := Monitor_Failure;
+            if Released then
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Failed);
+            else
+               Flyology.Operations.Drivers.Clear_Deadline (Item);
+               Flyology.Operations.Drivers.Completion_Source
+                 (Item, Read_Descriptor, Signal_Descriptor);
+               Flyology.Operations.Drivers.Arm_Readiness
+                 (Item, Read_Descriptor, False);
+            end if;
+      end case;
+   exception
+      when others =>
+         if Item.Provider.Active then
+            begin
+               Item.Owner.State.Take_Prepared_Monitor
+                 (Item.Provider.Ticket,
+                  Item.Provider.Token,
+                  True,
+                  Released,
+                  Completed,
+                  Item.Provider.Status,
+                  Item.Provider.Snapshot);
+               Item.Provider.Active := not Released;
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+         Item.Provider.Failure := Monitor_Failure;
+         if not Item.Provider.Active then
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
+         end if;
+   end Drive_Prepared_Observation;
+
    overriding
    procedure Drive (Item : in out Observation_Operation; Event : Flyology.Operations.Driver_Event) is
       Completed                          : Boolean;
@@ -324,6 +687,10 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Valid                              : Boolean;
       Read_Descriptor, Signal_Descriptor : Interfaces.C.int;
    begin
+      if Item.Provider.Prepared then
+         Drive_Prepared_Observation (Item, Event);
+         return;
+      end if;
       case Event is
          when Flyology.Operations.Source_Ready | Flyology.Operations.Deadline_Reached =>
             Item.Owner.State.Cancel_Monitor
@@ -419,6 +786,27 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
       Completed : Boolean;
       Released  : Boolean;
    begin
+      if Item.Provider.Prepared then
+         if Item.Provider.Active then
+            Item.Owner.State.Take_Prepared_Monitor
+              (Item.Provider.Ticket,
+               Item.Provider.Token,
+               True,
+               Released,
+               Completed,
+               Item.Provider.Status,
+               Item.Provider.Snapshot);
+            Item.Provider.Active := not Released;
+         end if;
+         if Item.Provider.Active then
+            Item.Provider.Cancellation_Pending := True;
+            Flyology.Operations.Drivers.Clear_Deadline (Item);
+         else
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Cancelled);
+         end if;
+         return;
+      end if;
       if Item.Provider.Active then
          Item.Owner.State.Cancel_Monitor
            (Item.Provider.Ticket,

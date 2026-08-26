@@ -16,12 +16,18 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    type Prepare_Result is
      (Start_Prepared, Start_Admission_Closed, Start_Capacity_Exhausted, Start_Generation_Exhausted);
    type Commit_Result is (Start_Committed, Start_Admission_Closed);
+   type Observation_Reserve_Result is
+     (Observation_Reserved,
+      Observation_Admission_Closed,
+      Observation_Capacity_Exhausted,
+      Observation_Identity_Exhausted);
    type Release_Result is private;
    Admission_Released  : constant Release_Result;
    Admission_Cancelled : constant Release_Result;
 
    type Start_Claim (Owner : not null access Family) is limited private;
    type Started_Admission (Owner : not null access Family) is limited private;
+   type Prepared_Observation_Claim (Owner : not null access Family) is limited private;
 
    --  Each claim or admission object has one externally serialized owner.
    --  Calls that read or mutate the same object must not overlap. Operations
@@ -36,6 +42,11 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Owner Family whose storage must outlive the target
    --  @return Vacant admission bound to Owner
    function Vacant_Started_Admission (Owner : not null access Family) return Started_Admission;
+   --  Construct a vacant persistent lifecycle-observation claim.
+   --  @param Owner Family whose storage must outlive the claim
+   --  @return Vacant observation claim bound to Owner
+   function Vacant_Observation_Claim
+     (Owner : not null access Family) return Prepared_Observation_Claim;
 
    --  Report whether the externally serialized claim structurally owns its
    --  exact prepared slot.
@@ -47,6 +58,10 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Item Admission inspected without changing ownership
    --  @return True until exact cancellation/join clears the owner
    function Is_Active (Item : Started_Admission) return Boolean;
+   --  Report whether Item owns one persistent Family monitor ticket.
+   --  @param Item Externally serialized claim
+   --  @return True from successful reservation through explicit release
+   function Is_Active (Item : Prepared_Observation_Claim) return Boolean;
    --  Report whether release has committed execution ownership for this exact
    --  active admission. The caller externally serializes Item with release or
    --  cancellation.
@@ -99,6 +114,43 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @exception Program_Error Admission is vacant or stale
    procedure Release_To_Run (Admission : in out Started_Admission; Result : not null access Release_Result);
 
+   --  Queue an exact blocked admission and publish a caller-owned completion
+   --  token last in the same protected cut. This form lets an external
+   --  publication guard distinguish an interrupted call from a completed cut.
+   --  The call writes Completed=False before entering the cut. Every normal,
+   --  idempotent, or cancelled return writes Result and then Completed=True.
+   --  A stale/error return or interruption before the cut leaves False;
+   --  interruption after the cut observes True.
+   --  @param Admission Active committed owner
+   --  @param Result Caller-aliased result published in the release cut
+   --  @param Completed Caller-aliased token published last by that same cut
+   --  @exception Program_Error Admission is vacant or stale
+   procedure Release_To_Run
+     (Admission : in out Started_Admission;
+      Result    : not null access Release_Result;
+      Completed : not null access Boolean);
+
+   --  Reserve a persistent exact-admission monitor ticket before release.
+   --  The committed admission and claim must have the same Owner. Capacity
+   --  exhaustion and nonwrapping monitor identity exhaustion are distinct.
+   --  Claim and every operation later activated from it must not outlive the
+   --  Family. An occupied or foreign Claim raises Program_Error.
+   --  @param Admission Active committed-blocked admission
+   --  @param Claim Vacant persistent claim target
+   --  @param Result Reservation outcome
+   procedure Reserve_Observation
+     (Admission : Started_Admission;
+      Claim     : in out Prepared_Observation_Claim;
+      Result    : out Observation_Reserve_Result);
+
+   --  Release and, when signal publication is in flight, drain one persistent
+   --  claim. Every scoped operation borrowing Claim must first be terminal.
+   --  Finish the operation before this call; finalization is only the
+   --  cancel/drain safety net.
+   --  @param Claim Claim returned to Family monitor capacity
+   procedure Release_Observation_Claim
+     (Claim : in out Prepared_Observation_Claim);
+
    --  Nonraising idempotent cleanup of an exact prepared claim.
    --  @param Claim Claim to clear, if active
    procedure Rollback (Claim : in out Start_Claim);
@@ -132,7 +184,8 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @return Active or immediately terminal scoped observation
    --  @exception Program_Error Invalid admission or owner
    --  @exception Stale_Handle Observed is outside the exact admission epoch
-   --  @exception Constraint_Error Completion-set or monitor capacity exhausted
+   --  @exception Flyology.Operations.Capacity_Error Completion-set capacity exhausted
+   --  @exception Constraint_Error Family monitor capacity exhausted
    function Observe_Exact
      (Set       : not null access Flyology.Operations.Completion_Set'Class;
       Owner     : not null access Family;
@@ -147,9 +200,37 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Operation Vacant operation bound to the same Family
    --  @exception Program_Error Invalid admission or owner
    --  @exception Stale_Handle Observed is outside the exact admission epoch
-   --  @exception Constraint_Error Completion-set or monitor capacity exhausted
+   --  @exception Flyology.Operations.Capacity_Error Completion-set capacity exhausted
+   --  @exception Constraint_Error Family monitor capacity exhausted
    procedure Observe_Exact
      (Admission : Started_Admission;
+      Observed  : Child_Handle;
+      Timeout   : Duration := -1.0;
+      Operation : in out Observation_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Arm one generation wait against a previously reserved persistent claim.
+   --  Operation borrows Claim's ticket only for this wait; Finish or
+   --  cancellation returns the ticket to a dormant state without releasing
+   --  its capacity. Timeout begins at activation rather than reservation. An
+   --  activation is valid after successful release, or after exact
+   --  cancellation/join has retained the blocked admission's terminal fact;
+   --  it is not valid while the admission remains committed-blocked.
+   --  A probe of a replacement generation does not consume an older retained
+   --  replacement fact. Timeout or cancellation restores the older fact; a
+   --  copied newer boundary remains ordered behind it as epoch-ending evidence.
+   --  Claim must outlive Operation through terminal completion and Finish.
+   --  @param Claim Active claim, externally serialized with Operation
+   --  @param Observed Exact generation in Claim's admission epoch
+   --  @param Timeout Relative wait policy in seconds
+   --  @param Operation Vacant operation bound to the same Family
+   --  @exception Program_Error Claim is vacant/foreign or Operation has a foreign owner
+   --  @exception Stale_Handle Observed or the retained admission epoch is invalid
+   --  @exception Flyology.Operations.Capacity_Error Completion-set capacity exhausted
+   procedure Activate_Exact
+     (Claim     : in out Prepared_Observation_Claim;
       Observed  : Child_Handle;
       Timeout   : Duration := -1.0;
       Operation : in out Observation_Operation)
@@ -201,6 +282,21 @@ private
       State : Admission_Owner (Owner);
    end record;
 
+   type Observation_Claim_Owner (Owner : not null access Family)
+   is limited new Ada.Finalization.Limited_Controlled with record
+      Admission : aliased Child_Handle;
+      Ticket    : aliased Monitor_Index := Monitor_Index'First;
+      Token     : aliased Monitor_Token := 0;
+      Active    : aliased Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Observation_Claim_Owner);
+
+   type Prepared_Observation_Claim (Owner : not null access Family) is limited record
+      State : Observation_Claim_Owner (Owner);
+   end record;
+
    type Observation_Failure is (No_Failure, Invalid_Admission, Monitor_Failure);
 
    type Observation_State (Owner : not null access Family) is limited record
@@ -209,6 +305,7 @@ private
       Ticket               : aliased Monitor_Index := Monitor_Index'First;
       Token                : aliased Monitor_Token := 0;
       Active               : aliased Boolean := False;
+      Prepared             : Boolean := False;
       Status               : Generation_Observation_Status := Observation_Timed_Out;
       Snapshot             : Child_Snapshot;
       Failure              : Observation_Failure := No_Failure;

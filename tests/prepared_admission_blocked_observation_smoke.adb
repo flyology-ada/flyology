@@ -1,6 +1,7 @@
 with Ada.Real_Time;
 with Flyology;
 with Flyology.Cancellation;
+with Flyology.Operations;
 with Flyology.Supervision;
 with Flyology.Supervision.Children;
 with Flyology.Supervision.Families;
@@ -77,6 +78,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
    use type Prepared.Commit_Result;
    use type Prepared.Prepare_Result;
    use type Prepared.Release_Result;
+   use type Prepared.Observation_Reserve_Result;
 
    State  : aliased Context;
    Item   : aliased Families.Family;
@@ -99,35 +101,19 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
         Prepared.Vacant_Start_Claim (Item'Access);
       Admission : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
+      Observation_Claim : Prepared.Prepared_Observation_Claim :=
+        Prepared.Vacant_Observation_Claim (Item'Access);
       P_Result  : Prepared.Prepare_Result;
       C_Result  : Prepared.Commit_Result;
+      O_Result  : Prepared.Observation_Reserve_Result;
       R_Result  : aliased Prepared.Release_Result :=
         Prepared.Admission_Cancelled;
+      Release_Completed : aliased Boolean := False;
       Handle    : Child_Handle;
-
-      task Waiter is
-         entry Start (Observed : Child_Handle);
-         entry Join (Observation : out Generation_Observation);
-      end Waiter;
-
-      task body Waiter is
-         Target : Child_Handle;
-         Value  : Generation_Observation;
-      begin
-         accept Start (Observed : Child_Handle) do
-            Target := Observed;
-         end Start;
-         Value := Families.Wait_Termination (Item, Target, Timeout => -1.0);
-         accept Join (Observation : out Generation_Observation) do
-            Observation := Value;
-         end Join;
-      end Waiter;
-
-      Observation    : Generation_Observation;
-      Registered     : Boolean := False;
-      Waiter_Started : Boolean := False;
-      Deadline       : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Set       : aliased Flyology.Operations.Completion_Set (1);
+      Wait      : Prepared.Observation_Operation (Set'Access, Item'Access);
+      Observation : Generation_Observation;
+      Capacity_Reserved : Boolean := False;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       Prepared.Commit_Start (Claim, Admission, C_Result);
@@ -137,39 +123,38 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
          raise Program_Error with "committed-blocked admission setup failed";
       end if;
       Handle := Prepared.First_Handle (Admission);
-      Waiter.Start (Handle);
-      Waiter_Started := True;
-
-      while not Registered loop
-         begin
-            Observation :=
-              Families.Wait_Termination (Item, Handle, Timeout => 0.0);
-            if Observation.Status /= Observation_Timed_Out then
-               raise Program_Error
-                 with "committed-blocked handle became terminal too early";
-            end if;
-         exception
-            when Constraint_Error =>
-               Registered := True;
-         end;
-         if not Registered and then Ada.Real_Time.Clock >= Deadline then
-            raise Program_Error
-              with "committed-blocked waiter did not retain monitor capacity";
-         end if;
-         delay 0.001;
-      end loop;
+      Prepared.Reserve_Observation (Admission, Observation_Claim, O_Result);
+      if O_Result /= Prepared.Observation_Reserved
+        or else not Prepared.Is_Active (Observation_Claim)
+      then
+         raise Program_Error with "blocked observation capacity was not reserved";
+      end if;
+      begin
+         Observation := Families.Wait_Termination (Item, Handle, Timeout => 0.0);
+      exception
+         when Constraint_Error =>
+            Capacity_Reserved := True;
+      end;
+      if not Capacity_Reserved then
+         raise Program_Error with "prepared observation did not retain monitor capacity";
+      end if;
 
       if Shutdown_First then
          Families.Request_Shutdown (Item);
-         Prepared.Release_To_Run (Admission, R_Result'Access);
-         if R_Result /= Prepared.Admission_Cancelled then
+         Prepared.Release_To_Run
+           (Admission, R_Result'Access, Release_Completed'Access);
+         if R_Result /= Prepared.Admission_Cancelled
+           or else not Release_Completed
+         then
             raise Program_Error
-              with "shutdown admitted a committed-blocked request";
+              with "shutdown release did not publish completed cancellation";
          end if;
       end if;
 
       Prepared.Cancel_And_Join (Admission);
-      Waiter.Join (Observation);
+      Prepared.Activate_Exact (Observation_Claim, Handle, 0.0, Wait);
+      Flyology.Operations.Wait_All (Set);
+      Prepared.Finish (Wait, Observation);
       if Observation.Status /= Generation_Terminated
         or else Observation.Snapshot.Generation /= Current_Generation (Handle)
         or else Observation.Snapshot.Termination.Kind
@@ -178,20 +163,17 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
          raise Program_Error
            with "committed-blocked cancellation stranded exact observation";
       end if;
+      Prepared.Release_Observation_Claim (Observation_Claim);
+      if Prepared.Is_Active (Observation_Claim) then
+         raise Program_Error with "prepared observation claim did not release";
+      end if;
    exception
       when others =>
          if Prepared.Is_Active (Admission) then
             Prepared.Cancel_And_Join (Admission);
          end if;
-         if Waiter_Started then
-            begin
-               Waiter.Join (Observation);
-            exception
-               when Tasking_Error =>
-                  null;
-            end;
-         else
-            abort Waiter;
+         if Prepared.Is_Active (Observation_Claim) then
+            Prepared.Release_Observation_Claim (Observation_Claim);
          end if;
          raise;
    end Exercise;
