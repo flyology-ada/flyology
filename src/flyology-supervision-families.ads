@@ -316,6 +316,10 @@ private
          Released  : not null access Boolean;
          Signals   : not null access Monitor_Signal_Guard;
          Completed : out Boolean);
+      function Prepared_Admission_Join_Is_Immediate
+        (Slot     : Slot_Index;
+         Handle   : Child_Handle;
+         Observed : Flyology.Supervision.Generation) return Boolean;
       entry Await_Admission_Cancel (Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean);
       procedure Take_Start

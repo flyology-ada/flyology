@@ -338,6 +338,16 @@ completion-set wake may drive several claims, each of which rechecks only its
 own generation-stamped ticket. The API reserves Family monitor capacity before
 release. A higher-level protocol must separately pre-provision or dedicate the
 caller-owned completion-set operation capacity that activation consumes later.
+The generation-qualified `Admission_Join_Is_Immediate` query is the sole
+admission authority for deciding that exact cleanup cannot wait. A copied
+terminal observation cannot establish that fact because it does not prove that
+its generation is the admission's protected current epoch or that the slot has
+not been reused. If cancellation or family shutdown prevents a released queued
+request from entering its generation task, manager cleanup publishes one final
+`Joined` boundary with `Cancelled` or
+`Supervisor_Shutdown`. An internal manager allocation or rendezvous failure
+before the generation task starts uses the defensive `Abnormal_Completion`
+cause.
 One bounded prior-fact slot lets an exact probe of the replacement generation
 wait without consuming the older replacement boundary. Timeout or cancellation
 restores that boundary. A newer fact copied by the probe is also retained behind

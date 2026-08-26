@@ -68,6 +68,20 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Item Admission inspected without changing ownership
    --  @return True only after its successful Release_To_Run cut
    function Is_Released (Item : Started_Admission) return Boolean;
+   --  Report whether exact admission cleanup is known not to wait. This is an
+   --  admission-epoch fact, not an inference from one generation snapshot.
+   --  The caller externally serializes Admission with release, cancellation,
+   --  join, and finalization. The query is prompt, nonraising for valid
+   --  lifetime actuals, allocates nothing, follows no replacement, and uses no
+   --  monitor capacity. True remains stable until that owner joins the exact
+   --  admission. Vacant, blocked, queued, managed, and merely terminal
+   --  generations return False.
+   --  @param Admission Exact admission inspected without changing ownership
+   --  @param Observed Generation whose completion would become final
+   --  @return True only when Cancel_And_Join on Admission cannot wait
+   function Admission_Join_Is_Immediate
+     (Admission : Started_Admission;
+      Observed  : Flyology.Supervision.Generation) return Boolean;
    --  Return the exact first-generation handle reserved by this prepared
    --  claim. Commit_Start preserves the identity value when it transfers
    --  admission ownership to a Started_Admission.

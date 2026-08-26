@@ -643,6 +643,36 @@ package body Flyology.Supervision.Families is
          end case;
       end Begin_Admission_Cancel;
 
+      function Prepared_Admission_Join_Is_Immediate
+        (Slot     : Slot_Index;
+         Handle   : Child_Handle;
+         Observed : Flyology.Supervision.Generation) return Boolean is
+      begin
+         if Controller (Handle) /= Identity
+           or else Child (Handle) /= Snapshots (Slot).Id
+           or else Child (Handle) < First_Child_Id
+           or else Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id)
+                   /= Interfaces.Unsigned_64 (Slot) - 1
+           or else Current_Generation (Handle) > Snapshots (Slot).Generation
+         then
+            raise Program_Error with "prepared admission join provenance is inconsistent";
+         end if;
+
+         case Slots (Slot) is
+            when Released_Queued | Released_Managed =>
+               return False;
+
+            when Released_Reapable =>
+               if Snapshots (Slot).State /= Joined then
+                  raise Program_Error with "joinable admission state is inconsistent";
+               end if;
+               return Snapshots (Slot).Generation = Observed;
+
+            when others =>
+               raise Program_Error with "active prepared admission state is inconsistent";
+         end case;
+      end Prepared_Admission_Join_Is_Immediate;
+
       entry Await_Admission_Cancel (for Slot in Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean)
         when Slots (Slot) = Released_Reapable
@@ -1051,6 +1081,15 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) in Managed | Released_Managed
            and then Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation)
          then
+            if Snapshots (Slot).Termination.Kind = No_Termination then
+               Snapshots (Slot).Termination :=
+                 Empty_Summary
+                   ((if Shutdown
+                     then Supervisor_Shutdown
+                     elsif Stop_Requested (Slot)
+                     then Cancelled
+                     else Abnormal_Completion));
+            end if;
             Record_Event
               (Slot,
                Lifecycle_Changed,

@@ -49,6 +49,16 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    is (Item.State.Active);
    function Is_Released (Item : Started_Admission) return Boolean
    is (Item.State.Released);
+   function Admission_Join_Is_Immediate
+     (Admission : Started_Admission;
+      Observed  : Flyology.Supervision.Generation) return Boolean is
+   begin
+      return
+        Admission.State.Active
+        and then Admission.State.Released
+        and then Admission.Owner.State.Prepared_Admission_Join_Is_Immediate
+          (Admission.State.Slot, Admission.State.Handle, Observed);
+   end Admission_Join_Is_Immediate;
    function First_Handle (Item : Start_Claim) return Child_Handle
    is (Item.State.Handle);
    function First_Handle (Item : Started_Admission) return Child_Handle

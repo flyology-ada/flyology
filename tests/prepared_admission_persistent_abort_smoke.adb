@@ -12,6 +12,7 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
    use Flyology;
    use Flyology.Supervision;
    use type Ada.Real_Time.Time;
+   use type Flyology.Supervision.Generation;
    use type Flyology.Supervision.Generation_Observation_Status;
 
    type Request is new Positive;
@@ -580,6 +581,11 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
       end Canceller;
    begin
       Prepare_Admission (5, Admission, Monitor, Observed);
+      if Prepared.Admission_Join_Is_Immediate
+           (Admission, Current_Generation (Observed))
+      then
+         raise Program_Error with "live admission was classified as immediately joinable";
+      end if;
       while not Families.Current (Item, Observed).Live loop
          if Ada.Real_Time.Clock >= Local_Deadline then
             raise Program_Error with "claimed-signal generation did not become live";
@@ -597,6 +603,11 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
         or else Observation.Snapshot.State /= Terminated
       then
          raise Program_Error with "claimed signal did not publish the first terminal boundary";
+      end if;
+      if Prepared.Admission_Join_Is_Immediate
+           (Admission, Observation.Snapshot.Generation)
+      then
+         raise Program_Error with "generation termination preceded exact admission joinability";
       end if;
       Flyology.Task_Lifecycle_Testing.Wait_Reached
         (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
@@ -616,6 +627,11 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
       then
          raise Program_Error with "claimed signal did not retain final join for rearm";
       end if;
+      if not Prepared.Admission_Join_Is_Immediate
+        (Admission, Observation.Snapshot.Generation)
+      then
+         raise Program_Error with "joined released admission was not immediately joinable";
+      end if;
       Canceller.Start;
       while not Canceller'Terminated loop
          if Ada.Real_Time.Clock >= Local_Deadline then
@@ -623,6 +639,11 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
          end if;
          delay 0.001;
       end loop;
+      if Prepared.Admission_Join_Is_Immediate
+           (Admission, Observation.Snapshot.Generation)
+      then
+         raise Program_Error with "vacant joined admission retained join authority";
+      end if;
       Flyology.Task_Lifecycle_Testing.Reset;
       Prepared.Release_Observation_Claim (Monitor);
    exception
@@ -763,6 +784,31 @@ procedure Prepared_Admission_Persistent_Abort_Smoke is
       end;
    end Exercise_Claim_Finalizer;
 
+   procedure Exercise_Join_Query is
+      Admission : Prepared.Started_Admission :=
+        Prepared.Vacant_Started_Admission (Item'Access);
+      Monitor   : Prepared.Prepared_Observation_Claim :=
+        Prepared.Vacant_Observation_Claim (Item'Access);
+      Observed  : Child_Handle;
+      Exact     : Flyology.Supervision.Generation;
+   begin
+      Prepare_Admission
+        (6, Admission, Monitor, Observed, Release => False);
+      Exact := Current_Generation (Observed);
+      if Prepared.Admission_Join_Is_Immediate (Admission, Exact) then
+         raise Program_Error with "blocked admission exposed lifecycle join authority";
+      elsif Exact /= Flyology.Supervision.Generation'Last
+        and then Prepared.Admission_Join_Is_Immediate (Admission, Exact + 1)
+      then
+         raise Program_Error with "join query accepted a foreign generation";
+      end if;
+      Prepared.Cancel_And_Join (Admission);
+      if Prepared.Admission_Join_Is_Immediate (Admission, Exact) then
+         raise Program_Error with "inactive admission retained join authority";
+      end if;
+      Prepared.Release_Observation_Claim (Monitor);
+   end Exercise_Join_Query;
+
    Deadline : constant Ada.Real_Time.Time :=
      Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
@@ -779,6 +825,7 @@ begin
    Exercise_Registration_Abort;
    Exercise_Claimed_Cancellation;
    Exercise_Claimed_Signal_Order;
+   Exercise_Join_Query;
    Exercise_Interrupted_Finalization;
    Exercise_Claim_Finalizer;
    Families.Request_Shutdown (Item);

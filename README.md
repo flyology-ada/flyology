@@ -735,6 +735,15 @@ generation.
 `Request_Cancellation` applies only to the supplied exact current generation
 inside that admission, without exposing a handle constructor, waiting, or
 following a replacement.
+`Admission_Join_Is_Immediate` is the generation-qualified authority for deciding
+whether cleanup of that exact released admission can finish without waiting. A
+copied terminal observation alone is insufficient because it does not prove that
+its generation is the admission's protected current epoch or that the slot has
+not been reused. If a released request is cancelled or shutdown wins before its
+generation task starts, the final snapshot is published directly as `Joined`
+with `Cancelled` or
+`Supervisor_Shutdown`; an internal manager setup failure before the generation
+task starts uses the defensive `Abnormal_Completion` cause.
 The reservation overload publishes its caller-aliased `Reserved` evidence last
 in the protected success cut, so interruption before or after ownership transfer
 can be reconciled without inferring state from an ordinary `out` result.
