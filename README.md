@@ -712,6 +712,9 @@ overload publishes the result and then the caller-owned token last in the same
 protected cut, so an interrupted external publication guard can reconcile
 without guessing whether execution was released. Rollback, abort, shutdown, and
 `Cancel_And_Join` retain one exact owner and never join a later slot generation.
+The commit overload likewise publishes caller-aliased `Committed` evidence last
+in the protected ownership cut, so an interrupted downstream adapter can
+distinguish the active blocked admission from the still-owned prepared claim.
 The child adds no second slot or monitor-capacity table; bounded kind,
 admission, and deferred-fact metadata accompanies the configured
 `Maximum_Children` slots and `Monitor_Capacity` tickets. After matching, the

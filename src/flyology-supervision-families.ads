@@ -302,6 +302,7 @@ private
          Admission_Slot   : not null access Slot_Index;
          Admission_Handle : not null access Child_Handle;
          Admission_Active : not null access Boolean;
+         Committed        : not null access Boolean;
          Status           : out Prepared_Commit_Status);
       procedure Release_Prepared
         (Slot      : Slot_Index;

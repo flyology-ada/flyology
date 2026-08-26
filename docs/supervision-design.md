@@ -319,6 +319,10 @@ monitor table is introduced. The release result and a caller-aliased completion
 token are published in that order within one protected cut; the token is the
 abort-safe evidence that a surrounding publication guard may use before
 reconciling the admission.
+The commit overload provides the same abort-stable shape: caller-aliased
+`Committed` evidence is written last after the blocked admission owns every
+field and the prepared claim is vacant. Its legacy overload delegates through
+an ignored local token.
 
 The optional persistent prepared-observation claim reserves one exact Family
 monitor ticket while the admission is still committed and blocked. A scoped

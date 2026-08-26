@@ -121,6 +121,24 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    procedure Commit_Start
      (Claim : in out Start_Claim; Admission : in out Started_Admission; Result : out Commit_Result);
 
+   --  Move an exact prepared reservation into a blocked admission and publish
+   --  caller-owned evidence last in the same protected success cut. Committed
+   --  is False before validation and remains False on a closed or pre-cut
+   --  exceptional return. True proves Admission owns the exact committed slot
+   --  even when ordinary return or Result copy-out is interrupted after the
+   --  success cut.
+   --  @param Claim Active prepared owner, cleared only on Start_Committed
+   --  @param Admission Vacant same-family target
+   --  @param Committed Caller-owned exact-cut ownership evidence
+   --  @param Result Commit or closed outcome on normal return
+   --  @exception Program_Error Targets are vacant/occupied inconsistently or
+   --     belong to different families
+   procedure Commit_Start
+     (Claim     : in out Start_Claim;
+      Admission : in out Started_Admission;
+      Committed : not null access Boolean;
+      Result    : out Commit_Result);
+
    --  Queue an exact blocked admission. Repeated release after success is
    --  idempotent. Admission_Cancelled retains the active admission owner.
    --  @param Admission Active committed owner

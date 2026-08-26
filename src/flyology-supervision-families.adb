@@ -538,8 +538,10 @@ package body Flyology.Supervision.Families is
          Admission_Slot   : not null access Slot_Index;
          Admission_Handle : not null access Child_Handle;
          Admission_Active : not null access Boolean;
+         Committed        : not null access Boolean;
          Status           : out Prepared_Commit_Status) is
       begin
+         Committed.all := False;
          if not Claim_Active.all or else Admission_Active.all then
             raise Program_Error with "invalid prepared admission ownership";
          elsif Slots (Slot) /= Prepared
@@ -558,6 +560,7 @@ package body Flyology.Supervision.Families is
          Admission_Active.all := True;
          Claim_Active.all := False;
          Status := Prepared_Committed;
+         Committed.all := True;
       end Commit_Prepared;
 
       procedure Release_Prepared

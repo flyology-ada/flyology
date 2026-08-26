@@ -139,12 +139,56 @@ procedure Prepared_Admission_Abort_Smoke is
       Prepared.Rollback (Claim);
    end Assert_Reusable;
 
+   procedure Exercise_Commit_Evidence_Failures is
+      Claim : Prepared.Start_Claim :=
+        Prepared.Vacant_Start_Claim (Item'Access);
+      Admission : Prepared.Started_Admission :=
+        Prepared.Vacant_Started_Admission (Item'Access);
+      P_Result : Prepared.Prepare_Result;
+      C_Result : Prepared.Commit_Result;
+      Committed : aliased Boolean := True;
+      Rejected : Boolean := False;
+   begin
+      begin
+         Prepared.Commit_Start
+           (Claim, Admission, Committed'Access, C_Result);
+      exception
+         when Program_Error =>
+            Rejected := True;
+      end;
+      if not Rejected
+        or else Committed
+        or else Prepared.Is_Active (Claim)
+        or else Prepared.Is_Active (Admission)
+      then
+         raise Program_Error with "invalid commit published ownership evidence";
+      end if;
+
+      Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
+      if P_Result /= Prepared.Start_Prepared then
+         raise Program_Error with "closed commit evidence setup did not prepare";
+      end if;
+      Families.Request_Shutdown (Item);
+      Committed := True;
+      Prepared.Commit_Start
+        (Claim, Admission, Committed'Access, C_Result);
+      if C_Result /= Prepared.Start_Admission_Closed
+        or else Committed
+        or else not Prepared.Is_Active (Claim)
+        or else Prepared.Is_Active (Admission)
+      then
+         raise Program_Error with "closed commit published ownership evidence";
+      end if;
+      Prepared.Rollback (Claim);
+   end Exercise_Commit_Evidence_Failures;
+
    procedure Exercise_Abort (Stage : Abort_Stage) is
       Point : constant Flyology.Task_Lifecycle_Testing.Barrier_Point :=
         Point_For (Stage);
       Release_Result    : aliased Prepared.Release_Result :=
         Prepared.Admission_Cancelled;
       Release_Completed : aliased Boolean := False;
+      Commit_Completed  : aliased Boolean := False;
 
       task Worker is
          entry Start;
@@ -161,7 +205,8 @@ procedure Prepared_Admission_Abort_Smoke is
          accept Start;
          Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
          if Stage in After_Commit | After_Release then
-            Prepared.Commit_Start (Claim, Admission, C_Result);
+            Prepared.Commit_Start
+              (Claim, Admission, Commit_Completed'Access, C_Result);
          end if;
          if Stage = After_Release then
             Prepared.Release_To_Run
@@ -196,6 +241,11 @@ procedure Prepared_Admission_Abort_Smoke is
       then
          raise Program_Error
            with "aborted post-cut release lost its completed publication";
+      elsif Stage in After_Commit | After_Release
+        and then not Commit_Completed
+      then
+         raise Program_Error
+           with "aborted post-cut commit lost its completed publication";
       end if;
       Flyology.Task_Lifecycle_Testing.Reset;
       Assert_Reusable;
@@ -708,7 +758,7 @@ begin
    Exercise_Snapshot_Integrity;
    Exercise_Producer_Abort;
    Assert_Reusable;
-   Families.Request_Shutdown (Item);
+   Exercise_Commit_Evidence_Failures;
    Owner.Join;
 exception
    when others =>

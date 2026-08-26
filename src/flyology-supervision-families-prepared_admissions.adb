@@ -116,8 +116,20 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    procedure Commit_Start
      (Claim : in out Start_Claim; Admission : in out Started_Admission; Result : out Commit_Result)
    is
+      Committed : aliased Boolean := False;
+   begin
+      Commit_Start (Claim, Admission, Committed'Access, Result);
+   end Commit_Start;
+
+   procedure Commit_Start
+     (Claim     : in out Start_Claim;
+      Admission : in out Started_Admission;
+      Committed : not null access Boolean;
+      Result    : out Commit_Result)
+   is
       Status : Prepared_Commit_Status;
    begin
+      Committed.all := False;
       if Claim.Owner /= Admission.Owner then
          raise Program_Error with "prepared owners belong to different families";
       elsif not Claim.State.Active then
@@ -132,6 +144,7 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          Admission.State.Slot'Access,
          Admission.State.Handle'Access,
          Admission.State.Active'Access,
+         Committed,
          Status);
       if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Admission.State.Active then
          Flyology.Task_Lifecycle_Test_Hooks.Barrier
