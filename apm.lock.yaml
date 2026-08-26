@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-26T22:44:13.058438+00:00'
+generated_at: '2026-08-26T23:07:17.170322+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/flyology-allocators
@@ -45,7 +45,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/profiles/ada-library
@@ -55,7 +55,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-interface-values
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-interface-values
@@ -71,7 +71,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-source-style
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-source-style
@@ -87,7 +87,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-alire-release-policy
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/alire-release-policy
@@ -103,7 +103,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-decision-authority
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/decision-authority
@@ -119,7 +119,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-performance-testing
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/performance-testing
@@ -135,7 +135,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-problem-solution-commits
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/problem-solution-commits
@@ -151,7 +151,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-repository-workflow
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/repository-workflow
@@ -167,7 +167,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-review-cycle
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/review-cycle
@@ -183,7 +183,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-tla-plus-assurance
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/tla-plus-assurance
@@ -199,7 +199,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-skills
   host: github.com
-  resolved_commit: aa7c026deb87398718a6100786c3f8e6e88fcbf5
+  resolved_commit: 6a97e7ad286a7722e6a2a6ccf782bac73fecb9e9
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/skills
@@ -490,7 +490,7 @@ dependencies:
     .agents/skills/tla-plus-learning/references/modeling.md: sha256:e60d726e2dd6b2ff3848e54d74a5ad80ec65071221d547b78465a34e6bfe3123
     .agents/skills/tla-plus-learning/references/proofs.md: sha256:ab762e94b55a0003abd4ebc5816823b7017a2d1c66f6eee2716cc4d1bb44bd29
     .agents/skills/tla-plus-learning/references/resources.md: sha256:e62a2bc37c1e0c2a821428ee0f880d3f5b980bfad66f1c97287e5037634d1489
-    .agents/skills/tla-plus/SKILL.md: sha256:9a906890edae20985b98c1747c1a14a8ea49794c23a20909682d62fbe55895fe
+    .agents/skills/tla-plus/SKILL.md: sha256:04058169e1e08e46b47de27c1db9bdf57e4a14d8a85ec4a35f2a2c8dc9a46bb2
     .agents/skills/tla-plus/references/runner-and-reporting.md: sha256:2a4b2c6955854bfebdbc88106b4bb097fec2420d956c737302bd3358d6956d8f
     .agents/skills/tlaplus-add-variable/SKILL.md: sha256:9e43d627cef529602aa88fcf4b729e26bdc4082cdf06e23af33c8f08931dec6e
     .agents/skills/tlaplus-from-source/SKILL.md: sha256:e3fc651973a5b5d96dc02e2ee7c3baf25fafb30b3af1da56e257832ed228e913
@@ -572,12 +572,12 @@ dependencies:
     .claude/skills/tla-plus-learning/references/modeling.md: sha256:e60d726e2dd6b2ff3848e54d74a5ad80ec65071221d547b78465a34e6bfe3123
     .claude/skills/tla-plus-learning/references/proofs.md: sha256:ab762e94b55a0003abd4ebc5816823b7017a2d1c66f6eee2716cc4d1bb44bd29
     .claude/skills/tla-plus-learning/references/resources.md: sha256:e62a2bc37c1e0c2a821428ee0f880d3f5b980bfad66f1c97287e5037634d1489
-    .claude/skills/tla-plus/SKILL.md: sha256:9a906890edae20985b98c1747c1a14a8ea49794c23a20909682d62fbe55895fe
+    .claude/skills/tla-plus/SKILL.md: sha256:04058169e1e08e46b47de27c1db9bdf57e4a14d8a85ec4a35f2a2c8dc9a46bb2
     .claude/skills/tla-plus/references/runner-and-reporting.md: sha256:2a4b2c6955854bfebdbc88106b4bb097fec2420d956c737302bd3358d6956d8f
     .claude/skills/tlaplus-add-variable/SKILL.md: sha256:9e43d627cef529602aa88fcf4b729e26bdc4082cdf06e23af33c8f08931dec6e
     .claude/skills/tlaplus-from-source/SKILL.md: sha256:e3fc651973a5b5d96dc02e2ee7c3baf25fafb30b3af1da56e257832ed228e913
     .claude/skills/tlaplus-split-action/SKILL.md: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
-  content_hash: sha256:523aa0fe965b73e66d81c5eaf1d5926004b7bc4faaf8d8ea7b3557a64cd1075a
+  content_hash: sha256:2fc5bb6753a2525de31d527165475dc0344a813c2fb143b223acb3c0b4e47718
 deployments:
 - kind: project-relative
   target: claude
@@ -1550,7 +1550,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:9a906890edae20985b98c1747c1a14a8ea49794c23a20909682d62fbe55895fe
+  content_hash: sha256:04058169e1e08e46b47de27c1db9bdf57e4a14d8a85ec4a35f2a2c8dc9a46bb2
 - kind: project-relative
   target: claude
   value: .claude/skills/tla-plus/references/runner-and-reporting.md
@@ -2468,7 +2468,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:9a906890edae20985b98c1747c1a14a8ea49794c23a20909682d62fbe55895fe
+  content_hash: sha256:04058169e1e08e46b47de27c1db9bdf57e4a14d8a85ec4a35f2a2c8dc9a46bb2
 - kind: project-relative
   target: codex
   value: .agents/skills/tla-plus/references/runner-and-reporting.md
