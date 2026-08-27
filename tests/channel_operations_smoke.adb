@@ -7,12 +7,15 @@ with Flyology.IO.Timers;
 with Flyology.Operations;
 
 procedure Channel_Operations_Smoke is
-   package Integer_Channels is new Flyology.Channels.Bounded (Element_Type => Integer, Empty_Value => 0);
+   package Integer_Channels is new
+     Flyology.Channels.Bounded (Element_Type => Integer, Empty_Value => 0);
 
    use type Integer_Channels.Try_Receive_Result;
    use type Integer_Channels.Try_Send_Result;
 
-   function Ref (Item : Flyology.Operations.Operation'Class) return Flyology.Operations.Operation_Reference
+   function Ref
+     (Item : Flyology.Operations.Operation'Class)
+      return Flyology.Operations.Operation_Reference
    renames Flyology.Operations.Reference;
 
    procedure Check (Condition : Boolean; Message : String) is
@@ -57,7 +60,8 @@ procedure Channel_Operations_Smoke is
       declare
          Channel  : Integer_Channels.Channel (Capacity => 1);
          Accepted : aliased Boolean := True;
-         Result   : Integer_Channels.Try_Send_Result := Integer_Channels.Send_Closed;
+         Result   : Integer_Channels.Try_Send_Result :=
+           Integer_Channels.Send_Closed;
 
          function Arm return Boolean is
          begin
@@ -87,8 +91,20 @@ procedure Channel_Operations_Smoke is
             delay 0.0;
          end loop;
          Channel.Try_Receive (Value, Status);
-         Passed := Passed and then not Accepted and then Status = Integer_Channels.Channel_Empty;
+         Passed :=
+           Passed
+           and then not Accepted
+           and then Status = Integer_Channels.Channel_Empty;
          Flyology.Channel_Testing.Reset;
+      exception
+         when others =>
+            Flyology.Channel_Testing.Release_Before_Send;
+            abort Sender;
+            while not Sender'Terminated loop
+               delay 0.0;
+            end loop;
+            Flyology.Channel_Testing.Reset;
+            raise;
       end;
 
       --  Caller-aliased send evidence survives abort after the protected
@@ -129,12 +145,16 @@ procedure Channel_Operations_Smoke is
          end Barrier;
 
          Accepted         : aliased Boolean := False;
-         Published_Result : Integer_Channels.Try_Send_Result := Integer_Channels.Send_Closed;
+         Published_Result : Integer_Channels.Try_Send_Result :=
+           Integer_Channels.Send_Closed;
 
-         procedure Send_Then_Publish (Result : out Integer_Channels.Try_Send_Result) is
+         procedure Send_Then_Publish
+           (Result : out Integer_Channels.Try_Send_Result)
+         is
             Local_Result : Integer_Channels.Try_Send_Result;
          begin
-            Integer_Channels.Try_Send (Channel, 17, Accepted'Access, Local_Result);
+            Integer_Channels.Try_Send
+              (Channel, 17, Accepted'Access, Local_Result);
             Barrier.Arrive;
             Barrier.Wait_For_Release;
             Result := Local_Result;
@@ -150,15 +170,35 @@ procedure Channel_Operations_Smoke is
          Value  : Integer := 0;
          Status : Integer_Channels.Try_Receive_Result;
       begin
-         Barrier.Wait_Until_Arrived;
+         select
+            Barrier.Wait_Until_Arrived;
+         or
+            delay 2.0;
+            raise Program_Error
+              with "channel acceptance barrier was not reached";
+         end select;
          abort Sender;
          Barrier.Release;
          while not Sender'Terminated loop
             delay 0.0;
          end loop;
-         Passed := Passed and then Accepted and then Published_Result = Integer_Channels.Send_Closed;
+         Passed :=
+           Passed
+           and then Accepted
+           and then Published_Result = Integer_Channels.Send_Closed;
          Channel.Try_Receive (Value, Status);
-         Passed := Passed and then Status = Integer_Channels.Item_Received and then Value = 17;
+         Passed :=
+           Passed
+           and then Status = Integer_Channels.Item_Received
+           and then Value = 17;
+      exception
+         when others =>
+            Barrier.Release;
+            abort Sender;
+            while not Sender'Terminated loop
+               delay 0.0;
+            end loop;
+            raise;
       end;
 
       --  Rejection always clears a stale caller token and retains no value.
@@ -170,16 +210,28 @@ procedure Channel_Operations_Smoke is
          Value    : Integer := 0;
       begin
          Integer_Channels.Try_Send (Channel, 1, Accepted'Access, Status);
-         Passed := Passed and then Accepted and then Status = Integer_Channels.Item_Sent;
+         Passed :=
+           Passed
+           and then Accepted
+           and then Status = Integer_Channels.Item_Sent;
          Accepted := True;
          Integer_Channels.Try_Send (Channel, 2, Accepted'Access, Status);
-         Passed := Passed and then not Accepted and then Status = Integer_Channels.Channel_Full;
+         Passed :=
+           Passed
+           and then not Accepted
+           and then Status = Integer_Channels.Channel_Full;
          Channel.Close;
          Accepted := True;
          Integer_Channels.Try_Send (Channel, 3, Accepted'Access, Status);
-         Passed := Passed and then not Accepted and then Status = Integer_Channels.Send_Closed;
+         Passed :=
+           Passed
+           and then not Accepted
+           and then Status = Integer_Channels.Send_Closed;
          Channel.Try_Receive (Value, Received);
-         Passed := Passed and then Received = Integer_Channels.Item_Received and then Value = 1;
+         Passed :=
+           Passed
+           and then Received = Integer_Channels.Item_Received
+           and then Value = 1;
          Channel.Try_Receive (Value, Received);
          Passed := Passed and then Received = Integer_Channels.Receive_Closed;
       end;
@@ -195,14 +247,17 @@ procedure Channel_Operations_Smoke is
          Alarm   : aliased Flyology.IO.Timers.Timer_Operation :=
            Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
          Winner  : Flyology.Operations.Gate_Operation :=
-           Flyology.Operations.Wait_For_Success (Set'Access, [Ref (Get), Ref (Alarm)]);
+           Flyology.Operations.Wait_For_Success
+             (Set'Access, [Ref (Get), Ref (Alarm)]);
          Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
          Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
          Status  : Integer_Channels.Try_Send_Result;
          Value   : Integer := 0;
       begin
          Channel.Try_Send (42, Status);
-         Check (Status = Integer_Channels.Item_Sent, "channel test publication failed");
+         Check
+           (Status = Integer_Channels.Item_Sent,
+            "channel test publication failed");
          while not Flyology.Operations.Is_Terminal (Winner) loop
             Flyology.Operations.Wait_Some (Set, Batch);
          end loop;
@@ -232,16 +287,21 @@ procedure Channel_Operations_Smoke is
          Right   : aliased Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 1.0);
          Both    : Flyology.Operations.Gate_Operation :=
-           Flyology.Operations.Wait_All (Set'Access, [Ref (Left), Ref (Right)]);
+           Flyology.Operations.Wait_All
+             (Set'Access, [Ref (Left), Ref (Right)]);
          Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
          Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
          Status  : Integer_Channels.Try_Send_Result;
          A, B    : Integer := 0;
       begin
          Channel.Try_Send (1, Status);
-         Check (Status = Integer_Channels.Item_Sent, "first fan-out publication failed");
+         Check
+           (Status = Integer_Channels.Item_Sent,
+            "first fan-out publication failed");
          Channel.Try_Send (2, Status);
-         Check (Status = Integer_Channels.Item_Sent, "second fan-out publication failed");
+         Check
+           (Status = Integer_Channels.Item_Sent,
+            "second fan-out publication failed");
          while not Flyology.Operations.Is_Terminal (Both) loop
             Flyology.Operations.Wait_Some (Set, Batch);
          end loop;
@@ -249,7 +309,9 @@ procedure Channel_Operations_Smoke is
          Integer_Channels.Finish (Left, A);
          Integer_Channels.Finish (Right, B);
          Passed :=
-           Passed and then Matches.Count = 2 and then ((A = 1 and then B = 2) or else (A = 2 and then B = 1));
+           Passed
+           and then Matches.Count = 2
+           and then ((A = 1 and then B = 2) or else (A = 2 and then B = 1));
       end;
 
       --  A full channel retains a pending send. Receiving capacity wakes it;
@@ -269,23 +331,30 @@ procedure Channel_Operations_Smoke is
          begin
             Channel.Try_Receive (Value, Receive_Status);
             Check
-              (Receive_Status = Integer_Channels.Item_Received and then Value = 7,
+              (Receive_Status = Integer_Channels.Item_Received
+               and then Value = 7,
                "channel capacity release failed");
             Flyology.Operations.Wait_All (Set);
             Integer_Channels.Finish (Put);
          end;
          Channel.Try_Receive (Value, Receive_Status);
-         Passed := Passed and then Receive_Status = Integer_Channels.Item_Received and then Value = 8;
+         Passed :=
+           Passed
+           and then Receive_Status = Integer_Channels.Item_Received
+           and then Value = 8;
       end;
 
       --  Timeout and close are retained provider failures. The set wait does
       --  not raise them; typed Finish reconstructs the synchronous exception.
       declare
-         Channel               : aliased Integer_Channels.Channel (Capacity => 1);
-         Set                   : aliased Flyology.Operations.Completion_Set (2);
+         Channel               :
+           aliased Integer_Channels.Channel (Capacity => 1);
+         Set                   :
+           aliased Flyology.Operations.Completion_Set (2);
          Timed                 : Integer_Channels.Receive_Operation :=
            Integer_Channels.Receive (Set'Access, Channel'Access, 0.005);
-         Closed                : Integer_Channels.Receive_Operation (Set'Access);
+         Closed                :
+           Integer_Channels.Receive_Operation (Set'Access);
          Timed_Out, Was_Closed : Boolean := False;
          Value                 : Integer := 0;
       begin
@@ -318,7 +387,8 @@ procedure Channel_Operations_Smoke is
          Was_Closed : Boolean := False;
       begin
          Channel.Try_Send (10, Status);
-         Check (Status = Integer_Channels.Item_Sent, "close-send preload failed");
+         Check
+           (Status = Integer_Channels.Item_Sent, "close-send preload failed");
          declare
             Put      : aliased Integer_Channels.Send_Operation :=
               Integer_Channels.Send (Set'Access, Channel'Access, 11, 1.0);
@@ -353,7 +423,8 @@ procedure Channel_Operations_Smoke is
          Status    : Integer_Channels.Try_Send_Result;
       begin
          declare
-            Get : Integer_Channels.Receive_Operation := Integer_Channels.Receive (Set'Access, Channel'Access);
+            Get : Integer_Channels.Receive_Operation :=
+              Integer_Channels.Receive (Set'Access, Channel'Access);
          begin
             Flyology.Operations.Cancel (Get);
             begin
@@ -371,7 +442,9 @@ procedure Channel_Operations_Smoke is
             null;
          end;
          Channel.Try_Send (9, Status);
-         Check (Status = Integer_Channels.Item_Sent, "channel stale-subscription publication failed");
+         Check
+           (Status = Integer_Channels.Item_Sent,
+            "channel stale-subscription publication failed");
          declare
             Get : Integer_Channels.Receive_Operation :=
               Integer_Channels.Receive (Set'Access, Channel'Access, 0.0);
