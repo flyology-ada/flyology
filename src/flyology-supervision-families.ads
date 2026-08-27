@@ -210,17 +210,33 @@ private
    subtype Monitor_Token is Interfaces.Unsigned_64;
    type Monitor_State is
      (Monitor_Free,
+      Monitor_Prepared_Reserved,
+      Monitor_Prepared_Dormant,
       Monitor_Pending,
       Monitor_Termination_Signal_Pending,
       Monitor_Replacement_Signal_Pending,
       Monitor_Termination_Signal_Claimed,
       Monitor_Replacement_Signal_Claimed,
+      Monitor_Immediate_Replaced_Claimed,
+      Monitor_Immediate_Terminal_As_Replacement_Claimed,
+      Monitor_Immediate_Terminated_Claimed,
       Monitor_Terminated,
-      Monitor_Replaced);
+      Monitor_Replaced,
+      Monitor_Prepared_Ended);
+   type Monitor_Kind is (Monitor_Ordinary, Monitor_Admission_Transient, Monitor_Admission_Prepared);
+   type Deferred_Monitor_Fact is
+     (No_Deferred_Monitor_Fact, Deferred_Monitor_Replaced, Deferred_Monitor_Terminated);
+   type Monitor_Kind_Array is array (Monitor_Index) of Monitor_Kind;
+   type Prepared_Monitor_Reserve_Status is
+     (Prepared_Monitor_Reserved,
+      Prepared_Monitor_Admission_Closed,
+      Prepared_Monitor_Capacity_Exhausted,
+      Prepared_Monitor_Identity_Exhausted);
    type Monitor_State_Array is array (Monitor_Index) of Monitor_State;
    type Monitor_Token_Array is array (Monitor_Index) of Monitor_Token;
    type Monitor_Handle_Array is array (Monitor_Index) of Child_Handle;
    type Monitor_Snapshot_Array is array (Monitor_Index) of Child_Snapshot;
+   type Deferred_Monitor_Fact_Array is array (Monitor_Index) of Deferred_Monitor_Fact;
    type Monitor_Signal_Guard (Owner : not null access Family) is new Ada.Finalization.Limited_Controlled
    with record
       Ticket     : aliased Monitor_Index := Monitor_Index'First;
@@ -281,12 +297,14 @@ private
          Admission_Slot   : not null access Slot_Index;
          Admission_Handle : not null access Child_Handle;
          Admission_Active : not null access Boolean;
+         Committed        : not null access Boolean;
          Status           : out Prepared_Commit_Status);
       procedure Release_Prepared
         (Slot      : Slot_Index;
          Handle    : Child_Handle;
          Released  : not null access Boolean;
-         Succeeded : not null access Boolean);
+         Succeeded : not null access Boolean;
+         Completed : not null access Boolean);
       procedure Begin_Admission_Cancel
         (Slot      : Slot_Index;
          Handle    : Child_Handle;
@@ -294,6 +312,8 @@ private
          Released  : not null access Boolean;
          Signals   : not null access Monitor_Signal_Guard;
          Completed : out Boolean);
+      function Prepared_Admission_Join_Is_Immediate
+        (Slot : Slot_Index; Handle : Child_Handle; Observed : Flyology.Supervision.Generation) return Boolean;
       entry Await_Admission_Cancel (Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean);
       procedure Take_Start
@@ -301,7 +321,7 @@ private
          Slot      : out Slot_Index;
          Handle    : out Child_Handle;
          Incident  : out Incident_Context);
-      procedure Stop_One (Handle : Child_Handle; Valid : out Boolean);
+      procedure Stop_One (Handle : Child_Handle; Applied : not null access Boolean);
       procedure Stop_Status
         (Slot     : Slot_Index;
          Handle   : Child_Handle;
@@ -366,6 +386,58 @@ private
          Token     : not null access Monitor_Token;
          Active    : not null access Boolean;
          Valid     : out Boolean);
+      procedure Reserve_Prepared_Admission_Monitor
+        (Admission : Child_Handle;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
+         Reserved  : not null access Boolean;
+         Status    : out Prepared_Monitor_Reserve_Status);
+      procedure Activate_Prepared_Admission_Monitor
+        (Admission         : Child_Handle;
+         Ticket            : Monitor_Index;
+         Token             : Monitor_Token;
+         Observed          : Child_Handle;
+         Signal            : Interfaces.C.int;
+         Immediate         : out Boolean;
+         Status            : out Generation_Observation_Status;
+         Snapshot          : out Child_Snapshot;
+         Active            : not null access Boolean;
+         Immediate_Claimed : not null access Boolean;
+         Valid             : out Boolean);
+      procedure Resolve_Prepared_Immediate_Claim
+        (Ticket   : Monitor_Index;
+         Token    : Monitor_Token;
+         Commit   : Boolean;
+         Active   : not null access Boolean;
+         Resolved : out Boolean);
+      procedure Commit_Prepared_Current_Fact
+        (Ticket : Monitor_Index; Status : Generation_Observation_Status; Primary_Terminal : Boolean);
+      procedure Restore_Prepared_Prior_Fact
+        (Ticket           : Monitor_Index;
+         Retain_Current   : Boolean;
+         Current_Terminal : Boolean;
+         Current_Snapshot : Child_Snapshot);
+      procedure Take_Prepared_Monitor
+        (Ticket        : Monitor_Index;
+         Token         : Monitor_Token;
+         Preserve_Fact : Boolean;
+         Released      : out Boolean;
+         Completed     : out Boolean;
+         Status        : out Generation_Observation_Status;
+         Snapshot      : out Child_Snapshot);
+      entry Await_Prepared_Monitor (Monitor_Index)
+        (Token         : Monitor_Token;
+         Preserve_Fact : Boolean;
+         Status        : out Generation_Observation_Status;
+         Snapshot      : out Child_Snapshot);
+      procedure Release_Prepared_Monitor
+        (Ticket   : Monitor_Index;
+         Token    : Monitor_Token;
+         Active   : not null access Boolean;
+         Released : out Boolean);
+      entry Await_Prepared_Monitor_Release (Monitor_Index)
+        (Token : Monitor_Token; Active : not null access Boolean);
       procedure Claim_Monitor_Signal (Signals : not null access Monitor_Signal_Guard);
       procedure Try_Acknowledge_Monitor_Signal
         (Signals : not null access Monitor_Signal_Guard;
@@ -403,44 +475,51 @@ private
         (Slot    : Slot_Index;
          Status  : Generation_Observation_Status;
          Signals : not null access Monitor_Signal_Guard);
-      Configured               : Boolean := False;
-      Identity                 : Controller_Id := Controller_Id'First;
-      Run_Used                 : Boolean := False;
-      Shutdown                 : Boolean := False;
-      Terminal                 : Boolean := False;
-      Slots                    : Slot_State_Array := (others => Free);
-      Snapshots                : Snapshot_Array;
-      Has_Generation           : Boolean_Array := (others => False);
-      Stop_Requested           : Boolean_Array := (others => False);
-      Recovery_Requested       : Boolean_Array := (others => False);
-      Intervention             : Termination_Array;
-      Queue                    : Slot_Order := (others => Slot_Index'First);
-      Queue_Head               : Slot_Index := Slot_Index'First;
-      Queue_Tail               : Slot_Index := Slot_Index'First;
-      Queue_Length             : Natural := 0;
-      Reserved_Children        : Natural := 0;
-      Live_Managers            : Natural := 0;
-      Total_Used               : Natural_Array := (others => 0);
-      Window_Used              : Natural_Array := (others => 0);
-      Consecutive              : Natural_Array := (others => 0);
-      Incident_Since           : Time_Array := (others => Ada.Real_Time.Time_First);
-      Window_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
-      Ready_Since              : Time_Array := (others => Ada.Real_Time.Time_First);
-      Last_Incident            : Incident_Id_Array := (others => Incident_Id'First);
-      Last_Attempt             : Incident_Attempt_Array := (others => Incident_Attempt'First);
-      Has_Incident             : Boolean_Array := (others => False);
-      Active_Incidents         : Incident_Context_Array := (others => No_Incident);
-      Inherited_Incident       : Incident_Context := No_Incident;
-      Events                   : Event_Buffer;
-      Event_First              : Positive := Event_Buffer'First;
-      Event_Length             : Natural := 0;
-      Event_Last_Sequence      : Event_Sequence := 0;
-      Event_Sequence_Exhausted : Boolean := False;
-      Monitor_States           : Monitor_State_Array := (others => Monitor_Free);
-      Monitor_Tokens           : Monitor_Token_Array := (others => 0);
-      Monitor_Handles          : Monitor_Handle_Array;
-      Monitor_Snapshots        : Monitor_Snapshot_Array;
-      Result                   : Supervisor_Result;
+      Configured                 : Boolean := False;
+      Identity                   : Controller_Id := Controller_Id'First;
+      Run_Used                   : Boolean := False;
+      Shutdown                   : Boolean := False;
+      Terminal                   : Boolean := False;
+      Slots                      : Slot_State_Array := (others => Free);
+      Snapshots                  : Snapshot_Array;
+      Has_Generation             : Boolean_Array := (others => False);
+      Stop_Requested             : Boolean_Array := (others => False);
+      Recovery_Requested         : Boolean_Array := (others => False);
+      Intervention               : Termination_Array;
+      Queue                      : Slot_Order := (others => Slot_Index'First);
+      Queue_Head                 : Slot_Index := Slot_Index'First;
+      Queue_Tail                 : Slot_Index := Slot_Index'First;
+      Queue_Length               : Natural := 0;
+      Reserved_Children          : Natural := 0;
+      Live_Managers              : Natural := 0;
+      Total_Used                 : Natural_Array := (others => 0);
+      Window_Used                : Natural_Array := (others => 0);
+      Consecutive                : Natural_Array := (others => 0);
+      Incident_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
+      Window_Since               : Time_Array := (others => Ada.Real_Time.Time_First);
+      Ready_Since                : Time_Array := (others => Ada.Real_Time.Time_First);
+      Last_Incident              : Incident_Id_Array := (others => Incident_Id'First);
+      Last_Attempt               : Incident_Attempt_Array := (others => Incident_Attempt'First);
+      Has_Incident               : Boolean_Array := (others => False);
+      Active_Incidents           : Incident_Context_Array := (others => No_Incident);
+      Inherited_Incident         : Incident_Context := No_Incident;
+      Events                     : Event_Buffer;
+      Event_First                : Positive := Event_Buffer'First;
+      Event_Length               : Natural := 0;
+      Event_Last_Sequence        : Event_Sequence := 0;
+      Event_Sequence_Exhausted   : Boolean := False;
+      Monitor_States             : Monitor_State_Array := (others => Monitor_Free);
+      Monitor_Kinds              : Monitor_Kind_Array := (others => Monitor_Ordinary);
+      Monitor_Tokens             : Monitor_Token_Array := (others => 0);
+      Monitor_Handles            : Monitor_Handle_Array;
+      Monitor_Admissions         : Monitor_Handle_Array;
+      Monitor_Snapshots          : Monitor_Snapshot_Array;
+      Monitor_Deferred_Facts     : Deferred_Monitor_Fact_Array := (others => No_Deferred_Monitor_Fact);
+      Monitor_Deferred_Snapshots : Monitor_Snapshot_Array;
+      Monitor_Prior_Facts        : Deferred_Monitor_Fact_Array := (others => No_Deferred_Monitor_Fact);
+      Monitor_Prior_Handles      : Monitor_Handle_Array;
+      Monitor_Prior_Snapshots    : Monitor_Snapshot_Array;
+      Result                     : Supervisor_Result;
    end Family_State;
 
    type Family_State_Access is access all Family_State;

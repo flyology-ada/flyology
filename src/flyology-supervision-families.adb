@@ -144,7 +144,75 @@ package body Flyology.Supervision.Families is
       begin
          pragma Assert (Status /= Observation_Timed_Out);
          for Ticket in Monitor_Index loop
-            if Monitor_States (Ticket) = Monitor_Pending
+            if Monitor_Kinds (Ticket) = Monitor_Admission_Prepared
+              and then Controller (Monitor_Admissions (Ticket)) = Identity
+              and then Child (Monitor_Admissions (Ticket)) = Snapshots (Slot).Id
+              and then (Monitor_States (Ticket)
+                        in Monitor_Immediate_Replaced_Claimed
+                         | Monitor_Immediate_Terminal_As_Replacement_Claimed
+                         | Monitor_Immediate_Terminated_Claimed
+                         | Monitor_Termination_Signal_Pending
+                         | Monitor_Termination_Signal_Claimed
+                        or else Monitor_Deferred_Facts (Ticket) /= No_Deferred_Monitor_Fact
+                        or else Monitor_States (Ticket) = Monitor_Terminated)
+            then
+               declare
+                  Latest_Snapshot : constant Child_Snapshot :=
+                    (if Monitor_Deferred_Facts (Ticket) = No_Deferred_Monitor_Fact
+                     then Monitor_Snapshots (Ticket)
+                     else Monitor_Deferred_Snapshots (Ticket));
+                  Latest          : constant Generation := Latest_Snapshot.Generation;
+               begin
+                  if Latest_Snapshot.State in Failed_Escalated | Joined then
+                     --  This prepared admission epoch is final. A later
+                     --  generation for the reused logical slot belongs to a
+                     --  different admission and must not enter this claim.
+                     null;
+                  elsif Status = Generation_Replaced and then Latest < Snapshots (Slot).Generation then
+                     Monitor_Deferred_Facts (Ticket) := Deferred_Monitor_Replaced;
+                     Monitor_Deferred_Snapshots (Ticket) := Snapshots (Slot);
+                  elsif Status = Generation_Terminated and then Latest = Snapshots (Slot).Generation then
+                     if Monitor_States (Ticket) = Monitor_Terminated
+                       and then Monitor_Deferred_Facts (Ticket) = No_Deferred_Monitor_Fact
+                     then
+                        Monitor_Snapshots (Ticket) := Snapshots (Slot);
+                     else
+                        Monitor_Deferred_Facts (Ticket) := Deferred_Monitor_Terminated;
+                        Monitor_Deferred_Snapshots (Ticket) := Snapshots (Slot);
+                     end if;
+                  end if;
+               end;
+            elsif Monitor_Kinds (Ticket) = Monitor_Admission_Prepared
+              and then Controller (Monitor_Admissions (Ticket)) = Identity
+              and then Child (Monitor_Admissions (Ticket)) = Snapshots (Slot).Id
+              and then Monitor_States (Ticket)
+                       in Monitor_Prepared_Reserved
+                        | Monitor_Prepared_Dormant
+                        | Monitor_Replaced
+                        | Monitor_Replacement_Signal_Pending
+                        | Monitor_Replacement_Signal_Claimed
+            then
+               if Status = Generation_Replaced
+                 and then Monitor_Snapshots (Ticket).Generation < Snapshots (Slot).Generation
+               then
+                  if Monitor_States (Ticket) in Monitor_Prepared_Reserved | Monitor_Prepared_Dormant then
+                     Monitor_States (Ticket) := Monitor_Replaced;
+                  end if;
+                  --  The snapshot is the latest lifecycle boundary. Any
+                  --  older generation is known replaced; the exact boundary
+                  --  generation is still current until another fact arrives.
+                  Monitor_Snapshots (Ticket) := Snapshots (Slot);
+               elsif Status = Generation_Terminated
+                 and then Monitor_Snapshots (Ticket).Generation = Snapshots (Slot).Generation
+               then
+                  Monitor_Snapshots (Ticket) := Snapshots (Slot);
+                  Monitor_States (Ticket) :=
+                    (case Monitor_States (Ticket) is
+                       when Monitor_Replacement_Signal_Pending => Monitor_Termination_Signal_Pending,
+                       when Monitor_Replacement_Signal_Claimed => Monitor_Termination_Signal_Claimed,
+                       when others                             => Monitor_Terminated);
+               end if;
+            elsif Monitor_States (Ticket) = Monitor_Pending
               and then (if Status = Generation_Terminated
                         then
                           Generation_Is_Current
@@ -469,8 +537,10 @@ package body Flyology.Supervision.Families is
          Admission_Slot   : not null access Slot_Index;
          Admission_Handle : not null access Child_Handle;
          Admission_Active : not null access Boolean;
+         Committed        : not null access Boolean;
          Status           : out Prepared_Commit_Status) is
       begin
+         Committed.all := False;
          if not Claim_Active.all or else Admission_Active.all then
             raise Program_Error with "invalid prepared admission ownership";
          elsif Slots (Slot) /= Prepared
@@ -489,16 +559,19 @@ package body Flyology.Supervision.Families is
          Admission_Active.all := True;
          Claim_Active.all := False;
          Status := Prepared_Committed;
+         Committed.all := True;
       end Commit_Prepared;
 
       procedure Release_Prepared
         (Slot      : Slot_Index;
          Handle    : Child_Handle;
          Released  : not null access Boolean;
-         Succeeded : not null access Boolean) is
+         Succeeded : not null access Boolean;
+         Completed : not null access Boolean) is
       begin
          if Released.all then
             Succeeded.all := True;
+            Completed.all := True;
             return;
          elsif Slots (Slot) /= Committed_Blocked
            or else not Generation_Is_Current
@@ -507,6 +580,7 @@ package body Flyology.Supervision.Families is
             raise Program_Error with "committed admission is stale";
          elsif Shutdown or else Terminal then
             Succeeded.all := False;
+            Completed.all := True;
             return;
          end if;
 
@@ -517,6 +591,7 @@ package body Flyology.Supervision.Families is
          Queue_Length := Queue_Length + 1;
          Released.all := True;
          Succeeded.all := True;
+         Completed.all := True;
       end Release_Prepared;
 
       procedure Begin_Admission_Cancel
@@ -570,7 +645,36 @@ package body Flyology.Supervision.Families is
          end case;
       end Begin_Admission_Cancel;
 
-      entry Await_Admission_Cancel (for Slot in Slot_Index)
+      function Prepared_Admission_Join_Is_Immediate
+        (Slot : Slot_Index; Handle : Child_Handle; Observed : Flyology.Supervision.Generation) return Boolean
+      is
+      begin
+         if Controller (Handle) /= Identity
+           or else Child (Handle) /= Snapshots (Slot).Id
+           or else Child (Handle) < First_Child_Id
+           or else Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id)
+                   /= Interfaces.Unsigned_64 (Slot) - 1
+           or else Current_Generation (Handle) > Snapshots (Slot).Generation
+         then
+            raise Program_Error with "prepared admission join provenance is inconsistent";
+         end if;
+
+         case Slots (Slot) is
+            when Released_Queued | Released_Managed =>
+               return False;
+
+            when Released_Reapable                  =>
+               if Snapshots (Slot).State /= Joined then
+                  raise Program_Error with "joinable admission state is inconsistent";
+               end if;
+               return Snapshots (Slot).Generation = Observed;
+
+            when others                             =>
+               raise Program_Error with "active prepared admission state is inconsistent";
+         end case;
+      end Prepared_Admission_Join_Is_Immediate;
+
+      entry Await_Admission_Cancel(for Slot in Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean)
         when Slots (Slot) = Released_Reapable
       is
@@ -610,10 +714,10 @@ package body Flyology.Supervision.Families is
          Incident := Inherited_Incident;
       end Take_Start;
 
-      procedure Stop_One (Handle : Child_Handle; Valid : out Boolean) is
+      procedure Stop_One (Handle : Child_Handle; Applied : not null access Boolean) is
          Slot : Slot_Index;
       begin
-         Valid := False;
+         Applied.all := False;
          if Child (Handle) < First_Child_Id
            or else Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id)
                    >= Interfaces.Unsigned_64 (Maximum_Children)
@@ -622,15 +726,15 @@ package body Flyology.Supervision.Families is
          end if;
          Slot :=
            Slot_Index (Interfaces.Unsigned_64 (Child (Handle)) - Interfaces.Unsigned_64 (First_Child_Id) + 1);
-         Valid :=
-           Kernel.Family_Stop_Command_Allowed
-             (Current =>
-                Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation),
-              Queued  => Slots (Slot) in Queued | Released_Queued,
-              Managed => Slots (Slot) in Managed | Released_Managed,
-              Live    => Snapshots (Slot).Live);
-         if Valid then
+         if Kernel.Family_Stop_Command_Allowed
+              (Current =>
+                 Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation),
+               Queued  => Slots (Slot) in Queued | Released_Queued,
+               Managed => Slots (Slot) in Managed | Released_Managed,
+               Live    => Snapshots (Slot).Live)
+         then
             Stop_Requested (Slot) := True;
+            Applied.all := True;
          end if;
       end Stop_One;
 
@@ -977,6 +1081,15 @@ package body Flyology.Supervision.Families is
          if Slots (Slot) in Managed | Released_Managed
            and then Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation)
          then
+            if Snapshots (Slot).Termination.Kind = No_Termination then
+               Snapshots (Slot).Termination :=
+                 Empty_Summary
+                   ((if Shutdown
+                     then Supervisor_Shutdown
+                     elsif Stop_Requested (Slot)
+                     then Cancelled
+                     else Abnormal_Completion));
+            end if;
             Record_Event
               (Slot,
                Lifecycle_Changed,
@@ -1192,6 +1305,7 @@ package body Flyology.Supervision.Families is
          end if;
 
          Monitor_Tokens (Selected) := Monitor_Tokens (Selected) + 1;
+         Monitor_Kinds (Selected) := Monitor_Ordinary;
          Monitor_Handles (Selected) := Handle;
          Monitor_Snapshots (Selected) := Snapshots (Slot);
          --  A pending monitor owns this snapshot as scratch storage.  The
@@ -1280,6 +1394,7 @@ package body Flyology.Supervision.Families is
          end if;
 
          Monitor_Tokens (Selected) := Monitor_Tokens (Selected) + 1;
+         Monitor_Kinds (Selected) := Monitor_Admission_Transient;
          Monitor_Handles (Selected) := Observed;
          Monitor_Snapshots (Selected) := Snapshots (Slot);
          Monitor_Snapshots (Selected).Attempts := Interfaces.Unsigned_64 (Signal);
@@ -1290,6 +1405,453 @@ package body Flyology.Supervision.Families is
          Active.all := True;
          Immediate := False;
       end Register_Admission_Monitor;
+
+      procedure Reserve_Prepared_Admission_Monitor
+        (Admission : Child_Handle;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean;
+         Reserved  : not null access Boolean;
+         Status    : out Prepared_Monitor_Reserve_Status)
+      is
+         Slot     : Slot_Index := Slot_Index'First;
+         Selected : Monitor_Index := Monitor_Index'First;
+         Found    : Boolean := False;
+         Reusable : Boolean := False;
+      begin
+         Ticket.all := Monitor_Index'First;
+         Token.all := 0;
+         Active.all := False;
+         Reserved.all := False;
+         Status := Prepared_Monitor_Admission_Closed;
+         if Controller (Admission) /= Identity
+           or else Child (Admission) < First_Child_Id
+           or else Interfaces.Unsigned_64 (Child (Admission)) - Interfaces.Unsigned_64 (First_Child_Id)
+                   >= Interfaces.Unsigned_64 (Maximum_Children)
+         then
+            return;
+         end if;
+         Slot :=
+           Slot_Index
+             (Interfaces.Unsigned_64 (Child (Admission)) - Interfaces.Unsigned_64 (First_Child_Id) + 1);
+         if Slots (Slot) /= Committed_Blocked
+           or else not Generation_Is_Current
+                         (Admission, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation)
+           or else Shutdown
+           or else Terminal
+         then
+            return;
+         end if;
+         if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+           and then Flyology.Task_Lifecycle_Test_Hooks.Consume_Prepared_Monitor_Identity_Exhausted
+         then
+            Status := Prepared_Monitor_Identity_Exhausted;
+            return;
+         end if;
+
+         for Candidate in Monitor_Index loop
+            if Monitor_Tokens (Candidate) /= Monitor_Token'Last then
+               Reusable := True;
+            end if;
+            if Monitor_States (Candidate) = Monitor_Free
+              and then Monitor_Tokens (Candidate) /= Monitor_Token'Last
+            then
+               Selected := Candidate;
+               Found := True;
+               exit;
+            end if;
+         end loop;
+         if not Found then
+            Status :=
+              (if Reusable then Prepared_Monitor_Capacity_Exhausted else Prepared_Monitor_Identity_Exhausted);
+            return;
+         end if;
+
+         Monitor_Tokens (Selected) := Monitor_Tokens (Selected) + 1;
+         Monitor_Kinds (Selected) := Monitor_Admission_Prepared;
+         Monitor_Admissions (Selected) := Admission;
+         Monitor_Handles (Selected) := Admission;
+         Monitor_Snapshots (Selected) := Snapshots (Slot);
+         Monitor_Deferred_Facts (Selected) := No_Deferred_Monitor_Fact;
+         Monitor_Prior_Facts (Selected) := No_Deferred_Monitor_Fact;
+         Monitor_States (Selected) := Monitor_Prepared_Reserved;
+         Ticket.all := Selected;
+         Token.all := Monitor_Tokens (Selected);
+         Active.all := True;
+         Status := Prepared_Monitor_Reserved;
+         Reserved.all := True;
+      end Reserve_Prepared_Admission_Monitor;
+
+      procedure Activate_Prepared_Admission_Monitor
+        (Admission         : Child_Handle;
+         Ticket            : Monitor_Index;
+         Token             : Monitor_Token;
+         Observed          : Child_Handle;
+         Signal            : Interfaces.C.int;
+         Immediate         : out Boolean;
+         Status            : out Generation_Observation_Status;
+         Snapshot          : out Child_Snapshot;
+         Active            : not null access Boolean;
+         Immediate_Claimed : not null access Boolean;
+         Valid             : out Boolean)
+      is
+         Slot           : Slot_Index := Slot_Index'First;
+         Preserve_Prior : Boolean := False;
+      begin
+         Immediate := True;
+         Status := Observation_Timed_Out;
+         Snapshot := Monitor_Snapshots (Ticket);
+         Active.all := False;
+         Immediate_Claimed.all := False;
+         Valid := False;
+         if Token /= Monitor_Tokens (Ticket)
+           or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared
+           or else Monitor_Admissions (Ticket) /= Admission
+           or else Controller (Admission) /= Identity
+           or else Controller (Observed) /= Identity
+           or else Child (Admission) /= Child (Observed)
+           or else Current_Generation (Observed) < Current_Generation (Admission)
+           or else Current_Generation (Observed) > Monitor_Snapshots (Ticket).Generation
+           or else Signal < 0
+         then
+            return;
+         end if;
+         if Monitor_States (Ticket) = Monitor_Replaced then
+            Snapshot := Monitor_Snapshots (Ticket);
+            if Current_Generation (Observed) < Snapshot.Generation then
+               Status := Generation_Replaced;
+               Valid := True;
+               Monitor_States (Ticket) := Monitor_Immediate_Replaced_Claimed;
+               Immediate_Claimed.all := True;
+               return;
+            elsif Monitor_Deferred_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+               --  The exact current probe is ordered after the retained
+               --  replacement. Answer only from retained evidence: the
+               --  Family slot may already belong to another admission epoch.
+               pragma Assert (Monitor_Prior_Facts (Ticket) = No_Deferred_Monitor_Fact);
+               Monitor_Prior_Facts (Ticket) := Deferred_Monitor_Replaced;
+               Monitor_Prior_Handles (Ticket) := Monitor_Handles (Ticket);
+               Monitor_Prior_Snapshots (Ticket) := Monitor_Snapshots (Ticket);
+               Monitor_Handles (Ticket) := Observed;
+               Monitor_Snapshots (Ticket) := Monitor_Deferred_Snapshots (Ticket);
+               Snapshot := Monitor_Snapshots (Ticket);
+               Status :=
+                 (if Monitor_Deferred_Facts (Ticket) = Deferred_Monitor_Terminated
+                    and then Current_Generation (Observed) = Snapshot.Generation
+                  then Generation_Terminated
+                  else Generation_Replaced);
+               Monitor_States (Ticket) :=
+                 (if Monitor_Deferred_Facts (Ticket) = Deferred_Monitor_Terminated
+                  then
+                    (if Status = Generation_Terminated
+                     then Monitor_Immediate_Terminated_Claimed
+                     else Monitor_Immediate_Terminal_As_Replacement_Claimed)
+                  else Monitor_Immediate_Replaced_Claimed);
+               Valid := True;
+               Immediate_Claimed.all := True;
+               return;
+            end if;
+            Preserve_Prior := True;
+         elsif Monitor_States (Ticket) = Monitor_Terminated then
+            Snapshot := Monitor_Snapshots (Ticket);
+            Valid := True;
+            if Current_Generation (Observed) < Snapshot.Generation then
+               --  Report the intervening replacement first without
+               --  consuming the admission's terminal boundary.
+               Status := Generation_Replaced;
+               Monitor_States (Ticket) := Monitor_Immediate_Terminal_As_Replacement_Claimed;
+            else
+               Status := Generation_Terminated;
+               Monitor_States (Ticket) := Monitor_Immediate_Terminated_Claimed;
+            end if;
+            Immediate_Claimed.all := True;
+            return;
+         elsif Monitor_States (Ticket) not in Monitor_Prepared_Reserved | Monitor_Prepared_Dormant
+           and then not Preserve_Prior
+         then
+            return;
+         end if;
+
+         Slot :=
+           Slot_Index
+             (Interfaces.Unsigned_64 (Child (Admission)) - Interfaces.Unsigned_64 (First_Child_Id) + 1);
+         if Slots (Slot) not in Released_Queued | Released_Managed | Released_Reapable
+           or else Current_Generation (Admission) > Snapshots (Slot).Generation
+           or else Current_Generation (Observed) < Current_Generation (Admission)
+           or else Current_Generation (Observed) > Snapshots (Slot).Generation
+         then
+            return;
+         end if;
+         if Preserve_Prior then
+            pragma Assert (Monitor_Prior_Facts (Ticket) = No_Deferred_Monitor_Fact);
+            Monitor_Prior_Facts (Ticket) := Deferred_Monitor_Replaced;
+            Monitor_Prior_Handles (Ticket) := Monitor_Handles (Ticket);
+            Monitor_Prior_Snapshots (Ticket) := Monitor_Snapshots (Ticket);
+            Monitor_States (Ticket) := Monitor_Prepared_Dormant;
+         end if;
+         Snapshot := Snapshots (Slot);
+         Valid := True;
+         if Current_Generation (Observed) < Snapshots (Slot).Generation then
+            Status := Generation_Replaced;
+            Monitor_Snapshots (Ticket) := Snapshot;
+            Monitor_States (Ticket) := Monitor_Immediate_Replaced_Claimed;
+            Immediate_Claimed.all := True;
+            return;
+         elsif Slots (Slot) = Released_Reapable or else Snapshots (Slot).State in Failed_Escalated | Joined
+         then
+            Status := Generation_Terminated;
+            Monitor_Snapshots (Ticket) := Snapshot;
+            Monitor_States (Ticket) := Monitor_Immediate_Terminated_Claimed;
+            Immediate_Claimed.all := True;
+            return;
+         end if;
+
+         Monitor_Handles (Ticket) := Observed;
+         Monitor_Snapshots (Ticket) := Snapshots (Slot);
+         Monitor_Snapshots (Ticket).Attempts := Interfaces.Unsigned_64 (Signal);
+         Monitor_Snapshots (Ticket).Escalated := True;
+         Monitor_States (Ticket) := Monitor_Pending;
+         Active.all := True;
+         Immediate := False;
+      end Activate_Prepared_Admission_Monitor;
+
+      procedure Commit_Prepared_Current_Fact
+        (Ticket : Monitor_Index; Status : Generation_Observation_Status; Primary_Terminal : Boolean) is
+      begin
+         pragma Assert (Status in Generation_Terminated | Generation_Replaced);
+         if Status = Generation_Replaced then
+            Monitor_Handles (Ticket).Generation := Monitor_Snapshots (Ticket).Generation;
+         end if;
+         if Primary_Terminal and then Status = Generation_Replaced then
+            --  Only the intervening replacement was delivered. The primary
+            --  exact-generation terminal fact remains next.
+            Monitor_States (Ticket) := Monitor_Terminated;
+            return;
+         end if;
+         if Monitor_Deferred_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+            --  The operation already copied its primary result. Promote a
+            --  later boundary, including same-generation Joined, for one
+            --  ordered rearm rather than rewriting the published snapshot.
+            Monitor_Snapshots (Ticket) := Monitor_Deferred_Snapshots (Ticket);
+            Monitor_States (Ticket) :=
+              (if Monitor_Deferred_Facts (Ticket) = Deferred_Monitor_Terminated
+               then Monitor_Terminated
+               else Monitor_Replaced);
+            Monitor_Deferred_Facts (Ticket) := No_Deferred_Monitor_Fact;
+         else
+            Monitor_States (Ticket) :=
+              (if Primary_Terminal and then Monitor_Snapshots (Ticket).State in Failed_Escalated | Joined
+               then Monitor_Prepared_Ended
+               else Monitor_Prepared_Dormant);
+         end if;
+      end Commit_Prepared_Current_Fact;
+
+      procedure Restore_Prepared_Prior_Fact
+        (Ticket           : Monitor_Index;
+         Retain_Current   : Boolean;
+         Current_Terminal : Boolean;
+         Current_Snapshot : Child_Snapshot) is
+      begin
+         pragma Assert (Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact);
+         if Retain_Current and then Monitor_Deferred_Facts (Ticket) = No_Deferred_Monitor_Fact then
+            Monitor_Deferred_Facts (Ticket) :=
+              (if Current_Terminal then Deferred_Monitor_Terminated else Deferred_Monitor_Replaced);
+            Monitor_Deferred_Snapshots (Ticket) := Current_Snapshot;
+         end if;
+         Monitor_Handles (Ticket) := Monitor_Prior_Handles (Ticket);
+         Monitor_Snapshots (Ticket) := Monitor_Prior_Snapshots (Ticket);
+         Monitor_States (Ticket) :=
+           (if Monitor_Prior_Facts (Ticket) = Deferred_Monitor_Terminated
+            then Monitor_Terminated
+            else Monitor_Replaced);
+         Monitor_Prior_Facts (Ticket) := No_Deferred_Monitor_Fact;
+      end Restore_Prepared_Prior_Fact;
+
+      procedure Resolve_Prepared_Immediate_Claim
+        (Ticket   : Monitor_Index;
+         Token    : Monitor_Token;
+         Commit   : Boolean;
+         Active   : not null access Boolean;
+         Resolved : out Boolean) is
+      begin
+         Resolved := False;
+         if Token /= Monitor_Tokens (Ticket)
+           or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared
+           or else Monitor_States (Ticket)
+                   not in Monitor_Immediate_Replaced_Claimed
+                        | Monitor_Immediate_Terminal_As_Replacement_Claimed
+                        | Monitor_Immediate_Terminated_Claimed
+         then
+            return;
+         end if;
+         declare
+            Claimed_State  : constant Monitor_State := Monitor_States (Ticket);
+            Current_Status : constant Generation_Observation_Status :=
+              (if Claimed_State = Monitor_Immediate_Terminated_Claimed
+               then Generation_Terminated
+               else Generation_Replaced);
+         begin
+            if Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+               Restore_Prepared_Prior_Fact
+                 (Ticket,
+                  --  The operation may publish this out of lifecycle order.
+                  --  Retain it behind the older replacement even when the
+                  --  operation itself consumes its copied result, so the
+                  --  admission epoch cannot reopen across slot reuse.
+                  Retain_Current   => True,
+                  Current_Terminal =>
+                    Claimed_State
+                    in Monitor_Immediate_Terminal_As_Replacement_Claimed
+                     | Monitor_Immediate_Terminated_Claimed,
+                  Current_Snapshot => Monitor_Snapshots (Ticket));
+            elsif not Commit then
+               Monitor_States (Ticket) :=
+                 (if Claimed_State = Monitor_Immediate_Replaced_Claimed
+                  then Monitor_Replaced
+                  else Monitor_Terminated);
+            else
+               Commit_Prepared_Current_Fact
+                 (Ticket,
+                  Current_Status,
+                  Primary_Terminal =>
+                    Claimed_State
+                    in Monitor_Immediate_Terminal_As_Replacement_Claimed
+                     | Monitor_Immediate_Terminated_Claimed);
+            end if;
+         end;
+         Active.all := False;
+         Resolved := True;
+      end Resolve_Prepared_Immediate_Claim;
+
+      procedure Take_Prepared_Monitor
+        (Ticket        : Monitor_Index;
+         Token         : Monitor_Token;
+         Preserve_Fact : Boolean;
+         Released      : out Boolean;
+         Completed     : out Boolean;
+         Status        : out Generation_Observation_Status;
+         Snapshot      : out Child_Snapshot) is
+      begin
+         Snapshot := Monitor_Snapshots (Ticket);
+         if Token /= Monitor_Tokens (Ticket) or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared then
+            Released := True;
+            Completed := False;
+            Status := Observation_Timed_Out;
+            return;
+         end if;
+         Released :=
+           Monitor_States (Ticket)
+           not in Monitor_Termination_Signal_Pending
+                | Monitor_Replacement_Signal_Pending
+                | Monitor_Termination_Signal_Claimed
+                | Monitor_Replacement_Signal_Claimed;
+         Completed := Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced;
+         Status :=
+           (if Monitor_States (Ticket)
+               in Monitor_Terminated | Monitor_Termination_Signal_Pending | Monitor_Termination_Signal_Claimed
+              and then Current_Generation (Monitor_Handles (Ticket)) < Monitor_Snapshots (Ticket).Generation
+            then Generation_Replaced
+            elsif Monitor_States (Ticket)
+                  in Monitor_Terminated
+                   | Monitor_Termination_Signal_Pending
+                   | Monitor_Termination_Signal_Claimed
+            then Generation_Terminated
+            elsif Monitor_States (Ticket)
+                  in Monitor_Replaced
+                   | Monitor_Replacement_Signal_Pending
+                   | Monitor_Replacement_Signal_Claimed
+            then Generation_Replaced
+            else Observation_Timed_Out);
+         if Released and then Monitor_States (Ticket) = Monitor_Pending then
+            if Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+               Restore_Prepared_Prior_Fact
+                 (Ticket, Retain_Current => False, Current_Terminal => False, Current_Snapshot => Snapshot);
+            else
+               Monitor_States (Ticket) := Monitor_Prepared_Dormant;
+            end if;
+         elsif Released and then Completed then
+            if Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+               Restore_Prepared_Prior_Fact
+                 (Ticket,
+                  Retain_Current   => True,
+                  Current_Terminal => Monitor_States (Ticket) = Monitor_Terminated,
+                  Current_Snapshot => Snapshot);
+            elsif not Preserve_Fact then
+               Commit_Prepared_Current_Fact
+                 (Ticket, Status, Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
+            end if;
+         end if;
+      end Take_Prepared_Monitor;
+
+      entry Await_Prepared_Monitor(for Ticket in Monitor_Index)
+        (Token         : Monitor_Token;
+         Preserve_Fact : Boolean;
+         Status        : out Generation_Observation_Status;
+         Snapshot      : out Child_Snapshot)
+        when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
+      is
+      begin
+         pragma Assert (Token = Monitor_Tokens (Ticket));
+         pragma Assert (Monitor_Kinds (Ticket) = Monitor_Admission_Prepared);
+         Snapshot := Monitor_Snapshots (Ticket);
+         Status :=
+           (if Monitor_States (Ticket) = Monitor_Terminated
+              and then Current_Generation (Monitor_Handles (Ticket)) < Snapshot.Generation
+            then Generation_Replaced
+            elsif Monitor_States (Ticket) = Monitor_Terminated
+            then Generation_Terminated
+            else Generation_Replaced);
+         if Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact then
+            Restore_Prepared_Prior_Fact
+              (Ticket,
+               Retain_Current   => True,
+               Current_Terminal => Monitor_States (Ticket) = Monitor_Terminated,
+               Current_Snapshot => Snapshot);
+         elsif not Preserve_Fact then
+            Commit_Prepared_Current_Fact
+              (Ticket, Status, Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
+         end if;
+      end Await_Prepared_Monitor;
+
+      procedure Release_Prepared_Monitor
+        (Ticket   : Monitor_Index;
+         Token    : Monitor_Token;
+         Active   : not null access Boolean;
+         Released : out Boolean) is
+      begin
+         if Token /= Monitor_Tokens (Ticket) or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared then
+            Active.all := False;
+            Released := True;
+            return;
+         end if;
+         Released :=
+           Monitor_States (Ticket)
+           not in Monitor_Termination_Signal_Pending
+                | Monitor_Replacement_Signal_Pending
+                | Monitor_Termination_Signal_Claimed
+                | Monitor_Replacement_Signal_Claimed;
+         if Released then
+            Monitor_States (Ticket) := Monitor_Free;
+            Monitor_Kinds (Ticket) := Monitor_Ordinary;
+            Monitor_Deferred_Facts (Ticket) := No_Deferred_Monitor_Fact;
+            Monitor_Prior_Facts (Ticket) := No_Deferred_Monitor_Fact;
+            Active.all := False;
+         end if;
+      end Release_Prepared_Monitor;
+
+      entry Await_Prepared_Monitor_Release(for Ticket in Monitor_Index)
+        (Token : Monitor_Token; Active : not null access Boolean)
+        when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
+      is
+      begin
+         pragma Assert (Token = Monitor_Tokens (Ticket));
+         pragma Assert (Monitor_Kinds (Ticket) = Monitor_Admission_Prepared);
+         Monitor_States (Ticket) := Monitor_Free;
+         Monitor_Kinds (Ticket) := Monitor_Ordinary;
+         Monitor_Deferred_Facts (Ticket) := No_Deferred_Monitor_Fact;
+         Monitor_Prior_Facts (Ticket) := No_Deferred_Monitor_Fact;
+         Active.all := False;
+      end Await_Prepared_Monitor_Release;
 
       procedure Claim_Monitor_Signal (Signals : not null access Monitor_Signal_Guard) is
       begin
@@ -1346,7 +1908,7 @@ package body Flyology.Supervision.Families is
          Signals.Claimed := False;
       end Try_Acknowledge_Monitor_Signal;
 
-      entry Await_Monitor (for Ticket in Monitor_Index)
+      entry Await_Monitor(for Ticket in Monitor_Index)
         (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot)
         when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
       is
@@ -1499,10 +2061,10 @@ package body Flyology.Supervision.Families is
    end Start;
 
    procedure Stop (Item : in out Family; Handle : Child_Handle) is
-      Valid : Boolean;
+      Applied : aliased Boolean := False;
    begin
-      Item.State.Stop_One (Handle, Valid);
-      if not Valid then
+      Item.State.Stop_One (Handle, Applied'Access);
+      if not Applied then
          raise Stale_Handle;
       end if;
    end Stop;
@@ -1922,6 +2484,10 @@ package body Flyology.Supervision.Families is
                            end loop;
                         end;
                         exit when not Item.State.Replacement_Wait_Allowed (Managed_Slot);
+                        if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                           Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                             (Flyology.Task_Lifecycle_Test_Hooks.Admission_Before_Replacement);
+                        end if;
                         Incident := Recovery;
                         Candidate := Next;
                      end loop;
@@ -1957,6 +2523,10 @@ package body Flyology.Supervision.Families is
          loop
             if Parent_Stop /= null and then Parent_Stop.Requested then
                Item.State.Request_Stop;
+            end if;
+            if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+               Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                 (Flyology.Task_Lifecycle_Test_Hooks.Family_Before_Take_Start);
             end if;
             Item.State.Take_Start (Available, Slot, Handle, Incident);
             if Available then

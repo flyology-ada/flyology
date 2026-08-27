@@ -19,9 +19,7 @@ procedure Prepared_Admission_Abort_Smoke is
 
    type Context is limited null record;
 
-   procedure Execute
-     (State : in out Context; Control : not null access Generation_Control)
-   is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
       pragma Unreferenced (State);
    begin
       Mark_Ready (Control.all);
@@ -73,8 +71,7 @@ procedure Prepared_Admission_Abort_Smoke is
         Monitor_Capacity    => 1);
 
    package Prepared is new
-     Families.Prepared_Admissions
-       (Request_Assignment_And_Cleanup_Are_Nonraising => True);
+     Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => True);
 
    use type Prepared.Commit_Result;
    use type Prepared.Prepare_Result;
@@ -111,59 +108,88 @@ procedure Prepared_Admission_Abort_Smoke is
       accept Join;
    end Abort_Owner;
 
-   type Abort_Stage is
-     (After_Reserve, After_Publish, After_Commit, After_Release);
+   type Abort_Stage is (After_Reserve, After_Publish, After_Commit, After_Release);
 
-   function Point_For
-     (Stage : Abort_Stage) return Flyology.Task_Lifecycle_Testing.Barrier_Point
+   function Point_For (Stage : Abort_Stage) return Flyology.Task_Lifecycle_Testing.Barrier_Point
    is (case Stage is
-         when After_Reserve =>
-           Flyology.Task_Lifecycle_Testing.Prepared_Admission_Reserved,
-         when After_Publish =>
-           Flyology.Task_Lifecycle_Testing.Prepared_Admission_Published,
-         when After_Commit  =>
-           Flyology.Task_Lifecycle_Testing.Prepared_Admission_Committed,
-         when After_Release =>
-           Flyology.Task_Lifecycle_Testing.Prepared_Admission_Released);
+         when After_Reserve => Flyology.Task_Lifecycle_Testing.Prepared_Admission_Reserved,
+         when After_Publish => Flyology.Task_Lifecycle_Testing.Prepared_Admission_Published,
+         when After_Commit  => Flyology.Task_Lifecycle_Testing.Prepared_Admission_Committed,
+         when After_Release => Flyology.Task_Lifecycle_Testing.Prepared_Admission_Released);
 
    procedure Assert_Reusable is
-      Claim    : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
+      Claim    : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
       P_Result : Prepared.Prepare_Result;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       if P_Result /= Prepared.Start_Prepared then
-         raise Program_Error
-           with "aborted prepared ownership did not restore capacity";
+         raise Program_Error with "aborted prepared ownership did not restore capacity";
       end if;
       Prepared.Rollback (Claim);
    end Assert_Reusable;
 
+   procedure Exercise_Commit_Evidence_Failures is
+      Claim     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
+      P_Result  : Prepared.Prepare_Result;
+      C_Result  : Prepared.Commit_Result;
+      Committed : aliased Boolean := True;
+      Rejected  : Boolean := False;
+   begin
+      begin
+         Prepared.Commit_Start (Claim, Admission, Committed'Access, C_Result);
+      exception
+         when Program_Error =>
+            Rejected := True;
+      end;
+      if not Rejected
+        or else Committed
+        or else Prepared.Is_Active (Claim)
+        or else Prepared.Is_Active (Admission)
+      then
+         raise Program_Error with "invalid commit published ownership evidence";
+      end if;
+
+      Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
+      if P_Result /= Prepared.Start_Prepared then
+         raise Program_Error with "closed commit evidence setup did not prepare";
+      end if;
+      Families.Request_Shutdown (Item);
+      Committed := True;
+      Prepared.Commit_Start (Claim, Admission, Committed'Access, C_Result);
+      if C_Result /= Prepared.Start_Admission_Closed
+        or else Committed
+        or else not Prepared.Is_Active (Claim)
+        or else Prepared.Is_Active (Admission)
+      then
+         raise Program_Error with "closed commit published ownership evidence";
+      end if;
+      Prepared.Rollback (Claim);
+   end Exercise_Commit_Evidence_Failures;
+
    procedure Exercise_Abort (Stage : Abort_Stage) is
-      Point : constant Flyology.Task_Lifecycle_Testing.Barrier_Point :=
-        Point_For (Stage);
+      Point             : constant Flyology.Task_Lifecycle_Testing.Barrier_Point := Point_For (Stage);
+      Release_Result    : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
+      Release_Completed : aliased Boolean := False;
+      Commit_Completed  : aliased Boolean := False;
 
       task Worker is
          entry Start;
       end Worker;
 
       task body Worker is
-         Claim     : Prepared.Start_Claim :=
-           Prepared.Vacant_Start_Claim (Item'Access);
-         Admission : Prepared.Started_Admission :=
-           Prepared.Vacant_Started_Admission (Item'Access);
+         Claim     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+         Admission : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
          P_Result  : Prepared.Prepare_Result;
          C_Result  : Prepared.Commit_Result;
-         R_Result  : aliased Prepared.Release_Result :=
-           Prepared.Admission_Cancelled;
       begin
          accept Start;
          Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
          if Stage in After_Commit | After_Release then
-            Prepared.Commit_Start (Claim, Admission, C_Result);
+            Prepared.Commit_Start (Claim, Admission, Commit_Completed'Access, C_Result);
          end if;
          if Stage = After_Release then
-            Prepared.Release_To_Run (Admission, R_Result'Access);
+            Prepared.Release_To_Run (Admission, Release_Result'Access, Release_Completed'Access);
          end if;
       end Worker;
    begin
@@ -176,29 +202,30 @@ procedure Prepared_Admission_Abort_Smoke is
          when others =>
             abort Worker;
             Flyology.Task_Lifecycle_Testing.Reset;
-            raise Program_Error
-              with
-                "prepared abort stage was not reached: "
-                & Abort_Stage'Image (Stage);
+            raise Program_Error with "prepared abort stage was not reached: " & Abort_Stage'Image (Stage);
       end;
       abort Worker;
       Flyology.Task_Lifecycle_Testing.Release (Point);
       while not Worker'Terminated loop
          delay 0.001;
       end loop;
+      if Stage = After_Release
+        and then (Release_Result /= Prepared.Admission_Released or else not Release_Completed)
+      then
+         raise Program_Error with "aborted post-cut release lost its completed publication";
+      elsif Stage in After_Commit | After_Release and then not Commit_Completed then
+         raise Program_Error with "aborted post-cut commit lost its completed publication";
+      end if;
       Flyology.Task_Lifecycle_Testing.Reset;
       Assert_Reusable;
    end Exercise_Abort;
 
    procedure Exercise_Producer_Abort is
-      Claim       : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Abort_Item'Access);
-      Admission   : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Abort_Item'Access);
+      Claim       : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Abort_Item'Access);
+      Admission   : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Abort_Item'Access);
       P_Result    : Prepared.Prepare_Result;
       C_Result    : Prepared.Commit_Result;
-      R_Result    : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
+      R_Result    : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
       Set         : aliased Flyology.Operations.Completion_Set (1);
       Observation : Generation_Observation;
 
@@ -224,17 +251,11 @@ procedure Prepared_Admission_Abort_Smoke is
       declare
          Wait : Prepared.Observation_Operation :=
            Prepared.Observe_Exact
-             (Set'Access,
-              Abort_Item'Access,
-              Admission,
-              Prepared.First_Handle (Admission),
-              Timeout => -1.0);
+             (Set'Access, Abort_Item'Access, Admission, Prepared.First_Handle (Admission), Timeout => -1.0);
       begin
          Flyology.Task_Lifecycle_Testing.Reset;
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Finalizing);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Signal_Finalizing);
          Canceller.Start;
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
@@ -246,8 +267,7 @@ procedure Prepared_Admission_Abort_Smoke is
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Wait, Observation);
          if Observation.Status /= Generation_Terminated then
-            raise Program_Error
-              with "producer abort lost the claimed terminal fact";
+            raise Program_Error with "producer abort lost the claimed terminal fact";
          end if;
       end;
       while not Abort_Owner'Terminated loop
@@ -257,16 +277,13 @@ procedure Prepared_Admission_Abort_Smoke is
          delay 0.001;
       end loop;
       if Prepared.Is_Active (Admission) then
-         raise Program_Error
-           with "producer abort did not retire its exact admission";
+         raise Program_Error with "producer abort did not retire its exact admission";
       end if;
-      Flyology.Task_Lifecycle_Testing.Release
-        (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+      Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
       Flyology.Task_Lifecycle_Testing.Reset;
    exception
       when others =>
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
          Flyology.Task_Lifecycle_Testing.Release
            (Flyology.Task_Lifecycle_Testing.Admission_Signal_Finalizing);
          abort Abort_Owner;
@@ -276,16 +293,12 @@ procedure Prepared_Admission_Abort_Smoke is
    end Exercise_Producer_Abort;
 
    procedure Exercise_Snapshot_Integrity is
-      Claim     : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Reuse     : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
+      Claim     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Reuse     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
       P_Result  : Prepared.Prepare_Result;
       C_Result  : Prepared.Commit_Result;
-      R_Result  : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
+      R_Result  : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
       Handle    : Child_Handle;
       Snapshot  : Generation_Observation;
    begin
@@ -305,17 +318,11 @@ procedure Prepared_Admission_Abort_Smoke is
       end loop;
 
       Flyology.Task_Lifecycle_Testing.Reset;
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
       declare
          First_Set  : aliased Flyology.Operations.Completion_Set (1);
          First_Wait : Prepared.Observation_Operation :=
-           Prepared.Observe_Exact
-             (First_Set'Access,
-              Item'Access,
-              Admission,
-              Handle,
-              Timeout => -1.0);
+           Prepared.Observe_Exact (First_Set'Access, Item'Access, Admission, Handle, Timeout => -1.0);
       begin
          Families.Stop (Item, Handle);
          Flyology.Operations.Wait_All (First_Set);
@@ -324,13 +331,11 @@ procedure Prepared_Admission_Abort_Smoke is
       Flyology.Task_Lifecycle_Testing.Wait_Reached
         (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
 
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
       declare
          Old_Set  : aliased Flyology.Operations.Completion_Set (1);
          Old_Wait : Prepared.Observation_Operation :=
-           Prepared.Observe_Exact
-             (Old_Set'Access, Item'Access, Admission, Handle, Timeout => -1.0);
+           Prepared.Observe_Exact (Old_Set'Access, Item'Access, Admission, Handle, Timeout => -1.0);
       begin
          Flyology.Task_Lifecycle_Testing.Release
            (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
@@ -339,19 +344,16 @@ procedure Prepared_Admission_Abort_Smoke is
          Prepared.Cancel_And_Join (Admission);
          Prepared.Prepare_Start (Item'Access, 2, Reuse, P_Result);
          if P_Result /= Prepared.Start_Prepared then
-            raise Program_Error
-              with "old signal claim did not permit exact slot reuse";
+            raise Program_Error with "old signal claim did not permit exact slot reuse";
          end if;
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
          Flyology.Operations.Wait_All (Old_Set);
          Prepared.Finish (Old_Wait, Snapshot);
          if Snapshot.Status /= Generation_Terminated
            or else Snapshot.Snapshot.Generation /= Current_Generation (Handle)
            or else Snapshot.Snapshot.State /= Joined
          then
-            raise Program_Error
-              with "slot reuse changed the claimed terminal snapshot";
+            raise Program_Error with "slot reuse changed the claimed terminal snapshot";
          end if;
       end;
       Prepared.Rollback (Reuse);
@@ -368,35 +370,27 @@ procedure Prepared_Admission_Abort_Smoke is
       end if;
       declare
          Stale_Set : aliased Flyology.Operations.Completion_Set (1);
-         Stale     :
-           Prepared.Observation_Operation (Stale_Set'Access, Item'Access);
+         Stale     : Prepared.Observation_Operation (Stale_Set'Access, Item'Access);
          Rejected  : Boolean := False;
       begin
          begin
-            Prepared.Observe_Exact
-              (Admission, Handle, Timeout => 0.0, Operation => Stale);
+            Prepared.Observe_Exact (Admission, Handle, Timeout => 0.0, Operation => Stale);
          exception
             when Families.Stale_Handle =>
                Rejected := True;
          end;
          if not Rejected then
-            raise Program_Error
-              with "prior admission generation was accepted as exact";
+            raise Program_Error with "prior admission generation was accepted as exact";
          end if;
       end;
       declare
          Foreign_Set : aliased Flyology.Operations.Completion_Set (1);
-         Foreign     :
-           Prepared.Observation_Operation
-             (Foreign_Set'Access, Abort_Item'Access);
+         Foreign     : Prepared.Observation_Operation (Foreign_Set'Access, Abort_Item'Access);
          Rejected    : Boolean := False;
       begin
          begin
             Prepared.Observe_Exact
-              (Admission,
-               Prepared.First_Handle (Admission),
-               Timeout   => 0.0,
-               Operation => Foreign);
+              (Admission, Prepared.First_Handle (Admission), Timeout => 0.0, Operation => Foreign);
          exception
             when Program_Error =>
                Rejected := True;
@@ -411,8 +405,7 @@ procedure Prepared_Admission_Abort_Smoke is
       when others =>
          Flyology.Task_Lifecycle_Testing.Release
            (Flyology.Task_Lifecycle_Testing.Admission_Before_Manager_Done);
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
          if Prepared.Is_Active (Admission) then
             Prepared.Cancel_And_Join (Admission);
          end if;
@@ -421,14 +414,12 @@ procedure Prepared_Admission_Abort_Smoke is
          raise;
    end Exercise_Snapshot_Integrity;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
    Owner.Start;
    Abort_Owner.Start;
    loop
-      exit when
-        Families.Accepting (Item) and then Families.Accepting (Abort_Item);
+      exit when Families.Accepting (Item) and then Families.Accepting (Abort_Item);
       if Ada.Real_Time.Clock >= Deadline then
          raise Program_Error with "abort-test family did not open";
       end if;
@@ -440,14 +431,11 @@ begin
    end loop;
 
    declare
-      Claim     : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
+      Claim     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
       P_Result  : Prepared.Prepare_Result;
       C_Result  : Prepared.Commit_Result;
-      R_Result  : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
+      R_Result  : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       Prepared.Commit_Start (Claim, Admission, C_Result);
@@ -460,8 +448,7 @@ begin
       end if;
 
       Flyology.Task_Lifecycle_Testing.Reset;
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Monitor_Registered);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Monitor_Registered);
       declare
          task Observer is
             entry Start;
@@ -474,11 +461,7 @@ begin
                Set  : aliased Flyology.Operations.Completion_Set (1);
                Wait : Prepared.Observation_Operation :=
                  Prepared.Observe_Exact
-                   (Set'Access,
-                    Item'Access,
-                    Admission,
-                    Prepared.First_Handle (Admission),
-                    Timeout => -1.0);
+                   (Set'Access, Item'Access, Admission, Prepared.First_Handle (Admission), Timeout => -1.0);
                pragma Unreferenced (Wait);
             begin
                Flyology.Operations.Wait_All (Set);
@@ -502,11 +485,7 @@ begin
          Observation : Generation_Observation;
          Wait        : Prepared.Observation_Operation :=
            Prepared.Observe_Exact
-             (Set'Access,
-              Item'Access,
-              Admission,
-              Prepared.First_Handle (Admission),
-              Timeout => 0.01);
+             (Set'Access, Item'Access, Admission, Prepared.First_Handle (Admission), Timeout => 0.01);
 
          task Canceller is
             entry Start;
@@ -529,8 +508,7 @@ begin
               (Flyology.Task_Lifecycle_Testing.Admission_Signal_Interrupted);
          end Releaser;
       begin
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Interrupted);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Signal_Interrupted);
          Flyology.Task_Lifecycle_Testing.Interrupt_Next_Admission_Signal;
          Canceller.Start;
          Flyology.Task_Lifecycle_Testing.Wait_Reached
@@ -538,8 +516,7 @@ begin
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Wait, Observation);
          if Observation.Status /= Generation_Terminated then
-            raise Program_Error
-              with "pre-ack lifecycle outcome lost to expired deadline";
+            raise Program_Error with "pre-ack lifecycle outcome lost to expired deadline";
          end if;
          Flyology.Task_Lifecycle_Testing.Reset;
       end;
@@ -623,11 +600,7 @@ begin
                Set  : aliased Flyology.Operations.Completion_Set (1);
                Wait : Prepared.Observation_Operation :=
                  Prepared.Observe_Exact
-                   (Set'Access,
-                    Item'Access,
-                    Admission,
-                    Prepared.First_Handle (Admission),
-                    Timeout => -1.0);
+                   (Set'Access, Item'Access, Admission, Prepared.First_Handle (Admission), Timeout => -1.0);
             begin
                Fence.Mark_Registered;
                accept Cancel;
@@ -654,8 +627,7 @@ begin
          while not Fence.Registered loop
             delay 0.001;
          end loop;
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
          Lifetime_Canceller.Start;
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
@@ -663,24 +635,19 @@ begin
          while not Fence.Cancelled loop
             delay 0.001;
          end loop;
-         if not Fence.Active_After_Cancel or else Observation_Owner'Terminated
-         then
-            raise Program_Error
-              with "claimed signal did not fence completion-set lifetime";
+         if not Fence.Active_After_Cancel or else Observation_Owner'Terminated then
+            raise Program_Error with "claimed signal did not fence completion-set lifetime";
          end if;
          delay 0.01;
          if Observation_Owner'Terminated then
-            raise Program_Error
-              with "completion-set owner escaped a claimed signal";
+            raise Program_Error with "completion-set owner escaped a claimed signal";
          end if;
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Signal_Claimed);
          while not Observation_Owner'Terminated loop
             delay 0.001;
          end loop;
          if not Fence.Finished or else Fence.Failed then
-            raise Program_Error
-              with "completion-set owner did not drain after signal ack";
+            raise Program_Error with "completion-set owner did not drain after signal ack";
          end if;
          Flyology.Task_Lifecycle_Testing.Reset;
       exception
@@ -697,7 +664,7 @@ begin
    Exercise_Snapshot_Integrity;
    Exercise_Producer_Abort;
    Assert_Reusable;
-   Families.Request_Shutdown (Item);
+   Exercise_Commit_Evidence_Failures;
    Owner.Join;
 exception
    when others =>

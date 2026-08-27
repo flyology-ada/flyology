@@ -12,6 +12,8 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
    References                 : aliased Atomics.uint32 := 0;
    Force_Prepared_Final       : Boolean := False
    with Atomic;
+   Force_Prepared_Monitor_End : Boolean := False
+   with Atomic;
    Interrupt_Admission_Signal : Boolean := False
    with Atomic;
 
@@ -21,6 +23,7 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Arrived := (others => False);
       Atomics.Atomic_Store_32 (References'Address, 0, Atomics.Relaxed);
       Force_Prepared_Final := False;
+      Force_Prepared_Monitor_End := False;
       Interrupt_Admission_Signal := False;
    end Reset;
 
@@ -94,6 +97,18 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Force_Prepared_Final := False;
       return Result;
    end Consume_Prepared_Generation_Final;
+
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted is
+   begin
+      Force_Prepared_Monitor_End := True;
+   end Force_Next_Prepared_Monitor_Identity_Exhausted;
+
+   function Consume_Prepared_Monitor_Identity_Exhausted return Boolean is
+      Result : constant Boolean := Force_Prepared_Monitor_End;
+   begin
+      Force_Prepared_Monitor_End := False;
+      return Result;
+   end Consume_Prepared_Monitor_Identity_Exhausted;
 
    procedure Interrupt_Next_Admission_Signal is
    begin

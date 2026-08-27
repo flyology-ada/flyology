@@ -13,11 +13,17 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    type Barrier_Point is
      (Static_Monitor_Registered,
       Family_Monitor_Registered,
+      Family_Before_Take_Start,
       Prepared_Admission_Reserved,
       Prepared_Admission_Published,
       Prepared_Admission_Committed,
+      Prepared_Observation_Before_Reserve,
+      Prepared_Observation_Reserved,
       Prepared_Admission_Released,
+      Prepared_Admission_Cancellation_Requested,
       Admission_Monitor_Registered,
+      Admission_Immediate_Claimed,
+      Admission_Before_Replacement,
       Admission_Before_Manager_Done,
       Admission_Signal_Claimed,
       Admission_Signal_Interrupted,
@@ -49,6 +55,12 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    with
      Import,
      External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_generation_consume";
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_monitor_arm";
+   function Consume_Prepared_Monitor_Identity_Exhausted return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_monitor_consume";
    procedure Interrupt_Next_Admission_Signal
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_signal_interrupt";
    function Consume_Admission_Signal_Interrupted return Boolean

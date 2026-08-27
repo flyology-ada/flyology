@@ -314,8 +314,57 @@ three explicit ownership cuts over those same slots. Preparation copies the
 request into a non-runnable slot and exposes its exact first-generation handle;
 commit transfers exact admission ownership from the claim to a started owner
 while preserving the same first-handle identity value, and release alone queues
-a manager. No extra child-capacity or monitor table is introduced. After a
-monitor matches, its no-longer-needed
+a manager. No extra child-capacity or
+monitor table is introduced. The release result and a caller-aliased completion
+token are published in that order within one protected cut; the token is the
+abort-safe evidence that a surrounding publication guard may use before
+reconciling the admission.
+The commit overload provides the same abort-stable shape: caller-aliased
+`Committed` evidence is written last after the blocked admission owns every
+field and the prepared claim is vacant. Its legacy overload delegates through
+an ignored local token.
+
+The optional persistent prepared-observation claim reserves one exact Family
+monitor ticket while the admission is still committed and blocked. A scoped
+operation arms the completion-set readiness source before the protected
+activation/recheck cut, borrows the claim for one generation, and returns it to
+a descriptor-free dormant state on finish or cancellation. The ticket remains
+reserved across replacement publication and exact rearm. The reservation
+overload publishes its caller-aliased `Reserved` evidence last in the protected
+success cut, so interruption before or after ownership transfer is reconciled
+without guessing from an ordinary `out` result. Reserved and dormant
+tickets remain lifecycle subscribers, so a replacement or terminal publication
+cannot disappear while no operation is armed. Operation cancellation preserves
+that retained fact for the next exact rearm. Claim finalization drains an
+in-flight signal before releasing its borrowed descriptor. Family monitor
+capacity and caller completion-set operation capacity are separate; a shared
+completion-set wake may drive several claims, each of which rechecks only its
+own generation-stamped ticket. The API reserves Family monitor capacity before
+release. A higher-level protocol must separately pre-provision or dedicate the
+caller-owned completion-set operation capacity that activation consumes later.
+The generation-qualified `Admission_Join_Is_Immediate` query is the sole
+admission authority for deciding that exact cleanup cannot wait. A copied
+terminal observation cannot establish that fact because it does not prove that
+its generation is the admission's protected current epoch or that the slot has
+not been reused. If cancellation or family shutdown prevents a released queued
+request from entering its generation task, manager cleanup publishes one final
+`Joined` boundary with `Cancelled` or
+`Supervisor_Shutdown`. An internal manager allocation or rendezvous failure
+before the generation task starts uses the defensive `Abnormal_Completion`
+cause.
+One bounded prior-fact slot lets an exact probe of the replacement generation
+wait without consuming the older replacement boundary. Timeout or cancellation
+restores that boundary. A newer fact copied by the probe is also retained behind
+the prior boundary, including after normal finish, because it carries the
+epoch-ending evidence needed to reject later slot reuse.
+
+An immediate retained fact is first held by a controlled claim. Publication
+commits that claim; abort or unwinding restores it. Lifecycle advancement during
+the claim is retained as one bounded, coalesced follow-up boundary, so a
+replacement and its later terminal state remain observable in order without
+crossing the admission epoch after slot reuse.
+
+After a monitor matches, its no-longer-needed
 observed-handle storage carries the borrowed wake descriptor while the coherent
 terminal snapshot remains fixed. One exact nonblocking write and terminal
 ticket publication share a bounded protected cut; an interrupted attempt

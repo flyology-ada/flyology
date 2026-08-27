@@ -707,9 +707,16 @@ reserves and copies into the family's existing fixed slot storage and exposes
 the exact first-generation handle through the active claim. `Commit_Start`
 transfers exact admission ownership to a one-shot admission owner while
 preserving the same first-handle identity value and keeping the request blocked,
-and only `Release_To_Run` queues it. Rollback, abort, shutdown, and
+and only `Release_To_Run` queues it. Its explicit completion-token
+overload publishes the result and then the caller-owned token last in the same
+protected cut, so an interrupted external publication guard can reconcile
+without guessing whether execution was released. Rollback, abort, shutdown, and
 `Cancel_And_Join` retain one exact owner and never join a later slot generation.
-The child adds no slot or monitor arrays to `Family`; it reuses the configured
+The commit overload likewise publishes caller-aliased `Committed` evidence last
+in the protected ownership cut, so an interrupted downstream adapter can
+distinguish the active blocked admission from the still-owned prepared claim.
+The child adds no second slot or monitor-capacity table; bounded kind,
+admission, and deferred-fact metadata accompanies the configured
 `Maximum_Children` slots and `Monitor_Capacity` tickets. After matching, the
 ticket's no-longer-needed observed-handle storage carries the borrowed wake
 descriptor while the coherent terminal snapshot remains fixed. One exact
@@ -721,6 +728,40 @@ its wake is readable, and the producer retains no descriptor afterward. Its scop
 observing one generation's termination, callers rearm that same exact
 generation to learn whether a replacement was coherently published or the
 admission finally joined, without polling or a helper task.
+For a start protocol that must guarantee observation capacity before release,
+`Prepared_Observation_Claim` reserves one persistent monitor ticket while the
+admission remains blocked. Each `Activate_Exact` operation borrows that ticket
+for one generation and returns it to a dormant state on finish or cancellation.
+Its generation overload qualifies an older retained fact with the claim's
+opaque admission identity without sampling or following the Family's latest
+generation.
+`Request_Cancellation` applies only to the supplied exact current generation
+inside that admission, without exposing a handle constructor, waiting, or
+following a replacement.
+`Admission_Join_Is_Immediate` is the generation-qualified authority for deciding
+whether cleanup of that exact released admission can finish without waiting. A
+copied terminal observation alone is insufficient because it does not prove that
+its generation is the admission's protected current epoch or that the slot has
+not been reused. If a released request is cancelled or shutdown wins before its
+generation task starts, the final snapshot is published directly as `Joined`
+with `Cancelled` or
+`Supervisor_Shutdown`; an internal manager setup failure before the generation
+task starts uses the defensive `Abnormal_Completion` cause.
+The reservation overload publishes its caller-aliased `Reserved` evidence last
+in the protected success cut, so interruption before or after ownership transfer
+can be reconciled without inferring state from an ordinary `out` result.
+Replacement rearm therefore cannot fail because another observer consumed the
+ticket between generations. Reserved and dormant claims continue retaining an
+exact replacement or terminal fact even when no scoped operation is armed, and
+cancelling an operation does not consume that retained fact. Explicit claim
+release or claim finalization drains any in-flight signal before returning the
+monitor slot. Operation capacity remains a separate caller-owned completion-set
+obligation; several claims may share one set wake source without sharing claim
+state. If a caller probes the replacement generation before consuming the older
+replacement fact, timeout restores the older boundary unchanged. A newer
+terminal or replacement result may be copied to that exact probe, but remains
+queued behind the older fact as an epoch-ending marker; ordered rearm therefore
+cannot cross a reused Family slot.
 The website has a focused [supervision guide](https://flyology.org/guide/supervision/).
 
 `Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers

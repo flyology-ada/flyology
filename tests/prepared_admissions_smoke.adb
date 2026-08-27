@@ -37,8 +37,7 @@ procedure Prepared_Admissions_Smoke is
       State : Progress;
    end record;
 
-   procedure Execute
-     (State : in out Context; Control : not null access Generation_Control) is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
    begin
       State.State.Mark_Started;
       Mark_Ready (Control.all);
@@ -90,8 +89,7 @@ procedure Prepared_Admissions_Smoke is
         Monitor_Capacity    => 1);
 
    package Prepared is new
-     Families.Prepared_Admissions
-       (Request_Assignment_And_Cleanup_Are_Nonraising => True);
+     Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => True);
 
    use type Prepared.Commit_Result;
    use type Prepared.Prepare_Result;
@@ -113,8 +111,7 @@ procedure Prepared_Admissions_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
    declare
       Rejected : Boolean := False;
@@ -122,8 +119,7 @@ begin
       begin
          declare
             package Invalid_Prepared is new
-              Families.Prepared_Admissions
-                (Request_Assignment_And_Cleanup_Are_Nonraising => False);
+              Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => False);
             pragma Unreferenced (Invalid_Prepared);
          begin
             null;
@@ -133,8 +129,7 @@ begin
             Rejected := True;
       end;
       if not Rejected then
-         raise Program_Error
-           with "false request-assignment contract was accepted";
+         raise Program_Error with "false request-assignment contract was accepted";
       end if;
    end;
 
@@ -153,50 +148,38 @@ begin
    pragma Warnings (On, "variable ""Item"" is not modified in loop body");
 
    declare
-      Claim              : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Other              : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Exhausted          : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission          : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
-      Occupied           : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
+      Claim              : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Other              : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Exhausted          : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission          : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
+      Occupied           : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
       Foreign_Item       : aliased Families.Family;
-      Foreign_Claim      : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Foreign_Item'Access);
+      Foreign_Claim      : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Foreign_Item'Access);
       Foreign_Admission  : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Foreign_Item'Access);
       P_Result           : Prepared.Prepare_Result;
       C_Result           : Prepared.Commit_Result;
-      R_Result           : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
+      R_Result           : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
       Rolled_Back_Handle : Child_Handle;
       Prepared_Handle    : Child_Handle;
+      Release_Completed  : aliased Boolean := False;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
-      if P_Result /= Prepared.Start_Prepared
-        or else not Prepared.Is_Active (Claim)
-      then
-         raise Program_Error
-           with "prepared reservation did not publish its owner";
+      if P_Result /= Prepared.Start_Prepared or else not Prepared.Is_Active (Claim) then
+         raise Program_Error with "prepared reservation did not publish its owner";
       end if;
       Rolled_Back_Handle := Prepared.First_Handle (Claim);
       if Rolled_Back_Handle /= Families.Latest (Item, 40_000_000_000)
         or else not Is_Current (Rolled_Back_Handle, 40_000_000_000, 1)
       then
-         raise Program_Error
-           with "prepared claim did not expose its exact first handle";
+         raise Program_Error with "prepared claim did not expose its exact first handle";
       end if;
       Prepared.Rollback (Claim);
       if Prepared.Is_Active (Claim) then
          raise Program_Error with "prepared rollback retained claim ownership";
       end if;
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
-      if P_Result /= Prepared.Start_Prepared
-        or else not Prepared.Is_Active (Claim)
-      then
+      if P_Result /= Prepared.Start_Prepared or else not Prepared.Is_Active (Claim) then
          raise Program_Error with "prepared slot could not be reserved again";
       end if;
       Prepared_Handle := Prepared.First_Handle (Claim);
@@ -204,8 +187,7 @@ begin
         or else Prepared_Handle = Rolled_Back_Handle
         or else not Is_Current (Prepared_Handle, 40_000_000_000, 2)
       then
-         raise Program_Error
-           with "reprepared claim did not advance its exact first handle";
+         raise Program_Error with "reprepared claim did not advance its exact first handle";
       end if;
       declare
          Rejected : Boolean := False;
@@ -235,15 +217,11 @@ begin
       end;
       Prepared.Prepare_Start (Item'Access, 2, Other, P_Result);
       if P_Result /= Prepared.Start_Prepared then
-         raise Program_Error
-           with "second prepared reservation did not use remaining capacity";
+         raise Program_Error with "second prepared reservation did not use remaining capacity";
       end if;
       Prepared.Prepare_Start (Item'Access, 3, Exhausted, P_Result);
-      if P_Result /= Prepared.Start_Capacity_Exhausted
-        or else Prepared.Is_Active (Exhausted)
-      then
-         raise Program_Error
-           with "prepared reservation did not retain fixed capacity";
+      if P_Result /= Prepared.Start_Capacity_Exhausted or else Prepared.Is_Active (Exhausted) then
+         raise Program_Error with "prepared reservation did not retain fixed capacity";
       end if;
       Prepared.Commit_Start (Other, Occupied, C_Result);
       if C_Result /= Prepared.Start_Committed
@@ -261,12 +239,8 @@ begin
             when Program_Error =>
                Rejected := True;
          end;
-         if not Rejected
-           or else not Prepared.Is_Active (Claim)
-           or else not Prepared.Is_Active (Occupied)
-         then
-            raise Program_Error
-              with "occupied commit target changed ownership";
+         if not Rejected or else not Prepared.Is_Active (Claim) or else not Prepared.Is_Active (Occupied) then
+            raise Program_Error with "occupied commit target changed ownership";
          end if;
       end;
       Prepared.Cancel_And_Join (Occupied);
@@ -279,9 +253,7 @@ begin
             when Program_Error =>
                Rejected := True;
          end;
-         if not Rejected
-           or else not Prepared.Is_Active (Claim)
-           or else Prepared.Is_Active (Foreign_Admission)
+         if not Rejected or else not Prepared.Is_Active (Claim) or else Prepared.Is_Active (Foreign_Admission)
          then
             raise Program_Error with "foreign commit target changed ownership";
          end if;
@@ -297,25 +269,24 @@ begin
         or else not Prepared.Is_Active (Admission)
         or else Prepared.First_Handle (Admission) /= Prepared_Handle
       then
-         raise Program_Error
-           with "prepared commit did not preserve exact handle identity";
+         raise Program_Error with "prepared commit did not preserve exact handle identity";
       end if;
       delay 0.01;
       if State.State.Started then
-         raise Program_Error
-           with "committed blocked request executed before release";
+         raise Program_Error with "committed blocked request executed before release";
       end if;
 
-      Prepared.Release_To_Run (Admission, R_Result'Access);
+      Prepared.Release_To_Run (Admission, R_Result'Access, Release_Completed'Access);
       if R_Result /= Prepared.Admission_Released
+        or else not Release_Completed
         or else not Prepared.Is_Released (Admission)
       then
-         raise Program_Error
-           with "release did not publish execution ownership";
+         raise Program_Error with "release did not publish execution ownership";
       end if;
       R_Result := Prepared.Admission_Cancelled;
-      Prepared.Release_To_Run (Admission, R_Result'Access);
-      if R_Result /= Prepared.Admission_Released then
+      Release_Completed := False;
+      Prepared.Release_To_Run (Admission, R_Result'Access, Release_Completed'Access);
+      if R_Result /= Prepared.Admission_Released or else not Release_Completed then
          raise Program_Error with "repeated release was not idempotent";
       end if;
       loop
@@ -330,30 +301,22 @@ begin
          Set         : aliased Flyology.Operations.Completion_Set (1);
          Operation   : Prepared.Observation_Operation :=
            Prepared.Observe_Exact
-             (Set'Access,
-              Item'Access,
-              Admission,
-              Prepared.First_Handle (Admission),
-              Timeout => -1.0);
+             (Set'Access, Item'Access, Admission, Prepared.First_Handle (Admission), Timeout => -1.0);
          Observation : Generation_Observation;
       begin
          Prepared.Cancel_And_Join (Admission);
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Operation, Observation);
          if Observation.Status /= Generation_Terminated then
-            raise Program_Error
-              with "scoped admission observation lost exact termination";
+            raise Program_Error with "scoped admission observation lost exact termination";
          end if;
       end;
    end;
 
    declare
-      Claim     : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Closed    : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
+      Claim     : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Closed    : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
       P_Result  : Prepared.Prepare_Result;
       C_Result  : Prepared.Commit_Result;
    begin
@@ -367,14 +330,11 @@ begin
         or else not Prepared.Is_Active (Claim)
         or else Prepared.Is_Active (Admission)
       then
-         raise Program_Error
-           with "closed commit did not retain prepared ownership";
+         raise Program_Error with "closed commit did not retain prepared ownership";
       end if;
       Prepared.Rollback (Claim);
       Prepared.Prepare_Start (Item'Access, 4, Closed, P_Result);
-      if P_Result /= Prepared.Start_Admission_Closed
-        or else Prepared.Is_Active (Closed)
-      then
+      if P_Result /= Prepared.Start_Admission_Closed or else Prepared.Is_Active (Closed) then
          raise Program_Error with "closed prepare changed ownership";
       end if;
    end;

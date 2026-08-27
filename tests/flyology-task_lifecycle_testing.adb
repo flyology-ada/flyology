@@ -21,8 +21,7 @@ package body Flyology.Task_Lifecycle_Testing is
    end Arm;
 
    procedure Wait_Reached (Point : Barrier_Point) is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while not Test_Hooks.Reached (Convert (Point)) loop
          if Ada.Real_Time.Clock >= Deadline then
@@ -44,6 +43,11 @@ package body Flyology.Task_Lifecycle_Testing is
    begin
       Test_Hooks.Force_Next_Prepared_Generation_Final;
    end Force_Next_Prepared_Generation_Final;
+
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted is
+   begin
+      Test_Hooks.Force_Next_Prepared_Monitor_Identity_Exhausted;
+   end Force_Next_Prepared_Monitor_Identity_Exhausted;
 
    procedure Interrupt_Next_Admission_Signal is
    begin
