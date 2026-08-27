@@ -7,6 +7,7 @@ test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
 task_lifecycle_test_subdir=behavioral-task-lifecycle-hooks
+channel_test_subdir=behavioral-channel-hooks
 structured_server_test_subdir=behavioral-structured-server-hooks
 wall_clock_test_subdir=behavioral-wall-clock-hooks
 socket_test_subdir=behavioral-socket-hooks
@@ -16,6 +17,7 @@ test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
 task_lifecycle_test_bin="$project_root/tests/bin/$task_lifecycle_test_subdir"
+channel_test_bin="$project_root/tests/bin/$channel_test_subdir"
 wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
 subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
@@ -136,6 +138,8 @@ FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
 export FLYOLOGY_SUBPROCESS_TEST_HOOKS
 FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=false
 export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+FLYOLOGY_CHANNEL_TEST_HOOKS=false
+export FLYOLOGY_CHANNEL_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
 "$alr" build
@@ -493,6 +497,8 @@ prepared_admission_cancellation_smoke
 prepared_admission_generation_smoke
 task_result_attach_abort_smoke'
 
+channel_hook_mains=channel_operations_smoke
+
 structured_server_hook_mains=structured_server_abort_smoke
 
 wall_clock_hook_mains=flyology-wall_clock_testing-smoke
@@ -507,7 +513,7 @@ file_watch_hook_mains=file_watches_recovery_smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|subprocess_smoke|file_watches_recovery_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -537,6 +543,7 @@ fi
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
+unset FLYOLOGY_CHANNEL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
@@ -558,6 +565,11 @@ FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
 export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
 compile_test_mains "$task_lifecycle_test_subdir" "$task_lifecycle_hook_mains"
 unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+
+FLYOLOGY_CHANNEL_TEST_HOOKS=true
+export FLYOLOGY_CHANNEL_TEST_HOOKS
+compile_test_mains "$channel_test_subdir" "$channel_hook_mains"
+unset FLYOLOGY_CHANNEL_TEST_HOOKS
 
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
 export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
@@ -646,6 +658,12 @@ link_test_mains \
   "$task_lifecycle_hook_mains"
 unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
 
+FLYOLOGY_CHANNEL_TEST_HOOKS=true
+export FLYOLOGY_CHANNEL_TEST_HOOKS
+link_test_mains \
+  "$channel_test_subdir" "$project_root/build/rts" "$channel_hook_mains"
+unset FLYOLOGY_CHANNEL_TEST_HOOKS
+
 FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
 export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
 link_test_mains \
@@ -688,6 +706,9 @@ for test_main in $ordinary_mains; do
       ;;
     flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
       current_test_bin=$task_lifecycle_test_bin
+      ;;
+    channel_operations_smoke)
+      current_test_bin=$channel_test_bin
       ;;
     subprocess_smoke)
       current_test_bin=$subprocess_test_bin
@@ -929,6 +950,7 @@ fi
 unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
 unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
 unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
+unset FLYOLOGY_CHANNEL_TEST_HOOKS || :
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :

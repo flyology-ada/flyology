@@ -1,5 +1,6 @@
 with Flyology.Connection_Test_Hooks;
 with Flyology.Buffer_Test_Hooks;
+with Flyology.Channel_Test_Hooks;
 with Flyology.DNS_Test_Observations;
 with Flyology.File_Watch_Test_Hooks;
 with Flyology.Structured_Server_Test_Hooks;
@@ -15,6 +16,9 @@ procedure Flyology.Test_Hook_Elision_Probe is
 begin
    if Flyology.Buffer_Test_Hooks.Enabled then
       Flyology.Buffer_Test_Hooks.Arm_Next_Acquisition_Near_Exhaustion;
+   end if;
+   if Flyology.Channel_Test_Hooks.Enabled then
+      Flyology.Channel_Test_Hooks.Before_Send_Barrier;
    end if;
    if Flyology.DNS_Test_Observations.Enabled then
       Flyology.DNS_Test_Observations.Reset;

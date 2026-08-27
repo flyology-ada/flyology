@@ -86,20 +86,15 @@ package Flyology.Channels.Bounded is
       --  @param Result Item_Sent, Channel_Full, or Send_Closed
       procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result);
 
-      --  Attempt to append without waiting and publish abort-stable ownership
-      --  evidence. Accepted is set False before validation and True only after
-      --  the complete item and queue state have been installed. Unlike Result,
-      --  the caller-aliased evidence remains authoritative if the calling task
-      --  is aborted after the protected acceptance cut but before ordinary
-      --  return copy-out. True means the channel owns exactly one copy of Value;
-      --  False means it owns none. Once True is published, a later propagated
-      --  internal notification failure does not revoke acceptance; ordinary
-      --  Result copy-out may then be unavailable.
+      --  @exclude Internal half of the abort-stable package-level Try_Send.
+      --  Accepted must already be False. On success it becomes True only after
+      --  the complete item and queue state have been installed.
       --  @param Value Value to copy if capacity is available
       --  @param Accepted Caller-owned evidence that the channel accepted Value
       --  @param Result Item_Sent, Channel_Full, or Send_Closed
-      procedure Try_Send
-        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result);
+      procedure Try_Send_After_Clear
+        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result)
+      with Pre => not Accepted.all;
 
       --  Attempt to remove the oldest value without waiting. Value is assigned
       --  only when Result is Item_Received.
@@ -121,6 +116,25 @@ package Flyology.Channels.Bounded is
       Count   : Natural := 0;  --  Occupied slots
       Stopped : Boolean := False;  --  Terminal close state
    end Channel;
+
+   --  Attempt to append without waiting and publish abort-stable ownership
+   --  evidence. Accepted is cleared before attempting to enter the protected
+   --  channel, then becomes True only after the complete item and queue state
+   --  have been installed. Unlike Result, the caller-aliased evidence remains
+   --  authoritative if the calling task is aborted at either boundary. True
+   --  means the channel owns exactly one copy of Value; False means it owns
+   --  none. Once True is published, a later propagated internal notification
+   --  failure does not revoke acceptance; ordinary Result copy-out may then be
+   --  unavailable.
+   --  @param Object Channel on which to attempt the send
+   --  @param Value Value to copy if capacity is available
+   --  @param Accepted Caller-owned evidence that the channel accepted Value
+   --  @param Result Item_Sent, Channel_Full, or Send_Closed
+   procedure Try_Send
+     (Object   : in out Channel;
+      Value    : Element_Type;
+      Accepted : not null access Boolean;
+      Result   : out Try_Send_Result);
 
    --  Append Value within one relative deadline. Negative Timeout waits
    --  indefinitely; zero is an immediate attempt. Once the protected Send is

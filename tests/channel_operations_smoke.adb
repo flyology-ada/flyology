@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Text_IO;
 with Flyology;
+with Flyology.Channel_Testing;
 with Flyology.Channels.Bounded;
 with Flyology.IO.Timers;
 with Flyology.Operations;
@@ -50,6 +51,46 @@ procedure Channel_Operations_Smoke is
    task body Runner is
       Passed : Boolean := True;
    begin
+      --  Clearing happens before the protected call can queue. Aborting at
+      --  that exact boundary therefore leaves authoritative false evidence
+      --  and no buffered value, even when the token arrived stale and true.
+      declare
+         Channel  : Integer_Channels.Channel (Capacity => 1);
+         Accepted : aliased Boolean := True;
+         Result   : Integer_Channels.Try_Send_Result := Integer_Channels.Send_Closed;
+
+         function Arm return Boolean is
+         begin
+            Flyology.Channel_Testing.Reset;
+            Flyology.Channel_Testing.Arm_Before_Send;
+            return True;
+         end Arm;
+
+         Armed : constant Boolean := Arm;
+         pragma Unreferenced (Armed);
+
+         task Sender;
+
+         task body Sender is
+         begin
+            Integer_Channels.Try_Send (Channel, 11, Accepted'Access, Result);
+         end Sender;
+
+         Value  : Integer := 0;
+         Status : Integer_Channels.Try_Receive_Result;
+      begin
+         Flyology.Channel_Testing.Wait_Before_Send;
+         Passed := Passed and then not Accepted;
+         abort Sender;
+         Flyology.Channel_Testing.Release_Before_Send;
+         while not Sender'Terminated loop
+            delay 0.0;
+         end loop;
+         Channel.Try_Receive (Value, Status);
+         Passed := Passed and then not Accepted and then Status = Integer_Channels.Channel_Empty;
+         Flyology.Channel_Testing.Reset;
+      end;
+
       --  Caller-aliased send evidence survives abort after the protected
       --  acceptance cut even though ordinary out copy-out never completes.
       declare
@@ -93,7 +134,7 @@ procedure Channel_Operations_Smoke is
          procedure Send_Then_Publish (Result : out Integer_Channels.Try_Send_Result) is
             Local_Result : Integer_Channels.Try_Send_Result;
          begin
-            Channel.Try_Send (17, Accepted'Access, Local_Result);
+            Integer_Channels.Try_Send (Channel, 17, Accepted'Access, Local_Result);
             Barrier.Arrive;
             Barrier.Wait_For_Release;
             Result := Local_Result;
@@ -128,14 +169,14 @@ procedure Channel_Operations_Smoke is
          Received : Integer_Channels.Try_Receive_Result;
          Value    : Integer := 0;
       begin
-         Channel.Try_Send (1, Accepted'Access, Status);
+         Integer_Channels.Try_Send (Channel, 1, Accepted'Access, Status);
          Passed := Passed and then Accepted and then Status = Integer_Channels.Item_Sent;
          Accepted := True;
-         Channel.Try_Send (2, Accepted'Access, Status);
+         Integer_Channels.Try_Send (Channel, 2, Accepted'Access, Status);
          Passed := Passed and then not Accepted and then Status = Integer_Channels.Channel_Full;
          Channel.Close;
          Accepted := True;
-         Channel.Try_Send (3, Accepted'Access, Status);
+         Integer_Channels.Try_Send (Channel, 3, Accepted'Access, Status);
          Passed := Passed and then not Accepted and then Status = Integer_Channels.Send_Closed;
          Channel.Try_Receive (Value, Received);
          Passed := Passed and then Received = Integer_Channels.Item_Received and then Value = 1;
