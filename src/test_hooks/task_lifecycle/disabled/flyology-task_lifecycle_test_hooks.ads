@@ -56,9 +56,7 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
      Import,
      External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_generation_consume";
    procedure Force_Next_Prepared_Monitor_Identity_Exhausted
-   with
-     Import,
-     External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_monitor_arm";
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_prepared_monitor_arm";
    function Consume_Prepared_Monitor_Identity_Exhausted return Boolean
    with
      Import,

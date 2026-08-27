@@ -53,9 +53,7 @@ procedure Prepared_Admission_Cancellation_Smoke is
       State : Progress;
    end record;
 
-   procedure Execute
-     (State : in out Context; Control : not null access Generation_Control)
-   is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
       Attempt : Positive;
    begin
       State.State.Begin_Generation (Attempt);
@@ -122,8 +120,7 @@ procedure Prepared_Admission_Cancellation_Smoke is
         Monitor_Capacity    => 1);
 
    package Prepared is new
-     Families.Prepared_Admissions
-       (Request_Assignment_And_Cleanup_Are_Nonraising => True);
+     Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => True);
 
    use type Prepared.Observation_Reserve_Result;
 
@@ -147,8 +144,7 @@ procedure Prepared_Admission_Cancellation_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
    Owner.Start;
    pragma Warnings (Off, "variable ""Item"" is not modified in loop body");
@@ -164,45 +160,38 @@ begin
    pragma Warnings (On, "variable ""Item"" is not modified in loop body");
 
    declare
-      Claim       : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission   : Prepared.Started_Admission :=
+      Claim                    : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission                : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
-      Monitor     : Prepared.Prepared_Observation_Claim :=
+      Monitor                  : Prepared.Prepared_Observation_Claim :=
         Prepared.Vacant_Observation_Claim (Item'Access);
-      Set         : aliased Flyology.Operations.Completion_Set (1);
-      Wait        : Prepared.Observation_Operation
-        (Set'Access, Item'Access);
-      P_Result    : Prepared.Prepare_Result;
-      C_Result    : Prepared.Commit_Result;
-      R_Result    : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
-      Applied     : aliased Boolean := True;
-      First       : Child_Handle;
-      Replacement : Child_Handle;
-      Observation : Generation_Observation;
-      Reused      : Child_Handle;
-      Reused_Claim : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Reused_Admission : Prepared.Started_Admission :=
+      Set                      : aliased Flyology.Operations.Completion_Set (1);
+      Wait                     : Prepared.Observation_Operation (Set'Access, Item'Access);
+      P_Result                 : Prepared.Prepare_Result;
+      C_Result                 : Prepared.Commit_Result;
+      R_Result                 : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
+      Applied                  : aliased Boolean := True;
+      First                    : Child_Handle;
+      Replacement              : Child_Handle;
+      Observation              : Generation_Observation;
+      Reused                   : Child_Handle;
+      Reused_Claim             : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Reused_Admission         : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
-      Reused_Monitor : Prepared.Prepared_Observation_Claim :=
+      Reused_Monitor           : Prepared.Prepared_Observation_Claim :=
         Prepared.Vacant_Observation_Claim (Item'Access);
-      Reused_Set : aliased Flyology.Operations.Completion_Set (1);
-      Reused_Wait : Prepared.Observation_Operation
-        (Reused_Set'Access, Item'Access);
-      O_Result : Prepared.Observation_Reserve_Result;
-      Attempts_Before_Reused : Natural;
-      Shutdown_Claim : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Shutdown_Admission : Prepared.Started_Admission :=
+      Reused_Set               : aliased Flyology.Operations.Completion_Set (1);
+      Reused_Wait              : Prepared.Observation_Operation (Reused_Set'Access, Item'Access);
+      O_Result                 : Prepared.Observation_Reserve_Result;
+      Attempts_Before_Reused   : Natural;
+      Shutdown_Claim           : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Shutdown_Admission       : Prepared.Started_Admission :=
         Prepared.Vacant_Started_Admission (Item'Access);
-      Shutdown_Monitor : Prepared.Prepared_Observation_Claim :=
+      Shutdown_Monitor         : Prepared.Prepared_Observation_Claim :=
         Prepared.Vacant_Observation_Claim (Item'Access);
-      Shutdown_Set : aliased Flyology.Operations.Completion_Set (1);
-      Shutdown_Wait : Prepared.Observation_Operation
-        (Shutdown_Set'Access, Item'Access);
-      Shutdown_Handle : Child_Handle;
+      Shutdown_Set             : aliased Flyology.Operations.Completion_Set (1);
+      Shutdown_Wait            : Prepared.Observation_Operation (Shutdown_Set'Access, Item'Access);
+      Shutdown_Handle          : Child_Handle;
       Attempts_Before_Shutdown : Natural;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
@@ -215,8 +204,7 @@ begin
          raise Program_Error with "cancellation-test admission setup failed";
       end if;
       First := Prepared.First_Handle (Admission);
-      Prepared.Request_Cancellation
-        (Admission, Current_Generation (First), Applied'Access);
+      Prepared.Request_Cancellation (Admission, Current_Generation (First), Applied'Access);
       if Applied then
          raise Program_Error with "blocked admission accepted cancellation";
       end if;
@@ -251,8 +239,7 @@ begin
          raise Program_Error with "replacement cancellation target did not advance";
       end if;
 
-      Prepared.Activate_Exact
-        (Monitor, Current_Generation (First), 0.0, Wait);
+      Prepared.Activate_Exact (Monitor, Current_Generation (First), 0.0, Wait);
       Flyology.Operations.Wait_All (Set);
       Prepared.Finish (Wait, Observation);
       if Observation.Status /= Generation_Terminated
@@ -260,8 +247,7 @@ begin
       then
          raise Program_Error with "first-generation fact was not retained";
       end if;
-      Prepared.Activate_Exact
-        (Monitor, Current_Generation (First), 0.0, Wait);
+      Prepared.Activate_Exact (Monitor, Current_Generation (First), 0.0, Wait);
       Flyology.Operations.Wait_All (Set);
       Prepared.Finish (Wait, Observation);
       if Observation.Status /= Generation_Replaced
@@ -270,8 +256,7 @@ begin
          raise Program_Error with "exact first-generation rearm did not reveal replacement";
       end if;
 
-      Prepared.Request_Cancellation
-        (Admission, Current_Generation (First), Applied'Access);
+      Prepared.Request_Cancellation (Admission, Current_Generation (First), Applied'Access);
       if Applied then
          raise Program_Error with "stale first-generation cancellation was applied";
       end if;
@@ -287,8 +272,7 @@ begin
          task body Canceller is
          begin
             accept Start;
-            Prepared.Request_Cancellation
-              (Admission, Current_Generation (Replacement), Applied'Access);
+            Prepared.Request_Cancellation (Admission, Current_Generation (Replacement), Applied'Access);
          end Canceller;
       begin
          Canceller.Start;
@@ -308,9 +292,7 @@ begin
       Prepared.Activate_Exact (Monitor, Replacement, -1.0, Wait);
       Flyology.Operations.Wait_All (Set);
       Prepared.Finish (Wait, Observation);
-      while Observation.Status = Generation_Terminated
-        and then Observation.Snapshot.State /= Joined
-      loop
+      while Observation.Status = Generation_Terminated and then Observation.Snapshot.State /= Joined loop
          Prepared.Activate_Exact (Monitor, Replacement, -1.0, Wait);
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Wait, Observation);
@@ -320,17 +302,12 @@ begin
         or else Observation.Snapshot.Termination.Kind /= Cancelled
       then
          raise Program_Error with "replacement cancellation did not terminate exactly";
-      elsif Prepared.Admission_Join_Is_Immediate
-        (Admission, Current_Generation (First))
-      then
+      elsif Prepared.Admission_Join_Is_Immediate (Admission, Current_Generation (First)) then
          raise Program_Error with "replaced generation gained final join authority";
-      elsif not Prepared.Admission_Join_Is_Immediate
-        (Admission, Current_Generation (Replacement))
-      then
+      elsif not Prepared.Admission_Join_Is_Immediate (Admission, Current_Generation (Replacement)) then
          raise Program_Error with "final replacement lacked exact join authority";
       end if;
-      Prepared.Request_Cancellation
-        (Admission, Current_Generation (Replacement), Applied'Access);
+      Prepared.Request_Cancellation (Admission, Current_Generation (Replacement), Applied'Access);
       if Applied then
          raise Program_Error with "terminal generation cancellation was reapplied";
       end if;
@@ -339,14 +316,12 @@ begin
 
       Flyology.Task_Lifecycle_Testing.Reset;
       begin
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Prepared.Prepare_Start (Item'Access, 2, Reused_Claim, P_Result);
          Prepared.Commit_Start (Reused_Claim, Reused_Admission, C_Result);
-         Prepared.Reserve_Observation
-           (Reused_Admission, Reused_Monitor, O_Result);
+         Prepared.Reserve_Observation (Reused_Admission, Reused_Monitor, O_Result);
          if P_Result /= Prepared.Start_Prepared
            or else C_Result /= Prepared.Start_Committed
            or else O_Result /= Prepared.Observation_Reserved
@@ -359,24 +334,17 @@ begin
          if R_Result /= Prepared.Admission_Released then
             raise Program_Error with "queued cancellation reuse did not release";
          end if;
-         Prepared.Request_Cancellation
-           (Admission, Current_Generation (Reused), Applied'Access);
+         Prepared.Request_Cancellation (Admission, Current_Generation (Reused), Applied'Access);
          if Applied then
             raise Program_Error with "inactive admission crossed slot reuse";
          end if;
-         Prepared.Request_Cancellation
-           (Reused_Admission, Current_Generation (Reused), Applied'Access);
+         Prepared.Request_Cancellation (Reused_Admission, Current_Generation (Reused), Applied'Access);
          if not Applied then
             raise Program_Error with "released queued cancellation was not applied";
          end if;
          Attempts_Before_Reused := State.State.Attempts;
-         Prepared.Activate_Exact
-           (Reused_Monitor,
-            Current_Generation (Reused),
-            -1.0,
-            Reused_Wait);
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
+         Prepared.Activate_Exact (Reused_Monitor, Current_Generation (Reused), -1.0, Reused_Wait);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Flyology.Operations.Wait_All (Reused_Set);
          Prepared.Finish (Reused_Wait, Observation);
          if Observation.Status /= Generation_Terminated
@@ -386,9 +354,7 @@ begin
            or else State.State.Attempts /= Attempts_Before_Reused
          then
             raise Program_Error with "queued cancellation did not publish exact no-run completion";
-         elsif not Prepared.Admission_Join_Is_Immediate
-           (Reused_Admission, Current_Generation (Reused))
-         then
+         elsif not Prepared.Admission_Join_Is_Immediate (Reused_Admission, Current_Generation (Reused)) then
             raise Program_Error with "queued cancellation did not publish immediate join authority";
          end if;
          Observation := Families.Wait_Termination (Item, Reused, Timeout => 2.0);
@@ -397,9 +363,7 @@ begin
            or else Observation.Snapshot.Termination.Kind /= Cancelled
          then
             raise Program_Error with "reused cancellation witness did not terminate";
-         elsif Prepared.Admission_Join_Is_Immediate
-           (Admission, Current_Generation (Replacement))
-         then
+         elsif Prepared.Admission_Join_Is_Immediate (Admission, Current_Generation (Replacement)) then
             raise Program_Error with "inactive admission crossed completed slot reuse";
          end if;
          Prepared.Cancel_And_Join (Reused_Admission);
@@ -414,14 +378,12 @@ begin
       end;
 
       begin
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Prepared.Prepare_Start (Item'Access, 3, Shutdown_Claim, P_Result);
          Prepared.Commit_Start (Shutdown_Claim, Shutdown_Admission, C_Result);
-         Prepared.Reserve_Observation
-           (Shutdown_Admission, Shutdown_Monitor, O_Result);
+         Prepared.Reserve_Observation (Shutdown_Admission, Shutdown_Monitor, O_Result);
          if P_Result /= Prepared.Start_Prepared
            or else C_Result /= Prepared.Start_Committed
            or else O_Result /= Prepared.Observation_Reserved
@@ -436,13 +398,9 @@ begin
          end if;
          Attempts_Before_Shutdown := State.State.Attempts;
          Prepared.Activate_Exact
-           (Shutdown_Monitor,
-            Current_Generation (Shutdown_Handle),
-            -1.0,
-            Shutdown_Wait);
+           (Shutdown_Monitor, Current_Generation (Shutdown_Handle), -1.0, Shutdown_Wait);
          Families.Request_Shutdown (Item);
-         Flyology.Task_Lifecycle_Testing.Release
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
+         Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Flyology.Operations.Wait_All (Shutdown_Set);
          Prepared.Finish (Shutdown_Wait, Observation);
          if Observation.Status /= Generation_Terminated
@@ -453,7 +411,7 @@ begin
          then
             raise Program_Error with "queued shutdown did not publish exact no-run completion";
          elsif not Prepared.Admission_Join_Is_Immediate
-           (Shutdown_Admission, Current_Generation (Shutdown_Handle))
+                     (Shutdown_Admission, Current_Generation (Shutdown_Handle))
          then
             raise Program_Error with "queued shutdown lacked immediate join authority";
          end if;
@@ -487,25 +445,20 @@ begin
          accept Join;
       end Second_Owner;
 
-      Claim : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Second_Item'Access);
-      Admission : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Second_Item'Access);
-      Monitor : Prepared.Prepared_Observation_Claim :=
+      Claim           : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Second_Item'Access);
+      Admission       : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Second_Item'Access);
+      Monitor         : Prepared.Prepared_Observation_Claim :=
         Prepared.Vacant_Observation_Claim (Second_Item'Access);
-      Set : aliased Flyology.Operations.Completion_Set (1);
-      Wait : Prepared.Observation_Operation
-        (Set'Access, Second_Item'Access);
-      P_Result : Prepared.Prepare_Result;
-      C_Result : Prepared.Commit_Result;
-      O_Result : Prepared.Observation_Reserve_Result;
-      R_Result : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
-      First : Child_Handle;
-      Observation : Generation_Observation;
-      Prior_Cause : Termination_Kind := No_Termination;
-      Second_Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Set             : aliased Flyology.Operations.Completion_Set (1);
+      Wait            : Prepared.Observation_Operation (Set'Access, Second_Item'Access);
+      P_Result        : Prepared.Prepare_Result;
+      C_Result        : Prepared.Commit_Result;
+      O_Result        : Prepared.Observation_Reserve_Result;
+      R_Result        : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
+      First           : Child_Handle;
+      Observation     : Generation_Observation;
+      Prior_Cause     : Termination_Kind := No_Termination;
+      Second_Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
    begin
       Second_Owner.Start;
       loop
@@ -537,13 +490,11 @@ begin
 
       Flyology.Task_Lifecycle_Testing.Reset;
       begin
-         Flyology.Task_Lifecycle_Testing.Arm
-           (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
+         Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
          Second_State.State.Permit_First_Failure;
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
-         Prepared.Activate_Exact
-           (Monitor, Current_Generation (First), 0.0, Wait);
+         Prepared.Activate_Exact (Monitor, Current_Generation (First), 0.0, Wait);
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Wait, Observation);
          if Observation.Status /= Generation_Terminated
@@ -558,8 +509,7 @@ begin
          Families.Request_Shutdown (Second_Item);
          Flyology.Task_Lifecycle_Testing.Release
            (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
-         Prepared.Activate_Exact
-           (Monitor, Current_Generation (First), -1.0, Wait);
+         Prepared.Activate_Exact (Monitor, Current_Generation (First), -1.0, Wait);
          Flyology.Operations.Wait_All (Set);
          Prepared.Finish (Wait, Observation);
          if Observation.Status /= Generation_Terminated
@@ -569,13 +519,10 @@ begin
            or else Second_State.State.Attempts /= 1
          then
             raise Program_Error with "rejected replacement changed the retained generation";
-         elsif not Prepared.Admission_Join_Is_Immediate
-           (Admission, Current_Generation (First))
-         then
+         elsif not Prepared.Admission_Join_Is_Immediate (Admission, Current_Generation (First)) then
             raise Program_Error with "rejected replacement lacked exact join authority";
          elsif Current_Generation (First) /= Generation'Last
-           and then Prepared.Admission_Join_Is_Immediate
-             (Admission, Current_Generation (First) + 1)
+           and then Prepared.Admission_Join_Is_Immediate (Admission, Current_Generation (First) + 1)
          then
             raise Program_Error with "rejected replacement invented successor join authority";
          end if;

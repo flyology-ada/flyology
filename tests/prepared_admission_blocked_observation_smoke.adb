@@ -18,9 +18,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
    type Request is new Positive;
    type Context is limited null record;
 
-   procedure Execute
-     (State : in out Context; Control : not null access Generation_Control)
-   is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
       pragma Unreferenced (State);
    begin
       Mark_Ready (Control.all);
@@ -72,8 +70,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
         Monitor_Capacity    => 1);
 
    package Prepared is new
-     Families.Prepared_Admissions
-       (Request_Assignment_And_Cleanup_Are_Nonraising => True);
+     Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => True);
 
    use type Prepared.Commit_Result;
    use type Prepared.Prepare_Result;
@@ -97,36 +94,29 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
    end Owner;
 
    procedure Exercise (Shutdown_First : Boolean) is
-      Claim     : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
+      Claim             : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission         : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
       Observation_Claim : Prepared.Prepared_Observation_Claim :=
         Prepared.Vacant_Observation_Claim (Item'Access);
-      P_Result  : Prepared.Prepare_Result;
-      C_Result  : Prepared.Commit_Result;
-      O_Result  : Prepared.Observation_Reserve_Result;
-      R_Result  : aliased Prepared.Release_Result :=
-        Prepared.Admission_Cancelled;
+      P_Result          : Prepared.Prepare_Result;
+      C_Result          : Prepared.Commit_Result;
+      O_Result          : Prepared.Observation_Reserve_Result;
+      R_Result          : aliased Prepared.Release_Result := Prepared.Admission_Cancelled;
       Release_Completed : aliased Boolean := False;
-      Handle    : Child_Handle;
-      Set       : aliased Flyology.Operations.Completion_Set (1);
-      Wait      : Prepared.Observation_Operation (Set'Access, Item'Access);
-      Observation : Generation_Observation;
+      Handle            : Child_Handle;
+      Set               : aliased Flyology.Operations.Completion_Set (1);
+      Wait              : Prepared.Observation_Operation (Set'Access, Item'Access);
+      Observation       : Generation_Observation;
       Capacity_Reserved : Boolean := False;
    begin
       Prepared.Prepare_Start (Item'Access, 1, Claim, P_Result);
       Prepared.Commit_Start (Claim, Admission, C_Result);
-      if P_Result /= Prepared.Start_Prepared
-        or else C_Result /= Prepared.Start_Committed
-      then
+      if P_Result /= Prepared.Start_Prepared or else C_Result /= Prepared.Start_Committed then
          raise Program_Error with "committed-blocked admission setup failed";
       end if;
       Handle := Prepared.First_Handle (Admission);
       Prepared.Reserve_Observation (Admission, Observation_Claim, O_Result);
-      if O_Result /= Prepared.Observation_Reserved
-        or else not Prepared.Is_Active (Observation_Claim)
-      then
+      if O_Result /= Prepared.Observation_Reserved or else not Prepared.Is_Active (Observation_Claim) then
          raise Program_Error with "blocked observation capacity was not reserved";
       end if;
       begin
@@ -141,22 +131,15 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
 
       if Shutdown_First then
          Families.Request_Shutdown (Item);
-         Prepared.Release_To_Run
-           (Admission, R_Result'Access, Release_Completed'Access);
-         if R_Result /= Prepared.Admission_Cancelled
-           or else not Release_Completed
-         then
-            raise Program_Error
-              with "shutdown release did not publish completed cancellation";
+         Prepared.Release_To_Run (Admission, R_Result'Access, Release_Completed'Access);
+         if R_Result /= Prepared.Admission_Cancelled or else not Release_Completed then
+            raise Program_Error with "shutdown release did not publish completed cancellation";
          end if;
       end if;
 
       Prepared.Cancel_And_Join (Admission);
-      if Shutdown_First
-        and then Current_Generation (Handle) = Generation'First
-      then
-         raise Program_Error
-           with "second same-slot admission did not advance its first generation";
+      if Shutdown_First and then Current_Generation (Handle) = Generation'First then
+         raise Program_Error with "second same-slot admission did not advance its first generation";
       end if;
       if Shutdown_First then
          declare
@@ -177,8 +160,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
               or else Flyology.Operations.Is_Terminal (Wait)
               or else not Prepared.Is_Active (Observation_Claim)
             then
-               raise Program_Error
-                 with "generation overload accepted a fact below the admission epoch";
+               raise Program_Error with "generation overload accepted a fact below the admission epoch";
             end if;
          end;
       end if;
@@ -190,8 +172,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
         or else Observation.Snapshot.Termination.Kind
                 /= (if Shutdown_First then Supervisor_Shutdown else Cancelled)
       then
-         raise Program_Error
-           with "committed-blocked cancellation stranded exact observation";
+         raise Program_Error with "committed-blocked cancellation stranded exact observation";
       end if;
       Prepared.Release_Observation_Claim (Observation_Claim);
       if Prepared.Is_Active (Observation_Claim) then
@@ -208,8 +189,7 @@ procedure Prepared_Admission_Blocked_Observation_Smoke is
          raise;
    end Exercise;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
    Owner.Start;
    --  Owner changes Item concurrently while this task waits for admission.

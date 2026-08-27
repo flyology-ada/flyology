@@ -51,9 +51,7 @@ procedure Prepared_Admission_Immediate_Abort_Smoke is
       State : Progress;
    end record;
 
-   procedure Execute
-     (State : in out Context; Control : not null access Generation_Control)
-   is
+   procedure Execute (State : in out Context; Control : not null access Generation_Control) is
       Attempt : Natural;
    begin
       State.State.Begin_Generation;
@@ -111,8 +109,7 @@ procedure Prepared_Admission_Immediate_Abort_Smoke is
         Monitor_Capacity    => 1);
 
    package Prepared is new
-     Families.Prepared_Admissions
-       (Request_Assignment_And_Cleanup_Are_Nonraising => True);
+     Families.Prepared_Admissions (Request_Assignment_And_Cleanup_Are_Nonraising => True);
 
    use type Prepared.Commit_Result;
    use type Prepared.Observation_Reserve_Result;
@@ -135,8 +132,7 @@ procedure Prepared_Admission_Immediate_Abort_Smoke is
       accept Join;
    end Owner;
 
-   Deadline : constant Ada.Real_Time.Time :=
-     Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
 begin
    Flyology.Task_Lifecycle_Testing.Reset;
    Owner.Start;
@@ -148,12 +144,9 @@ begin
    end loop;
 
    declare
-      Claim       : Prepared.Start_Claim :=
-        Prepared.Vacant_Start_Claim (Item'Access);
-      Admission   : Prepared.Started_Admission :=
-        Prepared.Vacant_Started_Admission (Item'Access);
-      Monitor     : Prepared.Prepared_Observation_Claim :=
-        Prepared.Vacant_Observation_Claim (Item'Access);
+      Claim       : Prepared.Start_Claim := Prepared.Vacant_Start_Claim (Item'Access);
+      Admission   : Prepared.Started_Admission := Prepared.Vacant_Started_Admission (Item'Access);
+      Monitor     : Prepared.Prepared_Observation_Claim := Prepared.Vacant_Observation_Claim (Item'Access);
       P_Result    : Prepared.Prepare_Result;
       C_Result    : Prepared.Commit_Result;
       O_Result    : Prepared.Observation_Reserve_Result;
@@ -174,8 +167,7 @@ begin
          accept Start;
          declare
             Local_Set  : aliased Flyology.Operations.Completion_Set (1);
-            Local_Wait : Prepared.Observation_Operation
-              (Local_Set'Access, Item'Access);
+            Local_Wait : Prepared.Observation_Operation (Local_Set'Access, Item'Access);
          begin
             Prepared.Activate_Exact (Monitor, First, -1.0, Local_Wait);
             Flyology.Operations.Wait_All (Local_Set);
@@ -201,8 +193,7 @@ begin
          accept Start;
          declare
             Local_Set  : aliased Flyology.Operations.Completion_Set (1);
-            Local_Wait : Prepared.Observation_Operation
-              (Local_Set'Access, Item'Access);
+            Local_Wait : Prepared.Observation_Operation (Local_Set'Access, Item'Access);
          begin
             Prepared.Activate_Exact (Monitor, First, -1.0, Local_Wait);
             Flyology.Operations.Wait_All (Local_Set);
@@ -229,10 +220,8 @@ begin
          delay 0.001;
       end loop;
 
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
       State.State.Permit_First_Failure;
       Flyology.Task_Lifecycle_Testing.Wait_Reached
         (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
@@ -240,8 +229,7 @@ begin
       Flyology.Task_Lifecycle_Testing.Wait_Reached
         (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
 
-      Flyology.Task_Lifecycle_Testing.Release
-        (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
+      Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Before_Replacement);
       while State.State.Attempts /= 2 loop
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "replacement immediate-claim generation did not start";
@@ -258,8 +246,7 @@ begin
       end loop;
 
       abort Activator;
-      Flyology.Task_Lifecycle_Testing.Release
-        (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
+      Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
       while not Activator'Terminated loop
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "terminal immediate-claim activator did not abort";
@@ -278,14 +265,12 @@ begin
          raise Program_Error with "aborted immediate terminal fact was not restored";
       end if;
 
-      Flyology.Task_Lifecycle_Testing.Arm
-        (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
+      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
       Replacement_Activator.Start;
       Flyology.Task_Lifecycle_Testing.Wait_Reached
         (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
       abort Replacement_Activator;
-      Flyology.Task_Lifecycle_Testing.Release
-        (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
+      Flyology.Task_Lifecycle_Testing.Release (Flyology.Task_Lifecycle_Testing.Admission_Immediate_Claimed);
       while not Replacement_Activator'Terminated loop
          if Ada.Real_Time.Clock >= Deadline then
             raise Program_Error with "replacement immediate-claim activator did not abort";

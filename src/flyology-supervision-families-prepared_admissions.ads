@@ -45,8 +45,7 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  Construct a vacant persistent lifecycle-observation claim.
    --  @param Owner Family whose storage must outlive the claim
    --  @return Vacant observation claim bound to Owner
-   function Vacant_Observation_Claim
-     (Owner : not null access Family) return Prepared_Observation_Claim;
+   function Vacant_Observation_Claim (Owner : not null access Family) return Prepared_Observation_Claim;
 
    --  Report whether the externally serialized claim structurally owns its
    --  exact prepared slot.
@@ -80,8 +79,7 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  @param Observed Generation whose completion would become final
    --  @return True only when Cancel_And_Join on Admission cannot wait
    function Admission_Join_Is_Immediate
-     (Admission : Started_Admission;
-      Observed  : Flyology.Supervision.Generation) return Boolean;
+     (Admission : Started_Admission; Observed : Flyology.Supervision.Generation) return Boolean;
    --  Return the exact first-generation handle reserved by this prepared
    --  claim. Commit_Start preserves the identity value when it transfers
    --  admission ownership to a Started_Admission.
@@ -195,8 +193,7 @@ package Flyology.Supervision.Families.Prepared_Admissions is
    --  Finish the operation before this call; finalization is only the
    --  cancel/drain safety net.
    --  @param Claim Claim returned to Family monitor capacity
-   procedure Release_Observation_Claim
-     (Claim : in out Prepared_Observation_Claim);
+   procedure Release_Observation_Claim (Claim : in out Prepared_Observation_Claim);
 
    --  Nonraising idempotent cleanup of an exact prepared claim.
    --  @param Claim Claim to clear, if active
@@ -365,8 +362,9 @@ private
       State : Admission_Owner (Owner);
    end record;
 
-   type Observation_Claim_Owner (Owner : not null access Family)
-   is limited new Ada.Finalization.Limited_Controlled with record
+   type Observation_Claim_Owner (Owner : not null access Family) is limited
+     new Ada.Finalization.Limited_Controlled
+   with record
       Admission : aliased Child_Handle;
       Ticket    : aliased Monitor_Index := Monitor_Index'First;
       Token     : aliased Monitor_Token := 0;

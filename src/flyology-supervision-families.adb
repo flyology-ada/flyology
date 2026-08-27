@@ -147,15 +147,14 @@ package body Flyology.Supervision.Families is
             if Monitor_Kinds (Ticket) = Monitor_Admission_Prepared
               and then Controller (Monitor_Admissions (Ticket)) = Identity
               and then Child (Monitor_Admissions (Ticket)) = Snapshots (Slot).Id
-              and then
-                (Monitor_States (Ticket)
-                   in Monitor_Immediate_Replaced_Claimed
-                      | Monitor_Immediate_Terminal_As_Replacement_Claimed
-                      | Monitor_Immediate_Terminated_Claimed
-                      | Monitor_Termination_Signal_Pending
-                      | Monitor_Termination_Signal_Claimed
-                 or else Monitor_Deferred_Facts (Ticket) /= No_Deferred_Monitor_Fact
-                 or else Monitor_States (Ticket) = Monitor_Terminated)
+              and then (Monitor_States (Ticket)
+                        in Monitor_Immediate_Replaced_Claimed
+                         | Monitor_Immediate_Terminal_As_Replacement_Claimed
+                         | Monitor_Immediate_Terminated_Claimed
+                         | Monitor_Termination_Signal_Pending
+                         | Monitor_Termination_Signal_Claimed
+                        or else Monitor_Deferred_Facts (Ticket) /= No_Deferred_Monitor_Fact
+                        or else Monitor_States (Ticket) = Monitor_Terminated)
             then
                declare
                   Latest_Snapshot : constant Child_Snapshot :=
@@ -188,10 +187,10 @@ package body Flyology.Supervision.Families is
               and then Child (Monitor_Admissions (Ticket)) = Snapshots (Slot).Id
               and then Monitor_States (Ticket)
                        in Monitor_Prepared_Reserved
-                          | Monitor_Prepared_Dormant
-                          | Monitor_Replaced
-                          | Monitor_Replacement_Signal_Pending
-                          | Monitor_Replacement_Signal_Claimed
+                        | Monitor_Prepared_Dormant
+                        | Monitor_Replaced
+                        | Monitor_Replacement_Signal_Pending
+                        | Monitor_Replacement_Signal_Claimed
             then
                if Status = Generation_Replaced
                  and then Monitor_Snapshots (Ticket).Generation < Snapshots (Slot).Generation
@@ -647,9 +646,8 @@ package body Flyology.Supervision.Families is
       end Begin_Admission_Cancel;
 
       function Prepared_Admission_Join_Is_Immediate
-        (Slot     : Slot_Index;
-         Handle   : Child_Handle;
-         Observed : Flyology.Supervision.Generation) return Boolean is
+        (Slot : Slot_Index; Handle : Child_Handle; Observed : Flyology.Supervision.Generation) return Boolean
+      is
       begin
          if Controller (Handle) /= Identity
            or else Child (Handle) /= Snapshots (Slot).Id
@@ -665,18 +663,18 @@ package body Flyology.Supervision.Families is
             when Released_Queued | Released_Managed =>
                return False;
 
-            when Released_Reapable =>
+            when Released_Reapable                  =>
                if Snapshots (Slot).State /= Joined then
                   raise Program_Error with "joinable admission state is inconsistent";
                end if;
                return Snapshots (Slot).Generation = Observed;
 
-            when others =>
+            when others                             =>
                raise Program_Error with "active prepared admission state is inconsistent";
          end case;
       end Prepared_Admission_Join_Is_Immediate;
 
-      entry Await_Admission_Cancel (for Slot in Slot_Index)
+      entry Await_Admission_Cancel(for Slot in Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean)
         when Slots (Slot) = Released_Reapable
       is
@@ -716,8 +714,7 @@ package body Flyology.Supervision.Families is
          Incident := Inherited_Incident;
       end Take_Start;
 
-      procedure Stop_One
-        (Handle : Child_Handle; Applied : not null access Boolean) is
+      procedure Stop_One (Handle : Child_Handle; Applied : not null access Boolean) is
          Slot : Slot_Index;
       begin
          Applied.all := False;
@@ -1446,8 +1443,7 @@ package body Flyology.Supervision.Families is
             return;
          end if;
          if Flyology.Task_Lifecycle_Test_Hooks.Enabled
-           and then Flyology.Task_Lifecycle_Test_Hooks
-                      .Consume_Prepared_Monitor_Identity_Exhausted
+           and then Flyology.Task_Lifecycle_Test_Hooks.Consume_Prepared_Monitor_Identity_Exhausted
          then
             Status := Prepared_Monitor_Identity_Exhausted;
             return;
@@ -1467,9 +1463,7 @@ package body Flyology.Supervision.Families is
          end loop;
          if not Found then
             Status :=
-              (if Reusable
-               then Prepared_Monitor_Capacity_Exhausted
-               else Prepared_Monitor_Identity_Exhausted);
+              (if Reusable then Prepared_Monitor_Capacity_Exhausted else Prepared_Monitor_Identity_Exhausted);
             return;
          end if;
 
@@ -1489,17 +1483,17 @@ package body Flyology.Supervision.Families is
       end Reserve_Prepared_Admission_Monitor;
 
       procedure Activate_Prepared_Admission_Monitor
-        (Admission : Child_Handle;
-         Ticket    : Monitor_Index;
-         Token     : Monitor_Token;
-         Observed  : Child_Handle;
-         Signal    : Interfaces.C.int;
-         Immediate : out Boolean;
-         Status    : out Generation_Observation_Status;
-         Snapshot  : out Child_Snapshot;
-         Active    : not null access Boolean;
+        (Admission         : Child_Handle;
+         Ticket            : Monitor_Index;
+         Token             : Monitor_Token;
+         Observed          : Child_Handle;
+         Signal            : Interfaces.C.int;
+         Immediate         : out Boolean;
+         Status            : out Generation_Observation_Status;
+         Snapshot          : out Child_Snapshot;
+         Active            : not null access Boolean;
          Immediate_Claimed : not null access Boolean;
-         Valid     : out Boolean)
+         Valid             : out Boolean)
       is
          Slot           : Slot_Index := Slot_Index'First;
          Preserve_Prior : Boolean := False;
@@ -1517,8 +1511,7 @@ package body Flyology.Supervision.Families is
            or else Controller (Observed) /= Identity
            or else Child (Admission) /= Child (Observed)
            or else Current_Generation (Observed) < Current_Generation (Admission)
-           or else Current_Generation (Observed)
-                   > Monitor_Snapshots (Ticket).Generation
+           or else Current_Generation (Observed) > Monitor_Snapshots (Ticket).Generation
            or else Signal < 0
          then
             return;
@@ -1573,8 +1566,7 @@ package body Flyology.Supervision.Families is
             end if;
             Immediate_Claimed.all := True;
             return;
-         elsif Monitor_States (Ticket)
-               not in Monitor_Prepared_Reserved | Monitor_Prepared_Dormant
+         elsif Monitor_States (Ticket) not in Monitor_Prepared_Reserved | Monitor_Prepared_Dormant
            and then not Preserve_Prior
          then
             return;
@@ -1605,8 +1597,7 @@ package body Flyology.Supervision.Families is
             Monitor_States (Ticket) := Monitor_Immediate_Replaced_Claimed;
             Immediate_Claimed.all := True;
             return;
-         elsif Slots (Slot) = Released_Reapable
-           or else Snapshots (Slot).State in Failed_Escalated | Joined
+         elsif Slots (Slot) = Released_Reapable or else Snapshots (Slot).State in Failed_Escalated | Joined
          then
             Status := Generation_Terminated;
             Monitor_Snapshots (Ticket) := Snapshot;
@@ -1625,9 +1616,7 @@ package body Flyology.Supervision.Families is
       end Activate_Prepared_Admission_Monitor;
 
       procedure Commit_Prepared_Current_Fact
-        (Ticket           : Monitor_Index;
-         Status           : Generation_Observation_Status;
-         Primary_Terminal : Boolean) is
+        (Ticket : Monitor_Index; Status : Generation_Observation_Status; Primary_Terminal : Boolean) is
       begin
          pragma Assert (Status in Generation_Terminated | Generation_Replaced);
          if Status = Generation_Replaced then
@@ -1651,8 +1640,7 @@ package body Flyology.Supervision.Families is
             Monitor_Deferred_Facts (Ticket) := No_Deferred_Monitor_Fact;
          else
             Monitor_States (Ticket) :=
-              (if Primary_Terminal
-                 and then Monitor_Snapshots (Ticket).State in Failed_Escalated | Joined
+              (if Primary_Terminal and then Monitor_Snapshots (Ticket).State in Failed_Escalated | Joined
                then Monitor_Prepared_Ended
                else Monitor_Prepared_Dormant);
          end if;
@@ -1667,9 +1655,7 @@ package body Flyology.Supervision.Families is
          pragma Assert (Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact);
          if Retain_Current and then Monitor_Deferred_Facts (Ticket) = No_Deferred_Monitor_Fact then
             Monitor_Deferred_Facts (Ticket) :=
-              (if Current_Terminal
-               then Deferred_Monitor_Terminated
-               else Deferred_Monitor_Replaced);
+              (if Current_Terminal then Deferred_Monitor_Terminated else Deferred_Monitor_Replaced);
             Monitor_Deferred_Snapshots (Ticket) := Current_Snapshot;
          end if;
          Monitor_Handles (Ticket) := Monitor_Prior_Handles (Ticket);
@@ -1699,7 +1685,7 @@ package body Flyology.Supervision.Families is
             return;
          end if;
          declare
-            Claimed_State : constant Monitor_State := Monitor_States (Ticket);
+            Claimed_State  : constant Monitor_State := Monitor_States (Ticket);
             Current_Status : constant Generation_Observation_Status :=
               (if Claimed_State = Monitor_Immediate_Terminated_Claimed
                then Generation_Terminated
@@ -1715,8 +1701,8 @@ package body Flyology.Supervision.Families is
                   Retain_Current   => True,
                   Current_Terminal =>
                     Claimed_State
-                      in Monitor_Immediate_Terminal_As_Replacement_Claimed
-                         | Monitor_Immediate_Terminated_Claimed,
+                    in Monitor_Immediate_Terminal_As_Replacement_Claimed
+                     | Monitor_Immediate_Terminated_Claimed,
                   Current_Snapshot => Monitor_Snapshots (Ticket));
             elsif not Commit then
                Monitor_States (Ticket) :=
@@ -1729,8 +1715,8 @@ package body Flyology.Supervision.Families is
                   Current_Status,
                   Primary_Terminal =>
                     Claimed_State
-                      in Monitor_Immediate_Terminal_As_Replacement_Claimed
-                         | Monitor_Immediate_Terminated_Claimed);
+                    in Monitor_Immediate_Terminal_As_Replacement_Claimed
+                     | Monitor_Immediate_Terminated_Claimed);
             end if;
          end;
          Active.all := False;
@@ -1738,18 +1724,16 @@ package body Flyology.Supervision.Families is
       end Resolve_Prepared_Immediate_Claim;
 
       procedure Take_Prepared_Monitor
-        (Ticket    : Monitor_Index;
-         Token     : Monitor_Token;
+        (Ticket        : Monitor_Index;
+         Token         : Monitor_Token;
          Preserve_Fact : Boolean;
-         Released  : out Boolean;
-         Completed : out Boolean;
-         Status    : out Generation_Observation_Status;
-         Snapshot  : out Child_Snapshot) is
+         Released      : out Boolean;
+         Completed     : out Boolean;
+         Status        : out Generation_Observation_Status;
+         Snapshot      : out Child_Snapshot) is
       begin
          Snapshot := Monitor_Snapshots (Ticket);
-         if Token /= Monitor_Tokens (Ticket)
-           or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared
-         then
+         if Token /= Monitor_Tokens (Ticket) or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared then
             Released := True;
             Completed := False;
             Status := Observation_Timed_Out;
@@ -1765,8 +1749,7 @@ package body Flyology.Supervision.Families is
          Status :=
            (if Monitor_States (Ticket)
                in Monitor_Terminated | Monitor_Termination_Signal_Pending | Monitor_Termination_Signal_Claimed
-              and then Current_Generation (Monitor_Handles (Ticket))
-                       < Monitor_Snapshots (Ticket).Generation
+              and then Current_Generation (Monitor_Handles (Ticket)) < Monitor_Snapshots (Ticket).Generation
             then Generation_Replaced
             elsif Monitor_States (Ticket)
                   in Monitor_Terminated
@@ -1782,10 +1765,7 @@ package body Flyology.Supervision.Families is
          if Released and then Monitor_States (Ticket) = Monitor_Pending then
             if Monitor_Prior_Facts (Ticket) /= No_Deferred_Monitor_Fact then
                Restore_Prepared_Prior_Fact
-                  (Ticket,
-                  Retain_Current   => False,
-                  Current_Terminal => False,
-                  Current_Snapshot => Snapshot);
+                 (Ticket, Retain_Current => False, Current_Terminal => False, Current_Snapshot => Snapshot);
             else
                Monitor_States (Ticket) := Monitor_Prepared_Dormant;
             end if;
@@ -1798,14 +1778,12 @@ package body Flyology.Supervision.Families is
                   Current_Snapshot => Snapshot);
             elsif not Preserve_Fact then
                Commit_Prepared_Current_Fact
-                 (Ticket,
-                  Status,
-                  Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
+                 (Ticket, Status, Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
             end if;
          end if;
       end Take_Prepared_Monitor;
 
-      entry Await_Prepared_Monitor (for Ticket in Monitor_Index)
+      entry Await_Prepared_Monitor(for Ticket in Monitor_Index)
         (Token         : Monitor_Token;
          Preserve_Fact : Boolean;
          Status        : out Generation_Observation_Status;
@@ -1831,21 +1809,17 @@ package body Flyology.Supervision.Families is
                Current_Snapshot => Snapshot);
          elsif not Preserve_Fact then
             Commit_Prepared_Current_Fact
-              (Ticket,
-               Status,
-               Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
+              (Ticket, Status, Primary_Terminal => Monitor_States (Ticket) = Monitor_Terminated);
          end if;
       end Await_Prepared_Monitor;
 
       procedure Release_Prepared_Monitor
-        (Ticket    : Monitor_Index;
-         Token     : Monitor_Token;
-         Active    : not null access Boolean;
-         Released  : out Boolean) is
+        (Ticket   : Monitor_Index;
+         Token    : Monitor_Token;
+         Active   : not null access Boolean;
+         Released : out Boolean) is
       begin
-         if Token /= Monitor_Tokens (Ticket)
-           or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared
-         then
+         if Token /= Monitor_Tokens (Ticket) or else Monitor_Kinds (Ticket) /= Monitor_Admission_Prepared then
             Active.all := False;
             Released := True;
             return;
@@ -1865,7 +1839,7 @@ package body Flyology.Supervision.Families is
          end if;
       end Release_Prepared_Monitor;
 
-      entry Await_Prepared_Monitor_Release (for Ticket in Monitor_Index)
+      entry Await_Prepared_Monitor_Release(for Ticket in Monitor_Index)
         (Token : Monitor_Token; Active : not null access Boolean)
         when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
       is
@@ -1934,7 +1908,7 @@ package body Flyology.Supervision.Families is
          Signals.Claimed := False;
       end Try_Acknowledge_Monitor_Signal;
 
-      entry Await_Monitor (for Ticket in Monitor_Index)
+      entry Await_Monitor(for Ticket in Monitor_Index)
         (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot)
         when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
       is
