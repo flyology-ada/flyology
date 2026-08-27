@@ -16,8 +16,7 @@ package body Flyology.Channel_Testing is
    end Arm_Before_Send;
 
    procedure Wait_Before_Send is
-      Deadline : constant Ada.Real_Time.Time :=
-        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while not Flyology.Channel_Test_Hooks.Before_Send_Reached loop
          if Ada.Real_Time.Clock >= Deadline then

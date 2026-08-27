@@ -12,7 +12,8 @@ with Flyology.Wall_Clock_Testing;
 with Flyology.Worker_Pool_Test_Hooks;
 
 procedure Flyology.Test_Hook_Elision_Probe is
-   Observed : Boolean := False with Volatile;
+   Observed : Boolean := False
+   with Volatile;
 begin
    if Flyology.Buffer_Test_Hooks.Enabled then
       Flyology.Buffer_Test_Hooks.Arm_Next_Acquisition_Near_Exhaustion;

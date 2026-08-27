@@ -1,7 +1,9 @@
 package body Flyology.Channel_Test_Hooks is
 
-   Armed   : Boolean := False with Atomic;
-   Arrived : Boolean := False with Atomic;
+   Armed   : Boolean := False
+   with Atomic;
+   Arrived : Boolean := False
+   with Atomic;
 
    procedure Reset is
    begin
