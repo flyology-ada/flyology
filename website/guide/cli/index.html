@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Install the Flyology aggregate command, scaffold an Ada crate, and add PATH-based extension commands.">
+    <meta name="theme-color" content="#17213d">
+    <title>Flyology CLI · Flyology guide</title>
+    <link rel="canonical" href="https://flyology.org/guide/cli/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../" aria-current="page">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../">Guide</a></li><li aria-current="page">CLI</li></ol>
+          <h1>Scaffold and extend Flyology projects.</h1>
+        </div>
+        <p class="doc-hero-copy"><code>flyology_cli</code> installs the <code>flyology</code> aggregate command. Use it to create an Alire crate, add shared project guidance, prepare a documentation website, or dispatch a separately installed extension command.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page" tabindex="0">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#install">Install the command</a></li>
+            <li><a href="#initialize">Initialize a crate</a></li>
+            <li><a href="#profiles">Choose a profile</a></li>
+            <li><a href="#agents">Add agent guidance</a></li>
+            <li><a href="#website">Add a website</a></li>
+            <li><a href="#output">Review generated files</a></li>
+            <li><a href="#extensions">Add extension commands</a></li>
+            <li><a href="#safety">Handle failure safely</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">i</span>
+            <p>The CLI itself depends only on GNAT. Every generated crate depends on Flyology and therefore uses Flyology's supported host and compiler matrix.</p>
+          </aside>
+
+          <section id="install">
+            <span class="step-label">CLI 01</span>
+            <h2>Install the aggregate command.</h2>
+            <p>The crate is currently available from the Flyology source repository. Build and install it with Alire from the crate directory.</p>
+            <figure class="code-panel">
+              <figcaption>install from the source checkout</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>git clone https://github.com/flyology-ada/flyology.git
+cd flyology/flyology_cli
+alr install
+flyology --version</code></pre>
+            </figure>
+            <p>Alire installs <code>flyology</code> into its configured binary prefix. Add that prefix to <code>PATH</code> if the shell cannot find the command.</p>
+          </section>
+
+          <section id="initialize">
+            <span class="step-label">CLI 02</span>
+            <h2>Initialize the current directory or a destination.</h2>
+            <p>Run <code>flyology init</code> without a destination to use the current directory. The CLI derives a default crate name from that directory. It prompts for an omitted crate kind and name.</p>
+            <figure class="code-panel">
+              <figcaption>interactive initialization in the current directory</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>mkdir telemetry_service
+cd telemetry_service
+flyology init</code></pre>
+            </figure>
+            <p>Pass a destination, name, and crate kind with <code>--yes</code> for non-interactive initialization. The command uses the documented profile, agent, and website defaults. It also approves Flyology index installation.</p>
+            <figure class="code-panel">
+              <figcaption>non-interactive consumer application</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>flyology init telemetry_service \
+  --name telemetry_service \
+  --bin --yes</code></pre>
+            </figure>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Index setup changes the user-level Alire configuration.</strong> If the named <code>flyology</code> index is absent, the CLI resets the community index and adds the Flyology organization index before it.</p>
+            </aside>
+          </section>
+
+          <section id="profiles">
+            <span class="step-label">CLI 03</span>
+            <h2>Choose the crate shape and project profile.</h2>
+            <p>The crate shape controls the generated Ada source and GPR project. Consumer metadata is the default. Use <code>--flyology-project</code> only for a crate maintained as part of Flyology. Both profiles add <code>flyology = "^0.1.0"</code> to <code>alire.toml</code>.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><code>--bin</code></dt><dd>Creates an executable project, a main procedure, and an Alire executable entry.</dd></div>
+                <div class="decision-row"><dt><code>--lib</code></dt><dd>Creates a static library project and a root package specification.</dd></div>
+                <div class="decision-row"><dt>No profile flag</dt><dd>Creates downstream consumer metadata. Website generation defaults to disabled.</dd></div>
+                <div class="decision-row"><dt><code>--flyology-project</code></dt><dd>Adds Flyology website metadata and tags. It does not enable website generation.</dd></div>
+              </dl>
+            </div>
+            <p>With <code>--yes</code>, omitted choices create a binary consumer. Agent guidance remains enabled, and website generation remains disabled for either profile.</p>
+          </section>
+
+          <section id="agents">
+            <span class="step-label">CLI 04</span>
+            <h2>Provision shared agent guidance.</h2>
+            <p>Agent guidance is enabled by default. The CLI creates an <code>apm.yml</code> dependency on the <code>flyology-ada/agents</code> Ada-library profile. Website projects also receive the Flyology website profile.</p>
+            <p>The CLI then runs <code>apm install</code> and <code>apm compile --target codex</code> in the new project. Install <a href="https://microsoft.github.io/apm/">APM 0.28.0</a>, or pass <code>--no-agents</code> to skip this setup.</p>
+            <figure class="code-panel">
+              <figcaption>library with shared guidance</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>flyology init wire_protocol \
+  --lib --flyology-project --yes</code></pre>
+            </figure>
+            <p>Use <code>--no-agents</code> when the repository manages agent resources another way.</p>
+          </section>
+
+          <section id="website">
+            <span class="step-label">CLI 05</span>
+            <h2>Add website-kit and generation scripts.</h2>
+            <p>Use <code>--website</code> to add <code>flyology-ada/website-kit</code> at <code>vendor/website-kit</code>. The CLI initializes a Git repository first when the destination does not have one.</p>
+            <p>The generated files include a starter page, GNATdoc theme metadata, an API documentation script, and a complete site build script.</p>
+            <figure class="code-panel">
+              <figcaption>build and validate the generated site</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr install gnatdoc_bin
+./scripts/build-site.sh</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Scaffolding with <code>--website</code> requires Git. Running the generated site build requires Node.js and GNATdoc. The starter GNATdoc metadata uses <code>https://example.com/</code>; replace it before publication.</p>
+            </aside>
+          </section>
+
+          <section id="output">
+            <span class="step-label">CLI 06</span>
+            <h2>Review the generated project boundary.</h2>
+            <p>The CLI writes only the selected project surface. Generated build directories remain ignored.</p>
+            <figure class="code-panel">
+              <figcaption>binary consumer with agents and no website</figcaption>
+              <pre><code>telemetry_service/
+├── .gitignore
+├── AGENTS.md              # generated by APM
+├── README.md
+├── alire.toml
+├── apm.lock.yaml          # generated by APM
+├── apm.yml
+├── telemetry_service.gpr
+└── src/
+    └── telemetry_service.adb</code></pre>
+            </figure>
+            <p>The GPR project uses the repository's 110-column Ada format settings. It also excludes Flyology from downstream GNATdoc analysis to avoid documenting the runtime dependency as part of the consumer API.</p>
+          </section>
+
+          <section id="extensions">
+            <span class="step-label">CLI 07</span>
+            <h2>Extend the aggregate command through PATH.</h2>
+            <p>When a command is not built in, the CLI searches <code>PATH</code> for <code>flyology-&lt;command&gt;</code>. It passes every remaining argument without shell parsing and returns the extension command's exit status.</p>
+            <figure class="code-panel">
+              <figcaption>extension command contract</figcaption>
+              <pre><code>flyology deploy staging --wait
+
+# Equivalent executable invocation:
+flyology-deploy staging --wait</code></pre>
+            </figure>
+            <p>This contract lets another crate install a focused command without changing <code>flyology_cli</code>. If no matching executable exists, the CLI reports an unknown command and returns failure.</p>
+          </section>
+
+          <section id="safety">
+            <span class="step-label">CLI 08</span>
+            <h2>Resolve collisions before initialization.</h2>
+            <p>The CLI checks each file that it writes directly before writing project files. It refuses to overwrite an existing manifest, GPR project, source file, README, ignore file, APM manifest, website tree, or site script.</p>
+            <p>APM and Git manage <code>AGENTS.md</code>, <code>apm.lock.yaml</code>, and <code>.gitmodules</code>. Review existing integration files before enabling those tools.</p>
+            <p>An external command can fail after project files are written. For example, APM installation or Git submodule setup can fail because the network is unavailable. The CLI keeps those files for inspection and reports the command that failed; it does not delete the destination automatically.</p>
+            <figure class="code-panel">
+              <figcaption>review all command options</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>flyology init --help</code></pre>
+            </figure>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Review generated project policy before the first release.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../../">Overview</a><a href="../">Guide</a><a href="../../architecture/">Architecture</a><a href="../../journal/">Journal</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

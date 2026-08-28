@@ -68,6 +68,7 @@ This adds the `flyology` crate and its runtime preparation. Standalone component
 - [Structured task supervision](https://flyology.org/guide/supervision/): Typed static trees, bounded dynamic families, readiness, generation-safe replacement, recovery, incident budgets, stopping, and event rings.
 - [Process upgrades](https://flyology.org/guide/process-upgrades/): Listener escrow, fresh-process topology reconstruction, cancellable canaries, compensation, promotion, drain, and fresh-process reversal.
 - [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, bounded multi-deadline, and wall-clock timer behavior, including backward clock changes.
+- [Flyology CLI](https://flyology.org/guide/cli/): Aggregate command installation, project scaffolding profiles, optional agent and website setup, generated files, and extension-command dispatch.
 
 ## Libraries that require Flyology Runtime
 
