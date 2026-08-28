@@ -8,7 +8,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: flyology-ci-${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    flyology-ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 # Every job, and every step that reaches the network, carries a timeout. The
