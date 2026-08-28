@@ -1,6 +1,6 @@
 name = "flyology_cli"
 description = "Aggregate command-line tooling for Flyology projects"
-version = "0.1.0-dev"
+version = "0.1.0"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
