@@ -3403,8 +3403,40 @@ rather than hidden behind a claim of universal portability.
   runnable API, multi-way comparisons, telemetry, machine output, and the
   interpretation of fractional nanosecond results, bounded custom axes, and
   caller-synchronized alternate timing.
+- [`flyology_cli`](flyology_cli): the installable `flyology` aggregate command,
+  including project initialization and PATH-based extension-command dispatch.
 - [`scripts`](scripts): custom RTS construction, verification, and test runners.
 - [`docker`](docker): native-architecture Linux validation Dockerfile.
+
+## Flyology CLI
+
+The standalone `flyology_cli` crate installs the `flyology` executable. Its
+`init` command creates a Flyology-dependent Alire binary or library in the
+current directory or another destination. Initialization can use a downstream
+consumer or Flyology-project profile, provision `flyology-ada/agents` through
+APM, and add `flyology-ada/website-kit` with static-site and GNATdoc generation
+scripts. It checks the configured Alire indexes and offers to add the Flyology
+organization index ahead of the community index when needed.
+
+```sh
+cd flyology_cli
+alr install
+
+flyology init ../sample_app \
+  --bin --yes
+```
+
+Consumer projects are the default; `--flyology-project` selects the
+Flyology-maintained project profile. Agent guidance is enabled by default, and
+website generation is disabled by default. Use `--no-agents` to opt out or
+`--website` to add the site scaffold. Without `--yes`, the CLI prompts for an
+omitted crate kind and name. It also asks before adding a missing Flyology
+index. Run `flyology init --help` for the full interface. Commands not built
+into the aggregate executable are delegated by name: `flyology foo` runs
+`flyology-foo` from `PATH`, preserving its arguments and exit status. See the
+crate's [README](flyology_cli/README.md) for the non-interactive profiles and
+extension contract. The website has a focused
+[Flyology CLI guide](https://flyology.org/guide/cli/).
 
 ## Use as an Alire dependency
 

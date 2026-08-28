@@ -99,6 +99,9 @@ jobs:
             fi
             exit "$status"
           }
+      - name: Test flyology_cli
+        working-directory: flyology_cli
+        run: alr test
       - name: Run runtime tests
         run: ./scripts/test.sh
       - name: Build connection-density showcase
