@@ -256,7 +256,7 @@ function initializePage() {
     fetchTitle.textContent = partial ? "Partial snapshot loaded" : "CI snapshot loaded";
     fetchDetail.textContent = `Generated ${dateLabel(data.generatedAt || data.fetchedAt)} · static data`;
     document.querySelector("[data-api-method]").textContent =
-      `This public snapshot was generated ${fullDate(data.generatedAt || data.fetchedAt)}. The page does not contact GitHub.`;
+      `Snapshot generated ${fullDate(data.generatedAt || data.fetchedAt)}.`;
     if (partial) {
       notice.hidden = false;
       noticeTitle.textContent = "Some results are unavailable";
