@@ -783,6 +783,15 @@ reuses the slot. Element assignment and finalization run under the channel's
 protected lock and must not block, reenter the same channel, or propagate an
 exception. Dequeue state is committed before slot clearing, so a raising
 finalizer cannot make an already copied value available a second time.
+The package-level nonblocking `Try_Send` overload with a caller-aliased
+`Accepted` token sets that token false before it attempts to enter the protected
+channel, and true only after it installs the complete value and queue state.
+The token therefore remains authoritative when abort occurs before protected
+entry or prevents ordinary `out` copy-out: true transfers ownership of exactly
+one queued value, while false transfers none. The familiar protected
+result-only overload uses the same protected transition. Once true is
+published, a later internal notification failure does not revoke that ownership
+even when the ordinary result is unavailable.
 The production dequeue consumes one SPARK-proved scalar transition that returns
 the old-head position while advancing the head and decrementing the count. It
 then replaces that returned slot with `Empty_Value`. The proof ties the three

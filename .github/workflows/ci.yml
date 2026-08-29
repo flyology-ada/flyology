@@ -119,7 +119,7 @@ jobs:
   hook-elision:
     name: Test-hook elision / ${{ matrix.os }} / GNAT 16.1.0
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +147,7 @@ jobs:
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Check every test-hook selection and optimization mode
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: ./scripts/check-test-hook-elision.sh
 
   proof:

@@ -1,4 +1,5 @@
 with Ada.Unchecked_Conversion;
+with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
 with Interfaces.C;
@@ -148,6 +149,13 @@ package body Flyology.Channels.Bounded is
       end Receive;
 
       procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result) is
+         Ignored : aliased Boolean := False;
+      begin
+         Try_Send_After_Clear (Value, Ignored'Access, Result);
+      end Try_Send;
+
+      procedure Try_Send_After_Clear
+        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result) is
       begin
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send  =>
@@ -155,6 +163,7 @@ package body Flyology.Channels.Bounded is
                Tail := Policy.Advance (Tail, Capacity);
                Count := Policy.Count_After_Send (Count, Capacity);
                Result := Item_Sent;
+               Accepted.all := True;
                Signal_Scoped;
 
             when Policy.Wait_To_Send =>
@@ -163,7 +172,7 @@ package body Flyology.Channels.Bounded is
             when Policy.Reject_Send  =>
                Result := Send_Closed;
          end case;
-      end Try_Send;
+      end Try_Send_After_Clear;
 
       procedure Try_Receive (Value : in out Element_Type; Result : out Try_Receive_Result) is
          Position : Positive;
@@ -201,6 +210,19 @@ package body Flyology.Channels.Bounded is
           Waiting_Senders   => Channel.Send'Count,
           Waiting_Receivers => Channel.Receive'Count);
    end Channel;
+
+   procedure Try_Send
+     (Object   : in out Channel;
+      Value    : Element_Type;
+      Accepted : not null access Boolean;
+      Result   : out Try_Send_Result) is
+   begin
+      Accepted.all := False;
+      if Flyology.Channel_Test_Hooks.Enabled then
+         Flyology.Channel_Test_Hooks.Before_Send_Barrier;
+      end if;
+      Object.Try_Send_After_Clear (Value, Accepted, Result);
+   end Try_Send;
 
    procedure Timed_Send (Item : in out Channel; Value : Element_Type; Timeout : Duration) is
    begin
