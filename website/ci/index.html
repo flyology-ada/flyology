@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Live GitHub Actions status for main branches and open pull requests across the Flyology organization.">
+    <meta name="theme-color" content="#17213d">
+    <title>CI status · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/ci/">
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <link rel="stylesheet" href="../assets/styles/ci.css?v=3">
+    <script src="../assets/scripts/site.js"></script>
+    <script type="module" src="../assets/scripts/ci.mjs?v=3"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home">
+          <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/">Overview</a></li>
+                <li><a href="../guide/">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../libraries/">Libraries</a></li>
+          <li><a href="../journal/">Journal</a></li>
+          <li><a href="../ci/" aria-current="page">CI</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/>
+              <circle cx="12" cy="12" r="4"/>
+            </svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="ci-page">
+      <header class="ci-hero page-shell">
+        <div class="ci-hero-copy">
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">CI status</li></ol>
+          <h1>CI status</h1>
+          <p>Public repositories on <code>main</code> and all open pull requests.</p>
+        </div>
+        <div class="ci-fetch-state" aria-live="polite" aria-atomic="true">
+          <span class="ci-fetch-mark" aria-hidden="true"></span>
+          <div>
+            <strong data-fetch-title>Loading CI status</strong>
+            <span data-fetch-detail>Reading the generated snapshot</span>
+          </div>
+          <button class="ci-refresh" type="button" data-refresh disabled>
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15.5 6.5V3m0 0H12m3.5 0-2.2 2.2A6.2 6.2 0 1 0 16 10"/></svg>
+            Reload snapshot
+          </button>
+        </div>
+      </header>
+
+      <section class="ci-ledger-wrap" aria-label="CI summary">
+        <dl class="ci-ledger page-shell">
+          <div><dt>Repositories</dt><dd data-summary-repositories>…</dd></div>
+          <div><dt>Main passing</dt><dd data-summary-main>…</dd></div>
+          <div><dt>Open pull requests</dt><dd data-summary-prs>…</dd></div>
+          <div><dt>Need attention</dt><dd data-summary-attention>…</dd></div>
+        </dl>
+      </section>
+
+      <div class="ci-content page-shell" data-ci-root aria-busy="true">
+        <noscript>
+          <p class="ci-notice">JavaScript is required to read the generated CI snapshot. You can inspect the <a href="https://github.com/orgs/flyology-ada/repositories">organization on GitHub</a> instead.</p>
+        </noscript>
+
+        <div class="ci-notice" data-notice hidden>
+          <strong data-notice-title></strong>
+          <p data-notice-copy></p>
+        </div>
+
+        <form class="ci-controls" data-filters>
+          <label>
+            <span>Find a repository or pull request</span>
+            <input type="search" data-search autocomplete="off" placeholder="Search by name or title">
+          </label>
+          <label>
+            <span>Show</span>
+            <select data-status-filter>
+              <option value="all">All states</option>
+              <option value="attention">Needs attention</option>
+              <option value="passing">Passing</option>
+              <option value="pending">In progress</option>
+              <option value="not-configured">No CI run</option>
+            </select>
+          </label>
+          <p data-filter-count>Loading status…</p>
+        </form>
+
+        <section class="ci-section" aria-labelledby="main-ci-title">
+          <div class="ci-section-heading">
+            <div>
+              <p class="eyebrow">Branch health</p>
+              <h2 id="main-ci-title">CI on main</h2>
+            </div>
+            <p>The newest run for each workflow named <code>CI</code> or stored as <code>ci.yml</code> or <code>ci.yaml</code>. Forks and archived repositories remain visible.</p>
+          </div>
+
+          <div class="ci-table-wrap" tabindex="0" aria-label="Repository CI status table">
+            <table class="ci-table">
+              <thead>
+                <tr><th>Repository</th><th>State</th><th>Latest CI run</th><th>Observed</th></tr>
+              </thead>
+              <tbody data-repositories>
+                <tr class="ci-loading-row"><td colspan="4"><span></span><span></span><span></span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="ci-empty" data-repositories-empty hidden>No repositories match these filters.</p>
+        </section>
+
+        <section class="ci-section ci-pr-section" aria-labelledby="pr-ci-title">
+          <div class="ci-section-heading">
+            <div>
+              <p class="eyebrow">Change health</p>
+              <h2 id="pr-ci-title">Open pull requests</h2>
+            </div>
+            <p>Each result combines the latest GitHub check runs for the pull request head commit. Expand a row to inspect individual checks.</p>
+          </div>
+
+          <div class="ci-pr-list" data-pull-requests>
+            <div class="ci-pr-loading"><span></span><span></span></div>
+            <div class="ci-pr-loading"><span></span><span></span></div>
+          </div>
+          <p class="ci-empty" data-prs-empty hidden>No pull requests match these filters.</p>
+        </section>
+
+        <footer class="ci-method">
+          <div>
+            <strong>Public CI data</strong>
+            <p data-api-method>This page reads a generated public snapshot and does not contact GitHub.</p>
+          </div>
+          <a href="https://github.com/orgs/flyology-ada/repositories">Open the organization on GitHub</a>
+        </footer>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>CI status is observational and does not replace each repository's merge requirements.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Overview</a><a href="../libraries/">Libraries</a><a href="../journal/">Journal</a><a href="https://github.com/flyology-ada">Source</a></div>
+      </div>
+    </footer>
+  </body>
+</html>
