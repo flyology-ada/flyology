@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-29T03:23:20.810261+00:00'
+generated_at: '2026-08-30T04:58:32.758805+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/flyology-allocators
@@ -45,7 +45,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/profiles/ada-library
@@ -55,7 +55,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-interface-values
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-interface-values
@@ -71,7 +71,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-source-style
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-source-style
@@ -87,7 +87,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-alire-release-policy
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/alire-release-policy
@@ -103,7 +103,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-decision-authority
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/decision-authority
@@ -119,7 +119,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-goal-stewardship
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/goal-stewardship
@@ -130,12 +130,12 @@ dependencies:
   deployed_files:
   - .claude/rules/goal-stewardship.md
   deployed_file_hashes:
-    .claude/rules/goal-stewardship.md: sha256:c5e1cb95a6d7b3835b329c6d48c653a8d45805c43757e50b4b0223b95d0749fb
-  content_hash: sha256:f4b230cf9e125b56e1d31fc4d1ded35dd03ab8c991a56eb3b71e7a4bff585034
+    .claude/rules/goal-stewardship.md: sha256:9ff5073f6a5ccd11af40c61c2d99c3df6bcc24dfa3a9606e8579e3802f9742cc
+  content_hash: sha256:5aa693e533dd35d7fc610283a7a916d64ce8a43432f55a9f706edf8b3dd72f1c
 - repo_url: flyology-ada/agents
   name: flyology-grounded-communication
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/grounded-communication
@@ -151,7 +151,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-performance-testing
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/performance-testing
@@ -167,7 +167,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-problem-solution-commits
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/problem-solution-commits
@@ -183,7 +183,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-repository-workflow
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/repository-workflow
@@ -199,7 +199,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-review-cycle
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/review-cycle
@@ -215,7 +215,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-tla-plus-assurance
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/tla-plus-assurance
@@ -231,7 +231,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-skills
   host: github.com
-  resolved_commit: a6d124a0fb1261033e2ee1fc51386f4388e435f5
+  resolved_commit: 39f2c8139965d11380cc211f7b2ac399815bcea5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/skills
@@ -342,6 +342,8 @@ dependencies:
   - .agents/skills/tlaplus-from-source/SKILL.md
   - .agents/skills/tlaplus-split-action
   - .agents/skills/tlaplus-split-action/SKILL.md
+  - .agents/skills/workflow-improvement
+  - .agents/skills/workflow-improvement/SKILL.md
   - .claude/skills/ada-api-contract-review
   - .claude/skills/ada-api-contract-review/SKILL.md
   - .claude/skills/ada-concurrency-ownership-review
@@ -444,6 +446,8 @@ dependencies:
   - .claude/skills/tlaplus-from-source/SKILL.md
   - .claude/skills/tlaplus-split-action
   - .claude/skills/tlaplus-split-action/SKILL.md
+  - .claude/skills/workflow-improvement
+  - .claude/skills/workflow-improvement/SKILL.md
   deployed_file_hashes:
     .agents/skills/ada-api-contract-review/SKILL.md: sha256:ee95c75b0cd67f94ffc0644e48f4a904c3c5f801ccd9a4346b14366b8921994d
     .agents/skills/ada-concurrency-ownership-review/SKILL.md: sha256:f10c924e5fd3975b7aadaec91b7e736ff6ad562151ade8c828f84038e7747d6f
@@ -527,6 +531,7 @@ dependencies:
     .agents/skills/tlaplus-add-variable/SKILL.md: sha256:9e43d627cef529602aa88fcf4b729e26bdc4082cdf06e23af33c8f08931dec6e
     .agents/skills/tlaplus-from-source/SKILL.md: sha256:e3fc651973a5b5d96dc02e2ee7c3baf25fafb30b3af1da56e257832ed228e913
     .agents/skills/tlaplus-split-action/SKILL.md: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
+    .agents/skills/workflow-improvement/SKILL.md: sha256:65a1aa4ea6c0b39383046e6a74a353f4eb2e1d54e8cdef2ddb9c188b7f7a0f25
     .claude/skills/ada-api-contract-review/SKILL.md: sha256:ee95c75b0cd67f94ffc0644e48f4a904c3c5f801ccd9a4346b14366b8921994d
     .claude/skills/ada-concurrency-ownership-review/SKILL.md: sha256:f10c924e5fd3975b7aadaec91b7e736ff6ad562151ade8c828f84038e7747d6f
     .claude/skills/ada-generated-source-review/SKILL.md: sha256:d0b609df71c5dd9540952107ffb6ac99d5b3fb1532a3b795d11f771ac2198ff9
@@ -609,7 +614,8 @@ dependencies:
     .claude/skills/tlaplus-add-variable/SKILL.md: sha256:9e43d627cef529602aa88fcf4b729e26bdc4082cdf06e23af33c8f08931dec6e
     .claude/skills/tlaplus-from-source/SKILL.md: sha256:e3fc651973a5b5d96dc02e2ee7c3baf25fafb30b3af1da56e257832ed228e913
     .claude/skills/tlaplus-split-action/SKILL.md: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
-  content_hash: sha256:2fc5bb6753a2525de31d527165475dc0344a813c2fb143b223acb3c0b4e47718
+    .claude/skills/workflow-improvement/SKILL.md: sha256:65a1aa4ea6c0b39383046e6a74a353f4eb2e1d54e8cdef2ddb9c188b7f7a0f25
+  content_hash: sha256:fb3758e7266e89aceec7befe95707f1e8801bdc43e68c17090daca584f994b5c
 deployments:
 - kind: project-relative
   target: claude
@@ -673,7 +679,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/instructions/goal-stewardship
   active_owner: flyology-ada/agents/packages/instructions/goal-stewardship
-  content_hash: sha256:c5e1cb95a6d7b3835b329c6d48c653a8d45805c43757e50b4b0223b95d0749fb
+  content_hash: sha256:9ff5073f6a5ccd11af40c61c2d99c3df6bcc24dfa3a9606e8579e3802f9742cc
 - kind: project-relative
   target: claude
   value: .claude/rules/grounded-communication.md
@@ -1665,6 +1671,24 @@ deployments:
   active_owner: flyology-ada/agents/packages/skills
   content_hash: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
 - kind: project-relative
+  target: claude
+  value: .claude/skills/workflow-improvement
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/workflow-improvement/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:65a1aa4ea6c0b39383046e6a74a353f4eb2e1d54e8cdef2ddb9c188b7f7a0f25
+- kind: project-relative
   target: codex
   value: .agents/skills/ada-api-contract-review
   runtime: null
@@ -2582,3 +2606,21 @@ deployments:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
   content_hash: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
+- kind: project-relative
+  target: codex
+  value: .agents/skills/workflow-improvement
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/workflow-improvement/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - flyology-ada/agents/packages/skills
+  active_owner: flyology-ada/agents/packages/skills
+  content_hash: sha256:65a1aa4ea6c0b39383046e6a74a353f4eb2e1d54e8cdef2ddb9c188b7f7a0f25
