@@ -1,0 +1,26 @@
+with "../../../flyology.gpr";
+
+project Tokio_IO_Spike is
+   Rust_Library := external ("RUST_SPIKE_LIBRARY");
+   Rust_Rpath   := external ("RUST_SPIKE_RPATH");
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("ada");
+   for Object_Dir use "build/obj";
+   for Exec_Dir use "build/bin";
+   for Main use ("tokio_io_spike.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Switches ("tokio_io_spike.adb") use (Rust_Library, Rust_Rpath);
+   end Linker;
+end Tokio_IO_Spike;

@@ -1,0 +1,15 @@
+[package]
+name = "flyology-rust-tokio-io-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tokio = { version = "=1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[profile.release]
+debug = true
+overflow-checks = true
