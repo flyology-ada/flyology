@@ -63,5 +63,14 @@ On 2026-08-31, macOS/AArch64 with Rust 1.97.1, GNAT 16.1.0, and GPRbuild
   `__eh_frame` but no `__unwind_info`; the Clang-linked executable contained
   both sections.
 
-This is evidence for a Darwin final-link constraint, not yet a portable
-conclusion. The Linux matrix remains a required next-wave run.
+This is evidence for a Darwin final-link constraint rather than a portable
+conclusion.
+
+On 2026-08-31, Linux/AArch64 with Rust 1.97.1 and Flyology's GNAT 16.2.0 passed
+the same static/dynamic and debug/release matrix. All four links caught and
+translated the intentional panic. The Linux path uses the selected GNAT's
+`gnatmake` and `gnatlink` directly because this standalone ABI probe needs no
+Flyology runtime or library. A separate Linux portability spike records that
+the tested Alire GPRbuild 26 package compiled and bound programs without
+performing their final link; that packaging failure does not invalidate the
+standalone GNAT/Rust ABI result.

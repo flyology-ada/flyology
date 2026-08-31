@@ -34,11 +34,26 @@ build_variant () {
       link_driver="$spike_root/clang-link.sh"
    fi
 
-   alr exec -- env -u GPR_CONFIG gprbuild \
-      -p -q -P "$spike_root/rust_abi_spike.gpr" \
-      -X"RUST_ABI_VARIANT=$variant" \
-      -X"RUST_ABI_LINK_DRIVER=$link_driver" \
-      -largs "$rust_library"
+   if [ "$(uname -s)" = Linux ]; then
+      mkdir -p "$spike_root/build/$variant/obj" "$spike_root/build/$variant/bin"
+      set -- "$rust_library"
+      if [ "$linkage" = dynamic ]; then
+         set -- "$@" "-Wl,-rpath,$cargo_target/$profile_dir"
+      fi
+      alr exec -- env -u GPR_CONFIG gnatmake \
+         -f \
+         -D "$spike_root/build/$variant/obj" \
+         -o "$spike_root/build/$variant/bin/rust_abi_spike" \
+         -gnat2022 -gnata -gnatVa -gnatwa -gnatyM110 \
+         "$spike_root/ada/rust_abi_spike.adb" \
+         -largs "$@"
+   else
+      alr exec -- env -u GPR_CONFIG gprbuild \
+         -p -q -P "$spike_root/rust_abi_spike.gpr" \
+         -X"RUST_ABI_VARIANT=$variant" \
+         -X"RUST_ABI_LINK_DRIVER=$link_driver" \
+         -largs "$rust_library"
+   fi
 
    executable="$spike_root/build/$variant/bin/rust_abi_spike"
    if command -v otool >/dev/null 2>&1; then
