@@ -8,6 +8,8 @@ package body Rust_Async_Jobs is
    use type System.Address;
 
    Bridge_OK           : constant Interfaces.C.int := 0;
+   Bridge_No_Capacity  : constant Interfaces.C.int := 3;
+   Bridge_Engine_Busy  : constant Interfaces.C.int := 5;
    State_Pending       : constant Interfaces.C.int := 0;
    State_Succeeded     : constant Interfaces.C.int := 1;
    State_Cancelled     : constant Interfaces.C.int := 2;
@@ -27,6 +29,13 @@ package body Rust_Async_Jobs is
      Import,
      Convention    => C,
      External_Name => "flyology_rust_engine_destroy";
+
+   function Rust_Engine_Active_Jobs
+     (Runtime : System.Address; Count : out Interfaces.Unsigned_32) return Interfaces.C.int
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_rust_engine_active_jobs";
 
    function Rust_Job_Start
      (Runtime   : System.Address;
@@ -88,12 +97,46 @@ package body Rust_Async_Jobs is
          raise Program_Error with "Rust async engine is not initialized";
       end if;
       Status := Rust_Engine_Destroy (Item.Handle);
+      if Status = Bridge_Engine_Busy then
+         raise Rust_Engine_Busy with "Rust async engine still has admitted jobs";
+      end if;
       if Status /= Bridge_OK then
          raise Rust_Job_Error
            with "Rust async engine shutdown failed, status=" & Status'Image;
       end if;
       Item.Handle := System.Null_Address;
    end Shutdown;
+
+   function Active_Jobs (Item : Engine) return Natural is
+      Count  : Interfaces.Unsigned_32;
+      Status : Interfaces.C.int;
+   begin
+      if Item.Handle = System.Null_Address then
+         raise Program_Error with "Rust async engine is not initialized";
+      end if;
+      Status := Rust_Engine_Active_Jobs (Item.Handle, Count);
+      if Status /= Bridge_OK then
+         raise Rust_Job_Error
+           with "Rust async engine inspection failed, status=" & Status'Image;
+      end if;
+      return Natural (Count);
+   end Active_Jobs;
+
+   overriding
+   procedure Finalize (Item : in out Job_Lease) is
+      Status : Interfaces.C.int;
+   begin
+      if Item.Owned then
+         Status := Rust_Job_Release (Item.Runtime, Item.Handle);
+         Item.Owned := False;
+         pragma Assert (Status = Bridge_OK);
+      end if;
+   exception
+      when others =>
+         --  Controlled finalization remains non-raising. The stress test's
+         --  Active_Jobs check detects a release that did not take effect.
+         Item.Owned := False;
+   end Finalize;
 
    procedure Rearm (Item : in out Job_Operation) is
       Read_Descriptor   : Interfaces.C.int;
@@ -110,7 +153,7 @@ package body Rust_Async_Jobs is
       Value  : Interfaces.Integer_64;
       Status : Interfaces.C.int;
    begin
-      Status := Rust_Job_Poll (Item.Runtime, Item.Handle, State, Value);
+      Status := Rust_Job_Poll (Item.Lease.Runtime, Item.Lease.Handle, State, Value);
       if Status /= Bridge_OK then
          Item.Failure := Bridge_Failed;
          Flyology.Operations.Drivers.Complete
@@ -154,7 +197,7 @@ package body Rust_Async_Jobs is
          raise Program_Error with "Rust async engine is not initialized";
       end if;
       return Result : Job_Operation (Set) do
-         Result.Runtime := Runtime.Handle;
+         Result.Lease.Runtime := Runtime.Handle;
          Flyology.Operations.Drivers.Start (Result);
          Flyology.Operations.Drivers.Completion_Source
            (Result, Read_Descriptor, Signal_Descriptor);
@@ -169,13 +212,18 @@ package body Rust_Async_Jobs is
               Milliseconds (Delay_For),
               Value,
               Signal_Descriptor,
-              Result.Handle);
+              Result.Lease.Handle);
          if Status /= Bridge_OK then
             Result.Failure := Bridge_Failed;
             Flyology.Operations.Drivers.Rollback_Start (Result);
-            raise Rust_Job_Error
-              with "Rust async job start failed, status=" & Status'Image;
+            if Status = Bridge_No_Capacity then
+               raise Rust_Capacity_Error with "Rust async engine has no free job slot";
+            else
+               raise Rust_Job_Error
+                 with "Rust async job start failed, status=" & Status'Image;
+            end if;
          end if;
+         Result.Lease.Owned := True;
          if Mode = Complete_Immediately then
             --  Rust has already signalled. The nonblocking pipe retains that
             --  completion across this later arm.
@@ -184,7 +232,8 @@ package body Rust_Async_Jobs is
                  (Result, Read_Descriptor, False);
             exception
                when others =>
-                  Status := Rust_Job_Release (Result.Runtime, Result.Handle);
+                  Status := Rust_Job_Release (Result.Lease.Runtime, Result.Lease.Handle);
+                  Result.Lease.Owned := False;
                   pragma Assert (Status = Bridge_OK);
                   Flyology.Operations.Drivers.Rollback_Start (Result);
                   raise;
@@ -215,7 +264,7 @@ package body Rust_Async_Jobs is
    procedure Request_Cancellation (Item : in out Job_Operation) is
       Status : Interfaces.C.int;
    begin
-      Status := Rust_Job_Cancel (Item.Runtime, Item.Handle);
+      Status := Rust_Job_Cancel (Item.Lease.Runtime, Item.Lease.Handle);
       if Status /= Bridge_OK then
          Item.Failure := Bridge_Failed;
          Flyology.Operations.Drivers.Complete
@@ -239,11 +288,12 @@ package body Rust_Async_Jobs is
       Failure : constant Failure_Kind := Item.Failure;
       Status  : Interfaces.C.int;
    begin
-      Status := Rust_Job_Release (Item.Runtime, Item.Handle);
+      Status := Rust_Job_Release (Item.Lease.Runtime, Item.Lease.Handle);
       if Status /= Bridge_OK then
          raise Rust_Job_Error
            with "Rust async job release failed, status=" & Status'Image;
       end if;
+      Item.Lease.Owned := False;
       Value := Item.Result;
       Flyology.Operations.Consume (Item);
       if Outcome = Flyology.Operations.Cancelled then

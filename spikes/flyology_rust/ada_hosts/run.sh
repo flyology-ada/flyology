@@ -31,4 +31,16 @@ RUST_SPIKE_LIBRARY=$rust_library RUST_SPIKE_RPATH=$rust_rpath \
   "$alr" exec -- env -u GPR_CONFIG gprbuild \
     --RTS="$project_root/build/rts" -f -P "$spike_root/ada_hosts_spike.gpr"
 
-"$project_root/scripts/run-with-timeout.sh" 20 "$spike_root/build/bin/ada_hosts_spike"
+stress_runs=${FLYOLOGY_RUST_STRESS_RUNS:-3}
+case $stress_runs in
+  ''|*[!0-9]*|0)
+    printf '%s\n' "FLYOLOGY_RUST_STRESS_RUNS must be a positive integer" >&2
+    exit 1
+    ;;
+esac
+
+run=1
+while [ "$run" -le "$stress_runs" ]; do
+  "$project_root/scripts/run-with-timeout.sh" 20 "$spike_root/build/bin/ada_hosts_spike"
+  run=$((run + 1))
+done

@@ -213,6 +213,32 @@ pub unsafe extern "C" fn flyology_rust_engine_destroy(engine: *mut Engine) -> c_
 #[unsafe(no_mangle)]
 /// # Safety
 ///
+/// `engine` must remain live for the call and `count` must point to writable storage.
+pub unsafe extern "C" fn flyology_rust_engine_active_jobs(
+    engine: *mut Engine,
+    count: *mut u32,
+) -> c_int {
+    ffi_guard(|| {
+        if count.is_null() {
+            return INVALID_ARGUMENT;
+        }
+        let engine = match unsafe { with_engine(engine) } {
+            Ok(engine) => engine,
+            Err(status) => return status,
+        };
+        let active = match engine.slots.lock() {
+            Ok(slots) => slots.iter().filter(|slot| slot.job.is_some()).count(),
+            Err(_) => return RUST_PANIC,
+        };
+        // SAFETY: count was checked and SLOT_COUNT fits in u32.
+        unsafe { count.write(active as u32) };
+        OK
+    })
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
 /// `engine` must remain live for the call, `result` must be writable, and `signal_fd`
 /// must remain a valid borrowed Flyology wake descriptor until the job terminalizes.
 pub unsafe extern "C" fn flyology_rust_job_start(
@@ -400,7 +426,10 @@ pub unsafe extern "C" fn flyology_rust_job_release(
         let Some(job) = slot.job.as_ref() else {
             return INVALID_HANDLE;
         };
-        if job.state.load(Ordering::Acquire) == JOB_PENDING {
+        if matches!(
+            job.state.load(Ordering::Acquire),
+            JOB_PENDING | JOB_PUBLISHING
+        ) {
             return JOB_STILL_PENDING;
         }
         slot.job = None;
@@ -411,6 +440,38 @@ pub unsafe extern "C" fn flyology_rust_job_release(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::UnixStream;
+
+    fn create_engine() -> *mut Engine {
+        let mut engine = ptr::null_mut();
+        assert_eq!(
+            // SAFETY: engine points to writable storage for the returned pointer.
+            unsafe { flyology_rust_engine_create(ptr::from_mut(&mut engine)) },
+            OK
+        );
+        assert!(!engine.is_null());
+        engine
+    }
+
+    fn start_immediate(engine: *mut Engine, signal_fd: c_int, value: i64) -> JobHandle {
+        let mut handle = JobHandle::default();
+        assert_eq!(
+            // SAFETY: engine is live, handle is writable, and the caller retains signal_fd.
+            unsafe {
+                flyology_rust_job_start(
+                    engine,
+                    MODE_IMMEDIATE,
+                    0,
+                    value,
+                    signal_fd,
+                    ptr::from_mut(&mut handle),
+                )
+            },
+            OK
+        );
+        handle
+    }
 
     #[test]
     fn rejects_null_engine_output() {
@@ -424,5 +485,89 @@ mod tests {
     #[test]
     fn catches_ffi_panics() {
         assert_eq!(ffi_guard(|| panic!("contained")), RUST_PANIC);
+    }
+
+    #[test]
+    fn generation_reuse_rejects_stale_handle() {
+        let engine = create_engine();
+        let (signal_reader, signal_writer) = UnixStream::pair().expect("signal pair");
+        let first = start_immediate(engine, signal_writer.as_raw_fd(), 11);
+        assert_eq!(
+            // SAFETY: engine and first identify a terminal live job.
+            unsafe { flyology_rust_job_release(engine, first) },
+            OK
+        );
+
+        let second = start_immediate(engine, signal_writer.as_raw_fd(), 22);
+        assert_eq!(first.slot, second.slot);
+        assert_ne!(first.generation, second.generation);
+        let mut state = -1;
+        let mut value = -1;
+        assert_eq!(
+            // SAFETY: outputs are writable; stale handles are an explicit validation case.
+            unsafe {
+                flyology_rust_job_poll(
+                    engine,
+                    first,
+                    ptr::from_mut(&mut state),
+                    ptr::from_mut(&mut value),
+                )
+            },
+            INVALID_HANDLE
+        );
+        assert_eq!(
+            // SAFETY: engine and second identify a terminal live job.
+            unsafe { flyology_rust_job_release(engine, second) },
+            OK
+        );
+        assert_eq!(
+            // SAFETY: all jobs are released and the engine is exclusively owned here.
+            unsafe { flyology_rust_engine_destroy(engine) },
+            OK
+        );
+        drop((signal_reader, signal_writer));
+    }
+
+    #[test]
+    fn ninth_job_is_rejected_until_a_slot_is_released() {
+        let engine = create_engine();
+        let (signal_reader, signal_writer) = UnixStream::pair().expect("signal pair");
+        let handles: [JobHandle; SLOT_COUNT] = std::array::from_fn(|index| {
+            start_immediate(engine, signal_writer.as_raw_fd(), index as i64)
+        });
+        let mut ninth = JobHandle::default();
+        assert_eq!(
+            // SAFETY: all arguments are live and writable; capacity exhaustion is expected.
+            unsafe {
+                flyology_rust_job_start(
+                    engine,
+                    MODE_IMMEDIATE,
+                    0,
+                    9,
+                    signal_writer.as_raw_fd(),
+                    ptr::from_mut(&mut ninth),
+                )
+            },
+            NO_CAPACITY
+        );
+        for handle in handles {
+            assert_eq!(
+                // SAFETY: each handle identifies a terminal live job and is released once.
+                unsafe { flyology_rust_job_release(engine, handle) },
+                OK
+            );
+        }
+        let reused = start_immediate(engine, signal_writer.as_raw_fd(), 10);
+        assert_eq!(
+            // SAFETY: reused identifies a terminal live job.
+            unsafe { flyology_rust_job_release(engine, reused) },
+            OK
+        );
+        assert_eq!(
+            // SAFETY: all jobs are released and the engine is exclusively owned here.
+            unsafe { flyology_rust_engine_destroy(engine) },
+            OK
+        );
+        drop((signal_reader, signal_writer));
     }
 }

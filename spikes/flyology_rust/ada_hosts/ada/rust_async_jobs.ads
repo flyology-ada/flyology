@@ -1,3 +1,4 @@
+with Ada.Finalization;
 with Flyology.Operations;
 with Interfaces;
 with System;
@@ -5,11 +6,14 @@ with System;
 package Rust_Async_Jobs is
 
    Rust_Job_Error : exception;
+   Rust_Capacity_Error : exception;
+   Rust_Engine_Busy : exception;
 
    type Engine is limited private;
 
    procedure Initialize (Item : in out Engine);
    procedure Shutdown (Item : in out Engine);
+   function Active_Jobs (Item : Engine) return Natural;
 
    type Job_Mode is
      (Complete_Immediately, Complete_After_Delay, Panic_After_Delay);
@@ -42,9 +46,17 @@ private
    type Failure_Kind is
      (No_Failure, Rust_Panicked, Signal_Failed, Bridge_Failed);
 
-   type Job_Operation is new Flyology.Operations.Operation with record
+   type Job_Lease is new Ada.Finalization.Limited_Controlled with record
       Runtime : System.Address := System.Null_Address;
       Handle  : Job_Handle;
+      Owned   : Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Job_Lease);
+
+   type Job_Operation is new Flyology.Operations.Operation with record
+      Lease   : Job_Lease;
       Result  : Interfaces.Integer_64 := 0;
       Failure : Failure_Kind := No_Failure;
    end record;
