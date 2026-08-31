@@ -1,0 +1,11 @@
+[package]
+name = "flyology-direct-future-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "unwind"

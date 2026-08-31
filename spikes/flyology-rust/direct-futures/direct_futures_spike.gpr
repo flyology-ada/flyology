@@ -1,0 +1,35 @@
+with "../../../flyology.gpr";
+
+project Direct_Futures_Spike is
+   for Languages use ("Ada");
+   for Source_Dirs use ("ada");
+   for Object_Dir use "../../../build/spikes/direct_futures/obj";
+   for Exec_Dir use "../../../build/spikes/direct_futures/bin";
+   for Main use
+     ("direct_futures_spike.adb",
+      "direct_futures_native_panic_child.adb",
+      "direct_futures_panic_child.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Switches ("Ada") use (external ("FLYOLOGY_RUST_FUTURE_LIBRARY"));
+   end Linker;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+end Direct_Futures_Spike;
