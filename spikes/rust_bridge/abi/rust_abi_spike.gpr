@@ -1,0 +1,23 @@
+project Rust_ABI_Spike is
+   Variant := external ("RUST_ABI_VARIANT", "static-debug");
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("ada");
+   for Object_Dir use "build/" & Variant & "/obj";
+   for Exec_Dir use "build/" & Variant & "/bin";
+   for Main use ("rust_abi_spike.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Driver use external ("RUST_ABI_LINK_DRIVER", "gcc");
+   end Linker;
+end Rust_ABI_Spike;

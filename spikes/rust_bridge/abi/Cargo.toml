@@ -1,0 +1,16 @@
+[package]
+name = "flyology-rust-abi-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "flyology_rust_abi_spike"
+crate-type = ["staticlib", "cdylib"]
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+
