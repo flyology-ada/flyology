@@ -1,0 +1,20 @@
+[package]
+name = "flyology-rust-ingress-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = { version = "=1.53.1", features = ["rt-multi-thread"] }
+
+[[bin]]
+name = "flyology-rust-ingress-spike"
+path = "src/main.rs"
+
+[[bin]]
+name = "flyology-binder-failure-probe"
+path = "src/bin/binder_failure.rs"
+
+[profile.release]
+debug = true
+overflow-checks = true
