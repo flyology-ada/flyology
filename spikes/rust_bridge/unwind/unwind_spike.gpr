@@ -1,0 +1,36 @@
+with "../../../flyology.gpr";
+
+project Unwind_Spike is
+   Variant := external ("FLYOLOGY_RUST_UNWIND_VARIANT", "static-debug-gcc");
+   Rust_Library := external ("FLYOLOGY_RUST_UNWIND_LIBRARY", "unconfigured-rust-library");
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("ada");
+   for Object_Dir use "build/obj";
+   for Exec_Dir use "build/" & Variant & "/bin";
+   for Main use ("unwind_native.adb", "unwind_lightweight.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Driver use external ("FLYOLOGY_RUST_UNWIND_LINK_DRIVER", "gcc");
+      for Switches ("Ada") use (Rust_Library);
+   end Linker;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+end Unwind_Spike;
