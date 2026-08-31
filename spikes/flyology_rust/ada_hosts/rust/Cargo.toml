@@ -1,0 +1,15 @@
+[package]
+name = "flyology-rust-ada-host-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[profile.release]
+debug = true
+overflow-checks = true
