@@ -28,6 +28,7 @@ procedure Flyology_Bench_Smoke is
    use type Flyology_Bench.Placement_Outcome;
    use type Flyology_Bench.Host_Lock_Outcome;
    use type Flyology_Bench.Condition_Availability;
+   use type Flyology_Bench.Condition_Detector;
    use type Flyology_Bench.Host_Lock.Acquisition;
    use type Interfaces.Unsigned_64;
 
@@ -825,9 +826,15 @@ begin
         (Report.Thermal_Availability /= Flyology_Bench.Condition_Not_Checked,
          "enabled thermal detection remained not checked");
       if Flyology_Bench.Metadata.Operating_System = "darwin" then
-         Check
-           (Report.Profile_Availability = Flyology_Bench.Condition_Available,
-            "pmset did not supply the active macOS profile");
+         if Report.Profile_Availability = Flyology_Bench.Condition_Available then
+            Check
+              (Report.Profile_Detector = Flyology_Bench.Darwin_PMSet,
+               "available macOS profile did not identify pmset");
+         else
+            Check
+              (Report.Profile_Detector = Flyology_Bench.No_Condition_Detector,
+               "unavailable macOS profile named a detector");
+         end if;
          Check
            (Report.Thermal_Availability = Flyology_Bench.Condition_Available,
             "NSProcessInfo did not supply macOS thermal pressure");
