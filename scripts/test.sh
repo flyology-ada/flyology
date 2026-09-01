@@ -424,6 +424,7 @@ process_generation_protocol_smoke
 process_generation_transport_smoke
 process_generation_coordinator_smoke
 process_lifecycle_smoke
+protected_action_blocking_smoke
 ready_queue_smoke
 runtime_smoke
 semantic_parity_smoke
