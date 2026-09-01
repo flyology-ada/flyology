@@ -110,6 +110,8 @@ run_gnatprove "$benchmark_log" \
   -f \
   -u \
   flyology_bench-baseline_math.adb \
+  flyology_bench-internal_condition_policy.adb \
+  flyology_bench-internal_window_policy.ads \
   flyology_bench-scaling_policy.adb
 
 printf '%s\n' "Flyology SPARK proof suite passed"

@@ -19,6 +19,36 @@ package body Flyology_Bench.Workers.Test_Support is
       Value.Environment_Data.Watched_CPUs := 1;
    end Corrupt_Control_Metadata;
 
+   procedure Corrupt_Condition_Windows (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Condition_Windows := 0;
+   end Corrupt_Condition_Windows;
+
+   procedure Corrupt_Disabled_Condition_State (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Profile_Detector := Darwin_PMSet;
+      Value.Environment_Data.Initial_Profile := Profile_Performance;
+      Value.Environment_Data.Profile_Changes := 1;
+   end Corrupt_Disabled_Condition_State;
+
+   procedure Corrupt_Enabled_Condition_State (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Profile_Availability := Condition_Unavailable;
+      Value.Environment_Data.Profile_Detector := Darwin_PMSet;
+      Value.Environment_Data.Initial_Profile := Profile_Performance;
+   end Corrupt_Enabled_Condition_State;
+
+   procedure Corrupt_Condition_Detector_Category (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Profile_Availability := Condition_Available;
+      Value.Environment_Data.Profile_Detector := Linux_CPU_Thermal_Throttle;
+   end Corrupt_Condition_Detector_Category;
+
+   procedure Corrupt_Fail_Affected (Value : in out Measurement) is
+   begin
+      Value.Environment_Data.Affected_Units := 1;
+   end Corrupt_Fail_Affected;
+
    procedure Corrupt_Metric_Request (Value : in out Measurement) is
    begin
       Value.Metric_Data.Data.Requested (Wall_Time) := False;

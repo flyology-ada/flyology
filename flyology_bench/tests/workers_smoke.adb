@@ -74,6 +74,19 @@ procedure Workers_Smoke is
 
 begin
    declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Env     : constant W.Environment := W.Create_Environment;
+   begin
+      W.Run
+        (Fixture, "wrong-disabled-condition-state", W.Ordinary_Measurement,
+         Base, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index (W.Reason (Results (1)), "not empty") /= 0,
+         "disabled condition report carrying transient state was accepted");
+   end;
+
+   declare
       Results : W.Worker_Result_Array (1 .. 3);
       Launch  : constant W.Launch_Configuration := (Default_Launch with delta Repetitions => 3);
       Env     : constant W.Environment := W.Create_Environment;
@@ -99,6 +112,62 @@ begin
             "environment fingerprint has the wrong shape");
       end loop;
       Check (W.Seed (Results (1)) /= W.Seed (Results (2)), "fresh workers reused one seed");
+   end;
+
+   declare
+      Results : W.Worker_Result_Array (1 .. 1);
+      Env     : constant W.Environment := W.Create_Environment;
+      Observe_Config : constant Flyology_Bench.Configuration :=
+        (Base
+         with delta
+           Operating_Conditions =>
+             (Enabled                    => True,
+              Response                   => Flyology_Bench.Observe,
+              Require_Nonreduced_Profile => False,
+              Require_Profile_Detection  => False,
+              Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
+              Require_Thermal_Detection  => False,
+              Window                     => 0.002));
+      Fail_Config : constant Flyology_Bench.Configuration :=
+        (Observe_Config
+         with delta
+           Operating_Conditions =>
+             (Enabled                    => True,
+              Response                   => Flyology_Bench.Fail,
+              Require_Nonreduced_Profile => False,
+              Require_Profile_Detection  => False,
+              Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
+              Require_Thermal_Detection  => False,
+              Window                     => 0.002));
+   begin
+      W.Run
+        (Fixture, "wrong-condition-windows", W.Ordinary_Measurement,
+         Observe_Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index (W.Reason (Results (1)), "sampling window") /= 0,
+         "condition report without a sampling window was accepted");
+      W.Run
+        (Fixture, "wrong-fail-affected", W.Ordinary_Measurement,
+         Fail_Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index (W.Reason (Results (1)), "Fail report") /= 0,
+         "successful Fail report with affected units was accepted");
+      W.Run
+        (Fixture, "wrong-enabled-condition-state", W.Ordinary_Measurement,
+         Observe_Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index (W.Reason (Results (1)), "observed state") /= 0,
+         "unavailable condition detector carrying state was accepted");
+      W.Run
+        (Fixture, "wrong-condition-detector", W.Ordinary_Measurement,
+         Observe_Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Malformed_Protocol
+         and then Ada.Strings.Fixed.Index (W.Reason (Results (1)), "invalid detector") /= 0,
+         "condition detector from the wrong category was accepted");
    end;
 
    declare
