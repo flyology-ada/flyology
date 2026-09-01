@@ -1,4 +1,5 @@
 with Ada.Command_Line;
+with Ada.Exceptions;
 with Ada.Finalization;
 with Flyology;
 with Flyology.Channels.Bounded;
@@ -21,6 +22,11 @@ procedure Channel_Reentrancy_Child is
          raise Program_Error with "cannot signal reentry test boundary";
       end if;
    end Signal_Reentry;
+
+   --  Name of the exception the deliberate reentrant call produced, written by
+   --  Worker and read after its enclosing block has awaited termination.
+   Detected      : String (1 .. 64) := (others => ' ');
+   Detected_Last : Natural := 0;
 
    Model : constant Flyology.Execution_Model :=
      (if Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "lightweight"
@@ -84,13 +90,32 @@ procedure Channel_Reentrancy_Child is
          Sent := (Ada.Finalization.Controlled with Live => False);
          Reentry_Hook := Reenter_Queue'Access;
          --  This same-object protected call from Finalize is deliberately a
-         --  contract violation. The runner confirms that the documented
-         --  bounded-error outcome occurs at this exact boundary.
+         --  contract violation. A native task self-deadlocks on the object's
+         --  mutex, which the runner confirms at this exact boundary. A
+         --  lightweight task would instead deadlock its whole execution group,
+         --  so the runtime detects the RM 9.5.1 bounded error and raises
+         --  Program_Error here.
          Queue.Receive (Received);
+      exception
+         when Error : others =>
+            declare
+               Name : constant String := Ada.Exceptions.Exception_Name (Error);
+               Last : constant Natural := Natural'Min (Name'Length, Detected'Length);
+            begin
+               Detected (1 .. Last) := Name (Name'First .. Name'First + Last - 1);
+               Detected_Last := Last;
+            end;
       end Worker;
    begin
       null;
    end Exercise;
 begin
    Exercise (Model);
+
+   --  Only the lightweight lane returns here: a native Worker never leaves the
+   --  self-deadlocked protected action, so the runner kills this process.
+   if Detected (1 .. Detected_Last) /= "PROGRAM_ERROR" then
+      raise Program_Error
+        with "reentrant same-object call was not detected: '" & Detected (1 .. Detected_Last) & "'";
+   end if;
 end Channel_Reentrancy_Child;
