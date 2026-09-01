@@ -33,7 +33,7 @@ package Flyology.Fairness is
    --  raises Program_Error at the yield rather than at compile time.
    --  @param Budget State owned by the calling task
    --  @exception Program_Error A lightweight task yields inside a protected
-   --    action
+   --     action
    procedure Checkpoint (Budget : in out Yield_Budget);
 
    --  Perform one cooperative scheduling point using `delay 0.0`. This is a
@@ -42,7 +42,7 @@ package Flyology.Fairness is
    --  protected bodies, so a lightweight caller inside a protected action
    --  raises Program_Error rather than being diagnosed at compile time.
    --  @exception Program_Error A lightweight task yields inside a protected
-   --    action
+   --     action
    procedure Yield_Now;
 
 private

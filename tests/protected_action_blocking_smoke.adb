@@ -20,10 +20,8 @@ procedure Protected_Action_Blocking_Smoke is
    --  The native holder stays inside its protected action for this long. Its
    --  peer contends far earlier, so the native lock wait is exercised rather
    --  than observed by coincidence.
-   Hold_Span : constant Ada.Real_Time.Time_Span :=
-     Ada.Real_Time.Milliseconds (200);
-   Peer_Lead : constant Ada.Real_Time.Time_Span :=
-     Ada.Real_Time.Milliseconds (20);
+   Hold_Span : constant Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (200);
+   Peer_Lead : constant Ada.Real_Time.Time_Span := Ada.Real_Time.Milliseconds (20);
 
    --  Which suspension point the holder reaches inside the protected action.
    type Suspension_Point is (Timed_Delay, Zero_Delay, Explicit_Yield);
@@ -77,9 +75,7 @@ procedure Protected_Action_Blocking_Smoke is
       begin
          --  The suspension below is the bounded error under test, so GNAT's
          --  syntactic diagnostic for it is expected and suppressed here only.
-         pragma
-           Warnings
-             (Off, "potentially blocking operation in protected operation");
+         pragma Warnings (Off, "potentially blocking operation in protected operation");
          case Point is
             when Timed_Delay    =>
                delay Ada.Real_Time.To_Duration (Hold_Span);
@@ -90,9 +86,7 @@ procedure Protected_Action_Blocking_Smoke is
             when Explicit_Yield =>
                Flyology.Fairness.Yield_Now;
          end case;
-         pragma
-           Warnings
-             (On, "potentially blocking operation in protected operation");
+         pragma Warnings (On, "potentially blocking operation in protected operation");
          Departed := Ada.Real_Time.Clock;
       end Hold;
 
@@ -112,8 +106,7 @@ procedure Protected_Action_Blocking_Smoke is
    protected body Outcome is
 
       procedure Holder_Raised (Name : String) is
-         Last : constant Natural :=
-           Natural'Min (Name'Length, Raised_Name'Length);
+         Last : constant Natural := Natural'Min (Name'Length, Raised_Name'Length);
       begin
          Raised_Name (1 .. Last) := Name (Name'First .. Name'First + Last - 1);
          Name_Last := Last;
@@ -217,8 +210,7 @@ procedure Protected_Action_Blocking_Smoke is
             Gate.Wait;
             delay Ada.Real_Time.To_Duration (Peer_Lead);
             declare
-               Attempted_At : constant Ada.Real_Time.Time :=
-                 Ada.Real_Time.Clock;
+               Attempted_At : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
             begin
                Object.Touch;
                Outcome.Peer_Completed (Attempted_At);
@@ -279,8 +271,7 @@ procedure Protected_Action_Blocking_Smoke is
             Gate.Wait;
             delay Ada.Real_Time.To_Duration (Peer_Lead);
             declare
-               Attempted_At : constant Ada.Real_Time.Time :=
-                 Ada.Real_Time.Clock;
+               Attempted_At : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
             begin
                Object.Touch;
                Outcome.Peer_Completed (Attempted_At);
