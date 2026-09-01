@@ -1,6 +1,6 @@
 name = "flyology"
 description = "Experimental GNAT runtime extension for native and lightweight Ada tasks"
-version = "0.1.1-dev"
+version = "0.2.0"
 
 authors = ["Yurii Rashkovskii"]
 maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
@@ -14,7 +14,7 @@ project-files = ["flyology.gpr"]
 gnat = ">=13 & <17"
 
 [[depends-on]]
-flyology_allocators = "~0.1.0-dev"
+flyology_allocators = "~0.1.0"
 
 [available.'case(os)']
 'linux|macos' = true
