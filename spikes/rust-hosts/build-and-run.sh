@@ -50,6 +50,7 @@ set -- \
 
 libgcc=$("$alr" exec -- gcc -print-libgcc-file-name)
 toolchain_library_dir=$(dirname -- "$libgcc")
+expect_exec_elf=0
 
 case $(uname -s) in
   Darwin)
@@ -67,6 +68,16 @@ case $(uname -s) in
     ;;
   Linux)
     set -- "$@" -C link-arg=-ldl -C link-arg=-pthread
+    case $(uname -m) in
+      x86_64|amd64)
+        #  The prepared GNAT runtime and this probe's Ada objects use static
+        #  R_X86_64_32/32S relocations. Rust defaults Linux executables to PIE,
+        #  which rust-lld correctly rejects for those objects. Keep Rust's
+        #  normal code generation and make only the final executable non-PIE.
+        set -- "$@" -C link-arg=-no-pie
+        expect_exec_elf=1
+        ;;
+    esac
     ;;
   *)
     printf '%s\n' "unsupported spike host: $(uname -s)" >&2
@@ -93,6 +104,14 @@ case $(uname -s) in
     if ldd "$executable" | grep -E 'libgnat|libgnarl' >/dev/null; then
       printf '%s\n' "Rust executable unexpectedly depends on a shared GNAT runtime" >&2
       exit 1
+    fi
+    if [ "$expect_exec_elf" -eq 1 ]; then
+      elf_type=$(readelf -h "$executable" | awk '$1 == "Type:" { print $2 }')
+      if [ "$elf_type" != EXEC ]; then
+        printf '%s\n' \
+          "Linux/x86-64 Rust-host executable must be non-PIE ELF type EXEC, got: $elf_type" >&2
+        exit 1
+      fi
     fi
     ;;
 esac

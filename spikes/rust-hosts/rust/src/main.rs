@@ -1,4 +1,5 @@
 use std::ffi::{c_int, c_void};
+use std::panic::{self, AssertUnwindSafe};
 
 unsafe extern "C" {
     fn adainit();
@@ -18,11 +19,29 @@ fn run_ada(label: &str) -> Result<(), String> {
     }
 }
 
+fn run_rust_panic_catch() -> Result<(), String> {
+    let previous_hook = panic::take_hook();
+    panic::set_hook(Box::new(|_| {}));
+    let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+        panic!("intentional Rust-hosted Ada link-policy probe panic");
+    }))
+    .is_err();
+    panic::set_hook(previous_hook);
+
+    if caught {
+        println!("PASS rust-panic-catch");
+        Ok(())
+    } else {
+        Err("Rust panic unexpectedly escaped catch_unwind".to_owned())
+    }
+}
+
 fn main() {
     unsafe { adainit() };
 
     let result = (|| {
         run_ada("rust-main-thread")?;
+        run_rust_panic_catch()?;
 
         std::thread::spawn(|| {
             let task = unsafe { __gnat_register_thread() };

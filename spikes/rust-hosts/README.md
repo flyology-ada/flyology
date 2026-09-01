@@ -30,6 +30,8 @@ shared `libgnat` or `libgnarl` dependency, and runs the executable under a
    initialization thread completes Flyology's one-shot process finalization.
 5. Ada exceptions can be contained on the Ada side and represented as a C
    integer status, so no exception crosses the language ABI.
+6. Rust panic unwinding remains functional after the Ada partition is
+   initialized and the prepared static GNAT runtime is present in the process.
 
 ## Lifecycle exercised
 
@@ -37,6 +39,7 @@ shared `libgnat` or `libgnarl` dependency, and runs the executable under a
 Rust main
   -> adainit
   -> Ada probe; local native and lightweight task masters finish
+  -> catch one intentional Rust panic entirely within Rust
   -> spawn Rust std thread
        -> __gnat_register_thread
        -> Ada probe; local native and lightweight task masters finish
@@ -56,6 +59,7 @@ The spike passed on macOS arm64 with GNAT 16.1.0 and Rust 1.97.1:
 
 ```text
 PASS rust-main-thread
+PASS rust-panic-catch
 PASS registered-rust-std-thread
 PASS adafinal
 ```
@@ -69,6 +73,13 @@ The following integration requirements were observable rather than assumed:
   automatically add GNAT GCC's `libemutls_w`, `libheapt_w`, and `libgcc`
   support archives, so the build script supplies the locally resolved
   toolchain archives explicitly.
+- On Linux/x86-64, the prepared static GNAT runtime and the spike's Ada
+  objects contain `R_X86_64_32` and `R_X86_64_32S` relocations. Rust 1.97.1
+  defaults the executable link to PIE, and rust-lld rejects those static
+  relocations. The runner passes `-no-pie` only to the final link on this
+  architecture and asserts that the result is ELF type `EXEC`. Rust retains
+  its normal code-generation model. Rebuilding Flyology and the complete GNAT
+  runtime as PIC would be a separate runtime policy, not a harness fix.
 - `GNAT.Threads` is the supported public registration surface. Current GNARL
   can register an unknown pthread lazily from its `Self` path, but depending
   on that target-specific behavior obscures ownership and cleanup. This spike
@@ -77,6 +88,34 @@ The following integration requirements were observable rather than assumed:
   may propagate an elaboration or finalization exception. The current probe
   contains exceptions raised by its exported application entry, but it does
   not solve exception containment around the binder lifecycle procedures.
+
+## Linux/x86-64 evidence
+
+On 2026-08-31 the unmodified runner failed in a clean, no-bind-mount
+Linux/amd64 Docker image when rust-lld combined Rust's default `-pie` with
+static relocations from the binder, probe object, and prepared `libgnat.a`.
+Two controls separated code generation from final-link policy:
+
+- `-C relocation-model=static` produced a passing executable; and
+- the narrower `-C link-arg=-no-pie` also passed without changing Rust code
+  generation.
+
+The committed runner uses the second control. In a fresh image it produced an
+x86-64 ELF `EXEC` with no dynamic `TEXTREL`, created and joined native and
+lightweight Ada tasks from both Rust callers, caught the intentional Rust
+panic, and finalized normally. The output was:
+
+```text
+PASS rust-main-thread
+PASS rust-panic-catch
+PASS registered-rust-std-thread
+PASS adafinal
+```
+
+This proves one correct static-link policy for the current prepared runtime;
+it does not establish that non-PIE is an acceptable deployment policy for
+every consumer. A consumer requiring PIE must instead provide a consistently
+PIC-built Ada probe, Flyology archive, allocator archive, and GNAT runtime.
 
 ## Kill criteria and remaining boundaries
 
