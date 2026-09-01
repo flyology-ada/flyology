@@ -27,10 +27,22 @@ package Flyology.Fairness is
    --  Yield when Budget's quantum has elapsed. Otherwise return immediately.
    --  Lightweight tasks return to their event loop; native tasks perform the
    --  normal Ada `delay 0.0` scheduling point. Fairness remains cooperative.
+   --  This is a potentially blocking operation and must not be called from a
+   --  protected action. The call is not syntactically visible to GNAT's check
+   --  on protected bodies, so a lightweight caller inside a protected action
+   --  raises Program_Error at the yield rather than at compile time.
    --  @param Budget State owned by the calling task
+   --  @exception Program_Error A lightweight task yields inside a protected
+   --    action
    procedure Checkpoint (Budget : in out Yield_Budget);
 
-   --  Perform one cooperative scheduling point using `delay 0.0`.
+   --  Perform one cooperative scheduling point using `delay 0.0`. This is a
+   --  potentially blocking operation and must not be called from a protected
+   --  action. The call is not syntactically visible to GNAT's check on
+   --  protected bodies, so a lightweight caller inside a protected action
+   --  raises Program_Error rather than being diagnosed at compile time.
+   --  @exception Program_Error A lightweight task yields inside a protected
+   --    action
    procedure Yield_Now;
 
 private
