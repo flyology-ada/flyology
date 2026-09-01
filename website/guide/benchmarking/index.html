@@ -179,7 +179,8 @@
             <li><a href="#axes">Select measurement axes</a></li>
             <li><a href="#budget">Bound collection time</a></li>
             <li><a href="#quiescence">Wait for a quiet CPU</a></li>
-            <li><a href="#interference">Keep the host quiet</a></li>
+            <li><a href="#operating-conditions">Check power profiles and thermal conditions</a></li>
+            <li><a href="#interference">Watch for CPU interference during collection</a></li>
             <li><a href="#telemetry">Use telemetry</a></li>
             <li><a href="#recording">Record externally driven work</a></li>
             <li><a href="#automation">Emit CSV or JSON</a></li>
@@ -471,10 +472,77 @@ Config.Samples := 75;</code></pre>
             <p>The maintained example enables the preflight with <code>FLYOLOGY_BENCH_QUIESCENCE=1</code>. It remains disabled by default so unattended runs do not acquire a new wait or failure condition.</p>
           </section>
 
-          <section id="interference">
+          <section id="operating-conditions">
             <span class="step-label">BENCH 08</span>
-            <h2>Watch for load that arrives after the gate passes.</h2>
-            <p>The preflight gate proves only that the host was quiet before warmup. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Interference</code></a> adds an optional watch that continues during collection. It estimates foreign load between timed samples, never inside them.</p>
+            <h2>Check power profiles and thermal conditions.</h2>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Operating_Conditions</code></a> selects an independent, opt-in <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Operating_Conditions_Policy</code></a>. The policy can observe:</p>
+            <ul>
+              <li>configured power profiles and low-power mode;</li>
+              <li>thermal state and available hardware throttle counters; and</li>
+              <li>process-profile changes that the collector sees at probe boundaries.</li>
+            </ul>
+            <p>The harness runs every condition probe outside timed regions.</p>
+            <figure class="code-panel">
+              <figcaption>pause until conditions recover, then recollect the affected collection window</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config.Operating_Conditions :=
+  (Enabled                    =&gt; True,
+   Response                   =&gt; Flyology_Bench.Pause,
+   Require_Nonreduced_Profile =&gt; True,
+   Require_Profile_Detection  =&gt; False,
+   Maximum_Thermal_State      =&gt; Flyology_Bench.Thermal_State_Fair,
+   Require_Thermal_Detection  =&gt; False,
+   Window                     =&gt; 0.050,
+   Stable_Time                =&gt; 0.500,
+   Poll_Interval              =&gt; 0.100,
+   Maximum_Pause_Time         =&gt; 30.0,
+   Rewarm_Time                =&gt; 0.050,
+   On_Pause_Timeout           =&gt; Flyology_Bench.Fallback_Observe);</code></pre>
+            </figure>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Activation</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Enabled</code></a> activates the probes. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Response</code></a> selects the behavior described below.</dd></div>
+                <div class="decision-row"><dt>Profile rules</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Nonreduced_Profile</code></a> rejects a reduced configured profile or enabled low-power mode. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Profile_Detection</code></a> makes missing profile evidence unacceptable.</dd></div>
+                <div class="decision-row"><dt>Thermal rules</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Maximum_Thermal_State</code></a> sets the highest acceptable thermal state from nominal through critical. The example uses <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#928efbd66951aea6e66070d3788e71c325865579178b510d09645d32b09128af"><code>Thermal_State_Fair</code></a>. Unknown is an observation result, not an acceptable threshold. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Thermal_Detection</code></a> makes absence of every supported thermal-state, throttle-counter, and degradation signal unacceptable.</dd></div>
+                <div class="decision-row"><dt>Collection window</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Window</code></a> sets the minimum target duration for each complete group of collection units.</dd></div>
+                <div class="decision-row"><dt>Recovery polling</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Stable_Time</code></a> sets the required continuous recovery interval. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Poll_Interval</code></a> controls probe spacing.</dd></div>
+                <div class="decision-row"><dt>Pause budget</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Maximum_Pause_Time</code></a> is one cumulative condition-wait budget for the complete run. When that budget expires, <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>On_Pause_Timeout</code></a> selects the action.</dd></div>
+                <div class="decision-row"><dt>Collection recovery</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Rewarm_Time</code></a> sets the workload rewarm duration after conditions recover during collection.</dd></div>
+              </dl>
+            </div>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Observe</code></a></dt><dd>The harness records unacceptable evidence and continues. During collection, it retains the affected collection window. Use this response when a run must finish without a new wait or failure condition.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Pause</code></a></dt><dd>The harness can wait at initial preflight, after workload warmup, and after calibration. If conditions recover during the calibration check, the harness repeats calibration. During collection, it waits for continuous recovery, rewarms, and recollects the complete affected window. Pause and rewarm time do not consume the sampling budget.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Fail</code></a></dt><dd>During collection, the harness completes the affected window before it raises <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#73bbc322b82eead61be222d5f53310973cfe6839bd57b7534961c2e481aa60b7"><code>Operating_Conditions_Unacceptable</code></a>. At initial, post-warmup, or calibration checks, the harness raises the exception at the check boundary.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Condition_Pause_Fallback</code></a></dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Fallback_Observe</code></a> records the expired budget and continues. During collection, it retains the original affected window. At earlier checks, no collection window exists. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Fallback_Fail</code></a> raises the same exception.</dd></div>
+              </dl>
+            </div>
+            <p>A collection unit is one sample, one comparison pair, or one balanced multi-way round. A response does not split a collection unit.</p>
+            <p>The policy groups complete collection units according to calibrated duration. If the operating-condition watch and the interference watch described next are both enabled, the harness uses the larger window target. A final window can contain fewer units.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>macOS</dt><dd><p>The collector reads power mode and power source from <code>pmset</code>. It reads live low-power, thermal-pressure, and process-profile values from public <code>NSProcessInfo</code> APIs. A Default or Sustained process profile is acceptable by itself. If the collector observes a change from the post-warmup profile at a probe boundary, it records a transient event.</p><p>macOS thermal pressure reports system stress. It is not a public hardware throttle counter. At each probe boundary, the collector reads live <code>NSProcessInfo</code> values. The collector caches <code>pmset</code> results for one second. If a brief profile switch ends before the next boundary, the collector does not observe it.</p></dd></div>
+                <div class="decision-row"><dt>Linux</dt><dd><p>The collector resolves the configured profile in this order:</p><ol><li>It queries an already-running power-profiles-daemon and reads its degradation reason.</li><li>If that profile is unavailable, it checks modern <code>/sys/class/platform-profile</code> handlers. If every present handler is readable and all values agree, the collector accepts their common value.</li><li>If no modern handler is present, the collector reads the legacy ACPI <code>platform_profile</code> file.</li></ol><p>If a modern handler is unreadable or conflicts with another handler, the profile remains unavailable. The collector does not use the legacy file in that case.</p><p>When the kernel exposes Intel-style thermal-throttle event and duration counters, the collector reads them separately.</p><p>Opening the local system bus is synchronous and is outside the D-Bus method-call deadline. A stalled connection can extend the nominal probe and pause bounds. After connection, the collector applies the remaining absolute deadline to D-Bus calls. Condition-probe time remains outside sampling timestamps and the sampling budget.</p><p>A throttle-event increase proves that throttling occurred during the observation span. A duration counter shows whether throttling continued while the harness waited. Without a duration counter, the harness cannot establish that the CPU cooled after an event, so the pause can exhaust the configured total budget and apply the fallback.</p></dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Missing evidence remains unavailable.</strong> The harness does not infer thermal throttling from instantaneous CPU frequency. If a counter disappears or loses continuity, the report retains previously valid deltas and marks the counter unavailable.</p>
+            </aside>
+            <p><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#9894c4c34ccc88cf6caf5063f7f9a67c342bb7d0b131233cdc5587dc1cf6d733"><code>Environment (Result)</code></a> retains:</p>
+            <ul>
+              <li>detector identities and initial, final, and worst states;</li>
+              <li>profile changes and throttle deltas; and</li>
+              <li>affected and recollected units, pause time, and fallback use.</li>
+            </ul>
+            <p>JSON preserves structured availability and detector fields for enabled runs. Console output is a compact summary and does not distinguish an unavailable throttle total from zero. Existing CSV schemas remain unchanged.</p>
+          </section>
+
+          <section id="interference">
+            <span class="step-label">BENCH 09</span>
+            <h2>Watch for CPU interference during collection.</h2>
+            <p>The operating-condition watch does not measure foreign CPU load. The CPU quiescence preflight establishes only that the host was quiet before warmup. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#6a1aa2450c70e57834f903df24652f0aeee8aea07c0b1263cae6ee1c116c6017"><code>Interference</code></a> adds an optional watch during collection. It estimates foreign load between timed samples, never inside them.</p>
             <figure class="code-panel">
               <figcaption>collect a contaminated window again instead of keeping it</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
@@ -512,7 +580,7 @@ Config.Samples := 75;</code></pre>
           </section>
 
           <section id="telemetry">
-            <span class="step-label">BENCH 09</span>
+            <span class="step-label">BENCH 10</span>
             <h2>Monitor the process outside timed intervals.</h2>
             <p><a href="../../api/flyology_bench/8831e2be58964450c5f948f7f734008de8973c7584305bfe185fcb5474d9e2f2.html#ba29fc9e6397621399ce9b061b096a2ff2426433e1fb9794afa94910f02019d2"><code>Terminal_Mode</code></a> enables process telemetry and names every live progress line. During multi-way collection, a fixed-width field identifies the implementation that produced each sample. Its fixed width prevents the progress display from moving. The line also reports CPU percentage, occupied cores, current RSS, RSS growth, and elapsed wall time. Final reports retain CPU and RSS sparklines.</p>
             <div class="decision-list">
@@ -597,7 +665,7 @@ FLYOLOGY_BENCH_RECORDING_OUTPUT=json ./examples/bin/recording_service</code></pr
           </section>
 
           <section id="automation">
-            <span class="step-label">BENCH 10</span>
+            <span class="step-label">BENCH 11</span>
             <h2>Emit CSV or JSON without terminal output.</h2>
             <p>CSV and newline-delimited JSON reporters omit progress and ANSI sequences. The maintained example selects the reporter through one environment variable.</p>
             <figure class="code-panel">
@@ -635,7 +703,7 @@ FLYOLOGY_BENCH_OUTPUT=json \
           </section>
 
           <section id="fresh-processes">
-            <span class="step-label">BENCH 11</span>
+            <span class="step-label">BENCH 12</span>
             <h2>Use fresh processes to isolate process-global state.</h2>
             <p><a href="../../api/flyology_bench/c4c0e76529dab572583b8159bab61baddf38a2920e3e252fa191fa01cc290e67.html"><code>Flyology_Bench.Workers</code></a> invokes the same executable directly through <code>posix_spawn</code>. Each worker executes one exact ordinary or paired case. A paired comparison stays inside one worker, so reference and contender retain their shared order and sample schedule.</p>
             <figure class="code-panel">
@@ -655,7 +723,7 @@ alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
           </section>
 
           <section id="correctness">
-            <span class="step-label">BENCH 12</span>
+            <span class="step-label">BENCH 13</span>
             <h2>Treat fractional nanoseconds as amortized throughput.</h2>
             <p>A result such as <code>0.878 ns/op</code> does not mean the clock directly resolved one operation in 878 picoseconds. The harness timed a batch lasting milliseconds and divided that duration by the logical operation count. This is useful throughput evidence when the batch performs exactly that many comparable operations.</p>
             <div class="decision-list">
@@ -673,7 +741,7 @@ alr exec -- gprbuild -p -P examples/flyology_bench_examples.gpr
           </section>
 
           <section id="platforms">
-            <span class="step-label">BENCH 13</span>
+            <span class="step-label">BENCH 14</span>
             <h2>Repeat on the host you intend to describe.</h2>
             <p>The crate is maintained on Darwin and Linux, including native Linux/AArch64 Docker validation. Its default fingerprint records operating system, architecture, and GNAT version. Add compiler switches, revision, CPU placement and power policy, and other conditions that could change the result.</p>
             <figure class="code-panel">

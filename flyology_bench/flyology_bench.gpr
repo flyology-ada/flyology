@@ -14,6 +14,12 @@ project Flyology_Bench is
         ("-O3", "-std=c11", "-Wall", "-Wextra", "-Werror");
    end Compiler;
 
+   package Linker is
+      --  Linux before glibc 2.34 provides the optional dynamic-loader API in
+      --  libdl. macOS SDKs retain the compatible library name.
+      for Linker_Options use ("-ldl");
+   end Linker;
+
    package Documentation is
       for Resources_Dir ("html") use "../docs/gnatdoc-bench/html";
    end Documentation;
