@@ -509,7 +509,16 @@ This is fixed-priority cooperative scheduling, not a hard-real-time claim:
   native/lightweight semantic suite, but kernel priority-ceiling violation checks,
   priority inheritance through arbitrary pthread/foreign locks, and bounded
   priority inversion are not a lightweight guarantee. Potentially blocking work
-  remains unsuitable inside a protected action.
+  remains unsuitable inside a protected action. On a lightweight task the
+  runtime detects that RM 9.5.1 bounded error: a potentially blocking
+  operation reached inside a protected action raises `Program_Error` at the
+  suspension point, the protected object's lock is released, and the object
+  stays usable. Without that check a suspended fiber would hold the object's
+  pthread mutex on its event-loop thread and deadlock every task in its
+  execution group. Native tasks keep stock GNAT behavior, where the same
+  construct is an undetected bounded error and a peer simply waits on the
+  lock; configure `pragma Detect_Blocking` for a partition that wants the
+  check on native tasks as well.
 
 Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
 preemption bound, or certified ceiling behavior should keep those tasks native
@@ -652,6 +661,13 @@ loop peers a turn, while a native task offers its pthread to the OS scheduler.
 It deliberately does not interrupt arbitrary Ada instructions; code that never
 calls a runtime suspension or checkpoint remains cooperative and can still own
 the loop until it returns.
+
+`delay 0.0`, `Flyology.Fairness.Yield_Now`, and `Checkpoint` are potentially
+blocking operations and must never be called inside a protected action. GNAT
+diagnoses a literal `delay` statement in a protected body, but a call to
+`Yield_Now` or `Checkpoint` is not syntactically visible to that check. On a
+lightweight task the yield itself raises `Program_Error`, so `Yield_Now` fails
+on every call and `Checkpoint` fails on the call where its quantum expires.
 
 ## Concurrency primitives
 
