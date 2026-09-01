@@ -28,4 +28,4 @@ jobs:
           apm install --frozen
           apm compile --target codex
           apm audit --ci
-          git diff --exit-code -- AGENTS.md flyology_allocators/AGENTS.md flyology_allocators/benchmarks/AGENTS.md website/AGENTS.md apm.lock.yaml
+          git diff --exit-code -- AGENTS.md flyology_allocators/AGENTS.md flyology_allocators/benchmarks/AGENTS.md apm.lock.yaml

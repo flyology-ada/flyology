@@ -725,9 +725,10 @@ required by the changed boundary.
 - Document lane-specific blocking, timeout units and deadline scope,
   cancellation latency, ownership/lifecycle, task safety, cooperative fairness,
   and group migration where they affect callers. Do not restate signatures.
-- Hand-written Guide, Architecture, and Journal pages follow `website/AGENTS.md`.
-  Link the first explanatory mention of each public Flyology API entity on a
-  page to its verified generated GNATdoc unit or declaration entry.
+- Use the `flyology-website-content` skill for hand-written Guide,
+  Architecture, and Journal pages. Link the first explanatory mention of each
+  public Flyology API entity on a page to its verified generated GNATdoc unit
+  or declaration entry.
 - Runtime specs are maintainer-facing and outside public GNATdoc scope, but
   still need comments for locking, ownership, state transitions, and ABI facts.
 - Tests should assert behavior and resource/lifecycle invariants, not merely

@@ -7,7 +7,6 @@ includes: auto
 dependencies:
   apm:
     - path: ./agent-packages/repository
-    - path: ./agent-packages/website
     - path: ./agent-packages/flyology-allocators
     - path: ./agent-packages/flyology-allocators-benchmarks
     - git: https://github.com/flyology-ada/agents.git
