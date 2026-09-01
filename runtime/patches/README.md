@@ -57,6 +57,18 @@ completed its dependent-task master but before user termination handlers run.
 It attaches the storage before activation and detaches it during ATCB reap; no
 ATCB field, global result registry, or post-allocation registration is added.
 
+The common blocking-detection patch makes `System.Tasking.Detect_Blocking`
+report true whenever the calling task is a running lightweight task, in
+addition to the binder flag that `pragma Detect_Blocking` sets. A lightweight
+task that reaches a suspension point inside a protected action keeps the
+object's pthread mutex held on its event-loop thread, so a same-group peer that
+contends for it parks the only thread that could resume the holder. RM 9.5.1
+permits an implementation to detect that bounded error, and the patch takes
+that outcome for fibers so every existing GNARL check site applies to them. The self-observation it calls reports a null address on the
+environment task, on native tasks, and before the scheduler is initialized, so
+a partition that creates no lightweight task keeps the binder-selected
+behaviour.
+
 When a future GNAT release changes the affected GNARL sources, add a new
 versioned family rather than weakening patch validation. A family may span
 multiple majors only while the same patch is built and behaviorally tested on
