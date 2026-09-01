@@ -26,17 +26,25 @@
 #endif
 
 #include <errno.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <pthread.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/file.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+
+extern char **environ;
 
 #if defined(__APPLE__)
 #include <libproc.h>
@@ -141,6 +149,469 @@ const size_t flyology_bench_timespec_bytes = sizeof(struct timespec);
 const size_t flyology_bench_rusage_bytes = sizeof(struct rusage);
 const size_t flyology_bench_rusage_counters_offset =
     offsetof(struct rusage, ru_maxrss);
+
+/* ------------------------------------------------------------------ */
+/* Fixed command-capture mechanisms.                                   */
+/*                                                                     */
+/* posix_spawn file actions and pollfd are opaque or platform-defined. */
+/* These leaves expose spawn, read, poll, wait, kill, and close without */
+/* retry or classification. Ada owns the deadline and state machine.   */
+/* ------------------------------------------------------------------ */
+
+const int flyology_bench_capture_eintr = EINTR;
+const int flyology_bench_capture_eagain = EAGAIN;
+const int flyology_bench_capture_ewouldblock = EWOULDBLOCK;
+
+int flyology_bench_capture_start(const char *path,
+                                 char *const argv[],
+                                 int *read_descriptor,
+                                 int *child_pid)
+{
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
+    int descriptors[2] = {-1, -1};
+    pid_t child = -1;
+    int status = 0;
+    int spawn_status;
+    int saved_errno = 0;
+    int actions_initialized = 0;
+    int attributes_initialized = 0;
+    short spawn_flags = POSIX_SPAWN_SETPGROUP;
+
+    *read_descriptor = -1;
+    *child_pid = -1;
+#if defined(__linux__)
+    if (pipe2(descriptors, O_CLOEXEC) != 0) {
+        return errno;
+    }
+#else
+    if (pipe(descriptors) != 0) {
+        return errno;
+    }
+    if (fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) != 0
+        || fcntl(descriptors[1], F_SETFD, FD_CLOEXEC) != 0) {
+        saved_errno = errno;
+        goto failed;
+    }
+#endif
+    status = fcntl(descriptors[0], F_GETFL);
+    if (status < 0 || fcntl(descriptors[0], F_SETFL, status | O_NONBLOCK) != 0) {
+        saved_errno = errno;
+        goto failed;
+    }
+    status = posix_spawn_file_actions_init(&actions);
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
+    actions_initialized = 1;
+    status = posix_spawn_file_actions_adddup2(&actions, descriptors[1], STDOUT_FILENO);
+    if (status == 0) {
+        status = posix_spawn_file_actions_adddup2(&actions, descriptors[1], STDERR_FILENO);
+    }
+    if (status == 0) {
+        status = posix_spawn_file_actions_addclose(&actions, descriptors[0]);
+    }
+    if (status == 0) {
+        status = posix_spawn_file_actions_addclose(&actions, descriptors[1]);
+    }
+#if defined(__linux__) && defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 34)
+    if (status == 0) {
+        status = posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+    }
+#endif
+#endif
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
+    status = posix_spawnattr_init(&attributes);
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
+    attributes_initialized = 1;
+    status = posix_spawnattr_setpgroup(&attributes, 0);
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
+#if defined(__APPLE__) && defined(POSIX_SPAWN_CLOEXEC_DEFAULT)
+    spawn_flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+#endif
+    status = posix_spawnattr_setflags(&attributes, spawn_flags);
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
+    spawn_status = posix_spawnp(&child, path, &actions, &attributes, argv, environ);
+    (void)posix_spawn_file_actions_destroy(&actions);
+    actions_initialized = 0;
+    (void)posix_spawnattr_destroy(&attributes);
+    attributes_initialized = 0;
+    if (spawn_status != 0) {
+        saved_errno = spawn_status;
+        goto failed;
+    }
+    (void)close(descriptors[1]);
+    descriptors[1] = -1;
+    *read_descriptor = descriptors[0];
+    *child_pid = (int)child;
+    return 0;
+
+failed:
+    if (actions_initialized) {
+        (void)posix_spawn_file_actions_destroy(&actions);
+    }
+    if (attributes_initialized) {
+        (void)posix_spawnattr_destroy(&attributes);
+    }
+    if (descriptors[0] >= 0) {
+        (void)close(descriptors[0]);
+    }
+    if (descriptors[1] >= 0) {
+        (void)close(descriptors[1]);
+    }
+    return saved_errno;
+}
+
+int flyology_bench_capture_read(int descriptor, void *output, size_t capacity,
+                                ssize_t *count)
+{
+    *count = read(descriptor, output, capacity);
+    return *count < 0 ? errno : 0;
+}
+
+int flyology_bench_capture_poll(int descriptor, int timeout_ms, int *ready)
+{
+    struct pollfd item = {descriptor, POLLIN | POLLHUP, 0};
+
+    *ready = poll(&item, 1, timeout_ms);
+    return *ready < 0 ? errno : 0;
+}
+
+int flyology_bench_capture_wait(int child_pid, int nohang, int *wait_status,
+                                int *result_pid)
+{
+    pid_t result = waitpid((pid_t)child_pid, wait_status, nohang ? WNOHANG : 0);
+
+    *result_pid = (int)result;
+    return result < 0 ? errno : 0;
+}
+
+int flyology_bench_capture_kill_group(int child_pid)
+{
+    return kill(-(pid_t)child_pid, SIGKILL) == 0 ? 0 : errno;
+}
+
+int flyology_bench_capture_close(int descriptor)
+{
+    return close(descriptor) == 0 ? 0 : errno;
+}
+
+int flyology_bench_capture_exit_status(int wait_status)
+{
+    if (WIFEXITED(wait_status)) {
+        return WEXITSTATUS(wait_status);
+    }
+    if (WIFSIGNALED(wait_status)) {
+        return 128 + WTERMSIG(wait_status);
+    }
+    return -1;
+}
+
+/* Query an already-running power-profiles-daemon through libsystemd. The
+ * preliminary name-owner request is passive, so observation does not start a
+ * daemon that was absent. Ada owns all string classification and policy. */
+#if defined(__linux__)
+struct flyology_bench_sd_bus_api {
+    void *handle;
+    int (*open_system)(void **);
+    int (*set_timeout)(void *, uint64_t);
+    int (*get_name_creds)(void *, const char *, uint64_t, void **);
+    int (*creds_get_unique_name)(void *, const char **);
+    void *(*creds_unref)(void *);
+    int (*get_property_string)(void *, const char *, const char *, const char *,
+                               const char *, void *, char **);
+    void *(*bus_unref)(void *);
+};
+
+static struct flyology_bench_sd_bus_api flyology_bench_sd_bus;
+static pthread_once_t flyology_bench_sd_bus_once = PTHREAD_ONCE_INIT;
+
+static void flyology_bench_initialize_sd_bus(void)
+{
+    struct flyology_bench_sd_bus_api *api = &flyology_bench_sd_bus;
+
+    api->handle = dlopen("libsystemd.so.0", RTLD_LAZY | RTLD_LOCAL);
+    if (api->handle == NULL) {
+        return;
+    }
+    *(void **)(&api->open_system) = dlsym(api->handle, "sd_bus_open_system");
+    *(void **)(&api->set_timeout) = dlsym(api->handle, "sd_bus_set_method_call_timeout");
+    *(void **)(&api->get_name_creds) = dlsym(api->handle, "sd_bus_get_name_creds");
+    *(void **)(&api->creds_get_unique_name) = dlsym(api->handle, "sd_bus_creds_get_unique_name");
+    *(void **)(&api->creds_unref) = dlsym(api->handle, "sd_bus_creds_unref");
+    *(void **)(&api->get_property_string) = dlsym(api->handle, "sd_bus_get_property_string");
+    *(void **)(&api->bus_unref) = dlsym(api->handle, "sd_bus_unref");
+    if (api->open_system == NULL || api->set_timeout == NULL || api->get_name_creds == NULL
+        || api->creds_get_unique_name == NULL || api->creds_unref == NULL
+        || api->get_property_string == NULL || api->bus_unref == NULL) {
+        (void)dlclose(api->handle);
+        memset(api, 0, sizeof(*api));
+    }
+}
+
+static int flyology_bench_copy_property(char *target, size_t capacity, const char *source)
+{
+    size_t length;
+
+    if (target == NULL || capacity == 0 || source == NULL) {
+        return -1;
+    }
+    length = strlen(source);
+    if (length >= capacity) {
+        return -1;
+    }
+    memcpy(target, source, length + 1);
+    return 0;
+}
+#endif
+
+int flyology_bench_linux_ppd_open(void **bus)
+{
+#if defined(__linux__)
+    struct flyology_bench_sd_bus_api *api = &flyology_bench_sd_bus;
+    int status;
+
+    *bus = NULL;
+    status = pthread_once(&flyology_bench_sd_bus_once, flyology_bench_initialize_sd_bus);
+    if (status != 0 || api->handle == NULL) {
+        return -ENOSYS;
+    }
+    return api->open_system(bus);
+#else
+    (void)bus;
+    return -ENOSYS;
+#endif
+}
+
+int flyology_bench_linux_ppd_set_timeout(void *bus, uint64_t timeout_us)
+{
+#if defined(__linux__)
+    return flyology_bench_sd_bus.set_timeout(bus, timeout_us);
+#else
+    (void)bus;
+    (void)timeout_us;
+    return -ENOSYS;
+#endif
+}
+
+int flyology_bench_linux_ppd_get_name_credentials(void *bus, const char *destination,
+                                                   void **credentials)
+{
+#if defined(__linux__)
+    *credentials = NULL;
+    return flyology_bench_sd_bus.get_name_creds(bus, destination, UINT64_C(1) << 31,
+                                                credentials);
+#else
+    (void)bus;
+    (void)destination;
+    (void)credentials;
+    return -ENOSYS;
+#endif
+}
+
+int flyology_bench_linux_ppd_copy_unique_name(void *credentials, char *target,
+                                               size_t capacity)
+{
+#if defined(__linux__)
+    const char *unique_name = NULL;
+    int status = flyology_bench_sd_bus.creds_get_unique_name(credentials, &unique_name);
+
+    if (status < 0) {
+        return status;
+    }
+    return flyology_bench_copy_property(target, capacity, unique_name);
+#else
+    (void)credentials;
+    (void)target;
+    (void)capacity;
+    return -ENOSYS;
+#endif
+}
+
+int flyology_bench_linux_ppd_get_property(void *bus, const char *destination,
+                                          const char *path, const char *interface,
+                                          const char *property, char *target,
+                                          size_t capacity)
+{
+#if defined(__linux__)
+    char *value = NULL;
+    int status = flyology_bench_sd_bus.get_property_string(
+        bus, destination, path, interface, property, NULL, &value);
+
+    if (status >= 0 && flyology_bench_copy_property(target, capacity, value) != 0) {
+        status = -ENOSPC;
+    }
+    free(value);
+    return status;
+#else
+    (void)bus;
+    (void)destination;
+    (void)path;
+    (void)interface;
+    (void)property;
+    (void)target;
+    (void)capacity;
+    return -ENOSYS;
+#endif
+}
+
+void flyology_bench_linux_ppd_credentials_unref(void *credentials)
+{
+#if defined(__linux__)
+    (void)flyology_bench_sd_bus.creds_unref(credentials);
+#else
+    (void)credentials;
+#endif
+}
+
+void flyology_bench_linux_ppd_bus_unref(void *bus)
+{
+#if defined(__linux__)
+    (void)flyology_bench_sd_bus.bus_unref(bus);
+#else
+    (void)bus;
+#endif
+}
+
+/* Foundation exposes current thermal pressure and effective low-power mode */
+/* through NSProcessInfo. Loading the Objective-C runtime dynamically keeps */
+/* those optional Darwin APIs out of every downstream link command.          */
+#if defined(__APPLE__)
+struct flyology_bench_darwin_condition_api {
+    void *foundation;
+    void *objective_c;
+    void *metal;
+    void *process;
+    void *responds_selector;
+    void *thermal_selector;
+    void *power_selector;
+    void *profile_selector;
+    long *default_profile_value;
+    long *sustained_profile_value;
+    signed char (*send_responds)(void *, void *, void *);
+    long (*send_long)(void *, void *);
+    signed char (*send_bool)(void *, void *);
+    signed char (*send_profile)(void *, void *, long);
+};
+
+static struct flyology_bench_darwin_condition_api flyology_bench_darwin_conditions;
+static pthread_once_t flyology_bench_darwin_conditions_once = PTHREAD_ONCE_INIT;
+
+static void flyology_bench_initialize_darwin_conditions(void)
+{
+    typedef void *(*get_class_fn)(const char *);
+    typedef void *(*register_name_fn)(const char *);
+    typedef void *(*send_object_fn)(void *, void *);
+    struct flyology_bench_darwin_condition_api *api = &flyology_bench_darwin_conditions;
+    get_class_fn get_class;
+    register_name_fn register_name;
+    send_object_fn send_object;
+    void *process_class;
+
+    api->foundation = dlopen("/System/Library/Frameworks/Foundation.framework/Foundation",
+                             RTLD_LAZY | RTLD_LOCAL);
+    api->objective_c = dlopen("/usr/lib/libobjc.A.dylib", RTLD_LAZY | RTLD_LOCAL);
+    if (api->foundation == NULL || api->objective_c == NULL) {
+        return;
+    }
+    get_class = (get_class_fn)dlsym(api->objective_c, "objc_getClass");
+    register_name = (register_name_fn)dlsym(api->objective_c, "sel_registerName");
+    send_object = (send_object_fn)dlsym(api->objective_c, "objc_msgSend");
+    api->send_long = (long (*)(void *, void *))dlsym(api->objective_c, "objc_msgSend");
+    api->send_bool = (signed char (*)(void *, void *))dlsym(api->objective_c, "objc_msgSend");
+    api->send_responds =
+        (signed char (*)(void *, void *, void *))dlsym(api->objective_c, "objc_msgSend");
+    api->send_profile =
+        (signed char (*)(void *, void *, long))dlsym(api->objective_c, "objc_msgSend");
+    if (get_class == NULL || register_name == NULL || send_object == NULL || api->send_long == NULL) {
+        return;
+    }
+    process_class = get_class("NSProcessInfo");
+    api->process = process_class == NULL ? NULL : send_object(process_class, register_name("processInfo"));
+    api->responds_selector = register_name("respondsToSelector:");
+    api->thermal_selector = register_name("thermalState");
+    api->power_selector = register_name("isLowPowerModeEnabled");
+    api->profile_selector = register_name("hasPerformanceProfile:");
+    api->metal = dlopen("/System/Library/Frameworks/Metal.framework/Metal", RTLD_LAZY | RTLD_LOCAL);
+    if (api->metal != NULL) {
+        api->default_profile_value = (long *)dlsym(api->metal, "NSProcessPerformanceProfileDefault");
+        api->sustained_profile_value =
+            (long *)dlsym(api->metal, "NSProcessPerformanceProfileSustained");
+    }
+}
+#endif
+
+int flyology_bench_darwin_process_conditions(int *thermal_available,
+                                              int *thermal_state,
+                                              int *low_power_available,
+                                              int *low_power,
+                                              int *profile_available,
+                                              int *default_profile,
+                                              int *sustained_profile)
+{
+#if defined(__APPLE__)
+    struct flyology_bench_darwin_condition_api *api = &flyology_bench_darwin_conditions;
+    int status;
+
+    *thermal_available = 0;
+    *thermal_state = 0;
+    *low_power_available = 0;
+    *low_power = 0;
+    *profile_available = 0;
+    *default_profile = 0;
+    *sustained_profile = 0;
+    status = pthread_once(&flyology_bench_darwin_conditions_once,
+                          flyology_bench_initialize_darwin_conditions);
+    if (status != 0 || api->process == NULL || api->responds_selector == NULL
+        || api->thermal_selector == NULL || api->power_selector == NULL
+        || api->profile_selector == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    if (api->send_responds(api->process, api->responds_selector, api->thermal_selector)) {
+        *thermal_available = 1;
+        *thermal_state = (int)api->send_long(api->process, api->thermal_selector);
+    }
+    if (api->send_responds(api->process, api->responds_selector, api->power_selector)) {
+        *low_power_available = 1;
+        *low_power = api->send_bool(api->process, api->power_selector) ? 1 : 0;
+    }
+    if (api->metal != NULL && api->default_profile_value != NULL
+        && api->sustained_profile_value != NULL
+        && api->send_responds(api->process, api->responds_selector, api->profile_selector)) {
+        *profile_available = 1;
+        *default_profile =
+            api->send_profile(api->process, api->profile_selector, *api->default_profile_value) ? 1 : 0;
+        *sustained_profile =
+            api->send_profile(api->process, api->profile_selector, *api->sustained_profile_value) ? 1 : 0;
+    }
+    return 0;
+#else
+    (void)thermal_available;
+    (void)thermal_state;
+    (void)low_power_available;
+    (void)low_power;
+    (void)profile_available;
+    (void)default_profile;
+    (void)sustained_profile;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
 
 /* ------------------------------------------------------------------ */
 /* Monotonic clock.                                                    */

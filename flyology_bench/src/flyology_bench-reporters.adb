@@ -41,6 +41,7 @@ package body Flyology_Bench.Reporters is
    function Full_Pad (Value : String; Width : Positive) return String;
    function Left_Pad (Value : String; Width : Positive) return String;
    function Elapsed_Image (Nanoseconds : Interfaces.Unsigned_64) return String;
+   function JSON_String (Value : String) return String;
 
    function Terminal_ANSI return Boolean
    is (Isatty (Interfaces.C.int (1)) = 1
@@ -59,6 +60,9 @@ package body Flyology_Bench.Reporters is
 
          when Waiting_For_CPU_Quiescence =>
             return "waiting for quiet CPU";
+
+         when Waiting_For_Operating_Conditions =>
+            return "waiting for operating conditions";
 
          when Warming                    =>
             return "warming workload";
@@ -702,6 +706,143 @@ package body Flyology_Bench.Reporters is
       end case;
    end Host_Lock_Name;
 
+   function Condition_Availability_Name (Value : Condition_Availability) return String is
+   begin
+      case Value is
+         when Condition_Not_Checked =>
+            return "not-checked";
+         when Condition_Unavailable =>
+            return "unavailable";
+         when Condition_Available   =>
+            return "available";
+      end case;
+   end Condition_Availability_Name;
+
+   function Condition_Detector_Name (Value : Condition_Detector) return String is
+   begin
+      case Value is
+         when No_Condition_Detector            => return "none";
+         when Darwin_PMSet                     => return "darwin-pmset";
+         when Darwin_Process_Info              => return "darwin-process-info";
+         when Linux_Power_Profiles_Daemon      => return "linux-power-profiles-daemon";
+         when Linux_Platform_Profile           => return "linux-platform-profile";
+         when Linux_CPU_Thermal_Throttle       => return "linux-cpu-thermal-throttle";
+      end case;
+   end Condition_Detector_Name;
+
+   function Profile_Name (Value : Performance_Profile) return String is
+   begin
+      case Value is
+         when Profile_Unknown     => return "unknown";
+         when Profile_Reduced     => return "reduced";
+         when Profile_Balanced    => return "balanced";
+         when Profile_Performance => return "performance";
+      end case;
+   end Profile_Name;
+
+   function Thermal_Name (Value : Host_Thermal_State) return String is
+   begin
+      case Value is
+         when Thermal_State_Unknown  => return "unknown";
+         when Thermal_State_Nominal  => return "nominal";
+         when Thermal_State_Fair     => return "fair";
+         when Thermal_State_Serious  => return "serious";
+         when Thermal_State_Critical => return "critical";
+      end case;
+   end Thermal_Name;
+
+   function Process_Profile_Name (Value : Process_Performance_Profile) return String is
+   begin
+      case Value is
+         when Process_Profile_Unknown   => return "unknown";
+         when Process_Profile_Default   => return "default";
+         when Process_Profile_Sustained => return "sustained";
+      end case;
+   end Process_Profile_Name;
+
+   function Low_Power_Name (Value : Low_Power_Mode_State) return String is
+   begin
+      case Value is
+         when Low_Power_Mode_Unknown  => return "unknown";
+         when Low_Power_Mode_Disabled => return "disabled";
+         when Low_Power_Mode_Enabled  => return "enabled";
+      end case;
+   end Low_Power_Name;
+
+   function Power_Source_Name (Value : Host_Power_Source) return String is
+   begin
+      case Value is
+         when Power_Source_Unknown => return "unknown";
+         when Battery_Power        => return "battery";
+         when External_Power       => return "external";
+      end case;
+   end Power_Source_Name;
+
+   function Degradation_Name (Value : Performance_Degradation) return String is
+   begin
+      case Value is
+         when Degradation_Unknown        => return "unknown";
+         when Not_Degraded               => return "not-degraded";
+         when High_Operating_Temperature => return "high-operating-temperature";
+         when Lap_Detected               => return "lap-detected";
+         when Other_Degradation          => return "other";
+      end case;
+   end Degradation_Name;
+
+   function Operating_Conditions_JSON (Report : Environment_Report) return String is
+   begin
+      return
+        """operating_conditions"":{""profile_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Profile_Availability))
+        & ",""profile_detector"":" & JSON_String (Condition_Detector_Name (Report.Profile_Detector))
+        & ",""initial_profile"":" & JSON_String (Profile_Name (Report.Initial_Profile))
+        & ",""final_profile"":" & JSON_String (Profile_Name (Report.Final_Profile))
+        & ",""initial_power_source"":" & JSON_String (Power_Source_Name (Report.Initial_Power_Source))
+        & ",""final_power_source"":" & JSON_String (Power_Source_Name (Report.Final_Power_Source))
+        & ",""profile_changes"":" & Report.Profile_Changes'Image
+        & ",""low_power_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Low_Power_Availability))
+        & ",""low_power_detector"":" & JSON_String (Condition_Detector_Name (Report.Low_Power_Detector))
+        & ",""initial_low_power_mode"":" & JSON_String (Low_Power_Name (Report.Initial_Low_Power_Mode))
+        & ",""worst_low_power_mode"":" & JSON_String (Low_Power_Name (Report.Worst_Low_Power_Mode))
+        & ",""final_low_power_mode"":" & JSON_String (Low_Power_Name (Report.Final_Low_Power_Mode))
+        & ",""process_profile_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Process_Profile_Avail))
+        & ",""process_profile_detector"":"
+        & JSON_String (Condition_Detector_Name (Report.Process_Profile_Detector))
+        & ",""initial_process_profile"":"
+        & JSON_String (Process_Profile_Name (Report.Initial_Process_Profile))
+        & ",""final_process_profile"":"
+        & JSON_String (Process_Profile_Name (Report.Final_Process_Profile))
+        & ",""process_profile_changes"":" & Report.Process_Profile_Changes'Image
+        & ",""thermal_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Thermal_Availability))
+        & ",""thermal_detector"":" & JSON_String (Condition_Detector_Name (Report.Thermal_Detector))
+        & ",""initial_thermal_pressure"":" & JSON_String (Thermal_Name (Report.Initial_Thermal_State))
+        & ",""worst_thermal_pressure"":" & JSON_String (Thermal_Name (Report.Worst_Thermal_State))
+        & ",""final_thermal_pressure"":" & JSON_String (Thermal_Name (Report.Final_Thermal_State))
+        & ",""degradation_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Degradation_Availability))
+        & ",""initial_degradation"":" & JSON_String (Degradation_Name (Report.Initial_Degradation))
+        & ",""worst_degradation"":" & JSON_String (Degradation_Name (Report.Worst_Degradation))
+        & ",""final_degradation"":" & JSON_String (Degradation_Name (Report.Final_Degradation))
+        & ",""throttle_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Throttle_Availability))
+        & ",""throttle_time_availability"":"
+        & JSON_String (Condition_Availability_Name (Report.Throttle_Time_Avail))
+        & ",""throttle_detector"":" & JSON_String (Condition_Detector_Name (Report.Throttle_Detector))
+        & ",""throttle_events"":" & Interfaces.Unsigned_64'Image (Report.Throttle_Events)
+        & ",""throttle_ms"":" & Interfaces.Unsigned_64'Image (Report.Throttle_Milliseconds)
+        & ",""windows"":" & Report.Condition_Windows'Image
+        & ",""affected_units"":" & Report.Affected_Units'Image
+        & ",""recollected_units"":" & Report.Recollected_Units'Image
+        & ",""pauses"":" & Report.Condition_Pauses'Image
+        & ",""paused_ns"":" & JSON_Number (Report.Condition_Paused_NS)
+        & ",""budget_expired"":" & (if Report.Condition_Budget_Expired then "true" else "false")
+        & ",""fallback_used"":" & (if Report.Condition_Fallback_Used then "true" else "false")
+        & "}";
+   end Operating_Conditions_JSON;
+
    --  Interference observations are reported, never applied. A run that had
    --  to repair itself must say so, otherwise a heavily repaired result reads
    --  as a quieter machine than the one it actually ran on.
@@ -711,11 +852,22 @@ package body Flyology_Bench.Reporters is
       Report : constant Environment_Report := Environment (Result);
       Color  : constant Boolean := Styled (Style);
       Count  : constant Positive := Positive (Result.Sample_Total);
+      Condition_Alert : constant Boolean :=
+        Report.Affected_Units > 0
+        or else Report.Profile_Changes > 0
+        or else Report.Process_Profile_Changes > 0
+        or else Report.Worst_Low_Power_Mode = Low_Power_Mode_Enabled
+        or else Report.Worst_Thermal_State in Thermal_State_Fair .. Thermal_State_Critical
+        or else Report.Worst_Degradation in
+          High_Operating_Temperature .. Other_Degradation
+        or else Report.Condition_Budget_Expired
+        or else Report.Condition_Fallback_Used;
       Alert  : constant Boolean :=
         Report.Contaminated_Samples > 0
         or else Report.Budget_Exhausted
         or else Report.Host_Lock in Lock_Namespace_Scoped .. Lock_Path_Unusable
-        or else Report.Placement = Placement_Rejected;
+        or else Report.Placement = Placement_Rejected
+        or else Condition_Alert;
       Label  : constant String := (if not Color then "" elsif Alert then Yellow else Green);
    begin
       if Report.Watched then
@@ -781,6 +933,62 @@ package body Flyology_Bench.Reporters is
                & " | core-scoped attribution abandoned: this process's own"
                & " threads shared the watched CPUs");
          end if;
+      end if;
+      if Report.Conditions_Checked then
+         Ada.Text_IO.Put_Line
+           (File,
+            "   "
+            & (if Color and then Condition_Alert then Yellow else "")
+            & Pad ("conditions", 10)
+            & (if Color and then Condition_Alert then Reset else "")
+            & " | profile "
+            & Profile_Name (Report.Initial_Profile)
+            & (if Report.Initial_Profile /= Report.Final_Profile
+               then " -> " & Profile_Name (Report.Final_Profile)
+               else "")
+            & " ("
+            & Natural'Image (Report.Profile_Changes)
+            & " changes)  power "
+            & Power_Source_Name (Report.Initial_Power_Source)
+            & (if Report.Initial_Power_Source /= Report.Final_Power_Source
+               then " -> " & Power_Source_Name (Report.Final_Power_Source)
+               else ""));
+         Ada.Text_IO.Put_Line
+           (File,
+            "   "
+            & Pad ("", 10)
+            & " | process "
+            & Process_Profile_Name (Report.Initial_Process_Profile)
+            & (if Report.Initial_Process_Profile /= Report.Final_Process_Profile
+               then " -> " & Process_Profile_Name (Report.Final_Process_Profile)
+               else "")
+            & " ("
+            & Natural'Image (Report.Process_Profile_Changes)
+            & " changes)  low power worst "
+            & Low_Power_Name (Report.Worst_Low_Power_Mode)
+            & "  thermal worst "
+            & Thermal_Name (Report.Worst_Thermal_State)
+            & "  degradation worst "
+            & Degradation_Name (Report.Worst_Degradation));
+         Ada.Text_IO.Put_Line
+           (File,
+            "   "
+            & Pad ("", 10)
+            & " | throttle events"
+            & Interfaces.Unsigned_64'Image (Report.Throttle_Events)
+            & "  throttled ms"
+            & Interfaces.Unsigned_64'Image (Report.Throttle_Milliseconds)
+            & "  affected units"
+            & Natural'Image (Report.Affected_Units)
+            & "  recollected"
+            & Natural'Image (Report.Recollected_Units)
+            & "  condition pauses"
+            & Natural'Image (Report.Condition_Pauses)
+            & "  paused "
+            & Image (Report.Condition_Paused_NS / 1_000_000_000.0, 3)
+            & "s"
+            & (if Report.Condition_Budget_Expired then "  budget expired" else "")
+            & (if Report.Condition_Fallback_Used then "  fallback used" else ""));
       end if;
    end Put_Result_Environment;
 
@@ -2149,6 +2357,9 @@ package body Flyology_Bench.Reporters is
          & (if Environment (Result).Attribution_Diluted then "true" else "false")
          & ",""host_lock"":"
          & JSON_String (Host_Lock_Name (Environment (Result).Host_Lock))
+         & (if Environment (Result).Conditions_Checked
+            then "," & Operating_Conditions_JSON (Environment (Result))
+            else "")
          & "}"
          & ",""metrics"":");
       Put_Metrics_JSON (File, Result);
@@ -2849,6 +3060,10 @@ package body Flyology_Bench.Reporters is
          & JSON_Number (Lag_One_Correlation (Result))
          & ",""metrics"":");
       Put_Comparison_Metrics_JSON (File, Result);
+      if Environment (Reference_Data).Conditions_Checked then
+         Ada.Text_IO.Put
+           (File, ",""environment"":{" & Operating_Conditions_JSON (Environment (Reference_Data)) & "}");
+      end if;
       Ada.Text_IO.Put_Line (File, "}");
    end Put_Comparison_JSON;
 
@@ -3387,9 +3602,14 @@ package body Flyology_Bench.Reporters is
             Ada.Text_IO.Put (File, "}");
          end;
       end loop;
+      Ada.Text_IO.Put (File, "],");
+      if Environment (Reference).Conditions_Checked then
+         Ada.Text_IO.Put
+           (File, """environment"":{" & Operating_Conditions_JSON (Environment (Reference)) & "},");
+      end if;
       Ada.Text_IO.Put_Line
         (File,
-         "],""clock"":{""backend"":"
+         """clock"":{""backend"":"
          & JSON_String (Clock_Backend (Reference))
          & ",""resolution_ns"":"
          & JSON_Number (Clock_Resolution_Nanoseconds (Reference))

@@ -267,6 +267,7 @@ procedure Basic is
       Custom_Metrics              => <>,
       CPU_Quiescence              => Quiescence_Gate,
       Interference                => Interference_Watch,
+      Operating_Conditions        => (others => <>),
       Placement                   => (others => <>),
       Host_Lock                   => (others => <>),
       Collect_Process_Telemetry   => False,

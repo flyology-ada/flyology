@@ -27,6 +27,7 @@ procedure Flyology_Bench_Smoke is
    use type Flyology_Bench.Interference_Source;
    use type Flyology_Bench.Placement_Outcome;
    use type Flyology_Bench.Host_Lock_Outcome;
+   use type Flyology_Bench.Condition_Availability;
    use type Flyology_Bench.Host_Lock.Acquisition;
    use type Interfaces.Unsigned_64;
 
@@ -116,8 +117,6 @@ procedure Flyology_Bench_Smoke is
    Attribution_Values : Attribution_Results := (others => 1);
 
    procedure Mix_Slot (Slot : Attribution_Slot; Iterations : Flyology_Bench.Iteration_Count) is
-      use type Interfaces.Unsigned_64;
-
       Value : Interfaces.Unsigned_64 := Attribution_Values (Slot);
    begin
       for Iteration in Flyology_Bench.Iteration_Count range 1 .. Iterations loop
@@ -227,6 +226,7 @@ procedure Flyology_Bench_Smoke is
       Custom_Metrics              => <>,
       CPU_Quiescence              => (others => <>),
       Interference                => (others => <>),
+      Operating_Conditions        => (others => <>),
       Placement                   => (others => <>),
       Host_Lock                   => (others => <>),
       Collect_Process_Telemetry   => False,
@@ -795,6 +795,55 @@ begin
       Check
         (Flyology_Bench.Sample_Foreign_CPU_Percent (Observed, 1) >= 0.0,
          "per-sample foreign share was not retained");
+   end;
+
+   --  Operating-condition observation records unknown separately from clean
+   --  and must not alter the retained sample schedule.
+   declare
+      Observed : Flyology_Bench.Measurement;
+      Report   : Flyology_Bench.Environment_Report;
+   begin
+      Operation_Benchmark
+        ((Config
+          with delta
+            Operating_Conditions =>
+              (Enabled                    => True,
+               Response                   => Flyology_Bench.Observe,
+               Require_Nonreduced_Profile => True,
+               Require_Profile_Detection  => False,
+               Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
+               Require_Thermal_Detection  => False,
+               Window                     => 0.002)),
+         Observed);
+      Report := Flyology_Bench.Environment (Observed);
+      Check (Report.Conditions_Checked, "operating conditions were not checked");
+      Check (Report.Condition_Windows > 0, "operating-condition watch closed no window");
+      Check
+        (Report.Profile_Availability /= Flyology_Bench.Condition_Not_Checked,
+         "enabled profile detection remained not checked");
+      Check
+        (Report.Thermal_Availability /= Flyology_Bench.Condition_Not_Checked,
+         "enabled thermal detection remained not checked");
+      if Flyology_Bench.Metadata.Operating_System = "darwin" then
+         Check
+           (Report.Profile_Availability = Flyology_Bench.Condition_Available,
+            "pmset did not supply the active macOS profile");
+         Check
+           (Report.Thermal_Availability = Flyology_Bench.Condition_Available,
+            "NSProcessInfo did not supply macOS thermal pressure");
+         Check
+           (Report.Low_Power_Availability = Flyology_Bench.Condition_Available,
+            "NSProcessInfo did not supply macOS low-power mode");
+      end if;
+      Check
+        (Report.Condition_Pauses = 0
+         and then Report.Recollected_Units = 0
+         and then not Report.Condition_Fallback_Used,
+         "Observe paused, recollected, or applied a fallback");
+      Check
+        (Flyology_Bench.Samples (Observed) = Config.Samples,
+         "operating-condition observation changed the sample count");
+      Flyology_Bench.Reporters.Put_JSON ("operating_conditions_observe", Observed);
    end;
 
    --  A zero limit asks the real-host integration probe to retake every

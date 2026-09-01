@@ -41,6 +41,7 @@ printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
 cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_probes_smoke"
+"$crate_root/tests/bin/flyology_bench-internal_condition_policy_smoke"
 "$crate_root/tests/bin/custom_metrics_smoke" >"$work_dir/custom.out"
 cat "$work_dir/custom.out"
 grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
@@ -154,7 +155,7 @@ cc_command=${CC:-cc}
 link_abi_probe() {
   "$cc_command" -std=c11 -Wall -Wextra -Werror \
     "$crate_root/tests/native/workers_abi_probe.c" \
-    "$crate_root/lib/libflyology_bench.a" -lpthread "$@" \
+    "$crate_root/lib/libflyology_bench.a" -lpthread -ldl "$@" \
     -o "$work_dir/workers_abi_probe"
 }
 if [ "$(uname -s)" = Linux ]; then
@@ -165,7 +166,34 @@ else
   link_abi_probe
 fi
 "$work_dir/workers_abi_probe"
+link_conditions_abi_probe() {
+  "$cc_command" -std=c11 -Wall -Wextra -Werror \
+    "$crate_root/tests/native/conditions_abi_probe.c" \
+    "$crate_root/lib/libflyology_bench.a" -lpthread -ldl "$@" \
+    -o "$work_dir/conditions_abi_probe"
+}
+if [ "$(uname -s)" = Linux ]; then
+  link_conditions_abi_probe -no-pie
+else
+  link_conditions_abi_probe
+fi
+"$work_dir/conditions_abi_probe"
 for symbol in \
+  flyology_bench_capture_start \
+  flyology_bench_capture_read \
+  flyology_bench_capture_poll \
+  flyology_bench_capture_wait \
+  flyology_bench_capture_kill_group \
+  flyology_bench_capture_close \
+  flyology_bench_capture_exit_status \
+  flyology_bench_darwin_process_conditions \
+  flyology_bench_linux_ppd_open \
+  flyology_bench_linux_ppd_set_timeout \
+  flyology_bench_linux_ppd_get_name_credentials \
+  flyology_bench_linux_ppd_copy_unique_name \
+  flyology_bench_linux_ppd_get_property \
+  flyology_bench_linux_ppd_credentials_unref \
+  flyology_bench_linux_ppd_bus_unref \
   flyology_bench_worker_spawn \
   flyology_bench_worker_set_nonblocking \
   flyology_bench_worker_observe_exit \
