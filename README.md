@@ -3910,6 +3910,10 @@ retain it for inspection. `FLYOLOGY_LINUX_PERF=1` adds Docker's `PERFMON`
 capability, requires the benchmark example to collect every Linux hardware
 counter, and requires the crate's smoke test to show that worker-task work is
 counted; the run fails when the host or virtual machine does not expose a PMU.
+The current AArch64 `gnat_flyology_native` 16.2 package reports a target identity
+that makes GPRconfig omit archive metadata; GPRbuild then returns success after
+compilation without creating libraries or executables. The runners' artifact
+checks fail closed on that toolchain issue. Linux/x86-64 does not reproduce it.
 To run every Alire release covered by the patch family:
 
 ```sh

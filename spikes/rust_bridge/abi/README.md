@@ -70,7 +70,8 @@ On 2026-08-31, Linux/AArch64 with Rust 1.97.1 and Flyology's GNAT 16.2.0 passed
 the same static/dynamic and debug/release matrix. All four links caught and
 translated the intentional panic. The Linux path uses the selected GNAT's
 `gnatmake` and `gnatlink` directly because this standalone ABI probe needs no
-Flyology runtime or library. A separate Linux portability spike records that
-the tested Alire GPRbuild 26 package compiled and bound programs without
-performing their final link; that packaging failure does not invalidate the
-standalone GNAT/Rust ABI result.
+Flyology runtime or library. A separate Linux portability spike isolated an
+AArch64 custom-GNAT GPR configuration that omitted archive metadata and
+therefore suppressed GPRbuild's final link. The same GPRbuild release links on
+x86-64, and the configuration issue does not invalidate this direct GNAT/Rust
+ABI result.

@@ -17,7 +17,7 @@ runtime, buffer, descriptor, cancellation, and shutdown ownership explicit.
 | Can many Rust callers enter tasking Ada? | [`rust-ingress`](../rust-ingress) | Six standard threads and six Tokio blocking jobs enter concurrently behind a lifecycle admission gate. |
 | Can Flyology poll a Rust future directly? | [`direct-futures`](../flyology-rust/direct-futures) | Serialized polling, wake-before-arm, cancellation, and late-waker deactivation pass. |
 | Can the future use Flyology I/O directly? | [`direct-io`](../flyology-rust/direct-io) | Bridge-aware `Future + Send` values publish up to six descriptor interests and one deadline without another executor thread. |
-| Does the matrix pass on Linux/AArch64? | [`linux-aarch64`](../flyology-rust/linux-aarch64) | The standalone ABI passes. Flyology-linked cases fail closed before execution because the selected GPRbuild package has no `gprlink`. |
+| Does the matrix pass on Linux? | [`linux-aarch64`](../flyology-rust/linux-aarch64) | The complete x86-64 matrix passes. AArch64 fails closed before bridge execution because the custom GNAT configuration omits archive metadata. |
 
 The main Darwin/AArch64 campaigns used GNAT 16.1.0, Rust 1.97.1, and Tokio
 1.53.1. Each linked README records its exact repetitions, toolchain, negative
@@ -93,9 +93,9 @@ poll, cancellation, and destruction.
 
 ## Remaining gates before a public bridge
 
-1. Repair or replace the supported Linux GPRbuild package and rerun every
-   Flyology-linked Linux case. The checked harness must reach its final PASS;
-   a zero exit without archives or executables is rejected.
+1. Repair the custom GNAT AArch64 target/configuration metadata, then rerun the
+   complete native AArch64 matrix. The checked harness rejects a zero GPRbuild
+   exit without archives or executables.
 2. Package and continuously verify the Darwin link recipe, final unwind
    sections, and isolated native/lightweight panic self-tests.
 3. Design the safe Rust-facing interest and result APIs without exposing the

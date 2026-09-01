@@ -3,7 +3,7 @@ set -eu
 
 spike_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(CDPATH= cd -- "$spike_root/../../.." && pwd)
-linux_arch=${FLYOLOGY_RUST_LINUX_ARCH:-arm64}
+linux_arch=${FLYOLOGY_RUST_LINUX_ARCH:-amd64}
 base_image=${FLYOLOGY_RUST_LINUX_BASE_IMAGE:-flyology-rust-linux-base-$linux_arch}
 image=${FLYOLOGY_RUST_LINUX_IMAGE:-flyology-rust-linux-$linux_arch}
 keep_images=${FLYOLOGY_KEEP_RUST_LINUX_IMAGES:-0}

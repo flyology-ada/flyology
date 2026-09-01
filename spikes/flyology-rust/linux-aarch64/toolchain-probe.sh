@@ -44,7 +44,7 @@ if [ "$missing" -ne 0 ]; then
   printf '%s\n' "Exchange files left by GPRbuild:" >&2
   find "$project_root" -name '*.lexch' -print | sort | sed -n '1,20p' >&2
   printf '%s\n' \
-    "FAIL supported GPRbuild cannot link Flyology cases; repair its link helpers before rerunning" >&2
+    "FAIL selected Ada toolchain configuration cannot create Flyology archives or executables" >&2
   exit 1
 fi
 
