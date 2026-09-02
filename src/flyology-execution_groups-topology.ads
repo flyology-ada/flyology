@@ -38,11 +38,14 @@ is
    --  point. This is Migrate restricted to the configured shared pool. The
    --  caller returns on Target's loop pthread with unchanged Ada task identity
    --  and locals. Native tasks cannot cross because their stacks remain owned
-   --  by their GNARL pthreads.
+   --  by their GNARL pthreads. Like Migrate, this is a potentially blocking
+   --  operation and must not be called inside a protected action.
    --  @param Target Configured ownership shard to enter
    --  @exception Group_Error The runtime reports an invalid pool size
    --  @exception Migration_Error Target is outside the configured pool, or
    --     the caller is native, pinned, or otherwise cannot migrate
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Cross_To_Shard (Target : Shard_Id);
 
 end Flyology.Execution_Groups.Topology;

@@ -68,6 +68,10 @@ package body Flyology.Execution_Groups is
 
    function Runtime_Migrate (Group : C.int) return C.int;
    pragma Import (C, Runtime_Migrate, "flyology_runtime_migrate");
+   --  Result of Runtime_Migrate when the calling lightweight task is inside
+   --  a protected action. The value is fixed by the documented result of
+   --  System.Flyology.Scheduler.Migrate.
+   Runtime_Blocked_In_Protected_Action : constant C.int := -2;
 
    function Runtime_Pin_Current_Thread (Owner : access System.Address) return C.int;
    pragma Import (C, Runtime_Pin_Current_Thread, "flyology_runtime_pin_current_thread");
@@ -308,8 +312,15 @@ package body Flyology.Execution_Groups is
    is (Runtime_Is_Dedicated_Group (C.int (Group)) /= 0);
 
    procedure Migrate (Group : Group_Id) is
+      Result : constant C.int := Runtime_Migrate (C.int (Group));
    begin
-      if Runtime_Migrate (C.int (Group)) /= 0 then
+      if Result = Runtime_Blocked_In_Protected_Action then
+         --  GNARL's wording at every RM 9.5.1 detection site, so each
+         --  lightweight suspension point inside a protected action reports
+         --  one outcome. The normal unwinding releases the protected
+         --  object's lock on the thread that holds it.
+         raise Program_Error with "potentially blocking operation";
+      elsif Result /= 0 then
          raise Migration_Error with "task cannot migrate to execution group" & Group'Image;
       end if;
    end Migrate;
