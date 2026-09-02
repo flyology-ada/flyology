@@ -251,9 +251,19 @@ is
    --  return on Group's scheduler thread. A live Thread_Pin prevents movement
    --  to another group. Native tasks cannot migrate because GNARL owns their
    --  stacks and threads. Leaving a dedicated group consumes its reservation.
+   --  Migrate is a potentially blocking operation and must not be called
+   --  inside a protected action: the protected object's lock belongs to the
+   --  source event-loop thread and cannot follow the task. The call is not
+   --  syntactically visible to GNAT's check on protected bodies, so a
+   --  lightweight caller inside a protected action raises Program_Error
+   --  before any movement, whatever Group names, and the normal unwinding
+   --  releases the lock on the thread that holds it. A native caller inside
+   --  a protected action keeps raising Migration_Error.
    --  @param Group Destination execution group
    --  @exception Migration_Error Caller is native, pinned, or cannot enter
    --     Group
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Migrate (Group : Group_Id);
 
 private

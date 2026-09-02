@@ -86,6 +86,13 @@ package System.Flyology.Scheduler is
    function Current_Processor return Interfaces.C.int;
    pragma Export (C, Current_Processor, "flyology_runtime_current_processor");
 
+   --  Move the calling fiber to Group at this safe point. Return 0 on
+   --  success, -1 when the caller is native, Group is invalid, the fiber is
+   --  pinned or owns active asynchronous files, or a dedicated Group is not
+   --  reserved for it, and -2 when the caller is inside a protected action.
+   --  The -2 refusal precedes every other outcome, including the same-group
+   --  no-op, because the protected object's pthread mutex belongs to the
+   --  current event-loop thread and cannot follow the task.
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "flyology_runtime_migrate");
 
