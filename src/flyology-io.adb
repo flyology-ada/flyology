@@ -42,6 +42,10 @@ package body Flyology.IO is
       Timeout_Nanoseconds : C.long_long;
       Interrupt_Wait      : C.int) return C.int;
    pragma Import (C, Runtime_Wait_IO_Many, "flyology_runtime_wait_io_many");
+   --  Result of Runtime_Wait_IO_Many when the calling lightweight task is
+   --  inside a protected action. The value is fixed by the documented result
+   --  of System.Flyology.Scheduler.Wait_IO_Many.
+   Runtime_Blocked_In_Protected_Action : constant C.int := -2;
 
    function Poll (Descriptors : System.Address; Count : C.unsigned; Timeout_MS : C.int) return C.int;
    pragma Import (C, Poll, "poll");
@@ -148,7 +152,12 @@ package body Flyology.IO is
                  C.unsigned (Requests'Length),
                  Time_Math.To_Nanoseconds (Timeout),
                  (if Interrupt_Wait then 1 else 0));
-            if Result < 0 or else Natural (Result) > Requests'Length then
+            if Result = Runtime_Blocked_In_Protected_Action then
+               --  GNARL's wording at every RM 9.5.1 detection site. The
+               --  fiber was never parked, and the normal unwinding releases
+               --  the protected object's lock on the thread that holds it.
+               raise Program_Error with "potentially blocking operation";
+            elsif Result < 0 or else Natural (Result) > Requests'Length then
                raise Device_Error with "event-loop readiness wait failed";
             elsif Result = 0 then
                return 0;

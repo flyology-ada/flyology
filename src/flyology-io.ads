@@ -78,24 +78,33 @@ is
    --  Wait until FD is ready or Timeout seconds expire. Negative means no
    --  limit; zero performs an immediate poll. A lightweight task suspends on
    --  its event loop; a native task blocks its thread in poll(2). Retries
-   --  after
-   --  EINTR share the original deadline.
+   --  after EINTR share the original deadline. This is a potentially
+   --  blocking operation and must not be called inside a protected action:
+   --  a lightweight task that would suspend there raises Program_Error
+   --  before suspending, while the zero-Timeout immediate poll does not
+   --  suspend and is not refused. Native tasks keep stock behavior.
    --  @param FD Valid descriptor to observe
    --  @param Condition Requested readiness condition
    --  @param Timeout Deadline interval in seconds
    --  @return True when ready; False on timeout
    --  @exception Device_Error FD is invalid or the poller fails
+   --  @exception Program_Error A lightweight task would suspend inside a
+   --     protected action
    function Wait (FD : Descriptor; Condition : Wait_Kind; Timeout : Duration := Infinite) return Boolean;
 
    --  Wait until one request is ready. Negative Timeout means no limit and
    --  zero is an immediate poll. One deadline spans EINTR retries. Duplicate
    --  descriptors and read/write pairs are supported; the lowest caller index
    --  wins simultaneous readiness. No descriptor is consumed. Lightweight
-   --  tasks suspend; native tasks block their thread.
+   --  tasks suspend; native tasks block their thread. A lightweight task
+   --  that would suspend inside a protected action raises Program_Error, as
+   --  for Wait.
    --  @param Requests At most Max_Wait_Requests readiness requests
    --  @param Timeout Deadline interval in seconds
    --  @return Exact Requests index ready, or 0 on timeout or empty input
    --  @exception Device_Error A descriptor is invalid or polling fails
+   --  @exception Program_Error A lightweight task would suspend inside a
+   --     protected action
    function Wait_Any (Requests : Wait_Request_Array; Timeout : Duration := Infinite) return Natural
    with Pre => Requests'Length <= Max_Wait_Requests;
 
@@ -103,11 +112,15 @@ is
    --  observed ready by the terminal zero-time probe. A readiness event that
    --  disappears before that probe is still reported. Empty input and timeout
    --  return an empty batch. Completed.Capacity must equal Requests'Length.
-   --  Duplicate requests remain distinct caller indexes.
+   --  Duplicate requests remain distinct caller indexes. A lightweight task
+   --  that would suspend inside a protected action raises Program_Error, as
+   --  for Wait.
    --  @param Requests At most Max_Wait_Requests readiness requests
    --  @param Completed Ready caller indexes
    --  @param Timeout Deadline interval in seconds
    --  @exception Device_Error A descriptor is invalid or polling fails
+   --  @exception Program_Error A lightweight task would suspend inside a
+   --     protected action
    procedure Wait_Some
      (Requests : Wait_Request_Array; Completed : out Wait_Batch; Timeout : Duration := Infinite)
    with Pre => Requests'Length <= Max_Wait_Requests and then Completed.Capacity = Requests'Length;
@@ -122,6 +135,8 @@ is
    --     descriptors
    --  @return Ready, Timed_Out, or Interrupted
    --  @exception Device_Error FD is invalid or the poller fails
+   --  @exception Program_Error A lightweight task would suspend inside a
+   --     protected action
    function Wait_Interruptibly
      (FD         : Descriptor;
       Condition  : Wait_Kind;
