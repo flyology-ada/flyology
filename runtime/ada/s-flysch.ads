@@ -196,6 +196,12 @@ package System.Flyology.Scheduler is
      (Node : System.Address; Node_Size : Interfaces.C.size_t) return Interfaces.C.int;
    pragma Export (C, Cancel_Async_File, "flyology_runtime_cancel_async_file");
 
+   --  Perform one completion-driven positional operation for the calling
+   --  fiber, or a socket SEND_ZC when For_Write is 2. Return 0 after
+   --  completion, 1 when SEND_ZC is unsupported and the caller must fall
+   --  back, -1 on invalid input or a submission failure, and -2 when the
+   --  caller is inside a protected action; the fiber is then never parked
+   --  and Buffer is never submitted.
    function File_IO
      (Descriptor  : Interfaces.C.int;
       Buffer      : System.Address;
