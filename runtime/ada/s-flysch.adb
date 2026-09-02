@@ -3738,6 +3738,14 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
 
+      --  A readiness wait parks the fiber while the protected object's mutex
+      --  stays held by this event-loop thread, so a same-group peer that
+      --  contends for it would park the only thread able to resume the
+      --  holder.
+      if In_Protected_Action (Group.Current_Fiber) then
+         return Blocked_In_Protected_Action;
+      end if;
+
       if Timeout_Nanoseconds < 0 then
          Timeout := No_Deadline;
       else

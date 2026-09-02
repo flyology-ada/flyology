@@ -522,7 +522,12 @@ This is fixed-priority cooperative scheduling, not a hard-real-time claim:
   execution group. Native tasks keep stock GNAT behavior, where the same
   construct is an undetected bounded error and a peer simply waits on the
   lock; configure `pragma Detect_Blocking` for a partition that wants the
-  check on native tasks as well.
+  check on native tasks as well. The same detection covers Flyology's own
+  lightweight suspension points that bypass GNARL's check sites: a
+  `Flyology.IO` readiness wait, and therefore every socket, completion-set,
+  and subprocess wait built on it, raises `Program_Error` before suspending
+  a lightweight task inside a protected action, while its zero-timeout
+  immediate poll does not suspend and is not refused.
 
 Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
 preemption bound, or certified ceiling behavior should keep those tasks native

@@ -164,7 +164,11 @@ package System.Flyology.Scheduler is
 
    --  Register Count descriptor/interest pairs. Interrupt_Wait is 1 when the
    --  set combines a primary descriptor with lifecycle wake descriptors; it
-   --  affects observability only, not readiness selection.
+   --  affects observability only, not readiness selection. Return the
+   --  one-based index of the request that became ready, 0 on timeout, -1
+   --  when the caller is not a running fiber or the set cannot be
+   --  registered, and -2 when the caller is inside a protected action; the
+   --  fiber is then never parked.
    function Wait_IO_Many
      (Requests            : System.Address;
       Count               : Interfaces.C.unsigned;
