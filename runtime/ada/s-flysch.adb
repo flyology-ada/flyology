@@ -3789,6 +3789,11 @@ package body System.Flyology.Scheduler is
         or else Task_Lock = System.Null_Address
       then
          return -1;
+      elsif In_Protected_Action (Group.Current_Fiber) then
+         --  A completion wait parks the fiber while the protected object's
+         --  mutex stays held by this event-loop thread. Refusing before any
+         --  submission also keeps the borrowed buffer out of the kernel.
+         return Blocked_In_Protected_Action;
       elsif For_Send_ZC and then not Pollers.Supports_Send_ZC (Group.Scheduler_Poller) then
          Transferred.all := 0;
          Error_Code.all := 0;
