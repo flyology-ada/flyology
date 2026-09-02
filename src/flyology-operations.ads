@@ -8,7 +8,10 @@ private with Flyology.Wake_Sources;
 --  Provides bounded completion sets for scoped operations. An initiating I/O
 --  overload associates a limited operation object with one set and returns
 --  without waiting. The owning task can then wait for heterogeneous terminal
---  batches without creating helper tasks or per-operation stacks.
+--  batches without creating helper tasks or per-operation stacks. Waiting
+--  for a batch is a potentially blocking operation: a lightweight task that
+--  would suspend inside a protected action raises Program_Error before
+--  suspending, as for Flyology.IO.Wait.
 
 package Flyology.Operations
   with Preelaborate

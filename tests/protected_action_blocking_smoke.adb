@@ -7,12 +7,16 @@
 --
 --  Flyology's own explicit migration is refused for the same reason and one
 --  more: the mutex belongs to the source event-loop thread, so a migrated task
---  would later release it from a thread that does not own it.
+--  would later release it from a thread that does not own it. A readiness
+--  wait bypasses GNARL's check sites as well, so the runtime refuses it at
+--  the same point.
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.Fairness;
+with Flyology.IO;
+with Flyology.IO.Sockets;
 
 procedure Protected_Action_Blocking_Smoke is
    use type Ada.Real_Time.Time;
@@ -34,11 +38,17 @@ procedure Protected_Action_Blocking_Smoke is
    Home_Group  : constant Groups.Group_Id := Groups.For_CPU (Home_CPU);
    Other_Group : constant Groups.Group_Id := 2;
 
+   --  A connected socket pair whose Quiet_End never receives data, so a
+   --  readiness wait on it lasts until its timeout.
+   Quiet_End, Far_End : Flyology.IO.Sockets.Socket_Type;
+   Wait_Descriptor    : Flyology.IO.Descriptor;
+
    --  Which suspension point the holder reaches inside the protected action.
    --  Explicit_Migration names another group; Same_Group_Migration names the
    --  holder's own group, which outside a protected action is a no-op.
+   --  Readiness_Wait waits for Hold_Span on the quiet socket.
    type Suspension_Point is
-     (Timed_Delay, Zero_Delay, Explicit_Yield, Explicit_Migration, Same_Group_Migration);
+     (Timed_Delay, Zero_Delay, Explicit_Yield, Explicit_Migration, Same_Group_Migration, Readiness_Wait);
 
    --  The object under test. Hold deliberately suspends inside the protected
    --  action; Touch is the peer's external call on the same object.
@@ -47,9 +57,11 @@ procedure Protected_Action_Blocking_Smoke is
       procedure Touch;
       function Touches return Natural;
       function Left_Action_At return Ada.Real_Time.Time;
+      function Wait_Expired return Boolean;
    private
       Count    : Natural := 0;
       Departed : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Expired  : Boolean := False;
    end Guarded_Object;
 
    --  Records what each participant observed. This object never carries a
@@ -109,6 +121,11 @@ procedure Protected_Action_Blocking_Smoke is
 
             when Same_Group_Migration =>
                Groups.Migrate (Home_Group);
+
+            when Readiness_Wait       =>
+               Expired :=
+                 not Flyology.IO.Wait
+                       (Wait_Descriptor, Flyology.IO.For_Read, Ada.Real_Time.To_Duration (Hold_Span));
          end case;
          pragma Warnings (On, "potentially blocking operation in protected operation");
          Departed := Ada.Real_Time.Clock;
@@ -124,6 +141,9 @@ procedure Protected_Action_Blocking_Smoke is
 
       function Left_Action_At return Ada.Real_Time.Time
       is (Departed);
+
+      function Wait_Expired return Boolean
+      is (Expired);
 
    end Guarded_Object;
 
@@ -333,6 +353,10 @@ procedure Protected_Action_Blocking_Smoke is
       if Holds_For_Span then
          pragma Assert (Outcome.Peer_Attempted_At < Object.Left_Action_At);
       end if;
+      if Point = Readiness_Wait then
+         --  The native wait blocked its thread in poll(2) for the whole span.
+         pragma Assert (Object.Wait_Expired);
+      end if;
       pragma Assert (Object.Touches = 1);
 
       Object.Touch;
@@ -340,11 +364,15 @@ procedure Protected_Action_Blocking_Smoke is
    end Check_Native;
 
 begin
+   Flyology.IO.Sockets.Create_Socket_Pair (Quiet_End, Far_End);
+   Wait_Descriptor := Flyology.IO.Sockets.Native_Descriptor (Quiet_End);
+
    for Point in Suspension_Point loop
       Check_Lightweight (Point);
    end loop;
 
    Check_Native (Timed_Delay, Expected => "", Holds_For_Span => True);
+   Check_Native (Readiness_Wait, Expected => "", Holds_For_Span => True);
 
    --  A native task never migrates, so both migration variants keep raising
    --  the ordinary refusal inside a protected action as well.
@@ -352,4 +380,7 @@ begin
      (Explicit_Migration, Expected => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR", Holds_For_Span => False);
    Check_Native
      (Same_Group_Migration, Expected => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR", Holds_For_Span => False);
+
+   Flyology.IO.Sockets.Close_Socket (Quiet_End);
+   Flyology.IO.Sockets.Close_Socket (Far_End);
 end Protected_Action_Blocking_Smoke;
