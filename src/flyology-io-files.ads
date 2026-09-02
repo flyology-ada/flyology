@@ -257,6 +257,9 @@ package Flyology.IO.Files is
    --  starts, but cannot interrupt a native syscall already in progress. A
    --  lightweight cancellation stays suspended until the kernel relinquishes
    --  Item, so Operation_Cancelled is a terminal buffer-ownership handoff.
+   --  This is a potentially blocking operation and must not be called inside
+   --  a protected action: a lightweight caller there raises Program_Error
+   --  before Item is submitted, and native tasks keep stock behavior.
    --  @param File Open descriptor permitting reads
    --  @param Offset Starting byte position
    --  @param Item Destination buffer
@@ -265,6 +268,8 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission, completion, or pread reports failure
    --  @exception Operation_Cancelled Token cancellation reaches a terminal
    --     state
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Read_At
      (File   : File_Descriptor;
       Offset : File_Offset;
@@ -293,6 +298,8 @@ package Flyology.IO.Files is
    --     state
    --  @exception Timeout_Error Deadline cancellation reaches a terminal state;
    --     never raised for a zero or negative Timeout
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Read_At
      (File    : File_Descriptor;
       Offset  : File_Offset;
@@ -311,6 +318,8 @@ package Flyology.IO.Files is
    --  @param Token Optional one-shot cancellation token
    --  @exception Device_Error Submission, completion, or pread reports failure
    --  @exception Operation_Cancelled Cancellation reaches a terminal state
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Read_At
      (File   : File_Descriptor;
       Offset : File_Offset;
@@ -333,6 +342,8 @@ package Flyology.IO.Files is
    --     state
    --  @exception Timeout_Error Deadline cancellation reaches a terminal state;
    --     never raised for a zero or negative Timeout
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Read_At
      (File    : File_Descriptor;
       Offset  : File_Offset;
@@ -349,7 +360,9 @@ package Flyology.IO.Files is
    --  back bytes already written. When Operation_Cancelled is raised, Last has
    --  no defined application meaning and a blind retry may duplicate or
    --  overwrite data; callers needing retry safety must provide an idempotent
-   --  protocol or track committed offsets independently.
+   --  protocol or track committed offsets independently. Like Read_At, this
+   --  must not be called inside a protected action; a lightweight caller
+   --  there raises Program_Error before Item is submitted.
    --  @param File Open descriptor permitting writes
    --  @param Offset Starting byte position
    --  @param Item Source buffer
@@ -360,6 +373,8 @@ package Flyology.IO.Files is
    --     failure
    --  @exception Operation_Cancelled Token cancellation reaches a terminal
    --     state
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Write_At
      (File   : File_Descriptor;
       Offset : File_Offset;
@@ -377,6 +392,8 @@ package Flyology.IO.Files is
    --  @exception Device_Error Submission, completion, or pwrite reports
    --     failure
    --  @exception Operation_Cancelled Cancellation reaches a terminal state
+   --  @exception Program_Error Lightweight caller is inside a protected
+   --     action
    procedure Write_At
      (File    : File_Descriptor;
       Offset  : File_Offset;
