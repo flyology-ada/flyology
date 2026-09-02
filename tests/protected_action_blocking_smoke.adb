@@ -8,18 +8,23 @@
 --  Flyology's own explicit migration is refused for the same reason and one
 --  more: the mutex belongs to the source event-loop thread, so a migrated task
 --  would later release it from a thread that does not own it. A readiness
---  wait bypasses GNARL's check sites as well, so the runtime refuses it at
---  the same point.
+--  wait and a synchronous positional file operation bypass GNARL's check
+--  sites as well, so the runtime refuses them at the same point.
+with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Exceptions;
 with Ada.Real_Time;
+with Ada.Streams;
 with Flyology;
 with Flyology.Execution_Groups;
 with Flyology.Fairness;
 with Flyology.IO;
+with Flyology.IO.Files;
 with Flyology.IO.Sockets;
 
 procedure Protected_Action_Blocking_Smoke is
    use type Ada.Real_Time.Time;
+   use type Ada.Streams.Stream_Element_Offset;
 
    package Groups renames Flyology.Execution_Groups;
 
@@ -43,12 +48,28 @@ procedure Protected_Action_Blocking_Smoke is
    Quiet_End, Far_End : Flyology.IO.Sockets.Socket_Type;
    Wait_Descriptor    : Flyology.IO.Descriptor;
 
+   --  A small regular file written by the environment task. A positional
+   --  read of it completes at once on a native task and is a completion wait
+   --  on a lightweight task.
+   Data_Path : constant String :=
+     Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp")
+     & "/protected-action-blocking-smoke.data";
+   File_Data : constant Ada.Streams.Stream_Element_Array (1 .. 4) := [10, 20, 30, 40];
+   Data_File : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
+
    --  Which suspension point the holder reaches inside the protected action.
    --  Explicit_Migration names another group; Same_Group_Migration names the
    --  holder's own group, which outside a protected action is a no-op.
-   --  Readiness_Wait waits for Hold_Span on the quiet socket.
+   --  Readiness_Wait waits for Hold_Span on the quiet socket, and File_Read
+   --  reads the data file.
    type Suspension_Point is
-     (Timed_Delay, Zero_Delay, Explicit_Yield, Explicit_Migration, Same_Group_Migration, Readiness_Wait);
+     (Timed_Delay,
+      Zero_Delay,
+      Explicit_Yield,
+      Explicit_Migration,
+      Same_Group_Migration,
+      Readiness_Wait,
+      File_Read);
 
    --  The object under test. Hold deliberately suspends inside the protected
    --  action; Touch is the peer's external call on the same object.
@@ -58,10 +79,12 @@ procedure Protected_Action_Blocking_Smoke is
       function Touches return Natural;
       function Left_Action_At return Ada.Real_Time.Time;
       function Wait_Expired return Boolean;
+      function Bytes_Read return Natural;
    private
-      Count    : Natural := 0;
-      Departed : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
-      Expired  : Boolean := False;
+      Count      : Natural := 0;
+      Departed   : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Expired    : Boolean := False;
+      Read_Count : Natural := 0;
    end Guarded_Object;
 
    --  Records what each participant observed. This object never carries a
@@ -126,6 +149,15 @@ procedure Protected_Action_Blocking_Smoke is
                Expired :=
                  not Flyology.IO.Wait
                        (Wait_Descriptor, Flyology.IO.For_Read, Ada.Real_Time.To_Duration (Hold_Span));
+
+            when File_Read            =>
+               declare
+                  Buffer : Ada.Streams.Stream_Element_Array (File_Data'Range);
+                  Last   : Ada.Streams.Stream_Element_Offset;
+               begin
+                  Flyology.IO.Files.Read_At (Data_File, 0, Buffer, Last);
+                  Read_Count := Natural (Last - Buffer'First + 1);
+               end;
          end case;
          pragma Warnings (On, "potentially blocking operation in protected operation");
          Departed := Ada.Real_Time.Clock;
@@ -144,6 +176,9 @@ procedure Protected_Action_Blocking_Smoke is
 
       function Wait_Expired return Boolean
       is (Expired);
+
+      function Bytes_Read return Natural
+      is (Read_Count);
 
    end Guarded_Object;
 
@@ -356,6 +391,9 @@ procedure Protected_Action_Blocking_Smoke is
       if Point = Readiness_Wait then
          --  The native wait blocked its thread in poll(2) for the whole span.
          pragma Assert (Object.Wait_Expired);
+      elsif Point = File_Read then
+         --  The native read ran as a direct pread and returned the data.
+         pragma Assert (Object.Bytes_Read = File_Data'Length);
       end if;
       pragma Assert (Object.Touches = 1);
 
@@ -363,24 +401,55 @@ procedure Protected_Action_Blocking_Smoke is
       pragma Assert (Object.Touches = 2);
    end Check_Native;
 
+   --  Close the socket pair and remove the data file. The suite's temporary
+   --  root is removed only when it is empty again.
+   procedure Release_Fixtures is
+   begin
+      Flyology.IO.Sockets.Close_Socket (Quiet_End);
+      Flyology.IO.Sockets.Close_Socket (Far_End);
+      Flyology.IO.Files.Close (Data_File);
+      if Ada.Directories.Exists (Data_Path) then
+         Ada.Directories.Delete_File (Data_Path);
+      end if;
+   end Release_Fixtures;
+
 begin
    Flyology.IO.Sockets.Create_Socket_Pair (Quiet_End, Far_End);
    Wait_Descriptor := Flyology.IO.Sockets.Native_Descriptor (Quiet_End);
+   Data_File :=
+     Flyology.IO.Files.Open
+       (Data_Path, Mode => Flyology.IO.Files.Read_Write, Create => True, Truncate => True);
+   declare
+      Last : Ada.Streams.Stream_Element_Offset;
+   begin
+      Flyology.IO.Files.Write_At (Data_File, 0, File_Data, Last);
+      pragma Assert (Last = File_Data'Last);
+   end;
 
-   for Point in Suspension_Point loop
-      Check_Lightweight (Point);
-   end loop;
+   begin
+      for Point in Suspension_Point loop
+         Check_Lightweight (Point);
+      end loop;
 
-   Check_Native (Timed_Delay, Expected => "", Holds_For_Span => True);
-   Check_Native (Readiness_Wait, Expected => "", Holds_For_Span => True);
+      Check_Native (Timed_Delay, Expected => "", Holds_For_Span => True);
+      Check_Native (Readiness_Wait, Expected => "", Holds_For_Span => True);
+      Check_Native (File_Read, Expected => "", Holds_For_Span => False);
 
-   --  A native task never migrates, so both migration variants keep raising
-   --  the ordinary refusal inside a protected action as well.
-   Check_Native
-     (Explicit_Migration, Expected => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR", Holds_For_Span => False);
-   Check_Native
-     (Same_Group_Migration, Expected => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR", Holds_For_Span => False);
+      --  A native task never migrates, so both migration variants keep
+      --  raising the ordinary refusal inside a protected action as well.
+      Check_Native
+        (Explicit_Migration,
+         Expected       => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR",
+         Holds_For_Span => False);
+      Check_Native
+        (Same_Group_Migration,
+         Expected       => "FLYOLOGY.EXECUTION_GROUPS.MIGRATION_ERROR",
+         Holds_For_Span => False);
+   exception
+      when others =>
+         Release_Fixtures;
+         raise;
+   end;
 
-   Flyology.IO.Sockets.Close_Socket (Quiet_End);
-   Flyology.IO.Sockets.Close_Socket (Far_End);
+   Release_Fixtures;
 end Protected_Action_Blocking_Smoke;

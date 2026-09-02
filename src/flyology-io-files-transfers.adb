@@ -39,6 +39,10 @@ package body Flyology.IO.Files.Transfers is
       Error_Code  : access C.int;
       Cancelled   : access C.int) return C.int;
    pragma Import (C, Event_File_IO, "flyology_runtime_file_io");
+   --  Result of Event_File_IO when the calling lightweight task is inside a
+   --  protected action. The value is fixed by the documented result of
+   --  System.Flyology.Scheduler.File_IO.
+   Runtime_Blocked_In_Protected_Action : constant C.int := -2;
 
    function Remaining (Started : Ada.Real_Time.Time; Timeout : Duration) return Duration is
       Elapsed : Duration;
@@ -222,6 +226,11 @@ package body Flyology.IO.Files.Transfers is
                then abort
                   Submit_Send_ZC;
                end select;
+            end if;
+            if Status = Runtime_Blocked_In_Protected_Action then
+               --  GNARL's wording at every RM 9.5.1 detection site; nothing
+               --  was submitted, so no fallback send may follow either.
+               raise Program_Error with "potentially blocking operation";
             end if;
             Action :=
               Flyology.File_Transfer_Policy.Classify

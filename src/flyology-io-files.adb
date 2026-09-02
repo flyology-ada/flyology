@@ -40,6 +40,10 @@ package body Flyology.IO.Files is
       Error_Code  : access C.int;
       Cancelled   : access C.int) return C.int;
    pragma Import (C, Event_File_IO, "flyology_runtime_file_io");
+   --  Result of Event_File_IO when the calling lightweight task is inside a
+   --  protected action. The value is fixed by the documented result of
+   --  System.Flyology.Scheduler.File_IO.
+   Runtime_Blocked_In_Protected_Action : constant C.int := -2;
 
    function Start_Async_File
      (Node       : System.Address;
@@ -600,7 +604,12 @@ package body Flyology.IO.Files is
             Native_Read (File, Offset, Item, Transferred, Error_Code);
          end if;
       end;
-      if Status /= 0 and then Error_Code = 0 then
+      if Status = Runtime_Blocked_In_Protected_Action then
+         --  GNARL's wording at every RM 9.5.1 detection site. Item was never
+         --  submitted, and the normal unwinding releases the protected
+         --  object's lock on the thread that holds it.
+         raise Program_Error with "potentially blocking operation";
+      elsif Status /= 0 and then Error_Code = 0 then
          raise Device_Error with "lightweight pread submission failed";
       elsif Cancelled /= 0 then
          raise Operation_Cancelled;
@@ -723,7 +732,9 @@ package body Flyology.IO.Files is
             Native_Write (File, Offset, Item, Transferred, Error_Code);
          end if;
       end;
-      if Status /= 0 and then Error_Code = 0 then
+      if Status = Runtime_Blocked_In_Protected_Action then
+         raise Program_Error with "potentially blocking operation";
+      elsif Status /= 0 and then Error_Code = 0 then
          raise Device_Error with "lightweight pwrite submission failed";
       elsif Cancelled /= 0 then
          raise Operation_Cancelled;

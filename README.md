@@ -525,9 +525,10 @@ This is fixed-priority cooperative scheduling, not a hard-real-time claim:
   check on native tasks as well. The same detection covers Flyology's own
   lightweight suspension points that bypass GNARL's check sites: a
   `Flyology.IO` readiness wait, and therefore every socket, completion-set,
-  and subprocess wait built on it, raises `Program_Error` before suspending
-  a lightweight task inside a protected action, while its zero-timeout
-  immediate poll does not suspend and is not refused.
+  and subprocess wait built on it, and a synchronous `Flyology.IO.Files`
+  read or write raise `Program_Error` before suspending a lightweight task
+  inside a protected action, while the zero-timeout immediate poll does not
+  suspend and is not refused.
 
 Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
 preemption bound, or certified ceiling behavior should keep those tasks native
