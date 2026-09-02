@@ -279,6 +279,15 @@ scripts remain authoritative for commands, proof totals, and test coverage.
 - Never hide a blocking `pread`, `pwrite`, DNS resolver, or arbitrary foreign
   call on an event-loop pthread. Use the implemented kernel completion path or
   an explicit native-task boundary.
+- Every direct fiber suspension point that bypasses GNARL's check sites,
+  currently `Migrate`, `Wait_IO_Many`, and `File_IO` in the scheduler, must
+  call `In_Protected_Action` before any registration, submission, or state
+  change and return the shared `-2` result when the caller is inside a
+  protected action; the public wrapper turns that result into
+  `Program_Error` with GNARL's "potentially blocking operation" wording.
+  Never park or migrate a fiber that holds a protected object's mutex: the
+  mutex belongs to the event-loop pthread, so a parked holder deadlocks its
+  group and a migrated holder unlocks from a thread that does not own it.
 - Preserve descriptor-generation and ownership rules. `Take` transfers sole
   closing ownership; high-level connections serialize operations and make
   cancellation/close generation-safe. Raw socket APIs do not infer ownership.
