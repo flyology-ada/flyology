@@ -2216,7 +2216,10 @@ package body Flyology.IO.DNS is
             Item.State.Query_Length := Stream'Length;
             Item.State.Query_Data (1 .. Stream'Length) := Stream;
             Left :=
-              Duration'Min (Item.State.Configuration.Per_Attempt, Time_Left (Item.State.Family_Deadline));
+              DNS_Policy.Attempt_Window
+                (Per_Attempt      => Item.State.Configuration.Per_Attempt,
+                 Overall_Remaining => Time_Left (Item.State.Family_Deadline),
+                 Infinite          => Item.State.Family_Deadline = Ada.Real_Time.Time_Last);
             Item.State.Attempt_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Left);
             Close_Quietly (Item.State.UDP_Socket);
             Sockets.Create_Socket (Item.State.UDP_Socket, Server.Family, Sockets.Socket_Datagram);
