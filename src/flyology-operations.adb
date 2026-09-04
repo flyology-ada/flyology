@@ -557,10 +557,14 @@ package body Flyology.Operations is
       Wait_At_Least (Set, 1, Completed);
    end Wait_Some;
 
-   type Gate_Kind is (Terminal_Gate, Success_Gate);
+   type Gate_Kind is (Terminal_Gate, Success_Gate, Target_Gate);
 
    procedure Wait_For_Gate
-     (Set : in out Completion_Set; Required : Positive; Completed : out Completion_Batch; Gate : Gate_Kind)
+     (Set       : in out Completion_Set;
+      Required  : Positive;
+      Completed : out Completion_Batch;
+      Gate      : Gate_Kind;
+      Target    : Operation_Id := Operation_Id'First)
    is
       Immediate_Mask  : Interfaces.Unsigned_32;
       Drove_Immediate : Boolean;
@@ -599,9 +603,15 @@ package body Flyology.Operations is
                when Terminal_Gate => Unreported_Count (Set) >= Required or else Pending_Count (Set) = 0,
                when Success_Gate  =>
                  Unreported_Success_Count (Set) >= Required
-                 or else Unreported_Success_Count (Set) + Pending_Count (Set) < Required)
+                 or else Unreported_Success_Count (Set) + Pending_Count (Set) < Required,
+               when Target_Gate   => Set.Slots (Target).State /= Pending)
          then
-            Publish_Unreported (Set, Completed);
+            if Gate = Target_Gate then
+               Completed.Count := 0;
+               Completed.Ids := (others => Operation_Id'First);
+            else
+               Publish_Unreported (Set, Completed);
+            end if;
             return;
          end if;
 
@@ -771,6 +781,12 @@ package body Flyology.Operations is
       Wait_For_Gate (Set, Required, Completed, Success_Gate);
    end Wait_For_Successes;
 
+   procedure Wait_For_Target (Set : in out Completion_Set; Target : Operation_Id) is
+      Ignored : Completion_Batch (Set.Capacity);
+   begin
+      Wait_For_Gate (Set, 1, Ignored, Target_Gate, Target);
+   end Wait_For_Target;
+
    procedure Wait_All (Set : in out Completion_Set) is
       Ignored : Completion_Batch (Set.Capacity);
    begin
@@ -920,26 +936,13 @@ package body Flyology.Operations is
       if Item.Slot /= 0 then
          declare
             Slot       : Slot_Record renames Item.Set.Slots (Operation_Id (Item.Slot));
-            Reported   : array (Item.Set.Slots'Range) of Boolean;
             Generation : Interfaces.Unsigned_64;
          begin
             if Slot.Generation = Item.Generation then
                if Slot.State = Pending then
-                  for Id in Item.Set.Slots'Range loop
-                     Reported (Id) := Item.Set.Slots (Id).Reported;
-                  end loop;
                   Request_Cancellation (Operation'Class (Item));
                   while Slot.State = Pending loop
-                     declare
-                        Ignored : Completion_Batch (Item.Set.Capacity);
-                     begin
-                        Wait_Some (Item.Set.all, Ignored);
-                     end;
-                     for Id in Item.Set.Slots'Range loop
-                        if Operation_Id (Item.Slot) /= Id then
-                           Item.Set.Slots (Id).Reported := Reported (Id);
-                        end if;
-                     end loop;
+                     Wait_For_Target (Completion_Set (Item.Set.all), Operation_Id (Item.Slot));
                   end loop;
                end if;
                Generation := Slot.Generation;

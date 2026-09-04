@@ -1890,6 +1890,11 @@ lifecycle, generation, capacity, and threshold cases are in
 [`tests/operation_gates_smoke.adb`](tests/operation_gates_smoke.adb), and the
 generic channel rows are in
 [`tests/channel_operations_smoke.adb`](tests/channel_operations_smoke.adb).
+Finalization cancellation and declaration-order independence are covered by
+[`tests/operations_finalize_smoke.adb`](tests/operations_finalize_smoke.adb).
+The corresponding generated TLA+/Ada replay lives in
+[`tests/operations_finalize_conformance`](tests/operations_finalize_conformance)
+and is maintained by `scripts/check-tla.sh`.
 Standalone TLS operations and their set-independent capability are covered by
 [`tests/tls_operations_smoke.adb`](tests/tls_operations_smoke.adb).
 
