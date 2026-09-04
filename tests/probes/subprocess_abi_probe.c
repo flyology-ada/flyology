@@ -29,6 +29,7 @@ int flyology_subprocess_signal_terminate(void);
 int flyology_subprocess_signal_kill(void);
 int flyology_subprocess_errno_interrupted(void);
 int flyology_subprocess_errno_would_block(void);
+int flyology_subprocess_errno_broken_pipe(void);
 int flyology_subprocess_errno_no_such_process(void);
 int flyology_subprocess_errno_permission(void);
 int flyology_subprocess_status_exited(int);
@@ -85,6 +86,7 @@ int main(int argc, char **argv)
         flyology_subprocess_signal_kill() != SIGKILL ||
         flyology_subprocess_errno_interrupted() != EINTR ||
         flyology_subprocess_errno_would_block() != EAGAIN ||
+        flyology_subprocess_errno_broken_pipe() != EPIPE ||
         flyology_subprocess_errno_no_such_process() != ESRCH ||
         flyology_subprocess_errno_permission() != EPERM)
         return 1;

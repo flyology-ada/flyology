@@ -29,6 +29,7 @@ for symbol in $symbols; do
     flyology_subprocess_signal_kill|\
     flyology_subprocess_errno_interrupted|\
     flyology_subprocess_errno_would_block|\
+    flyology_subprocess_errno_broken_pipe|\
     flyology_subprocess_errno_no_such_process|\
     flyology_subprocess_errno_permission|\
     flyology_subprocess_status_exited|\
@@ -57,6 +58,7 @@ for required in \
   flyology_subprocess_signal_kill \
   flyology_subprocess_errno_interrupted \
   flyology_subprocess_errno_would_block \
+  flyology_subprocess_errno_broken_pipe \
   flyology_subprocess_errno_no_such_process \
   flyology_subprocess_errno_permission \
   flyology_subprocess_status_exited \

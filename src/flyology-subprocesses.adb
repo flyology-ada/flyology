@@ -85,6 +85,8 @@ package body Flyology.Subprocesses is
    pragma Import (C, C_Errno_Interrupted, "flyology_subprocess_errno_interrupted");
    function C_Errno_Would_Block return C.int;
    pragma Import (C, C_Errno_Would_Block, "flyology_subprocess_errno_would_block");
+   function C_Errno_Broken_Pipe return C.int;
+   pragma Import (C, C_Errno_Broken_Pipe, "flyology_subprocess_errno_broken_pipe");
    function C_Errno_No_Such_Process return C.int;
    pragma Import (C, C_Errno_No_Such_Process, "flyology_subprocess_errno_no_such_process");
    function C_Errno_Permission return C.int;
@@ -103,6 +105,7 @@ package body Flyology.Subprocesses is
 
    Interrupted_Error : constant C.int := C_Errno_Interrupted;
    Would_Block_Error : constant C.int := C_Errno_Would_Block;
+   Broken_Pipe_Error : constant C.int := C_Errno_Broken_Pipe;
    No_Process_Error  : constant C.int := C_Errno_No_Such_Process;
    Permission_Error  : constant C.int := C_Errno_Permission;
 
@@ -627,16 +630,18 @@ package body Flyology.Subprocesses is
    end Read_Pipe;
 
    procedure Write_Pipe
-     (Descriptor : IO.Descriptor;
-      Item       : Ada.Streams.Stream_Element_Array;
-      Last       : out Ada.Streams.Stream_Element_Offset;
-      Timeout    : Duration;
-      Token      : access Cancellation.Token)
+     (Descriptor    : IO.Descriptor;
+      Item          : Ada.Streams.Stream_Element_Array;
+      Last          : out Ada.Streams.Stream_Element_Offset;
+      Timeout       : Duration;
+      Token         : access Cancellation.Token;
+      Reader_Closed : out Boolean)
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Result  : C.long;
    begin
       Last := Item'First - 1;
+      Reader_Closed := False;
       if Descriptor < 0 then
          raise Pipe_Error with "subprocess input pipe is closed";
       elsif Item'Length = 0 then
@@ -653,6 +658,9 @@ package body Flyology.Subprocesses is
             null;
          elsif C.int (GNAT.OS_Lib.Errno) = Would_Block_Error then
             Wait_Ready (Descriptor, IO.For_Write, Remaining (Started, Timeout), Token);
+         elsif C.int (GNAT.OS_Lib.Errno) = Broken_Pipe_Error then
+            Reader_Closed := True;
+            return;
          else
             raise Pipe_Error with "subprocess pipe write failed, errno=" & GNAT.OS_Lib.Errno'Image;
          end if;
@@ -690,13 +698,29 @@ package body Flyology.Subprocesses is
       Item    : Ada.Streams.Stream_Element_Array;
       Last    : out Ada.Streams.Stream_Element_Offset;
       Timeout : Duration := IO.Infinite;
-      Token   : access Cancellation.Token := null) is
+      Token   : access Cancellation.Token := null)
+   is
+      Reader_Closed : Boolean;
    begin
-      Write_Pipe (Child.Input_FD, Item, Last, Timeout, Token);
+      Try_Write_Standard_Input (Child, Item, Last, Reader_Closed, Timeout, Token);
+      if Reader_Closed then
+         raise Pipe_Error with "subprocess pipe write failed, errno=" & Broken_Pipe_Error'Image;
+      end if;
+   end Write_Standard_Input;
+
+   procedure Try_Write_Standard_Input
+     (Child         : in out Process;
+      Item          : Ada.Streams.Stream_Element_Array;
+      Last          : out Ada.Streams.Stream_Element_Offset;
+      Reader_Closed : out Boolean;
+      Timeout       : Duration := IO.Infinite;
+      Token         : access Cancellation.Token := null) is
+   begin
+      Write_Pipe (Child.Input_FD, Item, Last, Timeout, Token, Reader_Closed);
    exception
       when IO.Device_Error =>
          raise Pipe_Error with "subprocess stdin readiness wait failed";
-   end Write_Standard_Input;
+   end Try_Write_Standard_Input;
 
    function Decode (Raw_Status : C.int) return Exit_Status is
    begin

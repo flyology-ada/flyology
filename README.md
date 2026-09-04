@@ -2027,10 +2027,14 @@ complete hard termination.
 interleaves stdin writes with stdout and stderr reads under one monotonic
 command-progress deadline and optional cancellation token. After either
 retention bound is full, it continues draining and reports truncation instead
-of allowing a full pipe to deadlock the child. Timeout or cancellation attempts
-hard structured cleanup and closes the parent descriptors before the original
-exception propagates. Cleanup failures are suppressed in that path, and
-cleanup can extend delivery beyond the command-progress deadline.
+of allowing a full pipe to deadlock the child. If the child closes stdin before
+consuming the complete payload, capture closes the parent write end and keeps
+draining stdout and stderr through process exit. A narrow C leaf supplies the
+host header's `EPIPE` value; Ada retains the classification and stream-lifecycle
+policy. Timeout or cancellation attempts hard structured cleanup and closes
+the parent descriptors before the original exception propagates. Cleanup
+failures are suppressed in that path, and cleanup can extend delivery beyond
+the command-progress deadline.
 
 Each live process currently consumes one native reaper task and pthread. This
 initial backend is intended for bounded subprocess populations. A shared

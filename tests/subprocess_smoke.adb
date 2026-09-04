@@ -21,6 +21,8 @@ procedure Subprocess_Smoke is
    use type C.int;
    use type Subprocesses.Exit_Kind;
 
+   Large_Standard_Input : constant String (1 .. 300_000) := (others => 'I');
+
    function Open_FD_Count return C.int;
    pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
 
@@ -130,6 +132,26 @@ procedure Subprocess_Smoke is
 
       Value := Capture.Run (Fixture_Command ("stdin"), Standard_Input => "typed stdin", Maximum_Output => 32);
       Assert (Capture.Standard_Output (Value) = "typed stdin", "stdin round trip mismatch");
+
+      declare
+         Item : Subprocesses.Command :=
+           Subprocesses.To_Command ("/usr/bin/head");
+      begin
+         Subprocesses.Append_Argument (Item, "-c");
+         Subprocesses.Append_Argument (Item, "10");
+         Value :=
+           Capture.Run
+             (Item,
+              Standard_Input => Large_Standard_Input,
+              Maximum_Output => 32,
+              Timeout        => 10.0);
+         Assert
+           (Subprocesses.Successful (Capture.Status (Value)),
+            "prefix-input child failed");
+         Assert
+           (Capture.Standard_Output (Value) = Large_Standard_Input (1 .. 10),
+            "prefix output was lost");
+      end;
 
       Value := Capture.Run (Fixture_Command ("nonzero"));
       Assert
