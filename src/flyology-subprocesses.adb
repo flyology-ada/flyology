@@ -27,6 +27,9 @@ package body Flyology.Subprocesses is
    function C_Set_Nonblocking (Descriptor : C.int) return C.int;
    pragma Import (C, C_Set_Nonblocking, "flyology_subprocess_set_nonblocking");
 
+   function C_Set_No_Sigpipe (Descriptor : C.int) return C.int;
+   pragma Import (C, C_Set_No_Sigpipe, "flyology_subprocess_set_no_sigpipe");
+
    function C_Spawn
      (Pid                  : access C.int;
       Executable           : CS.chars_ptr;
@@ -363,6 +366,7 @@ package body Flyology.Subprocesses is
       if C_Pipe (Stdin_Ends'Address) /= 0
         or else (Pipe_Output and then C_Pipe (Stdout_Ends'Address) /= 0)
         or else (Pipe_Error and then C_Pipe (Stderr_Ends'Address) /= 0)
+        or else C_Set_No_Sigpipe (Stdin_Ends (1)) /= 0
         or else C_Set_Nonblocking (Stdin_Ends (1)) /= 0
         or else (Pipe_Output and then C_Set_Nonblocking (Stdout_Ends (0)) /= 0)
         or else (Pipe_Error and then C_Set_Nonblocking (Stderr_Ends (0)) /= 0)

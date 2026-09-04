@@ -7,8 +7,8 @@
  *
  * posix_spawn file-action and attribute objects, waitid's siginfo_t payload,
  * signal-number macros, wait-status macros, pipe2 flags, variadic fcntl
- * duplication, bootstrap file actions, and SIGPIPE masking are
- * C-only or host-header-selected interfaces. This file exposes those
+ * duplication, bootstrap file actions, SIGPIPE configuration, and SIGPIPE
+ * masking are C-only or host-header-selected interfaces. This file exposes those
  * mechanisms through fixed signatures. Ada owns socket-pair creation,
  * validation, argv/environment construction, retry and deadline policy,
  * descriptor ownership and cleanup, signal selection, reaping order, bounded
@@ -131,6 +131,16 @@ int flyology_subprocess_set_nonblocking(int descriptor)
     int flags = fcntl(descriptor, F_GETFL);
     if (flags < 0) return -1;
     return fcntl(descriptor, F_SETFL, flags | O_NONBLOCK);
+}
+
+int flyology_subprocess_set_no_sigpipe(int descriptor)
+{
+#if defined(__APPLE__)
+    return fcntl(descriptor, F_SETNOSIGPIPE, 1);
+#else
+    (void)descriptor;
+    return 0;
+#endif
 }
 
 int flyology_subprocess_spawn(pid_t *pid,

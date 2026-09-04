@@ -2006,6 +2006,13 @@ ordinary descendants that remain in the original group. A child that
 deliberately leaves the group with `setpgid` or `setsid` is outside this
 cleanup boundary.
 
+Darwin applies `F_SETNOSIGPIPE` to the parent's standard-input write end before
+spawn, so a child that closes its read end produces `EPIPE` without a
+process-directed `SIGPIPE`. The narrow C leaf is required because `fcntl` is
+variadic and the command is selected by the host header; Ada retains pipe
+creation, endpoint selection, error handling, and cleanup policy. Linux keeps
+the write call's pthread-scoped signal guard.
+
 Low-level waits, pipe operations, and signals keep process policy explicit.
 `Wait` classifies ordinary exit and signal termination but does not terminate
 the process when a caller deadline expires. `Stop` requests graceful group
