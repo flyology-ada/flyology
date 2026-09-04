@@ -7,6 +7,9 @@ is
    function Retry_IO_Immediately (Attempt : Positive) return Boolean
    is (Attempt < Immediate_IO_Retry_Limit);
 
+   function Complete_Transfer_First (Data_First : Stream_Offset; Transferred : Natural) return Stream_Offset
+   is (Data_First + Stream_Offset (Transferred));
+
    function Mode_Code (Datagram : Boolean) return C.int
    is (if Datagram then 2 else 1);
 

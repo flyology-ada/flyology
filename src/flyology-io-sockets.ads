@@ -1323,7 +1323,6 @@ private
       Socket               : access Socket_Type := null;
       Array_Item           : access Ada.Streams.Stream_Element_Array := null;
       Buffer_Item          : access Flyology.Buffers.Unique_Buffer := null;
-      Cursor               : Ada.Streams.Stream_Element_Offset := 1;
       Transferred          : Natural := 0;
       Error_Code           : Interfaces.C.int := 0;
       Failure              : Scoped_Failure := No_Failure;

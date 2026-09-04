@@ -1918,7 +1918,6 @@ package body Flyology.IO.Sockets is
       Item.Socket := Socket.all'Unchecked_Access;
       Item.Array_Item := (if Array_Item = null then null else Array_Item.all'Unchecked_Access);
       Item.Buffer_Item := (if Buffer_Item = null then null else Buffer_Item.all'Unchecked_Access);
-      Item.Cursor := (if Array_Item = null then 1 else Array_Item.all'First);
       Item.Transferred := 0;
       Item.Error_Code := 0;
       Item.Failure := No_Failure;
@@ -1986,7 +1985,6 @@ package body Flyology.IO.Sockets is
       Item.Array_Item := (if Array_Item = null then null else Array_Item.all'Unchecked_Access);
       Item.Datagram_Item := (if Datagram_Item = null then null else Datagram_Item.all'Unchecked_Access);
       Item.Buffer_Item := null;
-      Item.Cursor := (if Array_Item /= null then Array_Item.all'First else Datagram_Item.all'First);
       Item.Transferred := 0;
       Item.Error_Code := 0;
       Item.Failure := No_Failure;
@@ -2206,7 +2204,9 @@ package body Flyology.IO.Sockets is
          Complete_All   : constant Boolean :=
            Item.Kind in Receive_Exact | Send_Complete | Buffer_Send_Complete;
          First          : constant Ada.Streams.Stream_Element_Offset :=
-           (if Complete_All then Item.Cursor else Data_First);
+           (if Complete_All
+            then Flyology.Socket_Policy.Complete_Transfer_First (Data_First, Item.Transferred)
+            else Data_First);
          Count          : Natural;
          Error          : aliased Interfaces.C.int := 0;
          Result         : Interfaces.C.long;
@@ -2263,8 +2263,7 @@ package body Flyology.IO.Sockets is
          elsif Result = 0 then
             Fail ((if Sending then No_Progress_Failure else Peer_Closed_Failure));
          else
-            Item.Cursor := First + Ada.Streams.Stream_Element_Offset (Result);
-            if Item.Cursor > Data_Last then
+            if Item.Transferred >= Natural (Data_Last - Data_First + 1) then
                Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
             else
                Arm_IO (Sending);

@@ -3,6 +3,9 @@ begin
    pragma Assert (Retry_IO_Immediately (Immediate_IO_Retry_Limit - 1));
    pragma Assert (not Retry_IO_Immediately (Immediate_IO_Retry_Limit));
 
+   pragma Assert (Complete_Transfer_First (9, 0) = 9);
+   pragma Assert (Complete_Transfer_First (9, 2) = 11);
+
    pragma Assert (not Should_Enable_Datagram_Metadata (1));
    pragma Assert (Should_Enable_Datagram_Metadata (2));
 

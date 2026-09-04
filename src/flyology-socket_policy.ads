@@ -1,6 +1,7 @@
+with Ada.Streams;
 with Interfaces.C;
 
---  Internal, proved classification of socket ABI values and operation errors.
+--  Internal, proved socket classification and complete-transfer cursor policy.
 --
 --  The operating-system constants remain inputs supplied by the C boundary;
 --  this package proves every decision made from those values.
@@ -11,6 +12,9 @@ is
    package C renames Interfaces.C;
 
    use type C.int;
+   use type Ada.Streams.Stream_Element_Offset;
+
+   subtype Stream_Offset is Ada.Streams.Stream_Element_Offset;
 
    type Error_Kind is
      (Success,
@@ -27,6 +31,12 @@ is
 
    function Retry_IO_Immediately (Attempt : Positive) return Boolean
    with Global => null, Post => Retry_IO_Immediately'Result = (Attempt < Immediate_IO_Retry_Limit);
+
+   function Complete_Transfer_First (Data_First : Stream_Offset; Transferred : Natural) return Stream_Offset
+   with
+     Global => null,
+     Pre    => Data_First <= Stream_Offset'Last - Stream_Offset (Transferred),
+     Post   => Complete_Transfer_First'Result = Data_First + Stream_Offset (Transferred);
    type Connect_Error_Action is (Wait_For_Connection, Connected, Fail_Connect);
    type Post_Accept_Failure_Stage is (Peer_Address_Decode, Descriptor_Configuration);
    type Post_Accept_Failure_Action is (Fail_Listener, Discard_Accepted_Peer);
