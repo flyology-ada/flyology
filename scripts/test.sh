@@ -31,7 +31,10 @@ export FLYOLOGY_TEST_TEMP_ROOT
 unset FLYOLOGY_LOOP_POOL_SIZE || :
 
 cleanup_test_temp () {
-  rm -f -- "$test_temp_root/file-transfers-smoke.data"
+  rm -f -- \
+    "$test_temp_root/file-transfers-smoke.data" \
+    "$test_temp_root/operations-finalize-read-first.data" \
+    "$test_temp_root/operations-finalize-write-first.data"
   rmdir -- "$test_temp_root" 2>/dev/null || true
 }
 
@@ -412,6 +415,7 @@ observability_native_smoke
 observability_smoke
 observability_utilization_smoke
 operations_smoke
+operations_finalize_smoke
 operation_gates_smoke
 operation_composition_smoke
 operation_return_boundary_smoke

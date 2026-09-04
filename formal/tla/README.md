@@ -1,24 +1,28 @@
 # TLA+ models
 
-These models extract six concurrency-sensitive state machines from the Ada
+These models extract seven concurrency-sensitive state machines from the Ada
 implementation. They are bounded, executable design reviews: TLC explores all
 interleavings within each checked configuration, while the behavioral and
 SPARK suites continue to cover the implementation boundaries that TLA+ does
 not model.
 
-Run them with an official
-[`tla2tools.jar`](https://github.com/tlaplus/tlaplus/releases) release and a
-Java runtime:
+Run them with the reviewed `flyology-ada/tla` harness checkout and its pinned
+toolchain. Build the checkout at merged revision
+`dea289018a3eef2ac2aeab7a5ee8bc4e287fe231`, which contains reviewed revision
+`59d4301e83b37ad94094690d7ca4399251cc98cf` and pins TLA+ Tools revision
+`b123b22`, provision its toolchain, then evaluate the environment it reports:
 
 ```sh
-TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
+eval "$(/path/to/flyology-tla/bin/flyology-tla toolchain env /path/to/toolchain)"
+FLYOLOGY_TLA_HARNESS_ROOT=/path/to/flyology-tla ./scripts/check-tla.sh
 ```
 
-The script also recognizes a standard macOS TLA+ Toolbox installation. It runs
-the current safety and liveness configurations to completion. It then requires
-each broken configuration to produce its named counterexample. TLC's generated
-state is kept in a temporary directory. Alire and a native GNAT toolchain are
-also required for the allocator refinement traces described below.
+The script verifies the exact harness revision and toolchain before use. It
+runs the current safety and liveness configurations to completion, then
+requires each broken configuration to produce its named counterexample. TLC's
+generated state is kept under `build/` and removed on exit. Alire and a native
+GNAT toolchain are also required for the allocator refinement traces and the
+completion-finalization Ada replay described below.
 
 `AllocatorAlgorithmsRefinement` constrains the allocator model and the real
 standalone kernels to the same operation sequences. Test-only child units read
@@ -74,6 +78,12 @@ because both trace producers emitted nothing.
 | `OpenNestedFamily` / `CloseNestedFamily` | one-shot `Families.Run_Nested` controller owned by one outer generation |
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
+| `CompletionSetFinalize.BeginFinalize` | `Operations.Finalize` requesting cancellation while the model records the peer's initial reported state as a ghost baseline |
+| `EarlyGateReturn` | `Wait_Some` publishing an unrelated terminal, unreported slot before polling descriptors |
+| `RestoreReported` | the finalizer restoring every non-target slot's saved reported flag after `Wait_Some` |
+| `WaitForTarget` | the private drain predicate that ignores unrelated user-visible completion state |
+| `DispatchTarget` | descriptor readiness driving the cancelled target operation to terminal state |
+| `FinishFinalize` | finalization releasing the target slot after its provider has drained |
 
 The model action names are intentionally close to the Ada operations so that a
 code review can compare the transition order directly rather than accepting a
@@ -167,6 +177,34 @@ forwarding the parent stop request. The last defect is a temporal
 counterexample: the nested family remains open and the synchronous outer run
 cannot complete.
 
+`CompletionSetFinalize` isolates the scope-exit drain for one pending target
+and one unrelated terminal slot. The safe configuration gives finalization a
+private target-state predicate. Weak fairness includes the descriptor dispatch
+that terminalizes the target, and TLC checks that finalization reaches `Done`,
+releases no pending target, and preserves the unrelated slot's initial reported
+state. The broken configuration routes the drain through the user-visible
+`Wait_Some` gate. TLC produces the issue #130 lasso: `EarlyGateReturn` marks
+the unrelated slot reported, `RestoreReported` makes it unreported again, and
+the cycle repeats without entering `DispatchTarget` even though dispatch is
+weakly fair whenever its poll phase is reached.
+
+The model keeps driver phase, source kind, propagation-guard state, and child
+capacity outside the initial #130 state vector. Those are explicit extension
+points for later analysis of abort-deferred drive sections (#136), blocking
+driver cleanup (#131), and failed hidden-child admission (#180); this model
+does not select or implement their product behavior.
+
+The maintained gate also regenerates the typed Ada model twice, byte-compares
+both results with the checked-in files, regenerates and validates the bounded
+two-state witness trace, and builds the isolated test crate in
+[`tests/operations_finalize_conformance`](../../tests/operations_finalize_conformance).
+Its adapter records cancellation and exactly one `Source_Ready` drive from the
+delayed provider before accepting the target as drained. It then confirms that
+the unrelated terminal operation remains available through public
+`Wait_Some`. The replay runs under a 20-second external timeout and must report
+one conformant modeled transition. TLAPS separately proves both stated safety
+obligations; replay is not represented as proof.
+
 ## Reviewed abstraction boundary
 
 The models intentionally omit or coarsen the following details:
@@ -244,6 +282,15 @@ The models intentionally omit or coarsen the following details:
   advances once and exhaustion becomes terminal. The model does not replace
   the proved burst, total-attempt, stability-reset, saturation, and deadline
   arithmetic.
+- The completion-finalization model fixes the set to the smallest relevant
+  shape: one pending target and one terminal peer. `TargetGate` is an abstract
+  private predicate, not a new public wait operation. Kernel completion is
+  represented by one weakly fair `DispatchTarget` action after the drain
+  reaches its poll phase; the model does not claim a latency bound, kernel
+  fairness, or completion when a provider never relinquishes its input. The
+  one-step harness trace projects the detailed drain as the public scope-exit
+  transition and additionally requires the peer to remain publishable, which
+  checks preservation of its user-visible reported state.
 - Desired nested children are an application-owned set equal to the modeled
   family slots. A new owner generation receives a new family controller and
   must readmit every desired slot before publishing readiness. The model does
