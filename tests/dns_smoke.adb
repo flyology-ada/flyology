@@ -320,13 +320,14 @@ procedure DNS_Smoke is
       task Fake_Server;
 
       task body Fake_Server is
-         UDP, TCP    : Sockets.Socket_Type;
-         Collision   : Sockets.Socket_Type;
-         Peer        : Sockets.Endpoint;
-         Bound       : Sockets.Endpoint;
-         Query       : Streams.Stream_Element_Array (1 .. 512);
-         Last        : Streams.Stream_Element_Offset;
-         Retry_Count : Natural := 0;
+         UDP, TCP           : Sockets.Socket_Type;
+         Collision          : Sockets.Socket_Type;
+         Peer               : Sockets.Endpoint;
+         Bound              : Sockets.Endpoint;
+         Query              : Streams.Stream_Element_Array (1 .. 512);
+         Last               : Streams.Stream_Element_Offset;
+         Retry_Count        : Natural := 0;
+         Scoped_Retry_Count : Natural := 0;
 
          procedure Open_Server_Sockets is
          begin
@@ -596,6 +597,11 @@ procedure DNS_Smoke is
                   Retry_Count := Retry_Count + 1;
                   if Retry_Count > 1 then
                      Send_Response (Name, IPv4 => "198.51.100.4");
+                  end if;
+               elsif Name = "scoped-retry.test" then
+                  Scoped_Retry_Count := Scoped_Retry_Count + 1;
+                  if Scoped_Retry_Count > 1 then
+                     Send_Response (Name, IPv4 => "198.51.100.178");
                   end if;
                elsif Name = "tcp.test" then
                   Send_Response (Name, Truncated => True);
@@ -970,6 +976,31 @@ procedure DNS_Smoke is
                     OK
                     and then Values'Length = 1
                     and then Sockets.Image (Values (Values'First)) = "192.0.2.1";
+               end;
+            end;
+
+            Set_Stage ("scoped attempt retry");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "scoped-retry.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 2,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "198.51.100.178";
                end;
             end;
 

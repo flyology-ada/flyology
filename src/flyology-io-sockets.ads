@@ -5,6 +5,7 @@ with Ada.Streams;
 with Flyology.Buffers;
 with Flyology.Operations;
 with Interfaces.C;
+with System;
 
 --  Owns Flyology's portable socket, Internet-address, and endpoint types.
 --  Socket calls use one synchronous API in both task lanes: lightweight
@@ -1321,7 +1322,13 @@ private
    type Socket_Operation is abstract new Flyology.Operations.Operation with record
       Kind                 : Scoped_IO_Kind := Receive_One;
       Socket               : access Socket_Type := null;
-      Array_Item           : access Ada.Streams.Stream_Element_Array := null;
+      --  Capture an array view by value: a slice's access bounds may belong to
+      --  the initiating frame even though its backing storage outlives it.
+      Has_Array            : Boolean := False;
+      Array_Address        : System.Address := System.Null_Address;
+      Array_First          : Ada.Streams.Stream_Element_Offset := 1;
+      Array_Last           : Ada.Streams.Stream_Element_Offset := 0;
+      Array_Length         : Natural := 0;
       Buffer_Item          : access Flyology.Buffers.Unique_Buffer := null;
       Transferred          : Natural := 0;
       Error_Code           : Interfaces.C.int := 0;
@@ -1347,7 +1354,6 @@ private
    procedure Request_Cancellation (Item : in out Socket_Operation);
 
    type Datagram_Operation is abstract new Socket_Operation with record
-      Datagram_Item       : access constant Ada.Streams.Stream_Element_Array := null;
       Source_Family       : aliased Interfaces.C.unsigned_char := 0;
       Source_Address      : aliased IPv6_Octets := (others => 0);
       Source_Port         : aliased Interfaces.C.unsigned := 0;

@@ -86,6 +86,12 @@ selection, socket byte acceptance, partial-send reporting, and the coupling
 between the driver and the policy remain outside SPARK; the second-slot
 regression runs through that integration boundary in both task lanes.
 
+Issue #178 retains that proved cursor policy while changing raw scoped socket
+operations to capture an array's base address, bounds, and length during
+initiation. Access-value representation, backing-storage lifetime, system-call
+acceptance, and the DNS driver integration remain outside SPARK; a scoped DNS
+retry regression crosses the initiation-frame boundary in both task lanes.
+
 Issue #179 proves that an attempt with no overall deadline receives the full
 configured per-attempt window and that a finite overall deadline bounds the
 window by both remaining budgets. The negative infinite sentinel is excluded
@@ -271,6 +277,7 @@ remain the live integration boundary.
 - [x] HTTP client upload-policy proof and integration boundary
 - [x] Task-result lifecycle policy and runtime integration boundary
 - [x] Issue #105 complete-transfer cursor proof and socket-driver integration
+- [x] Issue #178 scoped socket array-view lifetime and DNS-driver integration
 - [x] Issue #179 DNS attempt-window proof and resolver integration
 - [x] Supervision policy contract strengthening (level 1, mode all)
   - [x] `Flyology.Supervision_Policy.Plan_Start_Order` (level 1, mode all)
