@@ -602,18 +602,21 @@ procedure Operations_Smoke is
       end;
       Check (Passed, "array send gate failed");
 
-      --  Cover the complete unique-buffer send operation and retained buffer
-      --  ownership through its gate and Finish transition.
+      --  Cover a complete unique-buffer send from the second pool slot. The
+      --  first slot's payload must not become a prefix of the sent bytes.
       declare
-         Storage       : aliased Flyology.Buffers.Pool (Block_Size => 16, Capacity => 1);
+         Storage       : aliased Flyology.Buffers.Pool (Block_Size => 8, Capacity => 2);
+         First_Slot    : aliased Flyology.Buffers.Unique_Buffer (Storage'Access);
          Outgoing      : aliased Flyology.Buffers.Unique_Buffer (Storage'Access);
          Set           : aliased Flyology.Operations.Completion_Set (2);
-         Input         : Ada.Streams.Stream_Element_Array := [1 => 0, 2 => 0, 3 => 0];
+         Input         : Ada.Streams.Stream_Element_Array (1 .. 11) := (others => 0);
          Batch         : Flyology.Operations.Completion_Batch (Set.Capacity);
          Matches       : Flyology.Operations.Completion_Batch (Set.Capacity);
          Received_Last : Ada.Streams.Stream_Element_Offset;
       begin
+         Flyology.Buffers.Acquire (First_Slot);
          Flyology.Buffers.Acquire (Outgoing);
+         Flyology.Buffers.Copy_From (First_Slot, (1 .. 8 => 99));
          Flyology.Buffers.Copy_From (Outgoing, [31, 32, 33]);
          declare
             Send_All_Buffer : aliased Flyology.IO.Sockets.Buffer_Send_All_Operation :=
@@ -627,12 +630,12 @@ procedure Operations_Smoke is
             Flyology.Operations.Finish (Sent, Matches);
             Flyology.IO.Sockets.Finish (Send_All_Buffer);
          end;
-         Flyology.IO.Sockets.Receive_Socket (Left_2, Input, Received_Last);
+         Flyology.IO.Sockets.Receive (Left_2, Input, Received_Last, Timeout => 0.5);
          Passed :=
            Passed
            and then Matches.Count = 1
-           and then Received_Last = Input'Last
-           and then Input = [1 => 31, 2 => 32, 3 => 33]
+           and then Received_Last = Input'First + 2
+           and then Input (Input'First .. Received_Last) = [31, 32, 33]
            and then Flyology.Buffers.Length (Outgoing) = 3;
       end;
       Check (Passed, "unique-buffer send-all gate failed");

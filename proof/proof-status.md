@@ -78,6 +78,14 @@ only when usage reporting was requested. Kernel CQE delivery, flag semantics,
 socket byte acceptance, the imported ABI, and Ada asynchronous-transfer races
 remain outside SPARK and require the Linux and lane-parity tests.
 
+Issue #105 proves that each complete stream transfer resumes at the current
+borrowed slice's lower bound plus the bytes already transferred. The policy
+accepts no independently initialized absolute cursor, so the historical
+second-pool-slot prefix cannot be represented at this boundary. Buffer slice
+selection, socket byte acceptance, partial-send reporting, and the coupling
+between the driver and the policy remain outside SPARK; the second-slot
+regression runs through that integration boundary in both task lanes.
+
 The supervision policy strengthening proves that every successful start plan
 contains each configured child once with all prerequisites earlier, and that a
 dependent-recovery set contains the failed child, excludes unconfigured ids,
@@ -207,6 +215,11 @@ remain the live integration boundary.
   - [x] `System.Flyology.Send_ZC_Policy.Plan_Completion`
   - [x] Whole-unit targeted proof for both policies
   - [x] Application and runtime policy suite widening
+- [x] Issue #105 production-used complete-transfer cursor policy
+      (level 1, mode all)
+  - [x] `Flyology.Socket_Policy.Complete_Transfer_First`
+  - [x] Whole `Flyology.Socket_Policy` unit widening
+  - [x] Application and runtime policy suite widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -244,6 +257,7 @@ remain the live integration boundary.
 - [x] `Flyology.Timer_Set_Policy.Collect_Due` (level 1, mode all)
 - [x] HTTP client upload-policy proof and integration boundary
 - [x] Task-result lifecycle policy and runtime integration boundary
+- [x] Issue #105 complete-transfer cursor proof and socket-driver integration
 - [x] Supervision policy contract strengthening (level 1, mode all)
   - [x] `Flyology.Supervision_Policy.Plan_Start_Order` (level 1, mode all)
     - [x] Readiness-table invariant
@@ -293,6 +307,19 @@ remain the live integration boundary.
 - [x] Fresh whole-unit widening of `Flyology.Supervision_Policy`
 - [x] Re-run the application and runtime proof suites after strengthening the
       production supervision policy contracts
+
+- [x] Prove issue #105 complete-transfer cursor arithmetic at targeted
+      subprogram scope
+- [x] Widen the complete `Flyology.Socket_Policy` unit at level 1 and mode all
+- [x] Confirm scoped array and unique-buffer complete transfers consume the
+      slice-relative policy result
+- [x] Cover a unique-buffer complete send from the second pool slot, with the
+      preceding slot filled by distinguishable bytes, in both task lanes
+- [x] Re-run the application and runtime proof suites after issue #105
+      integration
+- [x] Re-run the full behavioral suite after issue #105 integration
+- [x] Review the issue #105 proof boundary, driver coupling, ownership,
+      compatibility, regression sensitivity, and scope
 
 - [x] Strengthen `Down_Ready` so every direct child of a nonroot position is
       ordered after that position's parent
