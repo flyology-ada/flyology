@@ -84,6 +84,9 @@ because both trace producers emitted nothing.
 | `WaitForTarget` | the private drain predicate that ignores unrelated user-visible completion state |
 | `DispatchTarget` | descriptor readiness driving the cancelled target operation to terminal state |
 | `FinishFinalize` | finalization releasing the target slot after its provider has drained |
+| `FailUpgradeDriver` | failed scoped TLS upgrade cleanup either returning a retained failure or blocking in connection close |
+| `DrainPeer` | the owner cancelling and draining an operation registered in another completion set |
+| `FinishFailedUpgrade` | typed `Finish` closing the failed upgraded connection after peer registrations have drained |
 
 The model action names are intentionally close to the Ada operations so that a
 code review can compare the transition order directly rather than accepting a
@@ -178,32 +181,41 @@ counterexample: the nested family remains open and the synchronous outer run
 cannot complete.
 
 `CompletionSetFinalize` isolates the scope-exit drain for one pending target
-and one unrelated terminal slot. The safe configuration gives finalization a
-private target-state predicate. Weak fairness includes the descriptor dispatch
-that terminalizes the target, and TLC checks that finalization reaches `Done`,
-releases no pending target, and preserves the unrelated slot's initial reported
-state. The broken configuration routes the drain through the user-visible
-`Wait_Some` gate. TLC produces the issue #130 lasso: `EarlyGateReturn` marks
-the unrelated slot reported, `RestoreReported` makes it unreported again, and
-the cycle repeats without entering `DispatchTarget` even though dispatch is
-weakly fair whenever its poll phase is reached.
+and one unrelated terminal slot, and also models one failed TLS-upgrade driver
+with an operation registered in another completion set. The safe configuration
+gives finalization a private target-state predicate and defers failed-upgrade
+connection cleanup until typed `Finish`. Weak fairness includes descriptor
+dispatch, peer draining after the driver returns, and the final cleanup step.
+TLC checks that both workflows reach `Done`, release no pending target, preserve
+the unrelated slot's initial reported state, and close only after the peer
+registration drains.
 
-The model keeps driver phase, source kind, propagation-guard state, and child
-capacity outside the initial #130 state vector. Those are explicit extension
-points for later analysis of abort-deferred drive sections (#136), blocking
-driver cleanup (#131), and failed hidden-child admission (#180); this model
-does not select or implement their product behavior.
+Two broken configurations are required to fail. The first routes the finalizer
+through the user-visible `Wait_Some` gate and produces the issue #130 lasso:
+`EarlyGateReturn` marks the unrelated slot reported, `RestoreReported` makes it
+unreported again, and the cycle repeats without entering `DispatchTarget`. The
+second performs the issue #131 connection close inside the driver. The driver
+blocks waiting for the peer registration, while `DrainPeer` is enabled only
+after control returns to the owner, so `DriverFailureCompletes` has a terminal
+lasso in `Blocked`.
+
+The model still keeps source kind, propagation-guard state, and child capacity
+outside its state vector. Those remain extension points for analysis of
+abort-deferred drive sections (#136) and failed hidden-child admission (#180).
 
 The maintained gate also regenerates the typed Ada model twice, byte-compares
 both results with the checked-in files, regenerates and validates the bounded
-two-state witness trace, and builds the isolated test crate in
+three-state witness trace, and builds the isolated test crate in
 [`tests/operations_finalize_conformance`](../../tests/operations_finalize_conformance).
 Its adapter records cancellation and exactly one `Source_Ready` drive from the
 delayed provider before accepting the target as drained. It then confirms that
 the unrelated terminal operation remains available through public
-`Wait_Some`. The replay runs under a 20-second external timeout and must report
-one conformant modeled transition. TLAPS separately proves both stated safety
-obligations; replay is not represented as proof.
+`Wait_Some`. A second replay transition drives the failed-upgrade ordering: the
+driver returns, the peer operation is cancelled and drained, and typed `Finish`
+closes the connection while retaining the TLS failure. The replay runs under a
+20-second external timeout and must report two conformant modeled transitions.
+TLAPS separately proves both stated safety obligations; replay is not
+represented as proof.
 
 ## Reviewed abstraction boundary
 

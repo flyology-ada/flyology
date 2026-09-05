@@ -738,6 +738,7 @@ private
       Transport            : Transport_Kind := No_Transport;
       Pending_TLS_Session  : Flyology.IO.TLS.Session_Access := null;
       Upgrade_Started      : aliased Boolean := False;
+      Close_Required       : Boolean := False;
       Failure              : Scoped_IO_Failure := No_Failure;
    end record;
 

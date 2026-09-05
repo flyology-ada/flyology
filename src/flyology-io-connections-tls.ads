@@ -13,8 +13,11 @@ package Flyology.IO.Connections.TLS is
 
    --  Start a core TLS upgrade without suspending the owner task. Item and
    --  Backend are borrowed through provider setup; Item remains borrowed until
-   --  typed Finish or finalization. Any failure after the transport transition
-   --  closes Item, matching the synchronous Upgrade contract.
+   --  typed Finish or finalization. A failure after the transport transition
+   --  becomes terminal without closing from the driver; typed Finish closes
+   --  Item, matching the synchronous Upgrade contract. Drain other scoped
+   --  operations registered on Item before calling Finish because the close
+   --  waits for their leases to withdraw.
    --  @param Set Completion set that owns the operation slot
    --  @param Item Open plaintext admitted connection
    --  @param Backend Initialized TLS provider
@@ -96,7 +99,10 @@ package Flyology.IO.Connections.TLS is
      Pre =>
        not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
 
-   --  Consume a terminal TLS upgrade, raising its retained familiar error.
+   --  Consume a terminal TLS upgrade, close Item when a failed started
+   --  handshake retained that obligation, and raise the familiar error.
+   --  The close can wait for other operations registered on Item, so their
+   --  completion sets must be drained first by the same owner.
    --  @param Operation Terminal TLS upgrade operation
    procedure Finish (Operation : in out Upgrade_Operation);
 

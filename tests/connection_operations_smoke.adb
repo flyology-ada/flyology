@@ -1030,6 +1030,90 @@ procedure Connection_Operations_Smoke is
          end;
       end loop;
 
+      --  A failed scoped upgrade must return control to the owner before
+      --  closing the connection. Another operation can be registered in a
+      --  different completion set and requires that owner to cancel and
+      --  drain it before the connection close can finish.
+      declare
+         Manager           : aliased Connections.Server (Capacity => 1);
+         Item              : aliased Connections.Connection (Manager'Access);
+         Socket, Peer      : Sockets.Socket_Type;
+         Backend           : aliased Provider.Provider;
+         Holding_Data      : aliased Stream_Element_Array := [1 => 0];
+         Pending_Data      : aliased Stream_Element_Array := [1 => 0];
+         Last              : Stream_Element_Offset;
+         Holding_Cancelled : Boolean := False;
+         Upgrade_Failed    : Boolean := False;
+         Receive_Cancelled : Boolean := False;
+      begin
+         Provider.Set_Script
+           (Backend,
+            Provider.Handshake_Operation,
+            [1 => (TLS.Want_Read, Provider.Preserve_Output, 0),
+             2 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         declare
+            Holding_Set : aliased Flyology.Operations.Completion_Set (1);
+            Receive_Set : aliased Flyology.Operations.Completion_Set (1);
+            Upgrade_Set : aliased Flyology.Operations.Completion_Set (1);
+            Holding     : Connections.Receive_Operation :=
+              Connections.Receive
+                (Holding_Set'Access,
+                 Item'Access,
+                 Holding_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Pending : Connections.Receive_Operation :=
+              Connections.Receive
+                (Receive_Set'Access,
+                 Item'Access,
+                 Pending_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Secure : Connection_TLS.Upgrade_Operation :=
+              Connection_TLS.Upgrade
+                (Upgrade_Set'Access,
+                 Item'Access,
+                 Backend'Access,
+                 TLS.Server,
+                 "",
+                 Timeout => Flyology.IO.Infinite);
+         begin
+            Flyology.Operations.Cancel (Holding);
+            Flyology.Operations.Wait_All (Holding_Set);
+            begin
+               Connections.Finish (Holding, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  Holding_Cancelled := True;
+            end;
+
+            Sockets.Send_All (Peer, [1 => 97]);
+            Flyology.Operations.Wait_All (Upgrade_Set);
+
+            Flyology.Operations.Cancel (Pending);
+            Flyology.Operations.Wait_All (Receive_Set);
+            begin
+               Connections.Finish (Pending, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  Receive_Cancelled := True;
+            end;
+            begin
+               Connection_TLS.Finish (Secure);
+            exception
+               when TLS.TLS_Error =>
+                  Upgrade_Failed := True;
+            end;
+         end;
+         Passed :=
+           Passed
+           and then Holding_Cancelled
+           and then Upgrade_Failed
+           and then Receive_Cancelled
+           and then not Connections.Is_Open (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
       --  The same operation types transparently drive an upgraded TLS
       --  transport. WANT_WRITE from receive and WANT_READ from send select
       --  the opposite descriptor direction; partial TLS progress reschedules

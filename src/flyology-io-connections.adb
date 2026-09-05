@@ -1437,8 +1437,8 @@ package body Flyology.IO.Connections is
    procedure Complete_Connection_Operation
      (Item : in out Connection_Operation'Class; Result : Flyology.Operations.Terminal_Outcome)
    is
-      Published           : Flyology.Operations.Terminal_Outcome := Result;
-      Close_After_Release : constant Boolean :=
+      Published      : Flyology.Operations.Terminal_Outcome := Result;
+      Close_Required : constant Boolean :=
         Item.Kind = Upgrade_TLS_Transport
         and then Item.Upgrade_Started
         and then Result /= Flyology.Operations.Succeeded;
@@ -1453,17 +1453,10 @@ package body Flyology.IO.Connections is
             Item.Failure := Cleanup_Failure;
             Published := Flyology.Operations.Failed;
       end;
-      if Close_After_Release and then Item.Guard.State = Unregistered then
-         begin
-            Close (Item.Item.all);
-         exception
-            --  Preserve the operation's provider/deadline/cancellation
-            --  result. Close has already made ownership terminal before it
-            --  can report a cleanup error, matching synchronous Upgrade.
-            when others =>
-               null;
-         end;
-      end if;
+      --  A close can wait for registrations owned by another completion set.
+      --  Retain that obligation for typed Finish so the driver always returns
+      --  to the owner that can drain those operations.
+      Item.Close_Required := Close_Required and then Item.Guard.State = Unregistered;
       Item.Upgrade_Started := False;
       Flyology.Operations.Drivers.Complete (Item, Published);
    end Complete_Connection_Operation;
@@ -1743,8 +1736,8 @@ package body Flyology.IO.Connections is
       Timeout   : Duration;
       Token     : access Cancellation_Token) is
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1762,6 +1755,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
       Flyology.Operations.Drivers.Start (Operation);
       if Timeout >= 0.0 then
@@ -1787,8 +1781,8 @@ package body Flyology.IO.Connections is
       Timeout   : Duration;
       Token     : access Cancellation_Token) is
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1806,6 +1800,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
       Flyology.Operations.Drivers.Start (Operation);
       if Timeout >= 0.0 then
@@ -1834,8 +1829,8 @@ package body Flyology.IO.Connections is
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1853,6 +1848,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
 
       Flyology.Operations.Drivers.Start (Operation);
@@ -1968,10 +1964,24 @@ package body Flyology.IO.Connections is
    end Send_All;
 
    procedure Finish_Connection_Operation (Item : in out Connection_Operation'Class) is
-      Result  : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Item);
-      Failure : constant Scoped_IO_Failure := Item.Failure;
+      Result         : constant Flyology.Operations.Terminal_Outcome := Flyology.Operations.Outcome (Item);
+      Failure        : constant Scoped_IO_Failure := Item.Failure;
+      Close_Required : constant Boolean := Item.Close_Required;
+      Target         : constant Connection_Access := Item.Item;
    begin
       Flyology.Operations.Consume (Item);
+      Item.Close_Required := False;
+      if Close_Required and then Target /= null then
+         begin
+            Close (Target.all);
+         exception
+            --  Preserve the operation's provider/deadline/cancellation
+            --  result. Close makes ownership terminal before reporting any
+            --  cleanup error, matching synchronous Upgrade.
+            when others =>
+               null;
+         end;
+      end if;
       case Result is
          when Flyology.Operations.Succeeded =>
             null;
