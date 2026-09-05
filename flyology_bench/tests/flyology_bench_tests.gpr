@@ -9,6 +9,7 @@ project Flyology_Bench_Tests is
       "flyology_bench-internal_statistics_smoke.adb",
       "custom_metrics_smoke.adb",
       "baseline_gate_smoke.adb",
+      "delta_aggregate_expression_function_compile.adb",
       "sweeps_smoke.adb",
       "suite_smoke.adb",
       "worker_fixture.adb", "workers_smoke.adb");

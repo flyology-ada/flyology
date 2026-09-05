@@ -1026,8 +1026,9 @@ package body Flyology_Bench.Suites is
       return False;
    end Has_Unavailable;
 
+   --  GNAT 13 and 14 require inner parentheses around the delta aggregate.
    function Dry_Configuration (Base : Configuration) return Configuration
-   is (Base
+   is ((Base
        with delta
          Warmup_Time               => 0.0,
          Measurement_Time          => 0.000_010,
@@ -1043,7 +1044,7 @@ package body Flyology_Bench.Suites is
          Placement                 => (Enabled => False),
          Host_Lock                 => (Enabled => False),
          Collect_Process_Telemetry => False,
-         Progress                  => null);
+         Progress                  => null));
 
    function Execution_Configuration (Options : Runner_Options) return Configuration
    is (if Options.Dry
