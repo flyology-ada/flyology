@@ -1,0 +1,28 @@
+project Gnat13_Runtime_Warnings is
+   for Languages use ("Ada");
+   for Source_Dirs use (".");
+   for Object_Dir use
+     external
+       ("FLYOLOGY_GNAT13_WARNING_OBJECT_DIR",
+        "../../../build/tests/gnat13-runtime-warnings/gpr-obj");
+   for Exec_Dir use
+     external
+       ("FLYOLOGY_GNAT13_WARNING_EXEC_DIR",
+        "../../../build/tests/gnat13-runtime-warnings/gpr-bin");
+   for Create_Missing_Dirs use "True";
+   for Main use ("contract_assertion_probe.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnatg", "-gnatyM110", "-O2", "-gnata");
+   end Compiler;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+end Gnat13_Runtime_Warnings;
