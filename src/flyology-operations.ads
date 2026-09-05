@@ -100,6 +100,14 @@ is
    procedure Request_Cancellation (Item : in out Operation) is abstract;
 
    --  @exclude
+   --  Discharge provider state retained past terminal publication. Consume
+   --  and controlled finalization call this only after the operation no
+   --  longer owns a pending or terminal slot. Implementations must not raise
+   --  or wait for another operation to make progress.
+   --  @param Item Operation whose retained provider state is discarded
+   procedure Cleanup_After_Consume (Item : in out Operation) is null;
+
+   --  @exclude
    --  @param Item Operation whose slot must be released
    overriding
    procedure Finalize (Item : in out Operation);
@@ -259,7 +267,8 @@ is
    procedure Continue_After (Parent : in out Operation'Class; Child : in out Operation'Class);
 
    --  Release one terminal result and make its bounded slot reusable by the
-   --  same operation object.
+   --  same operation object. Slot release and provider cleanup form one
+   --  abort-deferred transition.
    --  @param Item Terminal operation whose slot becomes reusable
    procedure Consume (Item : in out Operation'Class)
    with Pre => Is_Terminal (Item);

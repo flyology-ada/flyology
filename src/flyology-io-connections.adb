@@ -72,6 +72,22 @@ package body Flyology.IO.Connections is
    overriding
    procedure Finalize (Guard : in out Close_Guard);
 
+   type Deferred_Close_Guard
+     (Item        : not null access Connection'Class;
+      Begin_Close : Boolean)
+   is new Ada.Finalization.Limited_Controlled with record
+      Socket     : Sockets.Socket_Type;
+      Owner      : Server_Access := null;
+      Generation : Descriptor_Generation := 0;
+      Ready      : Boolean := False;
+      Outcome    : Close_Outcome;
+   end record;
+
+   overriding
+   procedure Initialize (Guard : in out Deferred_Close_Guard);
+   overriding
+   procedure Finalize (Guard : in out Deferred_Close_Guard);
+
    type Session_Setup_Guard is new Ada.Finalization.Limited_Controlled with record
       Value : TLS.Session_Access := null;
    end record;
@@ -80,6 +96,9 @@ package body Flyology.IO.Connections is
    procedure Finalize (Guard : in out Upgrade_Cleanup_Guard);
    overriding
    procedure Finalize (Guard : in out Session_Setup_Guard);
+
+   procedure Request_Deferred_Close (Item : not null access Connection'Class);
+   procedure Try_Finish_Deferred_Close (Item : not null access Connection'Class; Begin_Close : Boolean);
 
    procedure Disarm (Guard : in out Upgrade_Cleanup_Guard) is
    begin
@@ -296,8 +315,46 @@ package body Flyology.IO.Connections is
             --  can retry instead of waiting for a completion that the failed
             --  attempt can no longer perform.
             Closing := True;
+            Deferred_Closing := False;
          end if;
       end Begin_Close;
+
+      procedure Begin_Deferred_Close is
+         Leader : constant Boolean := Policy.Close_Leader (Current_FD >= 0, Closing);
+      begin
+         if Leader then
+            if Policy.Close_Wake_Required (Leader, Started_Operations) then
+               Wake_Sources.Signal (Close_Wake);
+            end if;
+            Closing := True;
+            Deferred_Closing := True;
+         end if;
+      end Begin_Deferred_Close;
+
+      procedure Try_Drain_Deferred_Close
+        (Socket     : in out Sockets.Socket_Type;
+         Owner      : out Server_Access;
+         Generation : out Descriptor_Generation;
+         Ready      : out Boolean) is
+      begin
+         Ready :=
+           Deferred_Closing
+           and then Closing
+           and then not Active
+           and then Started_Operations = 0
+           and then Current_FD >= 0
+           and then Sockets.Is_Open (Current_Socket)
+           and then Current_Owner /= null;
+         if Ready then
+            Sockets.Move (Current_Socket, Socket);
+            Owner := Current_Owner;
+            Current_Owner := null;
+            Generation := Current_Generation;
+         else
+            Owner := null;
+            Generation := 0;
+         end if;
+      end Try_Drain_Deferred_Close;
 
       entry Await_Drained (Socket : in out Sockets.Socket_Type; Owner : out Server_Access)
         when not Active and then Started_Operations = 0
@@ -337,6 +394,7 @@ package body Flyology.IO.Connections is
          Wake_Sources.Release (Close_Wake);
          Lease_Signalled := False;
          Closing := False;
+         Deferred_Closing := False;
       end Finish_Close;
 
       function Is_Open_State return Boolean
@@ -365,6 +423,9 @@ package body Flyology.IO.Connections is
          when Acquired     =>
             Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
       end case;
+      if Guard.State = Unregistered then
+         Try_Finish_Deferred_Close (Guard.Item, Begin_Close => False);
+      end if;
    end Release_Operation;
 
    overriding
@@ -374,6 +435,7 @@ package body Flyology.IO.Connections is
    end Finalize;
 
    procedure Release_Operation (Guard : in out Scoped_Operation_Guard) is
+      Target : constant Connection_Access := Guard.Item;
    begin
       case Guard.State is
          when Unregistered =>
@@ -385,14 +447,16 @@ package body Flyology.IO.Connections is
          when Acquired     =>
             Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
       end case;
-      if Guard.State = Unregistered then
+      if Guard.State = Unregistered and then Target /= null then
+         Try_Finish_Deferred_Close (Target, Begin_Close => False);
          Guard.Item := null;
       end if;
    exception
       when others =>
          --  Drop the retained Item only when the controller has atomically
          --  discharged the guard. Otherwise finalization must retry.
-         if Guard.State = Unregistered then
+         if Guard.State = Unregistered and then Target /= null then
+            Try_Finish_Deferred_Close (Target, Begin_Close => False);
             Guard.Item := null;
          end if;
          raise;
@@ -471,35 +535,29 @@ package body Flyology.IO.Connections is
       Guard.Item.Controller.Begin_Close (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader);
    end Initialize;
 
-   overriding
-   procedure Finalize (Guard : in out Close_Guard) is
-      Socket : Sockets.Socket_Type;
-      Owner  : Server_Access;
-
+   procedure Finish_Close_Resources
+     (Item       : in out Connection'Class;
+      Generation : Descriptor_Generation;
+      Socket     : in out Sockets.Socket_Type;
+      Owner      : Server_Access;
+      Outcome    : in out Close_Outcome)
+   is
       procedure Record_Failure (Occurrence : Ada.Exceptions.Exception_Occurrence) is
       begin
-         if not Guard.Outcome.Failed then
-            Ada.Exceptions.Save_Occurrence (Guard.Outcome.Failure, Occurrence);
-            Guard.Outcome.Failed := True;
+         if not Outcome.Failed then
+            Ada.Exceptions.Save_Occurrence (Outcome.Failure, Occurrence);
+            Outcome.Failed := True;
          end if;
       end Record_Failure;
    begin
-      if not Guard.Outcome.Leader then
-         return;
-      end if;
-
-      --  The exact generation remains allocated until its sole operation has
-      --  observed Close_Wake and acknowledged release. Only then may the OS
-      --  recycle the integer descriptor.
-      Guard.Item.Controller.Await_Drained (Socket, Owner);
       begin
-         Free (Guard.Item.TLS_Session);
+         Free (Item.TLS_Session);
       exception
          when others =>
-            Guard.Item.TLS_Session := null;
-            Guard.Outcome.Provider_Error := True;
+            Item.TLS_Session := null;
+            Outcome.Provider_Error := True;
       end;
-      Guard.Item.TLS_Shutdown_Complete := False;
+      Item.TLS_Shutdown_Complete := False;
       --  Each remaining obligation is attempted independently and the first
       --  failure is reported. Close_Socket invalidates Socket even when close
       --  reports an error, and Finish_Close is the only operation that ends
@@ -513,7 +571,7 @@ package body Flyology.IO.Connections is
          end;
       end if;
       begin
-         Guard.Item.Controller.Finish_Close (Guard.Outcome.Generation);
+         Item.Controller.Finish_Close (Generation);
       exception
          when Occurrence : others =>
             Record_Failure (Occurrence);
@@ -526,7 +584,66 @@ package body Flyology.IO.Connections is
                Record_Failure (Occurrence);
          end;
       end if;
+   end Finish_Close_Resources;
+
+   overriding
+   procedure Finalize (Guard : in out Close_Guard) is
+      Socket : Sockets.Socket_Type;
+      Owner  : Server_Access;
+   begin
+      if not Guard.Outcome.Leader then
+         return;
+      end if;
+
+      --  The exact generation remains allocated until its sole operation has
+      --  observed Close_Wake and acknowledged release. Only then may the OS
+      --  recycle the integer descriptor.
+      Guard.Item.Controller.Await_Drained (Socket, Owner);
+      Finish_Close_Resources (Guard.Item.all, Guard.Outcome.Generation, Socket, Owner, Guard.Outcome.all);
    end Finalize;
+
+   overriding
+   procedure Initialize (Guard : in out Deferred_Close_Guard) is
+   begin
+      if Guard.Begin_Close then
+         Guard.Item.Controller.Begin_Deferred_Close;
+         if Test_Hooks.Enabled then
+            --  Paired with Deferred_Close_Published in the test interface.
+            Test_Hooks.Barrier (22);
+         end if;
+      end if;
+      Guard.Item.Controller.Try_Drain_Deferred_Close
+        (Guard.Socket, Guard.Owner, Guard.Generation, Guard.Ready);
+   end Initialize;
+
+   overriding
+   procedure Finalize (Guard : in out Deferred_Close_Guard) is
+   begin
+      if Guard.Ready then
+         Finish_Close_Resources (Guard.Item.all, Guard.Generation, Guard.Socket, Guard.Owner, Guard.Outcome);
+      end if;
+   exception
+      --  Deferred cleanup is an ownership safety net. Every cleanup stage is
+      --  attempted by Finish_Close_Resources; it must not replace a retained
+      --  operation result or escape controlled finalization.
+      when others =>
+         null;
+   end Finalize;
+
+   procedure Try_Finish_Deferred_Close (Item : not null access Connection'Class; Begin_Close : Boolean) is
+   begin
+      declare
+         Guard : Deferred_Close_Guard (Item, Begin_Close);
+         pragma Unreferenced (Guard);
+      begin
+         null;
+      end;
+   end Try_Finish_Deferred_Close;
+
+   procedure Request_Deferred_Close (Item : not null access Connection'Class) is
+   begin
+      Try_Finish_Deferred_Close (Item, Begin_Close => True);
+   end Request_Deferred_Close;
 
    overriding
    procedure Finalize (Guard : in out Session_Setup_Guard) is
@@ -1437,8 +1554,8 @@ package body Flyology.IO.Connections is
    procedure Complete_Connection_Operation
      (Item : in out Connection_Operation'Class; Result : Flyology.Operations.Terminal_Outcome)
    is
-      Published           : Flyology.Operations.Terminal_Outcome := Result;
-      Close_After_Release : constant Boolean :=
+      Published      : Flyology.Operations.Terminal_Outcome := Result;
+      Close_Required : constant Boolean :=
         Item.Kind = Upgrade_TLS_Transport
         and then Item.Upgrade_Started
         and then Result /= Flyology.Operations.Succeeded;
@@ -1453,17 +1570,10 @@ package body Flyology.IO.Connections is
             Item.Failure := Cleanup_Failure;
             Published := Flyology.Operations.Failed;
       end;
-      if Close_After_Release and then Item.Guard.State = Unregistered then
-         begin
-            Close (Item.Item.all);
-         exception
-            --  Preserve the operation's provider/deadline/cancellation
-            --  result. Close has already made ownership terminal before it
-            --  can report a cleanup error, matching synchronous Upgrade.
-            when others =>
-               null;
-         end;
-      end if;
+      --  A close can wait for registrations owned by another completion set.
+      --  Retain that obligation for typed Finish so the driver always returns
+      --  to the owner that can drain those operations.
+      Item.Close_Required := Close_Required and then Item.Guard.State = Unregistered;
       Item.Upgrade_Started := False;
       Flyology.Operations.Drivers.Complete (Item, Published);
    end Complete_Connection_Operation;
@@ -1735,6 +1845,31 @@ package body Flyology.IO.Connections is
          null;
    end Request_Cancellation;
 
+   overriding
+   procedure Cleanup_After_Consume (Item : in out Connection_Operation) is
+      Close_Required : constant Boolean := Item.Close_Required;
+      Target         : constant Connection_Access := Item.Item;
+   begin
+      if Test_Hooks.Enabled then
+         --  Paired with Cleanup_Dispatch_Entered in the test interface.
+         Test_Hooks.Barrier (23);
+      end if;
+      if Close_Required and then Target /= null then
+         begin
+            Request_Deferred_Close (Target);
+            Item.Close_Required := False;
+         exception
+            --  Retain the operation-side obligation when close initiation
+            --  fails. A reusable operation rejects a new start, and
+            --  controlled finalization retries before the object disappears.
+            when others =>
+               null;
+         end;
+      else
+         Item.Close_Required := False;
+      end if;
+   end Cleanup_After_Consume;
+
    procedure Start_Scoped_IO
      (Operation : in out Connection_Operation'Class;
       Item      : not null access Connection'Class;
@@ -1743,8 +1878,8 @@ package body Flyology.IO.Connections is
       Timeout   : Duration;
       Token     : access Cancellation_Token) is
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1762,6 +1897,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
       Flyology.Operations.Drivers.Start (Operation);
       if Timeout >= 0.0 then
@@ -1787,8 +1923,8 @@ package body Flyology.IO.Connections is
       Timeout   : Duration;
       Token     : access Cancellation_Token) is
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1806,6 +1942,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
       Flyology.Operations.Drivers.Start (Operation);
       if Timeout >= 0.0 then
@@ -1834,8 +1971,8 @@ package body Flyology.IO.Connections is
    is
       Started : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
    begin
-      if Operation.Guard.State /= Unregistered then
-         raise Flyology.Operations.Operation_Error with "connection operation still owns a lease";
+      if Operation.Guard.State /= Unregistered or else Operation.Close_Required then
+         raise Flyology.Operations.Operation_Error with "connection operation still owns connection state";
       end if;
       Operation.Item := Item.all'Unchecked_Access;
       Operation.Token := (if Token = null then null else Token.all'Unchecked_Access);
@@ -1853,6 +1990,7 @@ package body Flyology.IO.Connections is
       Operation.Transport := No_Transport;
       Operation.Pending_TLS_Session := null;
       Operation.Upgrade_Started := False;
+      Operation.Close_Required := False;
       Operation.Failure := No_Failure;
 
       Flyology.Operations.Drivers.Start (Operation);

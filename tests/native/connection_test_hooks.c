@@ -3,7 +3,7 @@
 
 enum {
    raw_accept_returned = 13,
-   barrier_count = 22
+   barrier_count = 24
 };
 
 static _Atomic int armed[barrier_count];
