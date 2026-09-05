@@ -106,6 +106,12 @@ evidence.
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
 | `MarkRestartReady` / `AdvanceRestartTime` / `RestartFailure` / `StartRestartGeneration` | static and family restart-window projection from `Ready_Since` and `Stability_Reset` boundaries to admissibility counters |
+| `PollerRegistrationOwnership.BeginWaitBatch` | Linux `Pollers.Wait_Batch` translating an epoll batch while the scheduler group lock is released |
+| `ForeignWake` | `Scheduler.Wake` queuing descriptor cancellation for the owning event-loop thread |
+| `DrainBudget` / `DrainRemaining` | `Process_Descriptor_Cancellations_Locked` consuming at most 64 entries per scheduler turn, retaining a poller wake while work remains |
+| `DeliverTarget` with readiness | `Handle_Poll_Event` retaining a wait whose descriptor cancellation is still queued |
+| `DeliverTarget` with timer expiry | `Promote_Expired_Timers` retaining an expired wait whose descriptor cancellation is still queued |
+| `ReregisterTarget` / `ReapTarget` | the otherwise unsafe reuse or release of a fiber before its queued cancellation is consumed |
 | `CompletionSetFinalize.BeginFinalize` | `Operations.Finalize` requesting cancellation while the model records the peer's initial reported state as a ghost baseline |
 | `EarlyGateReturn` | `Wait_Some` publishing an unrelated terminal, unreported slot before polling descriptors |
 | `RestoreReported` | the finalizer restoring every non-target slot's saved reported flag after `Wait_Some` |
@@ -253,6 +259,32 @@ family restart windows. A dedicated safe/broken restart-window pair confirms
 that stale readiness does not carry over across replacement starts, and
 `check-tla.sh` validates a full nine-transition witness plus implementation
 conformance for the same lane.
+
+`PollerRegistrationOwnership` models one loop thread translating a poll batch,
+a foreign wake that cancels 65 descriptor waiters, the loop's 64-entry drain
+budget, and either readiness or timer expiry selecting the last queued target.
+The safe readiness and timer configurations require a single registration-list
+writer, a live fiber and matching wait generation for every queued cancellation,
+exclusive cancellation ownership of the target, a retained progress wake, and
+no stale cancellation after reuse. The direct-cancellation broken configuration
+violates the single-writer rule during batch translation. The unowned-readiness
+configuration permits the target to re-register before its old queue entry is
+drained, and the unowned-timer configuration permits it to be reaped while that
+entry still references it; both are required counterexamples.
+
+`PollerRegistrationOwnershipProof` discharges two TLAPS obligations: the
+deferred, cancellation-owned configurations initialize in the stated safety
+conjunction, and every modeled action preserves it for either selected source.
+This is an invariant proof over the extraction, not a refinement proof of the
+Ada scheduler or Linux poller. The deterministic four-transition Ada replay
+uses the readiness witness and compares the real queued/processed cancellation
+observations with the generated model boundary. It does not replay timer
+delivery. The timer side is instead exercised by the Linux-only
+`linux_abort_readiness_waiter_smoke`, which holds an expired finite-deadline
+target beyond the 64-entry drain budget at the production scheduler guard.
+Both that runtime test and the Ada replay require Linux epoll behavior; on other
+hosts `check-tla.sh` runs the TLC and TLAPS coverage but explicitly defers the
+implementation replay.
 
 `CompletionSetFinalize` isolates the scope-exit drain for one pending target
 and one unrelated terminal slot, models one failed TLS-upgrade driver with an
