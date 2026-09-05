@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-09-02T12:58:29.566781+00:00'
+generated_at: '2026-09-05T06:29:34.613163+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: _local/flyology-allocators
@@ -35,7 +35,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-library-profile
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/profiles/ada-library
@@ -45,7 +45,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-interface-values
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-interface-values
@@ -61,7 +61,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-source-style
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/ada-source-style
@@ -72,12 +72,12 @@ dependencies:
   deployed_files:
   - .claude/rules/ada-source-style.md
   deployed_file_hashes:
-    .claude/rules/ada-source-style.md: sha256:815c3b5f0c89a49e38ea29b2b5b18ebcef65a7ce38c42108e9a45f83c1f4251d
-  content_hash: sha256:e521a0dfd1613c98fad853a782f81c24ff0943cbfe151b13702eb9c3b177001c
+    .claude/rules/ada-source-style.md: sha256:a9009f8be8315917814d20924c6930abfed591e649e43f0c092b01aff315669c
+  content_hash: sha256:00bc40743ce973b518269633526002f974d71e9e9c741dcaec61512d6a1af887
 - repo_url: flyology-ada/agents
   name: flyology-alire-release-policy
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/alire-release-policy
@@ -93,7 +93,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-decision-authority
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/decision-authority
@@ -109,7 +109,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-goal-stewardship
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/goal-stewardship
@@ -125,7 +125,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-grounded-communication
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/grounded-communication
@@ -141,7 +141,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-performance-testing
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/performance-testing
@@ -157,7 +157,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-problem-solution-commits
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/problem-solution-commits
@@ -173,7 +173,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-repository-workflow
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/repository-workflow
@@ -189,7 +189,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-review-cycle
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/review-cycle
@@ -205,7 +205,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-tla-plus-assurance
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/instructions/tla-plus-assurance
@@ -221,7 +221,7 @@ dependencies:
 - repo_url: flyology-ada/agents
   name: flyology-ada-skills
   host: github.com
-  resolved_commit: ede3aef1ef4f4b1ec281822427b397c5f7b9c1b8
+  resolved_commit: 194788b996114f2fae444f7c7e0fe70f7d9774a5
   resolved_ref: main
   version: 0.1.0
   virtual_path: packages/skills
@@ -487,12 +487,12 @@ dependencies:
     .agents/skills/flyology-website-content/references/journal.md: sha256:73af4b1c6b14c28ae214f8f45e80400faad1757dd9138dcf04429d95e340df72
     .agents/skills/flyology-website-content/references/review.md: sha256:89c4a2bae5d431a826c941ae2bd792fb80aa7234a3bbfb1c19e392cbe4cfa897
     .agents/skills/flyology-website-content/references/technical-writing.md: sha256:dd11d2c32d43225dad5aaa29bf1180d9df7784c9b4ad8835980280ad8292cc2e
-    .agents/skills/gnatdoc/SKILL.md: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
-    .agents/skills/gnatdoc/references/annotations.md: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
-    .agents/skills/gnatdoc/references/backends.md: sha256:8b4fc6ea8c3a0a19b824c409568fecb6c6ccbf34af2536a0499c0743a353fb05
-    .agents/skills/gnatdoc/references/command-reference.md: sha256:80b24c741ec5beb00cd70908a6254b8b373d326e39cc83a72091abbacb538d93
-    .agents/skills/gnatdoc/references/project-setup.md: sha256:0b9546e49f2be55263ad3cd21ae0f8ab2055ead6fe08d3a7814f3f5fcb788c9e
-    .agents/skills/gnatdoc/references/styles.md: sha256:589899212f7c1308fe1c10c916c347864e0b04ccd72da1c0a7417b2f98b7a9e7
+    .agents/skills/gnatdoc/SKILL.md: sha256:54c3036fb95eb202fdd072f8d4158acf2a91a8f0682368b6dce09ff9b260cb3c
+    .agents/skills/gnatdoc/references/annotations.md: sha256:26ebff501cfa259b76753583b4614f0079d9c5a968854394a930fc01b5cf9291
+    .agents/skills/gnatdoc/references/backends.md: sha256:820ca4b1b088085e0cfb372e6f08a58f3086c0f50402651b4833f1712beff85f
+    .agents/skills/gnatdoc/references/command-reference.md: sha256:fde3c9b05627c3fe514c4414fdcd639e461fe884e090019376d095e64b5abaf5
+    .agents/skills/gnatdoc/references/project-setup.md: sha256:45a00479bb7eba04e6059303c03dc6c80a1749030cf03b0d3fd7d4074cc965e4
+    .agents/skills/gnatdoc/references/styles.md: sha256:541fb0c4740d6d9645d79aa4e858ed8c957e4fe04cfc181043e02d732fa038f0
     .agents/skills/gnatprove/SKILL.md: sha256:868601c5a1a60160ab08bf925265dd888bd645bb64e8ee2a1f66f801ca00e5b7
     .agents/skills/gnatprove/references/gnatprove/command-reference.md: sha256:d09733f97ba49d2cec7177bc14fe82e080974f5784c231831dc92d9c732ca938
     .agents/skills/gnatprove/references/gnatprove/gnatprove-out.md: sha256:228cf6bfa831fe1a8b72635c16c1df444fb819cfa9a264fb7e40eec0f934ba4c
@@ -578,12 +578,12 @@ dependencies:
     .claude/skills/flyology-website-content/references/journal.md: sha256:73af4b1c6b14c28ae214f8f45e80400faad1757dd9138dcf04429d95e340df72
     .claude/skills/flyology-website-content/references/review.md: sha256:89c4a2bae5d431a826c941ae2bd792fb80aa7234a3bbfb1c19e392cbe4cfa897
     .claude/skills/flyology-website-content/references/technical-writing.md: sha256:dd11d2c32d43225dad5aaa29bf1180d9df7784c9b4ad8835980280ad8292cc2e
-    .claude/skills/gnatdoc/SKILL.md: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
-    .claude/skills/gnatdoc/references/annotations.md: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
-    .claude/skills/gnatdoc/references/backends.md: sha256:8b4fc6ea8c3a0a19b824c409568fecb6c6ccbf34af2536a0499c0743a353fb05
-    .claude/skills/gnatdoc/references/command-reference.md: sha256:80b24c741ec5beb00cd70908a6254b8b373d326e39cc83a72091abbacb538d93
-    .claude/skills/gnatdoc/references/project-setup.md: sha256:0b9546e49f2be55263ad3cd21ae0f8ab2055ead6fe08d3a7814f3f5fcb788c9e
-    .claude/skills/gnatdoc/references/styles.md: sha256:589899212f7c1308fe1c10c916c347864e0b04ccd72da1c0a7417b2f98b7a9e7
+    .claude/skills/gnatdoc/SKILL.md: sha256:54c3036fb95eb202fdd072f8d4158acf2a91a8f0682368b6dce09ff9b260cb3c
+    .claude/skills/gnatdoc/references/annotations.md: sha256:26ebff501cfa259b76753583b4614f0079d9c5a968854394a930fc01b5cf9291
+    .claude/skills/gnatdoc/references/backends.md: sha256:820ca4b1b088085e0cfb372e6f08a58f3086c0f50402651b4833f1712beff85f
+    .claude/skills/gnatdoc/references/command-reference.md: sha256:fde3c9b05627c3fe514c4414fdcd639e461fe884e090019376d095e64b5abaf5
+    .claude/skills/gnatdoc/references/project-setup.md: sha256:45a00479bb7eba04e6059303c03dc6c80a1749030cf03b0d3fd7d4074cc965e4
+    .claude/skills/gnatdoc/references/styles.md: sha256:541fb0c4740d6d9645d79aa4e858ed8c957e4fe04cfc181043e02d732fa038f0
     .claude/skills/gnatprove/SKILL.md: sha256:868601c5a1a60160ab08bf925265dd888bd645bb64e8ee2a1f66f801ca00e5b7
     .claude/skills/gnatprove/references/gnatprove/command-reference.md: sha256:d09733f97ba49d2cec7177bc14fe82e080974f5784c231831dc92d9c732ca938
     .claude/skills/gnatprove/references/gnatprove/gnatprove-out.md: sha256:228cf6bfa831fe1a8b72635c16c1df444fb819cfa9a264fb7e40eec0f934ba4c
@@ -637,7 +637,7 @@ dependencies:
     .claude/skills/tlaplus-from-source/SKILL.md: sha256:e3fc651973a5b5d96dc02e2ee7c3baf25fafb30b3af1da56e257832ed228e913
     .claude/skills/tlaplus-split-action/SKILL.md: sha256:7ea84ceeabd3b44f85d6548e74a365adc9b1d2355689831f840e2b1819e448d7
     .claude/skills/workflow-improvement/SKILL.md: sha256:65a1aa4ea6c0b39383046e6a74a353f4eb2e1d54e8cdef2ddb9c188b7f7a0f25
-  content_hash: sha256:5540da3e374efbdae89efba332bfdfc74a405781410e4a318a099fec267474f4
+  content_hash: sha256:126501d7cf3dbb70b2b4025aec46c1e256c912bb62d26252e70ca5c376676cd5
 deployments:
 - kind: project-relative
   target: claude
@@ -656,7 +656,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/instructions/ada-source-style
   active_owner: flyology-ada/agents/packages/instructions/ada-source-style
-  content_hash: sha256:815c3b5f0c89a49e38ea29b2b5b18ebcef65a7ce38c42108e9a45f83c1f4251d
+  content_hash: sha256:a9009f8be8315917814d20924c6930abfed591e649e43f0c092b01aff315669c
 - kind: project-relative
   target: claude
   value: .claude/rules/alire-release-policy.md
@@ -1160,7 +1160,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
+  content_hash: sha256:54c3036fb95eb202fdd072f8d4158acf2a91a8f0682368b6dce09ff9b260cb3c
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatdoc/references/annotations.md
@@ -1169,7 +1169,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
+  content_hash: sha256:26ebff501cfa259b76753583b4614f0079d9c5a968854394a930fc01b5cf9291
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatdoc/references/backends.md
@@ -1178,7 +1178,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:8b4fc6ea8c3a0a19b824c409568fecb6c6ccbf34af2536a0499c0743a353fb05
+  content_hash: sha256:820ca4b1b088085e0cfb372e6f08a58f3086c0f50402651b4833f1712beff85f
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatdoc/references/command-reference.md
@@ -1187,7 +1187,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:80b24c741ec5beb00cd70908a6254b8b373d326e39cc83a72091abbacb538d93
+  content_hash: sha256:fde3c9b05627c3fe514c4414fdcd639e461fe884e090019376d095e64b5abaf5
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatdoc/references/project-setup.md
@@ -1196,7 +1196,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:0b9546e49f2be55263ad3cd21ae0f8ab2055ead6fe08d3a7814f3f5fcb788c9e
+  content_hash: sha256:45a00479bb7eba04e6059303c03dc6c80a1749030cf03b0d3fd7d4074cc965e4
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatdoc/references/styles.md
@@ -1205,7 +1205,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:589899212f7c1308fe1c10c916c347864e0b04ccd72da1c0a7417b2f98b7a9e7
+  content_hash: sha256:541fb0c4740d6d9645d79aa4e858ed8c957e4fe04cfc181043e02d732fa038f0
 - kind: project-relative
   target: claude
   value: .claude/skills/gnatprove
@@ -2168,7 +2168,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:225bd5f25e320beceaeda14157e78dfb589eca6ae09e45449742347d2b53bd7a
+  content_hash: sha256:54c3036fb95eb202fdd072f8d4158acf2a91a8f0682368b6dce09ff9b260cb3c
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatdoc/references/annotations.md
@@ -2177,7 +2177,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:a65e5086a7b07a4f40567c96200d461a605f0b3a684708e84f27262b69a39b85
+  content_hash: sha256:26ebff501cfa259b76753583b4614f0079d9c5a968854394a930fc01b5cf9291
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatdoc/references/backends.md
@@ -2186,7 +2186,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:8b4fc6ea8c3a0a19b824c409568fecb6c6ccbf34af2536a0499c0743a353fb05
+  content_hash: sha256:820ca4b1b088085e0cfb372e6f08a58f3086c0f50402651b4833f1712beff85f
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatdoc/references/command-reference.md
@@ -2195,7 +2195,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:80b24c741ec5beb00cd70908a6254b8b373d326e39cc83a72091abbacb538d93
+  content_hash: sha256:fde3c9b05627c3fe514c4414fdcd639e461fe884e090019376d095e64b5abaf5
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatdoc/references/project-setup.md
@@ -2204,7 +2204,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:0b9546e49f2be55263ad3cd21ae0f8ab2055ead6fe08d3a7814f3f5fcb788c9e
+  content_hash: sha256:45a00479bb7eba04e6059303c03dc6c80a1749030cf03b0d3fd7d4074cc965e4
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatdoc/references/styles.md
@@ -2213,7 +2213,7 @@ deployments:
   owners:
   - flyology-ada/agents/packages/skills
   active_owner: flyology-ada/agents/packages/skills
-  content_hash: sha256:589899212f7c1308fe1c10c916c347864e0b04ccd72da1c0a7417b2f98b7a9e7
+  content_hash: sha256:541fb0c4740d6d9645d79aa4e858ed8c957e4fe04cfc181043e02d732fa038f0
 - kind: project-relative
   target: codex
   value: .agents/skills/gnatprove
