@@ -196,6 +196,8 @@ FLYOLOGY_CHANNEL_TEST_HOOKS=false
 export FLYOLOGY_CHANNEL_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=false
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
 "$development_alr" build
 "$project_root/scripts/check-atomic-store-selection.sh" \
   "$compiler_release" "$atomic_store_family"
@@ -238,7 +240,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/build/tests/subprocess_abi_probe"
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
-  'flyology_disabled_hook_must_be_elided_(buffer|task_lifecycle)_|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__task_lifecycle_test_hooks__(arm|barrier|consume_admission_signal_interrupted|consume_prepared_generation_final|force_next_prepared_generation_final|interrupt_next_admission_signal|note_reference_(acquired|released)|outstanding_references|reached|release|reset)$|flyology__task_lifecycle_testing__|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
+  'flyology_disabled_hook_must_be_elided_(adaptive_pool|buffer|task_lifecycle)_|flyology__adaptive_pool_test_hooks__(reset|record_chunk_state|chunk_is_live)|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__task_lifecycle_test_hooks__(arm|barrier|consume_admission_signal_interrupted|consume_prepared_generation_final|force_next_prepared_generation_final|interrupt_next_admission_signal|note_reference_(acquired|released)|outstanding_references|reached|release|reset)$|flyology__task_lifecycle_testing__|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS

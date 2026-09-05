@@ -56,6 +56,12 @@ procedure Data_Structures_Smoke is
         Element         => U64_Elements.Element,
         Slots_Per_Chunk => 16,
         Maximum_Chunks  => 8);
+   package Adaptive_Destroy_U64 is new
+     DS.Allocation_Pools.Adaptive
+       (Arena_Provider  => Arenas,
+        Element         => U64_Elements.Element,
+        Slots_Per_Chunk => 2,
+        Maximum_Chunks  => 2);
    subtype Bytes_16 is Ada.Streams.Stream_Element_Array (1 .. 16);
    package Bytes_16_Representation is new
      DS.Storage_Types.Immutable
@@ -254,6 +260,8 @@ procedure Data_Structures_Smoke is
    use type Arenas.Allocation_Result;
    use type DS.Dynamic.Growth_Result;
    use type Adaptive_U64.Allocation_Result;
+   use type Adaptive_Destroy_U64.Allocation_Result;
+   use type Adaptive_Destroy_U64.Handle;
    use type Dynamic_Maps.Put_Result;
    use type Handles.Generation;
    use type Handles.Slot_Index;
@@ -344,6 +352,68 @@ procedure Data_Structures_Smoke is
          raise Program_Error with Message;
       end if;
    end Assert;
+
+   procedure Test_Adaptive_Destroy_Atomicity is
+      Storage        : aliased SSE.Storage_Array (1 .. 262_144) := [others => 0]
+      with Alignment => 64;
+      Region         : Regions.View;
+      Arena          : Arenas.View;
+      Pool           : Adaptive_Destroy_U64.View;
+      Handles        : array (Positive range 1 .. 5) of Adaptive_Destroy_U64.Handle;
+      Result         : Adaptive_Destroy_U64.Allocation_Result;
+      Observed       : Interfaces.Unsigned_64;
+      Destroy_Failed : Boolean := False;
+      Rejected       : Boolean := False;
+
+      procedure Allocate (Data : Interfaces.Unsigned_64; Value : out Adaptive_Destroy_U64.Handle) is
+      begin
+         Adaptive_Destroy_U64.Try_Allocate (Pool, Arena, Data, Value, Result);
+         Assert (Result = Adaptive_Destroy_U64.Allocated, "adaptive destroy fixture allocation failed");
+      end Allocate;
+   begin
+      Regions.Attach (Region, Storage'Address, DS.Byte_Count (Storage'Length));
+      Arenas.Initialize
+        (Arena, Region, 64, (Usable_Capacity => 32_768, Minimum_Block_Size => 64), 16#A161_A161_A161_A161#);
+      Adaptive_Destroy_U64.Initialize (Pool, Region, 196_608, Arena);
+
+      Allocate (11, Handles (1));
+      Allocate (12, Handles (2));
+      Allocate (21, Handles (3));
+      Assert
+        (Handles (1) = (Chunk => 1, Slot => 1, Stamp => 1, Epoch => 1) and then Handles (3).Chunk = 2,
+         "adaptive destroy fixture did not establish two chunks");
+      Adaptive_Destroy_U64.Release (Pool, Arena, Handles (1));
+      Adaptive_Destroy_U64.Release (Pool, Arena, Handles (2));
+
+      begin
+         Adaptive_Destroy_U64.Destroy (Pool, Arena);
+      exception
+         when Program_Error =>
+            Destroy_Failed := True;
+      end;
+      Assert (Destroy_Failed, "adaptive destroy unexpectedly accepted a live later chunk");
+      Assert (Adaptive_Destroy_U64.Is_Attached (Pool), "failed adaptive destroy detached the pool");
+
+      Allocate (22, Handles (4));
+      Allocate (777, Handles (5));
+      begin
+         Adaptive_Destroy_U64.Read (Pool, Arena, Handles (1), Observed);
+      exception
+         when DS.Handle_Error =>
+            Rejected := True;
+      end;
+      Assert (Rejected, "failed adaptive destroy revived a stale handle");
+      Assert
+        (Handles (4) /= Handles (1) and then Handles (5) /= Handles (1),
+         "failed adaptive destroy reused the stale handle tuple");
+
+      Adaptive_Destroy_U64.Release (Pool, Arena, Handles (3));
+      Adaptive_Destroy_U64.Release (Pool, Arena, Handles (4));
+      Adaptive_Destroy_U64.Release (Pool, Arena, Handles (5));
+      Adaptive_Destroy_U64.Destroy (Pool, Arena);
+      Arenas.Destroy (Arena);
+      Regions.Detach (Region);
+   end Test_Adaptive_Destroy_Atomicity;
 
    function Encode (Value : Interfaces.Unsigned_64) return Ada.Streams.Stream_Element_Array is
       Result : Ada.Streams.Stream_Element_Array (1 .. 8);
@@ -545,6 +615,7 @@ procedure Data_Structures_Smoke is
    end Cleanup;
 
 begin
+   Test_Adaptive_Destroy_Atomicity;
    Assert
      (Mapping_Create (Path, Mapping_Length, Base_A'Access, Base_B'Access, FD'Access) = 0,
       "failed to map one temporary file twice");

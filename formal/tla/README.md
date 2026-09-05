@@ -1,6 +1,6 @@
 # TLA+ models
 
-These models extract seven concurrency-sensitive state machines from the Ada
+These models extract eight concurrency-sensitive state machines from the Ada
 implementation. They are bounded, executable design reviews: TLC explores all
 interleavings within each checked configuration, while the behavioral and
 SPARK suites continue to cover the implementation boundaries that TLA+ does
@@ -22,7 +22,7 @@ runs the current safety and liveness configurations to completion, then
 requires each broken configuration to produce its named counterexample. TLC's
 generated state is kept under `build/` and removed on exit. Alire and a native
 GNAT toolchain are also required for the allocator refinement traces and the
-completion-finalization Ada replay described below.
+implementation replays described below.
 
 `AllocatorAlgorithmsRefinement` constrains the allocator model and the real
 standalone kernels to the same operation sequences. Test-only child units read
@@ -33,6 +33,24 @@ free-index members, real TLSF classes and first/second-level bitmaps, Buddy
 hints, handles, and results with the TLC state. The three no-retry variants
 must prevent trace completion, so the comparison is not allowed to pass merely
 because both trace producers emitted nothing.
+
+`AdaptivePoolLifecycle` has a separate typed conformance lane. The gate runs
+the fixed witness to its intentional terminal invariant, regenerates the Ada
+boundary twice, byte-compares the generated sources and inference report,
+normalizes and validates the canonical trace, and then builds an isolated
+consumer copy with ephemeral local Alire pins. A conformance-only extending
+project also redirects the hook-enabled Flyology objects and library into that
+ephemeral tree. The gate first builds the adaptive-hook-disabled production
+archive and verifies that the replay build leaves it unchanged. Its private
+child adapter applies each modeled action to the real pool and reports only
+observed handles, errors, chunk lifecycle hooks, and stale-handle validation.
+Expected model values never cross the generated adapter boundary.
+
+`AdaptivePoolLifecycleProof` is the mandatory TLAPS preservation proof for the
+two-pass policy. It proves initialization and action-by-action preservation of
+the model's type, failed-destroy atomicity, and stale-handle safety predicates.
+The finite TLC safe/broken checks and four-transition Ada replay remain
+separate required evidence.
 
 ## Extraction map
 
@@ -70,6 +88,9 @@ because both trace producers emitted nothing.
 | `ReleaseLive` | bitmap clearing with full-to-partial class reinsertion, or immediate clearing of every descriptor in a large span |
 | `SlabSpanPublication.WriteGeneration` / `PublishBitmap` | small-slot generation update followed by release publication of the containing 32-bit bitmap word |
 | `ReadBitmap` / `ReadGenerationAfterAcquire` | handle validation's acquire bitmap read followed by the generation read it orders |
+| `AdaptivePoolLifecycle.Destroy` | `Allocation_Pools.Adaptive.Destroy`: either reclaim during the scan or preflight every chunk before reclamation |
+| `AllocateOne` / `AllocateTwo` | adaptive table-order allocation into a live chunk, followed by creation in the first empty entry |
+| `ValidateOldHandle` | adaptive validation of the complete `(chunk, slot, stamp, epoch)` handle tuple |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -164,6 +185,23 @@ the writer release-publishes one 32-bit bitmap word and the reader acquire-loads
 that word before reading the generation. The required broken configuration
 models the former ordinary 64-bit bitmap access and generation-first validation;
 TLC exposes the stale-handle acceptance when the bit becomes visible first.
+
+`AdaptivePoolLifecycle` checks a two-chunk, two-slot failed-destruction
+boundary. Chunk 1 is empty but retains advanced slot stamps, while chunk 2 has
+a live allocation. The current configuration preflights the whole table and
+therefore leaves both chunks intact when destruction fails. Its broken
+configuration reclaims chunk 1 before discovering the live slot in chunk 2;
+after two allocations, the recreated slab resets slot 1 to stamp 1 without
+advancing the pool epoch. TLC then produces the required stale-handle
+acceptance counterexample. The fixed configuration also checks that a failed
+destroy preserves the complete modeled pool state, including the free slot's
+owner and pool epoch.
+
+`AdaptivePoolLifecycleProof` discharges two TLAPS obligations over this
+extracted state machine: the fixed policy initializes in a safe state, and
+every named action preserves that safety conjunction. It does not prove the
+Ada implementation, executions outside the extraction, or unmodeled
+arena-release failures; TLC and replay retain their separate evidence roles.
 
 `SupervisionLifecycle` composes a fixed two-node static topology with a nested
 bounded family owned by the dependent node. The safety configuration explores
@@ -307,6 +345,14 @@ The models intentionally omit or coarsen the following details:
   bitmap word. Compiler lowering and a complete hardware memory model remain
   outside TLC and are covered by the maintained 32-bit atomic primitive
   boundary and bare-board cross-build.
+- The adaptive-pool lifecycle model fixes the table to two chunks and each
+  slab to two slots. It preserves table-order allocation, live/empty entries,
+  ownership, pool epoch, failed destruction, and the complete returned and
+  validated handle tuples. It exposes a slot generation only when allocation
+  returns it, rather than requiring a conformance adapter to predict an
+  otherwise unobservable free-slot stamp. It abstracts arena allocation and
+  release, unrelated slot metadata, byte geometry, payload copying,
+  outer-guard contention, and generation widths beyond two.
 - Crash actions establish the documented failure mode only: a dead owner can
   leave a guard or initialization slot abandoned. There is deliberately no
   recovery or ownership-stealing action and no liveness claim.

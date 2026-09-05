@@ -172,6 +172,8 @@ expect_safe \
 expect_safe \
   SlabSpanPublication SlabSpanPublication.cfg allocator-slab-publication
 expect_safe \
+  AdaptivePoolLifecycle AdaptivePoolLifecycle.cfg adaptive-pool-lifecycle
+expect_safe \
   AllocatorAlgorithmsRefinement \
   AllocatorAlgorithms_refinement_buddy.cfg allocator-refinement-buddy
 expect_safe \
@@ -287,6 +289,25 @@ expect_temporal_counterexample \
 expect_counterexample \
   SlabSpanPublication SlabSpanPublication_broken.cfg \
   NoStaleHandleAccepted allocator-slab-publication-broken
+expect_counterexample \
+  AdaptivePoolLifecycle AdaptivePoolLifecycle_broken.cfg \
+  NoStaleHandleAccepted adaptive-pool-lifecycle-broken
+for adaptive_tag in adaptive-pool-lifecycle adaptive-pool-lifecycle-broken
+do
+  if ! grep -Fq '5 states generated, 5 distinct states found' \
+    "$run_root/$adaptive_tag.log"
+  then
+    cat "$run_root/$adaptive_tag.log" >&2
+    printf '%s\n' \
+      "$adaptive_tag did not explore the reviewed five-state graph" >&2
+    exit 1
+  fi
+  if grep -q '^Warning:' "$run_root/$adaptive_tag.log"; then
+    cat "$run_root/$adaptive_tag.log" >&2
+    printf '%s\n' "$adaptive_tag emitted a TLC warning" >&2
+    exit 1
+  fi
+done
 expect_temporal_counterexample \
   AllocatorAlgorithmsRefinement \
   AllocatorAlgorithms_refinement_buddy_no_retry.cfg \
@@ -315,6 +336,23 @@ if ! grep -Fq 'All 2 obligations proved' "$proof_log"; then
   exit 1
 fi
 printf '%s\n' 'TLAPS proved       CompletionSetFinalizeProof    2 obligations'
+
+adaptive_proof_log="$run_root/adaptive-pool-lifecycle-proof.log"
+if ! "$FLYOLOGY_TLAPM" \
+  --cache-dir "$run_root/adaptive-tlapm-cache" --cleanfp --nofp \
+  --strict --method smt "$model_root/AdaptivePoolLifecycleProof.tla" \
+  >"$adaptive_proof_log" 2>&1
+then
+  cat "$adaptive_proof_log" >&2
+  exit 1
+fi
+if ! grep -Fq 'All 2 obligations proved' "$adaptive_proof_log"; then
+  cat "$adaptive_proof_log" >&2
+  printf '%s\n' \
+    'adaptive-pool lifecycle proof did not discharge both obligations' >&2
+  exit 1
+fi
+printf '%s\n' 'TLAPS proved       AdaptivePoolLifecycleProof    2 obligations'
 
 finalize_raw="$run_root/completion-set-finalize-raw.json"
 finalize_log="$run_root/completion-set-finalize-witness.log"
@@ -403,6 +441,76 @@ cmp \
   "$project_root/tests/operations_finalize_conformance/traces/completion-set-finalize.trace.json" \
   "$finalize_trace"
 
+adaptive_raw="$run_root/adaptive-pool-raw.json"
+adaptive_log="$run_root/adaptive-pool-witness.log"
+adaptive_meta="$run_root/adaptive-pool-witness-states"
+adaptive_config="$project_root/tests/adaptive_pool_conformance/AdaptivePoolLifecycle_witness.cfg"
+set +e
+"$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+  -workers 1 -coverage 1 -noGenerateSpecTE -metadir "$adaptive_meta" \
+  -config "$adaptive_config" \
+  -dumpTrace json "$adaptive_raw" AdaptivePoolLifecycle.tla \
+  >"$adaptive_log" 2>&1
+adaptive_status=$?
+set -e
+if [ "$adaptive_status" -ne 12 ] \
+  || ! grep -Fq 'Invariant WitnessPending is violated.' "$adaptive_log" \
+  || ! grep -Fq '5 states generated, 5 distinct states found' "$adaptive_log"
+then
+  cat "$adaptive_log" >&2
+  printf '%s\n' 'adaptive-pool witness did not reach its exact terminal state' >&2
+  exit 1
+fi
+for action in Destroy AllocateOne AllocateTwo ValidateOldHandle
+do
+  if ! grep -Eq "^<$action .*: [1-9]" "$adaptive_log"; then
+    cat "$adaptive_log" >&2
+    printf '%s\n' "adaptive-pool witness did not cover $action" >&2
+    exit 1
+  fi
+done
+if grep -q '^Warning:' "$adaptive_log"; then
+  cat "$adaptive_log" >&2
+  printf '%s\n' 'adaptive-pool witness emitted a TLC warning' >&2
+  exit 1
+fi
+
+adaptive_generated_one="$run_root/adaptive-generated-one"
+adaptive_generated_two="$run_root/adaptive-generated-two"
+"$tla_cli" ada generate \
+  "$model_root/AdaptivePoolLifecycle.tla" \
+  --config "$adaptive_config" \
+  --package Adaptive_Pool_Model --output "$adaptive_generated_one" \
+  --type-invariant TypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+"$tla_cli" ada generate \
+  "$model_root/AdaptivePoolLifecycle.tla" \
+  --config "$adaptive_config" \
+  --package Adaptive_Pool_Model --output "$adaptive_generated_two" \
+  --type-invariant TypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+for generated_file in \
+  adaptive_pool_model.ads adaptive_pool_model.adb \
+  adaptive_pool_model.inference.json
+do
+  cmp "$adaptive_generated_one/$generated_file" \
+    "$adaptive_generated_two/$generated_file"
+  cmp \
+    "$project_root/tests/adaptive_pool_conformance/generated/$generated_file" \
+    "$adaptive_generated_one/$generated_file"
+done
+
+adaptive_trace="$run_root/adaptive-pool.trace.json"
+"$tla_cli" trace normalize \
+  "$adaptive_raw" "$adaptive_trace" \
+  "$model_root/AdaptivePoolLifecycle.tla" \
+  --config "$adaptive_config" \
+  --toolchain tla2tools-1.8.0+b123b22 10 20
+"$tla_cli" trace validate "$adaptive_trace" 10 20
+cmp \
+  "$project_root/tests/adaptive_pool_conformance/traces/adaptive_pool_lifecycle.trace.json" \
+  "$adaptive_trace"
+
 if [ -n "${ALR:-}" ]; then
   alire=$ALR
 else
@@ -486,5 +594,84 @@ grep -Fq '"verdict":"conformant"' \
 grep -Fq '"compared_steps":5' \
   "$run_root/operations-finalize-result.json"
 printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          5 transitions'
+
+adaptive_conformance_source="$project_root/tests/adaptive_pool_conformance"
+adaptive_conformance_root="$run_root/adaptive-pool-conformance"
+mkdir -p \
+  "$adaptive_conformance_root/src" \
+  "$adaptive_conformance_root/generated" \
+  "$adaptive_conformance_root/traces"
+cp \
+  "$adaptive_conformance_source/alire.toml" \
+  "$adaptive_conformance_source/adaptive_pool_conformance.gpr" \
+  "$adaptive_conformance_source/adaptive_pool_conformance_flyology.gpr" \
+  "$adaptive_conformance_source/AdaptivePoolLifecycle_witness.cfg" \
+  "$adaptive_conformance_root/"
+cp "$adaptive_conformance_source/src/"* \
+  "$adaptive_conformance_root/src/"
+cp "$adaptive_conformance_source/generated/"* \
+  "$adaptive_conformance_root/generated/"
+cp "$adaptive_conformance_source/traces/"* \
+  "$adaptive_conformance_root/traces/"
+cd "$adaptive_conformance_root"
+adaptive_pin_flyology_log="$run_root/adaptive-pool-pin-flyology.log"
+if ! "$alire" -n with flyology --use "$project_root" \
+  >"$adaptive_pin_flyology_log" 2>&1
+then
+  cat "$adaptive_pin_flyology_log" >&2
+  exit 1
+fi
+adaptive_pin_harness_log="$run_root/adaptive-pool-pin-harness.log"
+if ! "$alire" -n with flyology_tla --use "$harness_root" \
+  >"$adaptive_pin_harness_log" 2>&1
+then
+  cat "$adaptive_pin_harness_log" >&2
+  exit 1
+fi
+adaptive_production_build_log="$run_root/adaptive-pool-production-build.log"
+cd "$project_root"
+if ! FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=false "$alire" exec -- gprbuild \
+  -P flyology.gpr -f -p -q -j0 >"$adaptive_production_build_log" 2>&1
+then
+  cat "$adaptive_production_build_log" >&2
+  exit 1
+fi
+adaptive_production_archive="$project_root/lib/libFlyology.a"
+if [ ! -f "$adaptive_production_archive" ]; then
+  printf '%s\n' \
+    "adaptive replay production build did not produce $adaptive_production_archive" >&2
+  exit 1
+fi
+adaptive_production_before="$run_root/adaptive-pool-production-before.cksum"
+adaptive_production_after="$run_root/adaptive-pool-production-after.cksum"
+cksum "$adaptive_production_archive" >"$adaptive_production_before"
+
+cd "$adaptive_conformance_root"
+adaptive_conformance_build_log="$run_root/adaptive-pool-build.log"
+if ! FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=true "$alire" exec -- gprbuild \
+  -P adaptive_pool_conformance.gpr -f -p -q -j0 \
+  >"$adaptive_conformance_build_log" 2>&1
+then
+  cat "$adaptive_conformance_build_log" >&2
+  exit 1
+fi
+cksum "$adaptive_production_archive" >"$adaptive_production_after"
+if ! cmp "$adaptive_production_before" "$adaptive_production_after"; then
+  printf '%s\n' \
+    'adaptive replay changed the adaptive-hook-disabled production archive' >&2
+  exit 1
+fi
+"$project_root/scripts/run-with-timeout.sh" 20 \
+  ./bin/adaptive-pool-conformance --format json \
+  --result-json "$run_root/adaptive-pool-result.json" \
+  "$adaptive_trace" >"$run_root/adaptive-pool-stdout.json"
+cmp \
+  "$run_root/adaptive-pool-result.json" \
+  "$run_root/adaptive-pool-stdout.json"
+grep -Fq '"verdict":"conformant"' \
+  "$run_root/adaptive-pool-result.json"
+grep -Fq '"compared_steps":4' \
+  "$run_root/adaptive-pool-result.json"
+printf '%s\n' 'Ada/TLA+ match    AdaptivePoolLifecycle          4 transitions'
 
 printf '%s\n' "Flyology TLA+ model checks passed"

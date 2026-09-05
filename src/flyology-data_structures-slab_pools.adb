@@ -755,7 +755,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       end if;
    end Recover_Poisoned;
 
-   procedure Destroy (Item : in out View) is
+   procedure Validate_Empty (Item : View) is
    begin
       Layouts.Require_Ready (Item.Core);
       for Slot in Interfaces.Unsigned_32 range 1 .. Item.Capacity_Value loop
@@ -764,6 +764,11 @@ package body Flyology.Data_Structures.Slab_Pools is
          end if;
       end loop;
       Validate_Slots (Item);
+   end Validate_Empty;
+
+   procedure Destroy (Item : in out View) is
+   begin
+      Validate_Empty (Item);
       Layouts.Mark_Destroyed (Item.Core);
       Detach (Item);
    end Destroy;
