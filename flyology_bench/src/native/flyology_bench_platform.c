@@ -153,14 +153,39 @@ const size_t flyology_bench_rusage_counters_offset =
 /* ------------------------------------------------------------------ */
 /* Fixed command-capture mechanisms.                                   */
 /*                                                                     */
-/* posix_spawn file actions and pollfd are opaque or platform-defined. */
-/* These leaves expose spawn, read, poll, wait, kill, and close without */
-/* retry or classification. Ada owns the deadline and state machine.   */
+/* posix_spawn actions and pollfd are opaque or platform-defined, and  */
+/* fcntl is variadic. This boundary therefore owns pipe/spawn setup,    */
+/* descriptor flag changes, polling, and wait-status macro decoding.   */
+/* Ada imports fixed-signature process calls directly and owns the      */
+/* deadline, retry, classification, and capture state machine.          */
 /* ------------------------------------------------------------------ */
 
 const int flyology_bench_capture_eintr = EINTR;
 const int flyology_bench_capture_eagain = EAGAIN;
 const int flyology_bench_capture_ewouldblock = EWOULDBLOCK;
+const int flyology_bench_capture_wnohang = WNOHANG;
+const int flyology_bench_capture_sigkill = SIGKILL;
+
+static int flyology_bench_capture_lift_descriptor(int *descriptor)
+{
+    int moved;
+    int saved_errno;
+
+    if (*descriptor > STDERR_FILENO) {
+        return 0;
+    }
+    moved = fcntl(*descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (moved < 0) {
+        return errno;
+    }
+    if (close(*descriptor) != 0) {
+        saved_errno = errno;
+        (void)close(moved);
+        return saved_errno;
+    }
+    *descriptor = moved;
+    return 0;
+}
 
 int flyology_bench_capture_start(const char *path,
                                  char *const argv[],
@@ -194,6 +219,14 @@ int flyology_bench_capture_start(const char *path,
         goto failed;
     }
 #endif
+    status = flyology_bench_capture_lift_descriptor(&descriptors[0]);
+    if (status == 0) {
+        status = flyology_bench_capture_lift_descriptor(&descriptors[1]);
+    }
+    if (status != 0) {
+        saved_errno = status;
+        goto failed;
+    }
     status = fcntl(descriptors[0], F_GETFL);
     if (status < 0 || fcntl(descriptors[0], F_SETFL, status | O_NONBLOCK) != 0) {
         saved_errno = errno;
@@ -276,38 +309,12 @@ failed:
     return saved_errno;
 }
 
-int flyology_bench_capture_read(int descriptor, void *output, size_t capacity,
-                                ssize_t *count)
-{
-    *count = read(descriptor, output, capacity);
-    return *count < 0 ? errno : 0;
-}
-
 int flyology_bench_capture_poll(int descriptor, int timeout_ms, int *ready)
 {
     struct pollfd item = {descriptor, POLLIN | POLLHUP, 0};
 
     *ready = poll(&item, 1, timeout_ms);
     return *ready < 0 ? errno : 0;
-}
-
-int flyology_bench_capture_wait(int child_pid, int nohang, int *wait_status,
-                                int *result_pid)
-{
-    pid_t result = waitpid((pid_t)child_pid, wait_status, nohang ? WNOHANG : 0);
-
-    *result_pid = (int)result;
-    return result < 0 ? errno : 0;
-}
-
-int flyology_bench_capture_kill_group(int child_pid)
-{
-    return kill(-(pid_t)child_pid, SIGKILL) == 0 ? 0 : errno;
-}
-
-int flyology_bench_capture_close(int descriptor)
-{
-    return close(descriptor) == 0 ? 0 : errno;
 }
 
 int flyology_bench_capture_exit_status(int wait_status)

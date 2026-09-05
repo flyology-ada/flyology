@@ -6,6 +6,7 @@ with Ada.Directories;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
+with GNAT.OS_Lib;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
@@ -47,6 +48,10 @@ package body Flyology_Bench.Internal_Conditions is
    with Import, Convention => C, External_Name => "flyology_bench_capture_eagain";
    Capture_EWOULDBLOCK : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_ewouldblock";
+   Capture_WNOHANG : C.int
+   with Import, Convention => C, External_Name => "flyology_bench_capture_wnohang";
+   Capture_SIGKILL : C.int
+   with Import, Convention => C, External_Name => "flyology_bench_capture_sigkill";
 
    function C_Capture_Start
      (Path        : CS.chars_ptr;
@@ -55,29 +60,21 @@ package body Flyology_Bench.Internal_Conditions is
       Child_PID   : access C.int) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_start";
 
-   function C_Capture_Read
-     (Descriptor : C.int;
-      Output     : System.Address;
-      Capacity   : C.size_t;
-      Count      : access C.long) return C.int
-   with Import, Convention => C, External_Name => "flyology_bench_capture_read";
-
    function C_Capture_Poll
      (Descriptor : C.int; Timeout_MS : C.int; Ready : access C.int) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_poll";
 
-   function C_Capture_Wait
-     (Child_PID   : C.int;
-      No_Hang     : C.int;
-      Wait_Status : access C.int;
-      Result_PID  : access C.int) return C.int
-   with Import, Convention => C, External_Name => "flyology_bench_capture_wait";
+   function C_Read (Descriptor : C.int; Output : System.Address; Capacity : C.size_t) return C.long
+   with Import, Convention => C, External_Name => "read";
 
-   function C_Capture_Kill_Group (Child_PID : C.int) return C.int
-   with Import, Convention => C, External_Name => "flyology_bench_capture_kill_group";
+   function C_Waitpid (Child_PID : C.int; Wait_Status : access C.int; Options : C.int) return C.int
+   with Import, Convention => C, External_Name => "waitpid";
 
-   function C_Capture_Close (Descriptor : C.int) return C.int
-   with Import, Convention => C, External_Name => "flyology_bench_capture_close";
+   function C_Kill (PID : C.int; Signal : C.int) return C.int
+   with Import, Convention => C, External_Name => "kill";
+
+   function C_Close (Descriptor : C.int) return C.int
+   with Import, Convention => C, External_Name => "close";
 
    function C_Capture_Exit_Status (Wait_Status : C.int) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_exit_status";
@@ -163,16 +160,17 @@ package body Flyology_Bench.Internal_Conditions is
          Ignored : C.int;
       begin
          if Descriptor >= 0 then
-            Ignored := C_Capture_Close (Descriptor);
+            Ignored := C_Close (Descriptor);
             Descriptor := -1;
          end if;
          if Child_PID > 0 then
             if Failed or else Overflowed then
-               Ignored := C_Capture_Kill_Group (Child_PID);
+               Ignored := C_Kill (-Child_PID, Capture_SIGKILL);
             end if;
             if not Child_Exited then
                loop
-                  Error := C_Capture_Wait (Child_PID, 0, Wait_Status'Access, Result_PID'Access);
+                  Result_PID := C_Waitpid (Child_PID, Wait_Status'Access, 0);
+                  Error := (if Result_PID < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
                   exit when Error /= Capture_EINTR;
                end loop;
             end if;
@@ -201,15 +199,15 @@ package body Flyology_Bench.Internal_Conditions is
       while not Pipe_EOF or else not Child_Exited loop
          if not Pipe_EOF then
             if Used < C.size_t (Maximum_Command_Output) then
-               Error :=
-                 C_Capture_Read
+               Count :=
+                 C_Read
                    (Descriptor,
                     Output (Command_Output_Index (Used))'Address,
-                    C.size_t (Maximum_Command_Output) - Used,
-                    Count'Access);
+                    C.size_t (Maximum_Command_Output) - Used);
             else
-               Error := C_Capture_Read (Descriptor, Discard'Address, Discard'Length, Count'Access);
+               Count := C_Read (Descriptor, Discard'Address, Discard'Length);
             end if;
+            Error := (if Count < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
             if Error = 0 then
                if Count = 0 then
                   Pipe_EOF := True;
@@ -229,7 +227,8 @@ package body Flyology_Bench.Internal_Conditions is
             end if;
          end if;
          if not Child_Exited then
-            Error := C_Capture_Wait (Child_PID, 1, Wait_Status'Access, Result_PID'Access);
+            Result_PID := C_Waitpid (Child_PID, Wait_Status'Access, Capture_WNOHANG);
+            Error := (if Result_PID < 0 then C.int (GNAT.OS_Lib.Errno) else 0);
             if Error = 0 and then Result_PID = Child_PID then
                Child_Exited := True;
             elsif Error /= 0 and then Error /= Capture_EINTR then

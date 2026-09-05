@@ -180,11 +180,7 @@ fi
 "$work_dir/conditions_abi_probe"
 for symbol in \
   flyology_bench_capture_start \
-  flyology_bench_capture_read \
   flyology_bench_capture_poll \
-  flyology_bench_capture_wait \
-  flyology_bench_capture_kill_group \
-  flyology_bench_capture_close \
   flyology_bench_capture_exit_status \
   flyology_bench_darwin_process_conditions \
   flyology_bench_linux_ppd_open \

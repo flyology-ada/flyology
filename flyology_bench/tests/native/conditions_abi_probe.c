@@ -5,20 +5,19 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <poll.h>
+#include <signal.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 extern const int flyology_bench_capture_eintr;
 extern const int flyology_bench_capture_eagain;
 extern const int flyology_bench_capture_ewouldblock;
 int flyology_bench_capture_start(const char *path, char *const argv[],
                                  int *read_descriptor, int *child_pid);
-int flyology_bench_capture_read(int descriptor, void *output, size_t capacity,
-                                ssize_t *count);
 int flyology_bench_capture_poll(int descriptor, int timeout_ms, int *ready);
-int flyology_bench_capture_wait(int child_pid, int nohang, int *wait_status,
-                                int *result_pid);
-int flyology_bench_capture_close(int descriptor);
 int flyology_bench_capture_exit_status(int wait_status);
 int flyology_bench_darwin_process_conditions(int *thermal_available,
                                               int *thermal_state,
@@ -68,8 +67,14 @@ int main(void)
 #endif
     int status;
 
+    if (close(STDOUT_FILENO) != 0 || close(STDERR_FILENO) != 0) {
+        return 15;
+    }
     if (flyology_bench_capture_start(exact[0], exact, &descriptor, &child_pid) != 0) {
         return 1;
+    }
+    if (descriptor <= STDERR_FILENO) {
+        return 16;
     }
     while ((!pipe_eof || !child_exited) && attempts++ < 100) {
         ssize_t count = 0;
@@ -77,12 +82,12 @@ int main(void)
         char discard;
 
         if (!pipe_eof) {
-            status = flyology_bench_capture_read(
-                descriptor, used < sizeof(output) ? output + used : &discard,
-                used < sizeof(output) ? sizeof(output) - used : 1, &count);
-            if (status == 0 && count == 0) {
+            count = read(descriptor, used < sizeof(output) ? output + used : &discard,
+                         used < sizeof(output) ? sizeof(output) - used : 1);
+            status = count < 0 ? errno : 0;
+            if (count == 0) {
                 pipe_eof = 1;
-            } else if (status == 0 && count > 0) {
+            } else if (count > 0) {
                 if (used < sizeof(output)) {
                     used += (size_t)count;
                 } else {
@@ -95,9 +100,9 @@ int main(void)
             }
         }
         if (!child_exited) {
-            status = flyology_bench_capture_wait(child_pid, 1, &wait_status,
-                                                  &result_pid);
-            if (status == 0 && result_pid == child_pid) {
+            result_pid = (int)waitpid((pid_t)child_pid, &wait_status, WNOHANG);
+            status = result_pid < 0 ? errno : 0;
+            if (result_pid == child_pid) {
                 child_exited = 1;
             } else if (status != 0 && status != flyology_bench_capture_eintr) {
                 return 5;
@@ -109,12 +114,12 @@ int main(void)
     }
     if (pipe_eof && !child_exited) {
         do {
-            status = flyology_bench_capture_wait(child_pid, 0, &wait_status,
-                                                  &result_pid);
+            result_pid = (int)waitpid((pid_t)child_pid, &wait_status, 0);
+            status = result_pid < 0 ? errno : 0;
         } while (status == flyology_bench_capture_eintr);
         child_exited = status == 0 && result_pid == child_pid;
     }
-    if (flyology_bench_capture_close(descriptor) != 0) {
+    if (close(descriptor) != 0) {
         return 9;
     }
     if (!pipe_eof) {
