@@ -23,13 +23,13 @@ private package Flyology_Bench.Internal_Conditions is
    end record;
 
    procedure Observe_Throttle_Source
-     (Continuity         : in out Throttle_Continuity;
-      Position           : Throttle_Source_Index;
-      Key                : Interfaces.Unsigned_16;
-      Event_Available    : Boolean;
-      Event_Total        : Interfaces.Unsigned_64;
-      Time_Available     : Boolean;
-      Time_Total_MS      : Interfaces.Unsigned_64;
+     (Continuity          : in out Throttle_Continuity;
+      Position            : Throttle_Source_Index;
+      Key                 : Interfaces.Unsigned_16;
+      Event_Available     : Boolean;
+      Event_Total         : Interfaces.Unsigned_64;
+      Time_Available      : Boolean;
+      Time_Total_MS       : Interfaces.Unsigned_64;
       Event_Discontinuous : in out Boolean;
       Time_Discontinuous  : in out Boolean);
 
@@ -41,27 +41,27 @@ private package Flyology_Bench.Internal_Conditions is
    with Pre => Count <= Maximum_Throttle_Sources;
 
    type Snapshot is record
-      Profile_Availability     : Condition_Availability := Condition_Unavailable;
-      Profile_Detector         : Condition_Detector := No_Condition_Detector;
-      Profile                  : Performance_Profile := Profile_Unknown;
-      Power_Source             : Host_Power_Source := Power_Source_Unknown;
-      Low_Power_Availability   : Condition_Availability := Condition_Unavailable;
-      Low_Power_Detector       : Condition_Detector := No_Condition_Detector;
-      Low_Power_Mode           : Low_Power_Mode_State := Low_Power_Mode_Unknown;
-      Process_Profile_Avail    : Condition_Availability := Condition_Unavailable;
-      Process_Profile_Detector : Condition_Detector := No_Condition_Detector;
-      Process_Profile          : Process_Performance_Profile := Process_Profile_Unknown;
-      Thermal_Availability     : Condition_Availability := Condition_Unavailable;
-      Thermal_Detector         : Condition_Detector := No_Condition_Detector;
-      Thermal_State            : Host_Thermal_State := Thermal_State_Unknown;
-      Degradation_Availability : Condition_Availability := Condition_Unavailable;
-      Degradation              : Performance_Degradation := Degradation_Unknown;
-      Throttle_Availability    : Condition_Availability := Condition_Unavailable;
-      Throttle_Time_Avail      : Condition_Availability := Condition_Unavailable;
-      Throttle_Detector        : Condition_Detector := No_Condition_Detector;
-      Throttle_Total           : Interfaces.Unsigned_64 := 0;
-      Throttle_Time_Total_MS   : Interfaces.Unsigned_64 := 0;
-      Throttle_Discontinuous   : Boolean := False;
+      Profile_Availability        : Condition_Availability := Condition_Unavailable;
+      Profile_Detector            : Condition_Detector := No_Condition_Detector;
+      Profile                     : Performance_Profile := Profile_Unknown;
+      Power_Source                : Host_Power_Source := Power_Source_Unknown;
+      Low_Power_Availability      : Condition_Availability := Condition_Unavailable;
+      Low_Power_Detector          : Condition_Detector := No_Condition_Detector;
+      Low_Power_Mode              : Low_Power_Mode_State := Low_Power_Mode_Unknown;
+      Process_Profile_Avail       : Condition_Availability := Condition_Unavailable;
+      Process_Profile_Detector    : Condition_Detector := No_Condition_Detector;
+      Process_Profile             : Process_Performance_Profile := Process_Profile_Unknown;
+      Thermal_Availability        : Condition_Availability := Condition_Unavailable;
+      Thermal_Detector            : Condition_Detector := No_Condition_Detector;
+      Thermal_State               : Host_Thermal_State := Thermal_State_Unknown;
+      Degradation_Availability    : Condition_Availability := Condition_Unavailable;
+      Degradation                 : Performance_Degradation := Degradation_Unknown;
+      Throttle_Availability       : Condition_Availability := Condition_Unavailable;
+      Throttle_Time_Avail         : Condition_Availability := Condition_Unavailable;
+      Throttle_Detector           : Condition_Detector := No_Condition_Detector;
+      Throttle_Total              : Interfaces.Unsigned_64 := 0;
+      Throttle_Time_Total_MS      : Interfaces.Unsigned_64 := 0;
+      Throttle_Discontinuous      : Boolean := False;
       Throttle_Time_Discontinuous : Boolean := False;
    end record;
 
@@ -78,10 +78,22 @@ private package Flyology_Bench.Internal_Conditions is
    --  Exercise the bounded command mechanism without exposing it through the
    --  public benchmark API. Used by the crate's native-boundary smoke test.
    procedure Capture_For_Test
-     (Command      : String;
-      Argument     : String;
-      Timeout_MS   : Positive;
-      Success      : out Boolean;
+     (Command       : String;
+      Argument      : String;
+      Timeout_MS    : Positive;
+      Success       : out Boolean;
       Output_Length : out Natural);
+
+   --  Exercise the real Linux sysfs and profile classifiers against a
+   --  caller-selected fixture root without opening the system bus. This is a
+   --  private crate-test seam, not part of the benchmark API.
+   procedure Read_Linux_For_Test
+     (Sysfs_Root                : String;
+      PPD_Profile               : String;
+      PPD_Profile_Available     : Boolean;
+      PPD_Degradation           : String;
+      PPD_Degradation_Available : Boolean;
+      Value                     : out Snapshot;
+      Continuity                : in out Throttle_Continuity);
 
 end Flyology_Bench.Internal_Conditions;

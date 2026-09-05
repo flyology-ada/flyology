@@ -802,10 +802,11 @@ example and CI runs do not acquire a new wait or failure condition.
 
 `Operating_Conditions` is an independent, opt-in policy for configured power
 profiles, thermal pressure, transient process profiles, and hardware throttle
-events. `Observe` keeps affected collection units and records the evidence;
-`Fail` raises after the complete sample, comparison pair, or multi-case round;
-`Pause` preserves that same atomic unit, waits for a continuously acceptable
-interval, re-warms, and recollects it:
+events. `Observe` keeps the complete affected collection window and records
+the evidence; `Fail` raises after that window; `Pause` preserves the window,
+waits for a continuously acceptable interval, re-warms, and recollects it.
+Samples, comparison pairs, and multi-case rounds remain indivisible collection
+units within a window:
 
 ```ada
 Config.Operating_Conditions :=
@@ -827,7 +828,7 @@ Config.Operating_Conditions :=
 `Thermal_State_Critical`; `Thermal_State_Unknown` is an observation result,
 not a policy threshold.
 
-The fallback is explicit. `Fallback_Observe` keeps the original affected unit
+The fallback is explicit. `Fallback_Observe` keeps the original affected collection window
 and marks the expired budget; `Fallback_Fail` raises
 `Operating_Conditions_Unacceptable`. A direct `Fail` policy is useful for
 strict baseline runs. Waiting and re-warming are outside harness timing and
@@ -837,9 +838,12 @@ On macOS the collector reads the configured `pmset` power mode, power source,
 `NSProcessInfo` low-power and thermal-pressure state, and, when available, the
 process Default/Sustained performance profile introduced in newer systems.
 The live `NSProcessInfo` values are sampled at every condition boundary. The
-configured `pmset` values are sampled at preflight, after warmup, at finalization,
-and at most once per second during collection or a pause so the probe does not
-become a stream of helper processes.
+configured `pmset` values are force-refreshed at preflight, after warmup, after
+calibration, at the terminal sampling-window close, and on entry to `Pause`.
+Ordinary collection-window openings, intermediate closes, and subsequent
+`Pause` polls reuse the one-second coarse cache so the probe does not become a
+stream of helper processes. Live `NSProcessInfo` values continue to be sampled
+at every poll. Final reporting reuses the last already-judged snapshot.
 Neither process profile is classified as bad by itself: a change from the
 post-warmup profile is the transient event. Thermal pressure is evidence of
 system thermal stress, not a claim that Apple exposes a public hardware
@@ -848,10 +852,13 @@ claim a separate physical sensor exists behind every value Apple returns.
 
 On Linux the collector reads power-profiles-daemon or the firmware
 `platform_profile` fallback and Intel thermal-throttle event counters when the
-kernel exports them. When present, cumulative throttled milliseconds establish
-whether throttling continued while `Pause` waited; a flat event count alone is
-not accepted as proof that a continuously throttled CPU cooled. A counter
-increase proves that throttling occurred during the observation window.
+kernel exports them. These counters are cumulative history, not a live
+throttle-state signal: an event count increases when throttling begins, while
+the cumulative duration is updated after that episode ends. A counter increase
+proves that throttling occurred during the observation window, but flat counters
+cannot prove that an in-progress episode cooled. After observing an event,
+`Pause` therefore remains unresolved until its cumulative budget applies the
+configured fallback.
 Reported throttle deltas also include increases observed while `Pause` waits;
 after continuity is lost, the retained totals are partial and their
 availability remains `unavailable`.
@@ -880,10 +887,12 @@ cleanup, platform stubs, and the available platform bridge.
 `Environment (Result)` retains detector identities, initial/final/worst
 states, changes, throttle-event deltas, affected and recollected units, pause
 time, cumulative throttled-millisecond deltas, and fallback use. Calibration
-is bracketed by the same probes and is repeated after a successful Pause
-recovery, so a stale batch size is not carried into collection. Console and
-JSON reporters expose these fields when the policy is enabled. JSON adds the
-condition object only for enabled runs, so
+is bracketed by the same probes. If conditions recover during the
+post-calibration check, the harness repeats calibration so a batch size chosen
+under rejected conditions is not carried into collection. A recovery during
+collection instead rewarms and recollects the affected window. Console and JSON
+reporters expose these fields when the policy is enabled. JSON adds the condition
+object only for enabled runs, so
 the default document shape stays unchanged; the stable CSV schema is likewise
 unchanged.
 

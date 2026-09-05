@@ -1,16 +1,20 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
+with Ada.Command_Line;
+with Ada.Directories;
 with Ada.Text_IO;
 with Flyology_Bench.Internal_Condition_Policy;
 with Flyology_Bench.Internal_Conditions;
 with Flyology_Bench.Internal_Window_Policy;
+with Interfaces;
 
 procedure Flyology_Bench.Internal_Condition_Policy_Smoke is
    package Policy renames Flyology_Bench.Internal_Condition_Policy;
    package Window_Policy renames Flyology_Bench.Internal_Window_Policy;
    use type Policy.Counter_Evidence;
    use type Policy.Policy_Action;
+   use type Interfaces.Unsigned_64;
 
    procedure Check (Condition : Boolean; Message : String) is
    begin
@@ -19,12 +23,12 @@ procedure Flyology_Bench.Internal_Condition_Policy_Smoke is
       end if;
    end Check;
 
-   Required  : constant Policy.Requirements :=
+   Required        : constant Policy.Requirements :=
      (Require_Nonreduced_Profile => True,
       Require_Profile_Detection  => True,
       Maximum_Thermal_State      => Thermal_State_Fair,
       Require_Thermal_Detection  => True);
-   Good      : constant Policy.State :=
+   Good            : constant Policy.State :=
      (Profile_Availability     => Condition_Available,
       Profile                  => Profile_Performance,
       Low_Power_Availability   => Condition_Available,
@@ -37,12 +41,16 @@ procedure Flyology_Bench.Internal_Condition_Policy_Smoke is
       Degradation              => Not_Degraded,
       Throttle_Availability    => Condition_Available,
       Throttle_Time_Avail      => Condition_Available);
-   Stable    : constant Policy.Counter_Evidence :=
+   Stable          : constant Policy.Counter_Evidence :=
      (Availability => Condition_Available, Increased => False, Increase => 0, Discontinuous => False);
-   Exact     : constant String (1 .. 32 * 1_024) := (others => 'x');
-   Oversized : constant String (1 .. 32 * 1_024 + 1) := (others => 'x');
-   Success   : Boolean;
-   Length    : Natural;
+   Exact           : constant String (1 .. 32 * 1_024) := (others => 'x');
+   Oversized       : constant String (1 .. 32 * 1_024 + 1) := (others => 'x');
+   Success         : Boolean;
+   Length          : Natural;
+   Tests_Directory : constant String :=
+     Ada.Directories.Containing_Directory
+       (Ada.Directories.Containing_Directory (Ada.Command_Line.Command_Name));
+   Fixture_Root    : constant String := Tests_Directory & "/fixtures/linux_conditions/";
 begin
    Check
      (Window_Policy.Required_Window (0.010, 0.002) = 0.010,
@@ -223,6 +231,106 @@ begin
         (Internal_Conditions.Throttle_Continuity'Size <= 40 * 1_024 * 8,
          "throttle continuity state exceeded the compact bound");
    end;
+
+   --  Run the real Linux detector against committed sysfs fixtures on every
+   --  host. The seam suppresses only the live system-bus query.
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "aggregate", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Availability = Condition_Available
+         and then Value.Throttle_Time_Avail = Condition_Available
+         and then Value.Throttle_Total = 15
+         and then Value.Throttle_Time_Total_MS = 150,
+         "Linux throttle fixture did not deduplicate sibling CPUs and package counters");
+      Check
+        (not Value.Throttle_Discontinuous and then not Value.Throttle_Time_Discontinuous,
+         "initial Linux throttle fixture was marked discontinuous");
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Platform_Profile
+         and then Value.Profile = Profile_Performance,
+         "agreeing modern Linux profile handlers were not accepted");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "conflict", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Availability = Condition_Unavailable,
+         "malformed Linux online CPU map produced throttle data");
+      Check
+        (Value.Profile_Availability = Condition_Unavailable,
+         "conflicting modern handlers fell through to the legacy Linux profile");
+
+      Continuity := (others => <>);
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "unreadable", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Unavailable,
+         "unreadable modern handler fell through to the legacy Linux profile");
+
+      Continuity := (others => <>);
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "legacy", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Platform_Profile
+         and then Value.Profile = Profile_Balanced,
+         "legacy Linux platform profile was not used when no modern handler existed");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "reset-a", "", False, "", False, Value, Continuity);
+      Check
+        (not Value.Throttle_Discontinuous and then not Value.Throttle_Time_Discontinuous,
+         "initial Linux reset fixture was marked discontinuous");
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "reset-b", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Discontinuous and then Value.Throttle_Time_Discontinuous,
+         "Linux counter reset was not reported as discontinuous");
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "missing", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Discontinuous and then Value.Throttle_Time_Discontinuous,
+         "disappearing Linux throttle sources were not reported as discontinuous");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "legacy", "power-saver", True, "high-operating-temperature", True, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Power_Profiles_Daemon
+         and then Value.Profile = Profile_Reduced
+         and then Value.Degradation_Availability = Condition_Available
+         and then Value.Degradation = High_Operating_Temperature,
+         "Linux power-profiles-daemon values were not classified");
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "legacy", "performance", True, "lap-detected", True, Value, Continuity);
+      Check (Value.Degradation = Lap_Detected, "Linux lap degradation was not classified");
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "legacy", "performance", True, "firmware-limit", True, Value, Continuity);
+      Check (Value.Degradation = Other_Degradation, "unknown Linux degradation was not retained");
+      Internal_Conditions.Read_Linux_For_Test
+        (Fixture_Root & "legacy", "performance", True, "", True, Value, Continuity);
+      Check (Value.Degradation = Not_Degraded, "empty Linux degradation was not classified as clear");
+   end;
+
    Internal_Conditions.Capture_For_Test ("/usr/bin/printf", Exact, 1_000, Success, Length);
    Check (Success and then Length = Exact'Length, "exact-capacity output was rejected");
    Internal_Conditions.Capture_For_Test ("/usr/bin/printf", Oversized, 1_000, Success, Length);
