@@ -380,7 +380,7 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 37
+#define FLYOLOGY_FAULT_POINT_COUNT 39
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 
@@ -397,6 +397,13 @@ static atomic_uint flyology_final_reap_state;
 static atomic_uint flyology_create_race_state;
 static atomic_uint flyology_automatic_placement_state;
 static atomic_int flyology_automatic_claim_group;
+/* 0 idle, 1 event-loop translation parked, 2 translation released. */
+static atomic_uint flyology_poller_translation_state;
+/* 0 idle, 1 bounded drain parked, 2 drain released. */
+static atomic_uint flyology_descriptor_cancel_budget_state;
+static atomic_uint flyology_poller_cancel_during_translation;
+static atomic_uint flyology_descriptor_cancel_queued;
+static atomic_uint flyology_descriptor_cancel_processed;
 static atomic_uint flyology_file_cancel_counts
     [FLYOLOGY_FILE_CANCEL_BACKENDS + 1]
     [FLYOLOGY_FILE_CANCEL_DISPOSITIONS + 1][2];
@@ -505,6 +512,16 @@ void flyology_test_fault_reset(void) {
                           memory_order_release);
     atomic_store_explicit(&flyology_automatic_claim_group, -1,
                           memory_order_release);
+    atomic_store_explicit(&flyology_poller_translation_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_poller_cancel_during_translation, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_descriptor_cancel_queued, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_descriptor_cancel_processed, 0,
+                          memory_order_relaxed);
     for (backend = 1; backend <= FLYOLOGY_FILE_CANCEL_BACKENDS; ++backend) {
         for (disposition = 1;
              disposition <= FLYOLOGY_FILE_CANCEL_DISPOSITIONS;
@@ -665,6 +682,88 @@ void flyology_test_release_automatic_placement(void) {
     }
 }
 
+/* Test rendezvous policy, including waiting and timeouts, remains in Ada.
+   These leaf functions expose only atomic publication and observation. */
+void flyology_test_begin_poller_translation(void) {
+    atomic_store_explicit(&flyology_poller_translation_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_poller_translation_released(void) {
+    return atomic_load_explicit(&flyology_poller_translation_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_poller_translation_parked(void) {
+    return atomic_load_explicit(&flyology_poller_translation_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_poller_translation(void) {
+    if (atomic_load_explicit(&flyology_poller_translation_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_poller_translation_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_begin_descriptor_cancel_budget(void) {
+    atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_descriptor_cancel_budget_released(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_descriptor_cancel_budget_parked(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_descriptor_cancel_budget(void) {
+    if (atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_note_poller_cancel(void) {
+    if (atomic_load_explicit(&flyology_poller_translation_state,
+                             memory_order_acquire) == 1) {
+        atomic_fetch_add_explicit(
+            &flyology_poller_cancel_during_translation, 1,
+            memory_order_relaxed);
+    }
+}
+
+unsigned flyology_test_poller_cancel_during_translation_count(void) {
+    return atomic_load_explicit(
+        &flyology_poller_cancel_during_translation, memory_order_relaxed);
+}
+
+void flyology_test_note_descriptor_cancel_queued(void) {
+    atomic_fetch_add_explicit(&flyology_descriptor_cancel_queued, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_descriptor_cancel_queued_count(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_queued,
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_descriptor_cancel_processed(void) {
+    atomic_fetch_add_explicit(&flyology_descriptor_cancel_processed, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_descriptor_cancel_processed_count(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_processed,
+                                memory_order_relaxed);
+}
+
 /* Release the parked creator and wait until it owns its registry shard, so
    the finalizing thread resumes with the creator inside the window rather
    than before it. */
@@ -701,6 +800,55 @@ int flyology_test_automatic_placement_parked(void) {
 }
 
 void flyology_test_release_automatic_placement(void) {
+}
+
+void flyology_test_begin_poller_translation(void) {
+}
+
+int flyology_test_poller_translation_released(void) {
+    return 1;
+}
+
+int flyology_test_poller_translation_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_poller_translation(void) {
+}
+
+void flyology_test_begin_descriptor_cancel_budget(void) {
+}
+
+int flyology_test_descriptor_cancel_budget_released(void) {
+    return 1;
+}
+
+int flyology_test_descriptor_cancel_budget_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_descriptor_cancel_budget(void) {
+}
+
+void flyology_test_note_poller_cancel(void) {
+}
+
+unsigned flyology_test_poller_cancel_during_translation_count(void) {
+    return 0;
+}
+
+void flyology_test_note_descriptor_cancel_queued(void) {
+}
+
+unsigned flyology_test_descriptor_cancel_queued_count(void) {
+    return 0;
+}
+
+void flyology_test_note_descriptor_cancel_processed(void) {
+}
+
+unsigned flyology_test_descriptor_cancel_processed_count(void) {
+    return 0;
 }
 
 unsigned flyology_test_atomic_store_model_count(int model) {

@@ -322,10 +322,14 @@ package body System.Flyology.Poller is
    end Watch_Many;
 
    function Cancel (Item : in out Poller; Descriptor : C.int; Condition : Interest) return Boolean is
-      Watch_Item : constant Watch_Access := Find (Item, Descriptor);
+      Watch_Item : Watch_Access;
       Retained   : Boolean;
       Result     : C.int;
    begin
+      if Faults.Enabled then
+         Faults.Note_Poller_Cancel;
+      end if;
+      Watch_Item := Find (Item, Descriptor);
       if Watch_Item = null then
          return True;
       elsif Condition = Readable then
@@ -547,6 +551,9 @@ package body System.Flyology.Poller is
             Count := Count + 1;
             Events (Events'First + Count - 1) := (Kind => Wake_Event, Descriptor => Descriptor, others => <>);
          else
+            if Faults.Enabled and then Faults.Fail (Faults.Poller_Translation_Pause) then
+               Faults.Pause_Poller_Translation;
+            end if;
             Watch_Item := Find (Item, Descriptor);
             if Watch_Item /= null then
                Error_Event :=
