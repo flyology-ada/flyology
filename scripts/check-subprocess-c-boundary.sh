@@ -20,6 +20,7 @@ for symbol in $symbols; do
     flyology_subprocess_pipe|\
     flyology_subprocess_duplicate_above|\
     flyology_subprocess_set_nonblocking|\
+    flyology_subprocess_set_no_sigpipe|\
     flyology_subprocess_spawn|\
     flyology_subprocess_observe_exit|\
     flyology_subprocess_write_no_sigpipe|\
@@ -47,6 +48,7 @@ for required in \
   flyology_subprocess_pipe \
   flyology_subprocess_duplicate_above \
   flyology_subprocess_set_nonblocking \
+  flyology_subprocess_set_no_sigpipe \
   flyology_subprocess_spawn \
   flyology_subprocess_observe_exit \
   flyology_subprocess_write_no_sigpipe \

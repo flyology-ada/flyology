@@ -18,6 +18,7 @@
 int flyology_subprocess_pipe(int[2]);
 int flyology_subprocess_duplicate_above(int, int);
 int flyology_subprocess_set_nonblocking(int);
+int flyology_subprocess_set_no_sigpipe(int);
 int flyology_subprocess_spawn(pid_t *, const char *, char *const [], int,
                               char *const [], const char *, int,
                               int, int, int, int, int, int,
@@ -98,6 +99,12 @@ int main(int argc, char **argv)
     if (flyology_subprocess_set_nonblocking(descriptors[0]) != 0 ||
         (fcntl(descriptors[0], F_GETFL) & O_NONBLOCK) == 0)
         goto cleanup;
+    if (flyology_subprocess_set_no_sigpipe(descriptors[1]) != 0)
+        goto cleanup;
+#if defined(__APPLE__)
+    if (fcntl(descriptors[1], F_GETNOSIGPIPE) != 1)
+        goto cleanup;
+#endif
 
     close(descriptors[0]);
     descriptors[0] = -1;

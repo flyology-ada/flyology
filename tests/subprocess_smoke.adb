@@ -49,6 +49,28 @@ procedure Subprocess_Smoke is
       return Item;
    end Fixture_Command;
 
+   procedure Exercise_Closed_Standard_Input is
+      Child  : Subprocesses.Process;
+      Status : Subprocesses.Exit_Status;
+      Buffer : constant Ada.Streams.Stream_Element_Array (1 .. 4_096) :=
+        (others => 0);
+      Last   : Ada.Streams.Stream_Element_Offset;
+      Raised : Boolean := False;
+   begin
+      Subprocesses.Spawn (Subprocesses.To_Command ("/usr/bin/true"), Child);
+      Subprocesses.Wait (Child, Status);
+      Assert (Subprocesses.Successful (Status), "closed-input child failed");
+      begin
+         Subprocesses.Write_Standard_Input
+           (Child, Buffer, Last, Timeout => 2.0);
+      exception
+         when Subprocesses.Pipe_Error =>
+            Raised := True;
+      end;
+      Assert (Raised, "closed child stdin did not raise Pipe_Error");
+      Subprocesses.Close (Child);
+   end Exercise_Closed_Standard_Input;
+
    protected Outcome is
       procedure Reset;
       procedure Fail (Message : String);
@@ -99,6 +121,8 @@ procedure Subprocess_Smoke is
          Assert (Text = "ready", "child readiness message was invalid");
       end Await_Ready;
    begin
+      Exercise_Closed_Standard_Input;
+
       Value := Capture.Run (Fixture_Command ("capture"));
       Assert (Subprocesses.Successful (Capture.Status (Value)), "capture child failed");
       Assert (Capture.Standard_Output (Value) = "stdout-value", "stdout capture mismatch");
