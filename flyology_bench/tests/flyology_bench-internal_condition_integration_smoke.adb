@@ -29,7 +29,9 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
       Calls := Calls + Natural (Iterations);
       for Iteration in Iteration_Count range 1 .. Iterations loop
          pragma Unreferenced (Iteration);
-         for Spin in 1 .. 64 loop
+         --  Maximum_Iterations stays at one so recollection call counts are
+         --  exact. Keep that one iteration longer than a coarse timer tick.
+         for Spin in 1 .. 1_024 loop
             pragma Unreferenced (Spin);
             Work := Work + 1;
          end loop;
@@ -592,16 +594,16 @@ begin
          "unresolved throttle event did not retain the fallback window");
    end;
 
-   --  Two pauses share one cumulative budget. The first recovers after using
-   --  most of it; the second has less than one stable interval left and must
-   --  use the Observe fallback while retaining its affected one-sample window.
+   --  Two pauses share one cumulative budget. The first recovers with ample
+   --  scheduling margin after consuming part of it. The second delayed read
+   --  fits a fresh budget but exceeds the cumulative remainder, so it must use
+   --  the Observe fallback while retaining its affected one-sample window.
    Hooks.Reset;
    Hooks.Reject_Read (6);
    Hooks.Reject_Read (12);
-   Hooks.Delay_Read (7, 30);
-   Hooks.Delay_Read (8, 30);
-   Hooks.Delay_Read (13, 30);
-   Hooks.Delay_Read (14, 30);
+   Hooks.Delay_Read (7, 100);
+   Hooks.Delay_Read (8, 100);
+   Hooks.Delay_Read (13, 350);
    declare
       Result : Measurement;
       Report : Environment_Report;
@@ -616,7 +618,7 @@ begin
                  Window             => 0.000_001,
                  Stable_Time        => 0.002,
                  Poll_Interval      => 0.001,
-                 Maximum_Pause_Time => 0.100)),
+                 Maximum_Pause_Time => 0.500)),
          Result);
       Report := Environment (Result);
       Check
