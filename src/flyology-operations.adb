@@ -861,7 +861,12 @@ package body Flyology.Operations is
       end;
    end Continue_After;
 
-   procedure Consume (Item : in out Operation'Class) is
+   type Consume_Guard (Item : not null access Operation'Class) is new Ada.Finalization.Limited_Controlled
+   with null record;
+
+   overriding
+   procedure Initialize (Guard : in out Consume_Guard) is
+      Item : Operation'Class renames Guard.Item.all;
    begin
       if Item.Slot = 0 then
          raise Operation_Error with "operation has not been started";
@@ -907,6 +912,14 @@ package body Flyology.Operations is
          Slot.Reported := False;
          Slot.Dependents := 0;
       end;
+      Cleanup_After_Consume (Item);
+   end Initialize;
+
+   procedure Consume (Item : in out Operation'Class) is
+      Guard : Consume_Guard (Item'Unchecked_Access);
+      pragma Unreferenced (Guard);
+   begin
+      null;
    end Consume;
 
    procedure Release (Item : in out Operation'Class) is
@@ -963,6 +976,7 @@ package body Flyology.Operations is
          Item.Slot := 0;
          Item.Generation := 0;
       end if;
+      Cleanup_After_Consume (Operation'Class (Item));
    end Finalize;
 
 end Flyology.Operations;

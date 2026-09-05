@@ -2,8 +2,12 @@ with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 with Completion_Set_Finalize_Model;
+with Completion_Set_Finalize_TLS_Provider;
 with Flyology;
+with Flyology.IO.Connections;
+with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
+with Flyology.IO.TLS;
 with Flyology.Operations;
 with Flyology.Operations.Drivers;
 with Flyology_TLA.Command_Line;
@@ -12,12 +16,17 @@ with Flyology_TLA.Traces;
 
 procedure Operations_Finalize_Conformance is
    package Model renames Completion_Set_Finalize_Model;
+   package Connections renames Flyology.IO.Connections;
+   package Connection_TLS renames Flyology.IO.Connections.TLS;
    package Operations renames Flyology.Operations;
+   package Replay_TLS renames Completion_Set_Finalize_TLS_Provider;
    package Drivers renames Flyology.Operations.Drivers;
    package Sockets renames Flyology.IO.Sockets;
+   package TLS renames Flyology.IO.TLS;
 
    use Ada.Strings.Unbounded;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Model.Input_Event_Type;
    use type Operations.Driver_Event;
 
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
@@ -268,6 +277,165 @@ procedure Operations_Finalize_Conformance is
          Other_Replayable       => Other_Replayable);
    end Execute_Finalize;
 
+   type Disposal_Mode is (Typed_Finish, Generic_Consume, Controlled_Finalize);
+
+   type Driver_Failure_Observation is record
+      Returned            : Boolean;
+      Peer_Drainable      : Boolean;
+      Close_Deferred      : Boolean;
+      Cleanup_Before_Peer : Boolean;
+      Closed              : Boolean;
+      Failure_Retained    : Boolean;
+      Result_Discarded    : Boolean;
+   end record;
+
+   function Driver_Failure_Detail
+     (Actual : Driver_Failure_Observation; Mode : Disposal_Mode)
+      return Unbounded_String
+   is
+      Result : Unbounded_String :=
+        To_Unbounded_String ("failed driver observations:");
+
+      procedure Note (Name : String) is
+      begin
+         Append (Result, " " & Name);
+      end Note;
+   begin
+      if not Actual.Returned then
+         Note ("Returned");
+      end if;
+      if not Actual.Peer_Drainable then
+         Note ("Peer_Drainable");
+      end if;
+      if not Actual.Close_Deferred then
+         Note ("Close_Deferred");
+      end if;
+      if not Actual.Cleanup_Before_Peer then
+         Note ("Cleanup_Before_Peer");
+      end if;
+      if not Actual.Closed then
+         Note ("Closed");
+      end if;
+      if Mode = Typed_Finish and then not Actual.Failure_Retained then
+         Note ("Failure_Retained");
+      end if;
+      if Mode /= Typed_Finish and then not Actual.Result_Discarded then
+         Note ("Result_Discarded");
+      end if;
+      return Result;
+   end Driver_Failure_Detail;
+
+   function Execute_Driver_Failure
+     (Mode : Disposal_Mode) return Driver_Failure_Observation
+   is
+      Manager             : aliased Connections.Server (Capacity => 1);
+      Item                : aliased Connections.Connection (Manager'Access);
+      Socket, Peer        : Sockets.Socket_Type;
+      Backend             : aliased Replay_TLS.Provider;
+      Holding_Data        : aliased Ada.Streams.Stream_Element_Array :=
+        [1 => 0];
+      Pending_Data        : aliased Ada.Streams.Stream_Element_Array :=
+        [1 => 0];
+      Last                : Ada.Streams.Stream_Element_Offset;
+      Sent                : Ada.Streams.Stream_Element_Offset;
+      Holding_Cancelled   : Boolean := False;
+      Returned            : Boolean := False;
+      Peer_Drainable      : Boolean := False;
+      Close_Deferred      : Boolean := False;
+      Cleanup_Before_Peer : Boolean := False;
+      Closed              : Boolean := False;
+      Failure_Retained    : Boolean := False;
+      Result_Discarded    : Boolean := False;
+   begin
+      Sockets.Create_Socket_Pair (Socket, Peer);
+      Connections.Take (Manager, Socket, Item);
+      declare
+         Holding_Set : aliased Operations.Completion_Set (1);
+         Peer_Set    : aliased Operations.Completion_Set (1);
+         Upgrade_Set : aliased Operations.Completion_Set (1);
+         Holding     : Connections.Receive_Operation :=
+           Connections.Receive
+             (Holding_Set'Access,
+              Item'Access,
+              Holding_Data'Access,
+              Timeout => Flyology.IO.Infinite);
+         Pending     : Connections.Receive_Operation :=
+           Connections.Receive
+             (Peer_Set'Access,
+              Item'Access,
+              Pending_Data'Access,
+              Timeout => Flyology.IO.Infinite);
+      begin
+         Operations.Cancel (Holding);
+         Operations.Wait_All (Holding_Set);
+         begin
+            Connections.Finish (Holding, Last);
+         exception
+            when Connections.Operation_Cancelled =>
+               Holding_Cancelled := True;
+         end;
+
+         declare
+            Upgrade : Connection_TLS.Upgrade_Operation :=
+              Connection_TLS.Upgrade
+                (Upgrade_Set'Access,
+                 Item'Access,
+                 Backend'Access,
+                 TLS.Server,
+                 "",
+                 Timeout => Flyology.IO.Infinite);
+         begin
+            Sockets.Send_Socket (Peer, [1 => 1], Sent);
+            if Sent /= 1 then
+               raise Program_Error with "failed-upgrade signal was short";
+            end if;
+            Operations.Wait_All (Upgrade_Set);
+            Returned := True;
+            Close_Deferred := Connections.Is_Open (Item);
+
+            case Mode is
+               when Typed_Finish        =>
+                  begin
+                     Connection_TLS.Finish (Upgrade);
+                  exception
+                     when TLS.TLS_Error =>
+                        Failure_Retained := True;
+                  end;
+                  Cleanup_Before_Peer := True;
+
+               when Generic_Consume     =>
+                  Operations.Consume (Upgrade);
+                  Result_Discarded := True;
+                  Cleanup_Before_Peer := True;
+
+               when Controlled_Finalize =>
+                  Result_Discarded := True;
+            end case;
+         end;
+         if Mode = Controlled_Finalize then
+            Cleanup_Before_Peer := True;
+         end if;
+         Operations.Cancel (Pending);
+         Operations.Wait_All (Peer_Set);
+         begin
+            Connections.Finish (Pending, Last);
+         exception
+            when Connections.Operation_Cancelled =>
+               Peer_Drainable := Holding_Cancelled;
+         end;
+         Closed := not Connections.Is_Open (Item);
+      end;
+      Sockets.Close_Socket (Peer);
+      return
+        (Returned            => Returned,
+         Peer_Drainable      => Peer_Drainable,
+         Close_Deferred      => Close_Deferred,
+         Cleanup_Before_Peer => Cleanup_Before_Peer,
+         Closed              => Closed,
+         Failure_Retained    => Failure_Retained,
+         Result_Discarded    => Result_Discarded);
+   end Execute_Driver_Failure;
+
    type Finalize_Adapter is new Model.Adapter with null record;
 
    overriding
@@ -303,6 +471,13 @@ procedure Operations_Finalize_Conformance is
          Saved_Other_Reported   => False,
          Cancellation_Requested => False,
          Phase                  => Model.State_Phase_Ready,
+         Driver_State           => Model.State_Driver_State_Pending,
+         Peer_Registered        => True,
+         Close_Required         => False,
+         Close_Pending          => False,
+         Driver_Returned        => False,
+         Driver_Phase           => Model.State_Driver_Phase_Ready,
+         Harness_Phase          => Model.State_Harness_Phase_Ready,
          Last_Action            => Model.State_Last_Action_Init);
       Status := (Succeeded => True, Detail => Null_Unbounded_String);
    end Reset;
@@ -318,60 +493,185 @@ procedure Operations_Finalize_Conformance is
       State        : out Model.State_Type;
       Status       : out Flyology_TLA.Replay.Adapter_Outcome)
    is
-      pragma Unreferenced (Index, Input);
-      Actual   : Finalize_Observation;
-      Complete : Boolean;
-   begin
-      if Action /= "CompletionSetFinalize!Finalize"
-        or else Role /= "finalize"
-        or else Model_Source /= "CompletionSetFinalize!Finalize"
-      then
-         Observed := (Returned => False, Other_Replayable => False);
-         Reset (Self, State, Status);
+      procedure Apply_Driver
+        (Mode          : Disposal_Mode;
+         Harness_Phase : Model.State_Harness_Phase_Type;
+         Last_Action   : Model.State_Last_Action_Type)
+      is
+         Actual   : constant Driver_Failure_Observation :=
+           Execute_Driver_Failure (Mode);
+         Complete : constant Boolean :=
+           Actual.Returned
+           and then Actual.Peer_Drainable
+           and then Actual.Close_Deferred
+           and then Actual.Cleanup_Before_Peer
+           and then Actual.Closed
+           and then (if Mode = Typed_Finish
+                     then
+                       Actual.Failure_Retained
+                       and then not Actual.Result_Discarded
+                     else
+                       Actual.Result_Discarded
+                       and then not Actual.Failure_Retained);
+      begin
+         Observed :=
+           (Returned            => Actual.Returned,
+            Other_Replayable    => False,
+            Peer_Drainable      => Actual.Peer_Drainable,
+            Close_Deferred      => Actual.Close_Deferred,
+            Cleanup_Before_Peer => Actual.Cleanup_Before_Peer,
+            Closed_At_Finish    => Actual.Closed and then Mode = Typed_Finish,
+            Closed_At_Consume   =>
+              Actual.Closed and then Mode = Generic_Consume,
+            Closed_At_Finalize  =>
+              Actual.Closed and then Mode = Controlled_Finalize,
+            Failure_Retained    => Actual.Failure_Retained,
+            Result_Discarded    => Actual.Result_Discarded);
+         State :=
+           (Target_State           => Model.State_Target_State_Idle,
+            Target_Reported        => False,
+            Other_State            => Model.State_Other_State_Terminal,
+            Other_Reported         => False,
+            Saved_Other_Reported   => False,
+            Cancellation_Requested => True,
+            Phase                  => Model.State_Phase_Done,
+            Driver_State           =>
+              (if Actual.Closed
+               then Model.State_Driver_State_Idle
+               else Model.State_Driver_State_Terminal),
+            Peer_Registered        => not Actual.Peer_Drainable,
+            Close_Required         => not Actual.Closed,
+            Close_Pending          => False,
+            Driver_Returned        => Actual.Returned,
+            Driver_Phase           =>
+              (if Complete
+               then Model.State_Driver_Phase_Done
+               elsif Actual.Returned
+               then Model.State_Driver_Phase_Returned
+               else Model.State_Driver_Phase_Blocked),
+            Harness_Phase          => Harness_Phase,
+            Last_Action            => Last_Action);
          Status :=
-           (Succeeded => False,
+           (Succeeded => Complete,
             Detail    =>
-              To_Unbounded_String ("unsupported modeled action or input"));
+              (if Complete
+               then Null_Unbounded_String
+               else Driver_Failure_Detail (Actual, Mode)));
+      end Apply_Driver;
+   begin
+      if Index = 1
+        and then Action = "CompletionSetFinalize!Finalize"
+        and then Role = "finalize"
+        and then Input.Event = Model.Input_Event_Finalize
+        and then Model_Source = "CompletionSetFinalize!Finalize"
+      then
+         declare
+            Actual   : constant Finalize_Observation := Execute_Finalize;
+            Complete : constant Boolean :=
+              Actual.Returned
+              and then Actual.Cancellation_Requested
+              and then Actual.Target_Driven
+              and then Actual.Other_Preserved
+              and then Actual.Other_Replayable;
+         begin
+            Observed :=
+              (Returned            => Actual.Returned,
+               Other_Replayable    => Actual.Other_Replayable,
+               Peer_Drainable      => False,
+               Close_Deferred      => False,
+               Cleanup_Before_Peer => False,
+               Closed_At_Finish    => False,
+               Closed_At_Consume   => False,
+               Closed_At_Finalize  => False,
+               Failure_Retained    => False,
+               Result_Discarded    => False);
+            State :=
+              (Target_State           =>
+                 (if Actual.Target_Driven
+                  then Model.State_Target_State_Idle
+                  else Model.State_Target_State_Pending),
+               Target_Reported        => False,
+               Other_State            =>
+                 (if Actual.Other_Preserved
+                  then Model.State_Other_State_Terminal
+                  else Model.State_Other_State_Idle),
+               Other_Reported         => not Actual.Other_Replayable,
+               Saved_Other_Reported   => False,
+               Cancellation_Requested => Actual.Cancellation_Requested,
+               Phase                  =>
+                 (if Complete
+                  then Model.State_Phase_Done
+                  else Model.State_Phase_Drain),
+               Driver_State           => Model.State_Driver_State_Pending,
+               Peer_Registered        => True,
+               Close_Required         => False,
+               Close_Pending          => False,
+               Driver_Returned        => False,
+               Driver_Phase           => Model.State_Driver_Phase_Ready,
+               Harness_Phase          => Model.State_Harness_Phase_Finalized,
+               Last_Action            =>
+                 (if Complete
+                  then Model.State_Last_Action_Finalize
+                  else Model.State_Last_Action_Begin_Finalize));
+            Status :=
+              (Succeeded => Complete,
+               Detail    =>
+                 (if Complete
+                  then Null_Unbounded_String
+                  else Failure_Detail (Actual)));
+         end;
+         return;
+      elsif Index = 2
+        and then Action = "CompletionSetFinalize!DriverFinish"
+        and then Role = "driver-finish"
+        and then Input.Event = Model.Input_Event_Driver_Finish
+        and then Model_Source = "CompletionSetFinalize!DriverFinish"
+      then
+         Apply_Driver
+           (Typed_Finish,
+            Model.State_Harness_Phase_Finished,
+            Model.State_Last_Action_Driver_Finish);
+         return;
+      elsif Index = 3
+        and then Action = "CompletionSetFinalize!DriverConsume"
+        and then Role = "driver-consume"
+        and then Input.Event = Model.Input_Event_Driver_Consume
+        and then Model_Source = "CompletionSetFinalize!DriverConsume"
+      then
+         Apply_Driver
+           (Generic_Consume,
+            Model.State_Harness_Phase_Consumed,
+            Model.State_Last_Action_Driver_Consume);
+         return;
+      elsif Index = 4
+        and then Action = "CompletionSetFinalize!DriverFinalize"
+        and then Role = "driver-finalize"
+        and then Input.Event = Model.Input_Event_Driver_Finalize
+        and then Model_Source = "CompletionSetFinalize!DriverFinalize"
+      then
+         Apply_Driver
+           (Controlled_Finalize,
+            Model.State_Harness_Phase_Done,
+            Model.State_Last_Action_Driver_Finalize);
          return;
       end if;
 
-      Actual := Execute_Finalize;
-      Complete :=
-        Actual.Returned
-        and then Actual.Cancellation_Requested
-        and then Actual.Target_Driven
-        and then Actual.Other_Preserved
-        and then Actual.Other_Replayable;
       Observed :=
-        (Returned         => Actual.Returned,
-         Other_Replayable => Actual.Other_Replayable);
-      State :=
-        (Target_State           =>
-           (if Actual.Target_Driven
-            then Model.State_Target_State_Idle
-            else Model.State_Target_State_Pending),
-         Target_Reported        => False,
-         Other_State            =>
-           (if Actual.Other_Preserved
-            then Model.State_Other_State_Terminal
-            else Model.State_Other_State_Idle),
-         Other_Reported         => not Actual.Other_Replayable,
-         Saved_Other_Reported   => False,
-         Cancellation_Requested => Actual.Cancellation_Requested,
-         Phase                  =>
-           (if Complete
-            then Model.State_Phase_Done
-            else Model.State_Phase_Drain),
-         Last_Action            =>
-           (if Complete
-            then Model.State_Last_Action_Finalize
-            else Model.State_Last_Action_Begin_Finalize));
+        (Returned            => False,
+         Other_Replayable    => False,
+         Peer_Drainable      => False,
+         Close_Deferred      => False,
+         Cleanup_Before_Peer => False,
+         Closed_At_Finish    => False,
+         Closed_At_Consume   => False,
+         Closed_At_Finalize  => False,
+         Failure_Retained    => False,
+         Result_Discarded    => False);
+      Reset (Self, State, Status);
       Status :=
-        (Succeeded => Complete,
+        (Succeeded => False,
          Detail    =>
-           (if Complete
-            then Null_Unbounded_String
-            else Failure_Detail (Actual)));
+           To_Unbounded_String ("unsupported modeled action or input"));
    end Apply;
 
 begin

@@ -208,6 +208,34 @@ expect_temporal_counterexample \
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_broken.cfg \
   FinalizeCompletes completion-finalize-broken
+expect_temporal_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
+  DriverFailureCompletes completion-finalize-blocking-close
+expect_temporal_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_blocking_cleanup.cfg \
+  DriverFailureCompletes completion-finalize-blocking-cleanup
+expect_temporal_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_interrupted_dispatch.cfg \
+  DriverFailureCompletes completion-finalize-interrupted-dispatch
+if ! grep -Fq 'driverPhase = "DispatchAborted"' \
+  "$run_root/completion-finalize-interrupted-dispatch.log"
+then
+  cat "$run_root/completion-finalize-interrupted-dispatch.log" >&2
+  printf '%s\n' \
+    'interrupted cleanup did not strand the undispatched close obligation' >&2
+  exit 1
+fi
+expect_temporal_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_interrupted_cleanup.cfg \
+  DriverFailureCompletes completion-finalize-interrupted-cleanup
+if ! grep -Fq 'driverPhase = "HandoffAborted"' \
+  "$run_root/completion-finalize-interrupted-cleanup.log"
+then
+  cat "$run_root/completion-finalize-interrupted-cleanup.log" >&2
+  printf '%s\n' \
+    'interrupted cleanup did not strand the published close handoff' >&2
+  exit 1
+fi
 expect_counterexample \
   AllocatorAlgorithms AllocatorAlgorithms_buddy_no_retry.cfg \
   NoFalseExhaustion allocator-buddy-no-retry
@@ -287,7 +315,7 @@ finalize_status=$?
 set -e
 if [ "$finalize_status" -ne 12 ] \
   || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$finalize_log" \
-  || ! grep -Fq '2 states generated, 2 distinct states found' "$finalize_log"
+  || ! grep -Fq '5 states generated, 5 distinct states found' "$finalize_log"
 then
   cat "$finalize_log" >&2
   printf '%s\n' \
@@ -297,6 +325,21 @@ fi
 if ! grep -Eq '^<FinalizeAtomically .*: [1-9]' "$finalize_log"; then
   cat "$finalize_log" >&2
   printf '%s\n' 'completion-finalization witness did not cover FinalizeAtomically' >&2
+  exit 1
+fi
+if ! grep -Eq '^<DriverFinishAtomically .*: [1-9]' "$finalize_log"; then
+  cat "$finalize_log" >&2
+  printf '%s\n' 'completion-finalization witness did not cover DriverFinishAtomically' >&2
+  exit 1
+fi
+if ! grep -Eq '^<DriverConsumeAtomically .*: [1-9]' "$finalize_log"; then
+  cat "$finalize_log" >&2
+  printf '%s\n' 'completion-finalization witness did not cover DriverConsumeAtomically' >&2
+  exit 1
+fi
+if ! grep -Eq '^<DriverFinalizeAtomically .*: [1-9]' "$finalize_log"; then
+  cat "$finalize_log" >&2
+  printf '%s\n' 'completion-finalization witness did not cover DriverFinalizeAtomically' >&2
   exit 1
 fi
 if grep -q '^Warning:' "$finalize_log"; then
@@ -390,8 +433,7 @@ cp \
   "$conformance_source/operations_finalize_conformance.gpr" \
   "$conformance_source/CompletionSetFinalize_trace.cfg" \
   "$conformance_root/"
-cp "$conformance_source/src/operations_finalize_conformance.adb" \
-  "$conformance_root/src/"
+cp "$conformance_source/src/"* "$conformance_root/src/"
 cp "$conformance_source/generated/"* "$conformance_root/generated/"
 cp "$conformance_source/traces/"* "$conformance_root/traces/"
 cd "$conformance_root"
@@ -423,8 +465,8 @@ cmp \
   "$run_root/operations-finalize-stdout.json"
 grep -Fq '"verdict":"conformant"' \
   "$run_root/operations-finalize-result.json"
-grep -Fq '"compared_steps":1' \
+grep -Fq '"compared_steps":4' \
   "$run_root/operations-finalize-result.json"
-printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          1 transition'
+printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          4 transitions'
 
 printf '%s\n' "Flyology TLA+ model checks passed"

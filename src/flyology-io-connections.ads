@@ -510,6 +510,12 @@ private
          State      : not null access Operation_State);
       procedure Begin_Close
         (FD : out Flyology.IO.Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean);
+      procedure Begin_Deferred_Close;
+      procedure Try_Drain_Deferred_Close
+        (Socket     : in out Flyology.IO.Sockets.Socket_Type;
+         Owner      : out Server_Access;
+         Generation : out Descriptor_Generation;
+         Ready      : out Boolean);
       entry Await_Drained (Socket : in out Flyology.IO.Sockets.Socket_Type; Owner : out Server_Access);
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
@@ -524,6 +530,7 @@ private
       Current_Generation : Descriptor_Generation := 0;
       Active             : Boolean := False with Atomic;
       Closing            : Boolean := False with Atomic;
+      Deferred_Closing   : Boolean := False;
       --  Active operation plus callers between Start_Operation and
       --  Try_Acquire.
       Started_Operations : Natural := 0 with Atomic;
@@ -738,6 +745,7 @@ private
       Transport            : Transport_Kind := No_Transport;
       Pending_TLS_Session  : Flyology.IO.TLS.Session_Access := null;
       Upgrade_Started      : aliased Boolean := False;
+      Close_Required       : Boolean := False;
       Failure              : Scoped_IO_Failure := No_Failure;
    end record;
 
@@ -751,6 +759,15 @@ private
    --  @param Item Connection operation to cancel and release
    overriding
    procedure Request_Cancellation (Item : in out Connection_Operation);
+
+   --  @exclude
+   --  Transfer a failed started TLS upgrade's close obligation to its
+   --  connection after the operation slot is no longer terminal. Generic
+   --  Consume and controlled finalization dispatch here as well as typed
+   --  Finish; the last withdrawing peer completes the deferred close.
+   --  @param Item Connection operation whose retained state is discarded
+   overriding
+   procedure Cleanup_After_Consume (Item : in out Connection_Operation);
 
    --  @exclude
    --  Start a high-level TLS upgrade. Factory is invoked synchronously before

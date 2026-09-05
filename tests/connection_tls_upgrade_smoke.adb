@@ -6,6 +6,7 @@ with Flyology.IO.Connections.Testing;
 with Flyology.IO.Connections.TLS;
 with Flyology.IO.Sockets;
 with Flyology.IO.TLS;
+with Flyology.Operations;
 with TLS_Test_Provider;
 
 procedure Connection_TLS_Upgrade_Smoke is
@@ -451,6 +452,102 @@ procedure Connection_TLS_Upgrade_Smoke is
       Assert_Resources (1);
    end Run_Aborted_Upgrade;
 
+   procedure Run_Aborted_Deferred_Close
+     (Model : Flyology.Execution_Model;
+      Point : Connection_Testing.Barrier_Point)
+   is
+      Manager      : aliased Connections.Server (Capacity => 1);
+      Item         : aliased Connections.Connection (Manager'Access);
+      Replacement  : aliased Connections.Connection (Manager'Access);
+      Socket, Peer : Sockets.Socket_Type;
+      Next, Other  : Sockets.Socket_Type;
+      Backend      : aliased Provider.Provider;
+      Set          : aliased Flyology.Operations.Completion_Set (1);
+      Secure       : Connection_TLS.Upgrade_Operation (Set'Access);
+      Reused       : Boolean := False;
+   begin
+      Provider.Reset_State_Telemetry;
+      Provider.Set_Script
+        (Backend,
+         Provider.Handshake_Operation,
+         [1 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+      Connection_Testing.Reset_Barriers;
+      Sockets.Create_Socket_Pair (Socket, Peer);
+      Connections.Take (Manager, Socket, Item);
+      Connection_TLS.Upgrade
+        (Item'Access,
+         Backend'Access,
+         TLS.Server,
+         "",
+         Timeout   => Flyology.IO.Infinite,
+         Operation => Secure);
+      Flyology.Operations.Wait_All (Set);
+      Connection_Testing.Arm (Point);
+
+      declare
+         task Consumer is
+            entry Start;
+            pragma Task_Info (Model);
+         end Consumer;
+
+         task body Consumer is
+         begin
+            accept Start;
+            Flyology.Operations.Consume (Secure);
+         end Consumer;
+      begin
+         Consumer.Start;
+         Connection_Testing.Wait_Reached (Point);
+         case Point is
+            when Connection_Testing.Deferred_Close_Published =>
+               pragma Assert (Connection_Testing.Close_Requested (Item));
+
+            when Connection_Testing.Cleanup_Dispatch_Entered =>
+               pragma Assert (not Connection_Testing.Close_Requested (Item));
+
+            when others                                      =>
+               raise Program_Error
+                 with "unsupported deferred-close abort point";
+         end case;
+         pragma Assert (Manager.Active = 1);
+         abort Consumer;
+         Connection_Testing.Release (Point);
+      exception
+         when others =>
+            Connection_Testing.Release (Point);
+            raise;
+      end;
+
+      pragma Assert (not Connections.Is_Open (Item));
+      pragma Assert (Manager.Active = 0);
+      Connections.Close (Item);
+      Sockets.Create_Socket_Pair (Next, Other);
+      Connections.Take (Manager, Next, Replacement);
+      pragma Assert (Connections.Is_Open (Replacement));
+      Provider.Set_Available (Backend, False);
+      Connection_TLS.Upgrade
+        (Replacement'Access,
+         Backend'Access,
+         TLS.Server,
+         "",
+         Timeout   => 1.0,
+         Operation => Secure);
+      Flyology.Operations.Wait_All (Set);
+      begin
+         Connection_TLS.Finish (Secure);
+      exception
+         when TLS.TLS_Error =>
+            Reused := True;
+      end;
+      pragma Assert (Reused);
+      pragma Assert (Connections.Is_Open (Replacement));
+      Connections.Close (Replacement);
+      Close_If_Open (Peer);
+      Close_If_Open (Other);
+      Connection_Testing.Reset_Barriers;
+      Assert_Resources (1);
+   end Run_Aborted_Deferred_Close;
+
    procedure Run_Finalizer_Failure (Model : Flyology.Execution_Model) is
       Manager : aliased Connections.Server (Capacity => 1);
       Item    : Connections.Connection;
@@ -689,6 +786,14 @@ begin
    Run_Stale_Plaintext_Operation (Flyology.Native_Task);
    Run_Aborted_Upgrade (Flyology.Lightweight_Task);
    Run_Aborted_Upgrade (Flyology.Native_Task);
+   for Point in
+     Connection_Testing.Barrier_Point
+       range Connection_Testing.Deferred_Close_Published
+             .. Connection_Testing.Cleanup_Dispatch_Entered
+   loop
+      Run_Aborted_Deferred_Close (Flyology.Lightweight_Task, Point);
+      Run_Aborted_Deferred_Close (Flyology.Native_Task, Point);
+   end loop;
    Run_Finalizer_Failure (Flyology.Lightweight_Task);
    Run_Finalizer_Failure (Flyology.Native_Task);
    Run_Concurrent_Close (Flyology.Lightweight_Task);

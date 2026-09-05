@@ -38,10 +38,12 @@ procedure Connection_Operations_Smoke is
          Result    : out Connection_Drivers.Acquisition_Result)
       is abstract;
       procedure Poll_Receive
-        (Item : in out Synthetic_Transport; Result : out Connection_Drivers.Acquisition_Result)
+        (Item   : in out Synthetic_Transport;
+         Result : out Connection_Drivers.Acquisition_Result)
       is abstract;
       procedure Arm_Acquire
-        (Item : in out Synthetic_Transport; Operation : in out Flyology.Operations.Operation'Class)
+        (Item      : in out Synthetic_Transport;
+         Operation : in out Flyology.Operations.Operation'Class)
       is abstract;
       procedure Receive_Step
         (Item   : in out Synthetic_Transport;
@@ -56,14 +58,15 @@ procedure Connection_Operations_Smoke is
       is abstract;
       procedure Release (Item : in out Synthetic_Transport) is abstract;
 
-      type Connection_Transport (Item : not null access Connections.Connection'Class) is limited
-        new Synthetic_Transport
-      with record
+      type Connection_Transport
+        (Item : not null access Connections.Connection'Class)
+      is limited new Synthetic_Transport with record
          IO                   : Connection_Drivers.Capability;
          Wakeup               : Connection_Drivers.Outbound_Wakeup;
          Timeout              : Duration := 1.0;
          Token                : access Flyology.Cancellation.Token := null;
-         Additional           : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+         Additional           : Flyology.IO.Descriptor :=
+           Flyology.IO.Invalid_Descriptor;
          Additional_For_Write : Boolean := False;
          Use_Outbound         : Boolean := True;
       end record;
@@ -75,10 +78,12 @@ procedure Connection_Operations_Smoke is
          Result    : out Connection_Drivers.Acquisition_Result);
       overriding
       procedure Poll_Receive
-        (Item : in out Connection_Transport; Result : out Connection_Drivers.Acquisition_Result);
+        (Item   : in out Connection_Transport;
+         Result : out Connection_Drivers.Acquisition_Result);
       overriding
       procedure Arm_Acquire
-        (Item : in out Connection_Transport; Operation : in out Flyology.Operations.Operation'Class);
+        (Item      : in out Connection_Transport;
+         Operation : in out Flyology.Operations.Operation'Class);
       overriding
       procedure Receive_Step
         (Item   : in out Connection_Transport;
@@ -106,9 +111,12 @@ procedure Connection_Operations_Smoke is
       end record;
 
       overriding
-      procedure Drive (Item : in out Synthetic_Receive_Operation; Event : Flyology.Operations.Driver_Event);
+      procedure Drive
+        (Item  : in out Synthetic_Receive_Operation;
+         Event : Flyology.Operations.Driver_Event);
       overriding
-      procedure Request_Cancellation (Item : in out Synthetic_Receive_Operation);
+      procedure Request_Cancellation
+        (Item : in out Synthetic_Receive_Operation);
 
    end Synthetic;
 
@@ -121,20 +129,26 @@ procedure Connection_Operations_Smoke is
          Result    : out Connection_Drivers.Acquisition_Result) is
       begin
          Connection_Drivers.Start
-           (Item.IO, Item.Item, Result, Timeout => Item.Timeout, Token => Item.Token);
+           (Item.IO,
+            Item.Item,
+            Result,
+            Timeout => Item.Timeout,
+            Token   => Item.Token);
          Connection_Drivers.Arm_Deadline (Item.IO, Operation);
       end Start_Receive;
 
       overriding
       procedure Poll_Receive
-        (Item : in out Connection_Transport; Result : out Connection_Drivers.Acquisition_Result) is
+        (Item   : in out Connection_Transport;
+         Result : out Connection_Drivers.Acquisition_Result) is
       begin
          Connection_Drivers.Poll_Acquisition (Item.IO, Result);
       end Poll_Receive;
 
       overriding
       procedure Arm_Acquire
-        (Item : in out Connection_Transport; Operation : in out Flyology.Operations.Operation'Class) is
+        (Item      : in out Connection_Transport;
+         Operation : in out Flyology.Operations.Operation'Class) is
       begin
          Connection_Drivers.Arm_Acquisition (Item.IO, Operation);
       end Arm_Acquire;
@@ -156,7 +170,8 @@ procedure Connection_Operations_Smoke is
          Required  : Connection_Drivers.Step_Result) is
       begin
          if Item.Additional = Flyology.IO.Invalid_Descriptor then
-            Connection_Drivers.Arm_Transport (Item.IO, Operation, Required, Item.Wakeup);
+            Connection_Drivers.Arm_Transport
+              (Item.IO, Operation, Required, Item.Wakeup);
          elsif Item.Use_Outbound then
             Connection_Drivers.Arm_Transport
               (Item.IO,
@@ -167,7 +182,11 @@ procedure Connection_Operations_Smoke is
                Item.Additional_For_Write);
          else
             Connection_Drivers.Arm_Transport
-              (Item.IO, Operation, Required, Item.Additional, Item.Additional_For_Write);
+              (Item.IO,
+               Operation,
+               Required,
+               Item.Additional,
+               Item.Additional_For_Write);
          end if;
       end Arm_Step;
 
@@ -178,13 +197,17 @@ procedure Connection_Operations_Smoke is
       end Release;
 
       overriding
-      procedure Drive (Item : in out Synthetic_Receive_Operation; Event : Flyology.Operations.Driver_Event) is
+      procedure Drive
+        (Item  : in out Synthetic_Receive_Operation;
+         Event : Flyology.Operations.Driver_Event)
+      is
          Acquired : Connection_Drivers.Acquisition_Result;
          Step     : Connection_Drivers.Step_Result;
       begin
          if Event = Flyology.Operations.Deadline_Reached then
             Release (Item.Transport.all);
-            Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
             return;
          elsif Event /= Flyology.Operations.Start_Operation
            and then ((Item.Protocol_Ready /= null
@@ -193,7 +216,8 @@ procedure Connection_Operations_Smoke is
                               and then Item.Source_Ready.all))
          then
             Release (Item.Transport.all);
-            Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Succeeded);
             return;
          elsif Event = Flyology.Operations.Start_Operation then
             Start_Receive (Item.Transport.all, Item, Acquired);
@@ -210,11 +234,15 @@ procedure Connection_Operations_Smoke is
          Item.Acquiring := False;
          Receive_Step (Item.Transport.all, Item.Data.all, Item.Last, Step);
          case Step is
-            when Connection_Drivers.Made_Progress | Connection_Drivers.Peer_Closed =>
+            when Connection_Drivers.Made_Progress
+               | Connection_Drivers.Peer_Closed
+            =>
                Release (Item.Transport.all);
-               Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
+               Flyology.Operations.Drivers.Complete
+                 (Item, Flyology.Operations.Succeeded);
 
-            when Connection_Drivers.Need_Read | Connection_Drivers.Need_Write      =>
+            when Connection_Drivers.Need_Read | Connection_Drivers.Need_Write
+            =>
                Arm_Step (Item.Transport.all, Item, Step);
          end case;
       exception
@@ -225,24 +253,91 @@ procedure Connection_Operations_Smoke is
                when others =>
                   null;
             end;
-            Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
       end Drive;
 
       overriding
-      procedure Request_Cancellation (Item : in out Synthetic_Receive_Operation) is
+      procedure Request_Cancellation
+        (Item : in out Synthetic_Receive_Operation) is
       begin
          Release (Item.Transport.all);
-         Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Cancelled);
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Cancelled);
       exception
          when others =>
-            Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
+            Flyology.Operations.Drivers.Complete
+              (Item, Flyology.Operations.Failed);
       end Request_Cancellation;
 
    end Synthetic;
 
    use Synthetic;
 
-   function Ref (Item : Flyology.Operations.Operation'Class) return Flyology.Operations.Operation_Reference
+   type Upgrade_Parent
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Connections.Connection'Class;
+      Backend : not null access Provider.Provider)
+   is new Flyology.Operations.Operation (Set) with record
+      Child : Connection_TLS.Upgrade_Operation (Set);
+   end record;
+
+   overriding
+   procedure Drive
+     (Item : in out Upgrade_Parent; Event : Flyology.Operations.Driver_Event);
+
+   overriding
+   procedure Request_Cancellation (Item : in out Upgrade_Parent);
+
+   procedure Drive
+     (Item : in out Upgrade_Parent; Event : Flyology.Operations.Driver_Event)
+   is
+   begin
+      if Event = Flyology.Operations.Start_Operation then
+         Connection_TLS.Upgrade
+           (Item        => Item.Item,
+            Backend     => Item.Backend,
+            Side        => TLS.Server,
+            Server_Name => "",
+            Timeout     => Flyology.IO.Infinite,
+            Operation   => Item.Child);
+         Flyology.Operations.Continue_After (Item, Item.Child);
+      elsif Event = Flyology.Operations.Dependency_Changed
+        and then Flyology.Operations.Is_Terminal (Item.Child)
+      then
+         Flyology.Operations.Consume (Item.Child);
+         Flyology.Operations.Release (Item.Child);
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Succeeded);
+      else
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+      end if;
+   exception
+      when others =>
+         Flyology.Operations.Drivers.Complete
+           (Item, Flyology.Operations.Failed);
+   end Drive;
+
+   procedure Request_Cancellation (Item : in out Upgrade_Parent) is
+   begin
+      if Flyology.Operations.Is_Active (Item.Child) then
+         Flyology.Operations.Cancel (Item.Child);
+      end if;
+      if Flyology.Operations.Is_Terminal (Item.Child) then
+         Flyology.Operations.Consume (Item.Child);
+         Flyology.Operations.Release (Item.Child);
+      end if;
+      Flyology.Operations.Drivers.Complete
+        (Item, Flyology.Operations.Cancelled);
+   exception
+      when others =>
+         null;
+   end Request_Cancellation;
+
+   function Ref
+     (Item : Flyology.Operations.Operation'Class)
+      return Flyology.Operations.Operation_Reference
    renames Flyology.Operations.Reference;
 
    procedure Check (Condition : Boolean; Message : String) is
@@ -287,19 +382,23 @@ procedure Connection_Operations_Smoke is
          Manager      : aliased Connections.Server (Capacity => 1);
          Item         : aliased Connections.Connection (Manager'Access);
          Socket, Peer : Sockets.Socket_Type;
-         Data         : aliased Stream_Element_Array := [1 => 0, 2 => 0, 3 => 0];
-         Sent         : constant Stream_Element_Array := [1 => 11, 2 => 12, 3 => 13];
+         Data         : aliased Stream_Element_Array :=
+           [1 => 0, 2 => 0, 3 => 0];
+         Sent         : constant Stream_Element_Array :=
+           [1 => 11, 2 => 12, 3 => 13];
       begin
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
          declare
             Set     : aliased Flyology.Operations.Completion_Set (3);
             Get     : aliased Connections.Receive_Exactly_Operation :=
-              Connections.Receive_Exactly (Set'Access, Item'Access, Data'Access, Timeout => 1.0);
+              Connections.Receive_Exactly
+                (Set'Access, Item'Access, Data'Access, Timeout => 1.0);
             Alarm   : aliased Flyology.IO.Timers.Timer_Operation :=
               Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
             First   : Flyology.Operations.Gate_Operation :=
-              Flyology.Operations.Wait_For_Success (Set'Access, [Ref (Get), Ref (Alarm)]);
+              Flyology.Operations.Wait_For_Success
+                (Set'Access, [Ref (Get), Ref (Alarm)]);
             Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
             Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
          begin
@@ -311,7 +410,10 @@ procedure Connection_Operations_Smoke is
             Flyology.Operations.Finish (First, Matches);
             Connections.Finish (Get);
             Passed :=
-              Passed and then Data = Sent and then Matches.Count = 1 and then Connections.Is_Open (Item);
+              Passed
+              and then Data = Sent
+              and then Matches.Count = 1
+              and then Connections.Is_Open (Item);
             if Flyology.Operations.Is_Active (Alarm) then
                Flyology.Operations.Cancel (Alarm);
             end if;
@@ -344,13 +446,16 @@ procedure Connection_Operations_Smoke is
             Connections.Take (Manager, Socket, Item);
             if Use_TLS then
                Provider.Set_Script
-                 (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+                 (Backend,
+                  Provider.Handshake_Operation,
+                  [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
                Provider.Set_Script
                  (Backend,
                   Provider.Receive_Operation,
                   [1 => (TLS.Want_Write, Provider.Preserve_Output, 0),
                    2 => (TLS.Complete, Provider.Advance_Output, 1)]);
-               Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
+               Connection_TLS.Upgrade
+                 (Item, Backend, TLS.Server, "", Timeout => 1.0);
             else
                Sockets.Send_All (Peer, [1 => 71]);
             end if;
@@ -361,11 +466,13 @@ procedure Connection_Operations_Smoke is
                Get.Data := Data'Unchecked_Access;
                Flyology.Operations.Drivers.Start (Get);
                Flyology.Operations.Drive
-                 (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+                 (Flyology.Operations.Operation'Class (Get),
+                  Flyology.Operations.Start_Operation);
                Flyology.Operations.Wait_All (Set);
                Passed :=
                  Passed
-                 and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded
+                 and then Flyology.Operations.Outcome (Get)
+                          = Flyology.Operations.Succeeded
                  and then Data (1) = (if Use_TLS then 42 else 71)
                  and then not Connection_Drivers.Is_Engaged (Channel.IO);
                Flyology.Operations.Consume (Get);
@@ -397,9 +504,13 @@ procedure Connection_Operations_Smoke is
             Get.Protocol_Ready := Published'Unchecked_Access;
             Flyology.Operations.Drivers.Start (Get);
             Flyology.Operations.Drive
-              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
             Flyology.Operations.Wait_All (Set);
-            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded;
+            Passed :=
+              Passed
+              and then Flyology.Operations.Outcome (Get)
+                       = Flyology.Operations.Succeeded;
             Flyology.Operations.Consume (Get);
          end;
          Published := False;
@@ -410,12 +521,14 @@ procedure Connection_Operations_Smoke is
             Get.Data := Data'Unchecked_Access;
             Flyology.Operations.Drivers.Start (Get);
             Flyology.Operations.Drive
-              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
             Sockets.Send_All (Peer, [1 => 73]);
             Flyology.Operations.Wait_All (Set);
             Passed :=
               Passed
-              and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded
+              and then Flyology.Operations.Outcome (Get)
+                       = Flyology.Operations.Succeeded
               and then Data = [1 => 73];
             Flyology.Operations.Consume (Get);
          end;
@@ -445,11 +558,15 @@ procedure Connection_Operations_Smoke is
             Get.Protocol_Ready := Published'Unchecked_Access;
             Flyology.Operations.Drivers.Start (Get);
             Flyology.Operations.Drive
-              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
             Published := True;
             Connection_Drivers.Signal (Channel.Wakeup);
             Flyology.Operations.Wait_All (Set);
-            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded;
+            Passed :=
+              Passed
+              and then Flyology.Operations.Outcome (Get)
+                       = Flyology.Operations.Succeeded;
             Flyology.Operations.Consume (Get);
          end;
          Connections.Close (Item);
@@ -592,9 +709,13 @@ procedure Connection_Operations_Smoke is
             Get.Data := Data'Unchecked_Access;
             Flyology.Operations.Drivers.Start (Get);
             Flyology.Operations.Drive
-              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
             Flyology.Operations.Wait_All (Set);
-            Passed := Passed and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Failed;
+            Passed :=
+              Passed
+              and then Flyology.Operations.Outcome (Get)
+                       = Flyology.Operations.Failed;
             Flyology.Operations.Consume (Get);
          end;
          Connections.Close (Item);
@@ -669,7 +790,8 @@ procedure Connection_Operations_Smoke is
       begin
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
-         Connection_Drivers.Start (Holder, Item'Access, Holder_Result, Timeout => 1.0);
+         Connection_Drivers.Start
+           (Holder, Item'Access, Holder_Result, Timeout => 1.0);
          Passed := Passed and then Holder_Result = Connection_Drivers.Acquired;
          declare
             Set : aliased Flyology.Operations.Completion_Set (1);
@@ -678,23 +800,29 @@ procedure Connection_Operations_Smoke is
             Get.Data := Data'Unchecked_Access;
             Flyology.Operations.Drivers.Start (Get);
             Flyology.Operations.Drive
-              (Flyology.Operations.Operation'Class (Get), Flyology.Operations.Start_Operation);
+              (Flyology.Operations.Operation'Class (Get),
+               Flyology.Operations.Start_Operation);
             Connection_Drivers.Release (Holder);
             Sockets.Send_All (Peer, [1 => 72]);
             Flyology.Operations.Wait_All (Set);
             Passed :=
               Passed
-              and then Flyology.Operations.Outcome (Get) = Flyology.Operations.Succeeded
+              and then Flyology.Operations.Outcome (Get)
+                       = Flyology.Operations.Succeeded
               and then Data (1) = 72;
             Flyology.Operations.Consume (Get);
          end;
-         Connection_Drivers.Start (Holder, Item'Access, Holder_Result, Timeout => 1.0);
+         Connection_Drivers.Start
+           (Holder, Item'Access, Holder_Result, Timeout => 1.0);
          declare
             Waiting : Connection_Drivers.Capability;
             Result  : Connection_Drivers.Acquisition_Result;
          begin
-            Connection_Drivers.Start (Waiting, Item'Access, Result, Timeout => 1.0);
-            Passed := Passed and then Result = Connection_Drivers.Need_Acquire_Readiness;
+            Connection_Drivers.Start
+              (Waiting, Item'Access, Result, Timeout => 1.0);
+            Passed :=
+              Passed
+              and then Result = Connection_Drivers.Need_Acquire_Readiness;
          end;
          Connection_Drivers.Release (Holder);
          Connections.Close (Item);
@@ -717,21 +845,27 @@ procedure Connection_Operations_Smoke is
          declare
             Set : aliased Flyology.Operations.Completion_Set (2);
             Get : Connections.Receive_Exactly_Operation :=
-              Connections.Receive_Exactly (Set'Access, Item'Access, Incoming'Access, 1.0);
+              Connections.Receive_Exactly
+                (Set'Access, Item'Access, Incoming'Access, 1.0);
             Put : Connections.Send_All_Operation :=
-              Connections.Send_All (Set'Access, Item'Access, Outgoing'Access, 1.0);
+              Connections.Send_All
+                (Set'Access, Item'Access, Outgoing'Access, 1.0);
          begin
             Sockets.Send_All (Peer, [1 => 33]);
             Flyology.Operations.Wait_All (Set);
             Check
-              (Flyology.Operations.Is_Terminal (Get) and then Flyology.Operations.Is_Terminal (Put),
+              (Flyology.Operations.Is_Terminal (Get)
+               and then Flyology.Operations.Is_Terminal (Put),
                "serialized connection operations did not both complete");
             --  Put acquired the lease even though Get remains terminal and
             --  has not yet been consumed.
             Sockets.Receive_Exactly (Peer, Peer_Data, Timeout => 1.0);
             Connections.Finish (Get);
             Connections.Finish (Put);
-            Passed := Passed and then Incoming = [1 => 33] and then Peer_Data = Outgoing;
+            Passed :=
+              Passed
+              and then Incoming = [1 => 33]
+              and then Peer_Data = Outgoing;
          end;
          Connections.Close (Item);
          Sockets.Close_Socket (Peer);
@@ -741,7 +875,8 @@ procedure Connection_Operations_Smoke is
       --  typed Finish boundary without leaving Close blocked.
       declare
          Manager                  : aliased Connections.Server (Capacity => 1);
-         Item                     : aliased Connections.Connection (Manager'Access);
+         Item                     :
+           aliased Connections.Connection (Manager'Access);
          Socket, Peer             : Sockets.Socket_Type;
          Data                     : aliased Stream_Element_Array := [1 => 0];
          Token                    : aliased Flyology.Cancellation.Token;
@@ -753,7 +888,8 @@ procedure Connection_Operations_Smoke is
          declare
             Set       : aliased Flyology.Operations.Completion_Set (2);
             Cancelled : Connections.Receive_Operation :=
-              Connections.Receive (Set'Access, Item'Access, Data'Access, 1.0, Token'Access);
+              Connections.Receive
+                (Set'Access, Item'Access, Data'Access, 1.0, Token'Access);
             Timed     : Connections.Receive_Operation (Set'Access);
          begin
             Token.Request;
@@ -782,7 +918,8 @@ procedure Connection_Operations_Smoke is
       --  both release the connection lease before the next user of Item.
       declare
          Manager              : aliased Connections.Server (Capacity => 1);
-         Item                 : aliased Connections.Connection (Manager'Access);
+         Item                 :
+           aliased Connections.Connection (Manager'Access);
          Socket, Peer         : Sockets.Socket_Type;
          Data                 : aliased Stream_Element_Array := [1 => 0];
          Explicitly_Cancelled : Boolean := False;
@@ -793,7 +930,11 @@ procedure Connection_Operations_Smoke is
          declare
             Set     : aliased Flyology.Operations.Completion_Set (1);
             Pending : Connections.Receive_Operation :=
-              Connections.Receive (Set'Access, Item'Access, Data'Access, Timeout => Flyology.IO.Infinite);
+              Connections.Receive
+                (Set'Access,
+                 Item'Access,
+                 Data'Access,
+                 Timeout => Flyology.IO.Infinite);
          begin
             Flyology.Operations.Cancel (Pending);
             Flyology.Operations.Wait_All (Set);
@@ -807,12 +948,19 @@ procedure Connection_Operations_Smoke is
          declare
             Set       : aliased Flyology.Operations.Completion_Set (1);
             Abandoned : Connections.Receive_Operation :=
-              Connections.Receive (Set'Access, Item'Access, Data'Access, Timeout => Flyology.IO.Infinite);
+              Connections.Receive
+                (Set'Access,
+                 Item'Access,
+                 Data'Access,
+                 Timeout => Flyology.IO.Infinite);
             pragma Unreferenced (Abandoned);
          begin
             null;
          end;
-         Passed := Passed and then Explicitly_Cancelled and then Connections.Is_Open (Item);
+         Passed :=
+           Passed
+           and then Explicitly_Cancelled
+           and then Connections.Is_Open (Item);
          Connections.Close (Item);
          Sockets.Close_Socket (Peer);
       end;
@@ -821,13 +969,19 @@ procedure Connection_Operations_Smoke is
       --  EOF is a Device_Error for Receive_Exactly, matching synchronous API
       --  semantics at the typed Finish boundary.
       declare
-         Manager                            : aliased Connections.Server (Capacity => 2);
-         Partial                            : aliased Connections.Connection (Manager'Access);
-         Exact                              : aliased Connections.Connection (Manager'Access);
+         Manager                            :
+           aliased Connections.Server (Capacity => 2);
+         Partial                            :
+           aliased Connections.Connection (Manager'Access);
+         Exact                              :
+           aliased Connections.Connection (Manager'Access);
          Socket_1, Peer_1, Socket_2, Peer_2 : Sockets.Socket_Type;
-         Data_1                             : aliased Stream_Element_Array := [1 => 0];
-         Data_2                             : aliased Stream_Element_Array := [1 => 0];
-         Last                               : Stream_Element_Offset := Data_1'First;
+         Data_1                             : aliased Stream_Element_Array :=
+           [1 => 0];
+         Data_2                             : aliased Stream_Element_Array :=
+           [1 => 0];
+         Last                               : Stream_Element_Offset :=
+           Data_1'First;
          Exact_Failed                       : Boolean := False;
       begin
          Sockets.Create_Socket_Pair (Socket_1, Peer_1);
@@ -841,7 +995,8 @@ procedure Connection_Operations_Smoke is
          declare
             Set : aliased Flyology.Operations.Completion_Set (1);
             One : Connections.Receive_Operation :=
-              Connections.Receive (Set'Access, Partial'Access, Data_1'Access, 1.0);
+              Connections.Receive
+                (Set'Access, Partial'Access, Data_1'Access, 1.0);
          begin
             Flyology.Operations.Wait_All (Set);
             Connections.Finish (One, Last);
@@ -849,7 +1004,8 @@ procedure Connection_Operations_Smoke is
          declare
             Set      : aliased Flyology.Operations.Completion_Set (1);
             All_Data : Connections.Receive_Exactly_Operation :=
-              Connections.Receive_Exactly (Set'Access, Exact'Access, Data_2'Access, 1.0);
+              Connections.Receive_Exactly
+                (Set'Access, Exact'Access, Data_2'Access, 1.0);
          begin
             Flyology.Operations.Wait_All (Set);
             begin
@@ -859,7 +1015,8 @@ procedure Connection_Operations_Smoke is
                   Exact_Failed := True;
             end;
          end;
-         Passed := Passed and then Last = Data_1'First - 1 and then Exact_Failed;
+         Passed :=
+           Passed and then Last = Data_1'First - 1 and then Exact_Failed;
          Connections.Close (Partial);
          Connections.Close (Exact);
       end;
@@ -875,7 +1032,8 @@ procedure Connection_Operations_Smoke is
          Data          : aliased Stream_Element_Array := [1 => 0];
          Was_Cancelled : Boolean := False;
 
-         task type Closer (Target : not null access Connections.Connection'Class);
+         task type Closer
+           (Target : not null access Connections.Connection'Class);
 
          task body Closer is
          begin
@@ -888,7 +1046,10 @@ procedure Connection_Operations_Smoke is
             Set        : aliased Flyology.Operations.Completion_Set (1);
             Pending    : Connections.Receive_Exactly_Operation :=
               Connections.Receive_Exactly
-                (Set'Access, Item'Access, Data'Access, Timeout => Flyology.IO.Infinite);
+                (Set'Access,
+                 Item'Access,
+                 Data'Access,
+                 Timeout => Flyology.IO.Infinite);
             Close_Item : Closer (Item'Access);
             pragma Unreferenced (Close_Item);
          begin
@@ -900,7 +1061,10 @@ procedure Connection_Operations_Smoke is
                   Was_Cancelled := True;
             end;
          end;
-         Passed := Passed and then Was_Cancelled and then not Connections.Is_Open (Item);
+         Passed :=
+           Passed
+           and then Was_Cancelled
+           and then not Connections.Is_Open (Item);
          Sockets.Close_Socket (Peer);
       end;
 
@@ -929,11 +1093,17 @@ procedure Connection_Operations_Smoke is
             Set     : aliased Flyology.Operations.Completion_Set (3);
             Secure  : aliased Connection_TLS.Upgrade_Operation :=
               Connection_TLS.Upgrade
-                (Set'Access, Item'Access, Backend'Access, TLS.Server, "", Timeout => 1.0);
+                (Set'Access,
+                 Item'Access,
+                 Backend'Access,
+                 TLS.Server,
+                 "",
+                 Timeout => 1.0);
             Alarm   : aliased Flyology.IO.Timers.Timer_Operation :=
               Flyology.IO.Timers.Sleep_For (Set'Access, 1.0);
             First   : Flyology.Operations.Gate_Operation :=
-              Flyology.Operations.Wait_For_Success (Set'Access, [Ref (Secure), Ref (Alarm)]);
+              Flyology.Operations.Wait_For_Success
+                (Set'Access, [Ref (Secure), Ref (Alarm)]);
             Batch   : Flyology.Operations.Completion_Batch (Set.Capacity);
             Matches : Flyology.Operations.Completion_Batch (Set.Capacity);
          begin
@@ -943,7 +1113,10 @@ procedure Connection_Operations_Smoke is
             end loop;
             Flyology.Operations.Finish (First, Matches);
             Connection_TLS.Finish (Secure);
-            Passed := Passed and then Matches.Count = 1 and then Connections.Is_Open (Item);
+            Passed :=
+              Passed
+              and then Matches.Count = 1
+              and then Connections.Is_Open (Item);
             if Flyology.Operations.Is_Active (Alarm) then
                Flyology.Operations.Cancel (Alarm);
             end if;
@@ -974,7 +1147,12 @@ procedure Connection_Operations_Smoke is
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
          Connection_TLS.Upgrade
-           (Item'Access, Backend'Access, TLS.Server, "", Timeout => 1.0, Operation => Secure);
+           (Item'Access,
+            Backend'Access,
+            TLS.Server,
+            "",
+            Timeout   => 1.0,
+            Operation => Secure);
          Flyology.Operations.Wait_All (Set);
          begin
             Connection_TLS.Finish (Secure);
@@ -982,7 +1160,10 @@ procedure Connection_Operations_Smoke is
             when TLS.TLS_Error =>
                Failed_At_Finish := True;
          end;
-         Passed := Passed and then Failed_At_Finish and then Connections.Is_Open (Item);
+         Passed :=
+           Passed
+           and then Failed_At_Finish
+           and then Connections.Is_Open (Item);
          Connections.Close (Item);
          Sockets.Close_Socket (Peer);
       end;
@@ -998,7 +1179,9 @@ procedure Connection_Operations_Smoke is
             Saw_Expected : Boolean := False;
          begin
             Provider.Set_Script
-              (Backend, Provider.Handshake_Operation, [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
+              (Backend,
+               Provider.Handshake_Operation,
+               [1 => (TLS.Want_Read, Provider.Preserve_Output, 0)]);
             Sockets.Create_Socket_Pair (Socket, Peer);
             Connections.Take (Manager, Socket, Item);
             declare
@@ -1010,7 +1193,10 @@ procedure Connection_Operations_Smoke is
                     Backend'Access,
                     TLS.Server,
                     "",
-                    Timeout => (if Cancel_Explicitly then Flyology.IO.Infinite else 0.005));
+                    Timeout =>
+                      (if Cancel_Explicitly
+                       then Flyology.IO.Infinite
+                       else 0.005));
             begin
                if Cancel_Explicitly then
                   Flyology.Operations.Cancel (Secure);
@@ -1025,10 +1211,263 @@ procedure Connection_Operations_Smoke is
                      Saw_Expected := not Cancel_Explicitly;
                end;
             end;
-            Passed := Passed and then Saw_Expected and then not Connections.Is_Open (Item);
+            Passed :=
+              Passed
+              and then Saw_Expected
+              and then not Connections.Is_Open (Item);
             Sockets.Close_Socket (Peer);
          end;
       end loop;
+
+      --  A failed scoped upgrade must return control to the owner before
+      --  closing the connection. Another operation can be registered in a
+      --  different completion set and requires that owner to cancel and
+      --  drain it before the connection close can finish.
+      declare
+         Manager           : aliased Connections.Server (Capacity => 1);
+         Item              : aliased Connections.Connection (Manager'Access);
+         Socket, Peer      : Sockets.Socket_Type;
+         Backend           : aliased Provider.Provider;
+         Holding_Data      : aliased Stream_Element_Array := [1 => 0];
+         Pending_Data      : aliased Stream_Element_Array := [1 => 0];
+         Last              : Stream_Element_Offset;
+         Holding_Cancelled : Boolean := False;
+         Upgrade_Failed    : Boolean := False;
+         Receive_Cancelled : Boolean := False;
+      begin
+         Provider.Set_Script
+           (Backend,
+            Provider.Handshake_Operation,
+            [1 => (TLS.Want_Read, Provider.Preserve_Output, 0),
+             2 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         declare
+            Holding_Set : aliased Flyology.Operations.Completion_Set (1);
+            Receive_Set : aliased Flyology.Operations.Completion_Set (1);
+            Upgrade_Set : aliased Flyology.Operations.Completion_Set (1);
+            Holding     : Connections.Receive_Operation :=
+              Connections.Receive
+                (Holding_Set'Access,
+                 Item'Access,
+                 Holding_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Pending     : Connections.Receive_Operation :=
+              Connections.Receive
+                (Receive_Set'Access,
+                 Item'Access,
+                 Pending_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Secure      : Connection_TLS.Upgrade_Operation :=
+              Connection_TLS.Upgrade
+                (Upgrade_Set'Access,
+                 Item'Access,
+                 Backend'Access,
+                 TLS.Server,
+                 "",
+                 Timeout => Flyology.IO.Infinite);
+         begin
+            Flyology.Operations.Cancel (Holding);
+            Flyology.Operations.Wait_All (Holding_Set);
+            begin
+               Connections.Finish (Holding, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  Holding_Cancelled := True;
+            end;
+
+            Sockets.Send_All (Peer, [1 => 97]);
+            Flyology.Operations.Wait_All (Upgrade_Set);
+
+            begin
+               Connection_TLS.Finish (Secure);
+            exception
+               when TLS.TLS_Error =>
+                  Upgrade_Failed := True;
+            end;
+            Flyology.Operations.Cancel (Pending);
+            Flyology.Operations.Wait_All (Receive_Set);
+            begin
+               Connections.Finish (Pending, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  Receive_Cancelled := True;
+            end;
+         end;
+         Passed :=
+           Passed
+           and then Holding_Cancelled
+           and then Upgrade_Failed
+           and then Receive_Cancelled
+           and then not Connections.Is_Open (Item);
+         Sockets.Close_Socket (Peer);
+      end;
+
+      --  Generic result discard and controlled finalization must also
+      --  transfer the close retained by a failed started upgrade without
+      --  waiting for an earlier-declared peer's reverse-order finalization.
+      for Finalize_Operation in Boolean loop
+         declare
+            Manager         : aliased Connections.Server (Capacity => 1);
+            Item            : aliased Connections.Connection (Manager'Access);
+            Replacement     : aliased Connections.Connection (Manager'Access);
+            Socket, Peer    : Sockets.Socket_Type;
+            Next_Socket     : Sockets.Socket_Type;
+            Next_Peer       : Sockets.Socket_Type;
+            Backend         : aliased Provider.Provider;
+            Holding_Data    : aliased Stream_Element_Array := [1 => 0];
+            Pending_Data    : aliased Stream_Element_Array := [1 => 0];
+            Last            : Stream_Element_Offset;
+            Peer_Cancelled  : Boolean := False;
+            Disposal_Return : Boolean := False;
+         begin
+            Provider.Set_Script
+              (Backend,
+               Provider.Handshake_Operation,
+               [1 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+            Sockets.Create_Socket_Pair (Socket, Peer);
+            Connections.Take (Manager, Socket, Item);
+            declare
+               Holding_Set : aliased Flyology.Operations.Completion_Set (1);
+               Pending_Set : aliased Flyology.Operations.Completion_Set (1);
+               Upgrade_Set : aliased Flyology.Operations.Completion_Set (1);
+               Holding     : Connections.Receive_Operation :=
+                 Connections.Receive
+                   (Holding_Set'Access,
+                    Item'Access,
+                    Holding_Data'Access,
+                    Timeout => Flyology.IO.Infinite);
+               Pending     : Connections.Receive_Operation :=
+                 Connections.Receive
+                   (Pending_Set'Access,
+                    Item'Access,
+                    Pending_Data'Access,
+                    Timeout => Flyology.IO.Infinite);
+            begin
+               Flyology.Operations.Cancel (Holding);
+               Flyology.Operations.Wait_All (Holding_Set);
+               begin
+                  Connections.Finish (Holding, Last);
+               exception
+                  when Connections.Operation_Cancelled =>
+                     null;
+               end;
+               declare
+                  Secure : Connection_TLS.Upgrade_Operation :=
+                    Connection_TLS.Upgrade
+                      (Upgrade_Set'Access,
+                       Item'Access,
+                       Backend'Access,
+                       TLS.Server,
+                       "",
+                       Timeout => Flyology.IO.Infinite);
+               begin
+                  Flyology.Operations.Wait_All (Upgrade_Set);
+                  if not Finalize_Operation then
+                     Flyology.Operations.Consume (Secure);
+                  end if;
+               end;
+               Disposal_Return := True;
+
+               Flyology.Operations.Cancel (Pending);
+               Flyology.Operations.Wait_All (Pending_Set);
+               begin
+                  Connections.Finish (Pending, Last);
+               exception
+                  when Connections.Operation_Cancelled =>
+                     Peer_Cancelled := True;
+               end;
+            end;
+            Sockets.Create_Socket_Pair (Next_Socket, Next_Peer);
+            Connections.Take (Manager, Next_Socket, Replacement);
+            Passed :=
+              Passed
+              and then Disposal_Return
+              and then Peer_Cancelled
+              and then not Connections.Is_Open (Item)
+              and then Connections.Is_Open (Replacement);
+            Connections.Close (Replacement);
+            Sockets.Close_Socket (Peer);
+            Sockets.Close_Socket (Next_Peer);
+         end;
+      end loop;
+
+      --  A composite parent may discard a failed upgrade child from its own
+      --  driver while a peer registration is still live. That discard must
+      --  transfer close ownership and return so the peer can be drained.
+      declare
+         Manager      : aliased Connections.Server (Capacity => 1);
+         Item         : aliased Connections.Connection (Manager'Access);
+         Replacement  : aliased Connections.Connection (Manager'Access);
+         Socket, Peer : Sockets.Socket_Type;
+         Next, Other  : Sockets.Socket_Type;
+         Backend      : aliased Provider.Provider;
+         Holding_Data : aliased Stream_Element_Array := [1 => 0];
+         Pending_Data : aliased Stream_Element_Array := [1 => 0];
+         Last         : Stream_Element_Offset;
+      begin
+         Provider.Set_Script
+           (Backend,
+            Provider.Handshake_Operation,
+            [1 => (TLS.Failed, Provider.Preserve_Output, 0)]);
+         Sockets.Create_Socket_Pair (Socket, Peer);
+         Connections.Take (Manager, Socket, Item);
+         declare
+            Holding_Set : aliased Flyology.Operations.Completion_Set (1);
+            Pending_Set : aliased Flyology.Operations.Completion_Set (1);
+            Parent_Set  : aliased Flyology.Operations.Completion_Set (2);
+            Holding     : Connections.Receive_Operation :=
+              Connections.Receive
+                (Holding_Set'Access,
+                 Item'Access,
+                 Holding_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Pending     : Connections.Receive_Operation :=
+              Connections.Receive
+                (Pending_Set'Access,
+                 Item'Access,
+                 Pending_Data'Access,
+                 Timeout => Flyology.IO.Infinite);
+            Parent      :
+              Upgrade_Parent (Parent_Set'Access, Item'Access, Backend'Access);
+         begin
+            Flyology.Operations.Drivers.Start (Parent);
+            Flyology.Operations.Drive
+              (Flyology.Operations.Operation'Class (Parent),
+               Flyology.Operations.Start_Operation);
+            Flyology.Operations.Cancel (Holding);
+            Flyology.Operations.Wait_All (Holding_Set);
+            begin
+               Connections.Finish (Holding, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  null;
+            end;
+
+            Flyology.Operations.Wait_All (Parent_Set);
+            Passed :=
+              Passed
+              and then Flyology.Operations.Outcome (Parent)
+                       = Flyology.Operations.Succeeded
+              and then not Connections.Is_Open (Item);
+
+            Flyology.Operations.Cancel (Pending);
+            Flyology.Operations.Wait_All (Pending_Set);
+            begin
+               Connections.Finish (Pending, Last);
+            exception
+               when Connections.Operation_Cancelled =>
+                  null;
+            end;
+            Flyology.Operations.Consume (Parent);
+         end;
+         Sockets.Create_Socket_Pair (Next, Other);
+         Connections.Take (Manager, Next, Replacement);
+         Passed := Passed and then Connections.Is_Open (Replacement);
+         Connections.Close (Replacement);
+         Sockets.Close_Socket (Peer);
+         Sockets.Close_Socket (Other);
+      end;
 
       --  The same operation types transparently drive an upgraded TLS
       --  transport. WANT_WRITE from receive and WANT_READ from send select
@@ -1048,7 +1487,9 @@ procedure Connection_Operations_Smoke is
       begin
          Provider.Reset_State_Telemetry;
          Provider.Set_Script
-           (Backend, Provider.Handshake_Operation, [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
+           (Backend,
+            Provider.Handshake_Operation,
+            [1 => (TLS.Complete, Provider.Preserve_Output, 0)]);
          Provider.Set_Script
            (Backend,
             Provider.Receive_Operation,
@@ -1067,12 +1508,14 @@ procedure Connection_Operations_Smoke is
              4 => (TLS.Complete, Provider.Advance_Output, 1)]);
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
-         Connection_TLS.Upgrade (Item, Backend, TLS.Server, "", Timeout => 1.0);
+         Connection_TLS.Upgrade
+           (Item, Backend, TLS.Server, "", Timeout => 1.0);
          --  Keep the descriptor readable while the scripted provider asks for
          --  read readiness. The test provider itself does not consume it.
          Sockets.Send_All (Peer, [1 => 99]);
 
-         Connections.Receive_Exactly (Item'Access, Incoming'Access, 1.0, null, Get);
+         Connections.Receive_Exactly
+           (Item'Access, Incoming'Access, 1.0, null, Get);
          Flyology.Operations.Wait_All (Set);
          Connections.Finish (Get);
          Connections.Send_All (Item'Access, Outgoing'Access, 1.0, null, Put);
@@ -1090,7 +1533,8 @@ procedure Connection_Operations_Smoke is
          --  when the typed result is consumed.
          declare
             Closed     : Connections.Receive_Exactly_Operation :=
-              Connections.Receive_Exactly (Set'Access, Item'Access, Incoming'Access, 1.0);
+              Connections.Receive_Exactly
+                (Set'Access, Item'Access, Incoming'Access, 1.0);
             Raised_TLS : Boolean := False;
          begin
             Flyology.Operations.Wait_All (Set);
@@ -1104,7 +1548,8 @@ procedure Connection_Operations_Smoke is
          end;
          declare
             Invalid    : Connections.Receive_Operation :=
-              Connections.Receive (Set'Access, Item'Access, Incoming'Access, 1.0);
+              Connections.Receive
+                (Set'Access, Item'Access, Incoming'Access, 1.0);
             Raised_TLS : Boolean := False;
             Last       : Stream_Element_Offset;
          begin

@@ -22,7 +22,9 @@ package Flyology.IO.Connections.Testing is
       Managed_Connect_Connected,
       Managed_Connect_Child_Started,
       Managed_Connect_Child_Detached,
-      Raw_Scoped_Connect_Armed);
+      Raw_Scoped_Connect_Armed,
+      Deferred_Close_Published,
+      Cleanup_Dispatch_Entered);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.
