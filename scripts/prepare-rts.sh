@@ -538,31 +538,86 @@ compile_runtime_ada () {
   fi
 }
 
-#  git apply resolves --directory relative to the repository worktree even
-#  when an absolute path is supplied. Anchor it here so callers may invoke
-#  prepare-rts.sh from a nested Alire crate or any other working directory.
-cd "$project_root"
-git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
-  --directory="$generated_include" \
-  "$tasking_patch"
+apply_runtime_patch () {
+  selected_patch=$1
+
+  #  --directory is interpreted through any enclosing Git worktree, even for
+  #  an absolute target, and a prefix mismatch is only a successful "Skipped
+  #  patch" diagnostic. Apply from the generated copy in explicit non-index
+  #  mode and stop repository discovery before its generated-tree parent.
+  (
+    cd "$generated_include"
+    GIT_CEILING_DIRECTORIES="$build_root" \
+      git apply --no-index --recount --unidiff-zero --ignore-space-change \
+        "$selected_patch"
+  )
+}
+
+require_generated_text () {
+  generated_file=$1
+  required_text=$2
+  patch_description=$3
+
+  if ! grep -F "$required_text" "$generated_file" >/dev/null; then
+    printf '%s\n' \
+      "required $patch_description postcondition is absent: $generated_file" \
+      >&2
+    exit 1
+  fi
+}
+
+apply_runtime_patch "$tasking_patch"
 if [ -n "$monotonic_patch" ]; then
-  git apply --ignore-space-change --unsafe-paths \
-    --directory="$generated_include" \
-    "$monotonic_patch"
+  apply_runtime_patch "$monotonic_patch"
 fi
-git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
-  --directory="$generated_include" \
-  "$task_state_patch"
-git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
-  --directory="$generated_include" \
-  "$blocking_detection_patch"
+apply_runtime_patch "$task_state_patch"
+apply_runtime_patch "$blocking_detection_patch"
 if [ "$compat_family" = gnat-legacy ]; then
-  git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
-    --directory="$generated_include" \
-    "$legacy_suspension_spec_patch"
-  git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
-    --directory="$generated_include" \
-    "$legacy_suspension_body_patch"
+  apply_runtime_patch "$legacy_suspension_spec_patch"
+  apply_runtime_patch "$legacy_suspension_body_patch"
+fi
+
+require_generated_text \
+  "$generated_include/s-taprop.adb" \
+  "renames System.Flyology.Scheduler.Create;" \
+  "task-primitives scheduler"
+require_generated_text \
+  "$generated_include/s-tassta.adb" \
+  "System.Flyology.Scheduler.Finalize;" \
+  "task-stages finalization"
+require_generated_text \
+  "$generated_include/s-tassta.adb" \
+  "System.Flyology.Task_Results.Publish" \
+  "task-stages result publication"
+require_generated_text \
+  "$generated_include/s-taskin.adb" \
+  "System.Flyology.Scheduler.Current_Task" \
+  "blocking-detection scheduler"
+if [ "$platform" = linux ]; then
+  require_generated_text \
+    "$generated_include/s-taprop.adb" \
+    '"flyology_linux_pthread_stack_min"' \
+    "Linux native stack minimum"
+fi
+if [ -n "$monotonic_patch" ]; then
+  require_generated_text \
+    "$generated_include/s-tpopmo.adb" \
+    '"flyology_monotonic_clock"' \
+    "Darwin monotonic clock"
+  require_generated_text \
+    "$generated_include/s-tpopmo.adb" \
+    '"flyology_darwin_cond_timedwait_relative"' \
+    "Darwin relative condition wait"
+fi
+if [ "$compat_family" = gnat-legacy ]; then
+  require_generated_text \
+    "$generated_include/a-sytaco.ads" \
+    "Suspended_Task : System.Tasking.Task_Id;" \
+    "legacy suspension-object specification"
+  require_generated_text \
+    "$generated_include/a-sytaco.adb" \
+    "S.Suspended_Task := Self_ID;" \
+    "legacy suspension-object body"
 fi
 
 if [ "${FLYOLOGY_TEST_RTS_FAIL_DURING_ASSEMBLY:-0}" = 1 ]; then
@@ -659,6 +714,133 @@ if [ "$platform" = linux ]; then
   ar -r "$generated_lib/libgnarl.a" s-fllimo.o
 fi
 ranlib "$generated_lib/libgnarl.a"
+
+require_archived_symbol () {
+  archived_object=$1
+  required_symbol=$2
+  patch_description=$3
+
+  if ! object_symbols=$(nm -g "$archived_object"); then
+    printf '%s\n' "could not inspect patched runtime object: $archived_object" \
+      >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$object_symbols" | awk '{ print $NF }' | \
+       sed 's/^_//' | grep -Fx "$required_symbol" >/dev/null
+  then
+    printf '%s\n' \
+      "required $patch_description symbol is absent: $required_symbol" >&2
+    exit 1
+  fi
+}
+
+hash_stream () {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum
+  else
+    printf '%s\n' "SHA-256 tool not found" >&2
+    return 1
+  fi
+}
+
+hash_file () {
+  hash_stream <"$1" | awk '{ print $1 }'
+}
+
+record_patched_core () {
+  entry_kind=$1
+  entry_name=$2
+  entry_file=$3
+
+  printf '%s %s %s\n' \
+    "$entry_kind" "$entry_name" "$(hash_file "$entry_file")" \
+    >>"$patched_core_manifest"
+}
+
+verification_root="$build_root/patch-verification"
+mkdir "$verification_root"
+(
+  cd "$verification_root"
+  ar -x "$generated_lib/libgnarl.a" s-taprop.o s-taskin.o s-tassta.o
+  if [ "$compat_family" = gnat-legacy ]; then
+    ar -x "$generated_lib/libgnarl.a" a-sytaco.o
+  fi
+)
+require_archived_symbol \
+  "$verification_root/s-taprop.o" \
+  system__flyology__scheduler__create \
+  "task-primitives scheduler"
+require_archived_symbol \
+  "$verification_root/s-taprop.o" \
+  flyology_runtime_file_io \
+  "task-primitives file-I/O bridge"
+require_archived_symbol \
+  "$verification_root/s-tassta.o" \
+  system__flyology__scheduler__finalize \
+  "task-stages finalization"
+require_archived_symbol \
+  "$verification_root/s-tassta.o" \
+  system__flyology__task_results__publish \
+  "task-stages result publication"
+require_archived_symbol \
+  "$verification_root/s-taskin.o" \
+  system__flyology__scheduler__current_task \
+  "blocking-detection scheduler"
+if [ "$platform" = linux ]; then
+  require_archived_symbol \
+    "$verification_root/s-taprop.o" \
+    flyology_linux_pthread_stack_min \
+    "Linux native stack minimum"
+fi
+if [ -n "$monotonic_patch" ]; then
+  require_archived_symbol \
+    "$verification_root/s-taprop.o" \
+    flyology_monotonic_clock \
+    "Darwin monotonic clock"
+  require_archived_symbol \
+    "$verification_root/s-taprop.o" \
+    flyology_darwin_cond_timedwait_relative \
+    "Darwin relative condition wait"
+fi
+if [ "$compat_family" = gnat-legacy ]; then
+  require_archived_symbol \
+    "$verification_root/a-sytaco.o" \
+    system__soft_links__abort_defer \
+    "legacy suspension-object body"
+fi
+
+patched_core_manifest="$build_root/.flyology-patched-core-manifest"
+printf '%s\n' "Flyology patched core manifest version 1" \
+  >"$patched_core_manifest"
+record_patched_core source adainclude/s-taprop.adb \
+  "$generated_include/s-taprop.adb"
+record_patched_core source adainclude/s-tassta.adb \
+  "$generated_include/s-tassta.adb"
+record_patched_core source adainclude/s-taskin.adb \
+  "$generated_include/s-taskin.adb"
+if [ -n "$monotonic_patch" ]; then
+  record_patched_core source adainclude/s-tpopmo.adb \
+    "$generated_include/s-tpopmo.adb"
+fi
+if [ "$compat_family" = gnat-legacy ]; then
+  record_patched_core source adainclude/a-sytaco.ads \
+    "$generated_include/a-sytaco.ads"
+  record_patched_core source adainclude/a-sytaco.adb \
+    "$generated_include/a-sytaco.adb"
+fi
+record_patched_core archive adalib/libgnarl.a:s-taprop.o \
+  "$verification_root/s-taprop.o"
+record_patched_core archive adalib/libgnarl.a:s-tassta.o \
+  "$verification_root/s-tassta.o"
+record_patched_core archive adalib/libgnarl.a:s-taskin.o \
+  "$verification_root/s-taskin.o"
+if [ "$compat_family" = gnat-legacy ]; then
+  record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
+    "$verification_root/a-sytaco.o"
+fi
+rm -rf -- "$verification_root"
 
 if [ "${FLYOLOGY_TEST_RTS_SIGNAL_BEFORE_DISPLACEMENT:-0}" = 1 ]; then
   printf '%s\n' "injected signal before Flyology RTS displacement" >&2

@@ -3774,10 +3774,14 @@ Darwin-only, requires positive tags, and is rejected on Apple-silicon hosts
 where the kernel reports `THREAD_AFFINITY_POLICY` unsupported. An empty default
 map adds no placement initialization syscall to a native-only process. These
 generated preparation policies are compiled into the RTS rather than read from
-the application environment. The script checks source compatibility by
-applying the source
-patch under `set -e`, so an incompatible runtime source tree fails rather than
-being silently accepted.
+the application environment. The script applies each source patch from the
+generated include directory in non-index mode, so an enclosing Git worktree
+cannot filter a nested path pin. Before publication it checks both targeted
+source text and symbols in the archived replacement objects; an incompatible
+or skipped patch therefore fails rather than being silently accepted. It then
+publishes exact hashes for every patched source and replacement archive member.
+Stamped Alire reuse validates that manifest and its stamp-bound hash before
+accepting an existing prepared RTS.
 
 `scripts/test-compiler-identities.sh` checks both supported Alire compiler
 environment variables and package-prefix shapes, every approved release, and
@@ -3785,8 +3789,13 @@ fail-closed rejection of ambiguous, unknown, and unsupported selections.
 `scripts/test-external-consumer.sh` copies a small consumer into a fresh
 temporary workspace, adds Flyology through an Alire path pin, verifies the
 automatic native-default build and persisted lightweight policy, and prepares
-a separate lightweight-default RTS to run the other variant. It also covers
-paths containing spaces, exact compiler binding despite a mismatched `PATH`,
+a separate lightweight-default RTS to run the other variant. It checks a
+standalone prepared-RTS control and the same core source and object
+postconditions with the pin nested below a different Git worktree; consumer
+runs are bounded so a missing lightweight bridge cannot hang the suite. It
+also verifies stamped-RTS reuse rejects missing, source-modified, and
+symbol-preserving replaced core artifacts, paths containing spaces, exact
+compiler binding despite a mismatched `PATH`,
 clean replacement of stale runtime files, interrupted-publication recovery,
 native-default inertness, and lazy event machinery for the lightweight opt-in.
 
