@@ -131,10 +131,12 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
            Rewarm_Time                => 0.0);
    end Policy;
 
+   --  GNAT 13 and 14 require inner parentheses around delta aggregates in
+   --  expression functions.
    function Config
      (Policy_Mode  : Operating_Conditions_Mode;
       Interference : Boolean := False) return Configuration
-   is (Default_Configuration
+   is ((Default_Configuration
        with delta
          Warmup_Time          => 0.0,
          Measurement_Time     => 0.000_100,
@@ -153,13 +155,13 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
                Window                      => 0.001,
                others                      => <>)
             else (others => <>)),
-         Operating_Conditions => Policy (Policy_Mode));
+         Operating_Conditions => Policy (Policy_Mode)));
 
    function Config
      (Policy_Mode      : Operating_Conditions_Mode;
       On_Pause_Timeout : Condition_Pause_Fallback;
       Interference     : Boolean := False) return Configuration
-   is (Default_Configuration
+   is ((Default_Configuration
        with delta
          Warmup_Time          => 0.0,
          Measurement_Time     => 0.000_100,
@@ -178,7 +180,7 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
                Window                      => 0.001,
                others                      => <>)
             else (others => <>)),
-         Operating_Conditions => Policy (Policy_Mode, On_Pause_Timeout));
+         Operating_Conditions => Policy (Policy_Mode, On_Pause_Timeout)));
 
 begin
    Check (Hooks.Enabled, "condition integration smoke selected disabled hooks");
