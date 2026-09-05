@@ -2,13 +2,13 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=$("$project_root/scripts/find-alr.sh")
+development_alr="$project_root/scripts/alr-development.sh"
 
 if [ "${FLYOLOGY_HOOK_ELISION_IN_ALIRE:-0}" != 1 ]; then
-  "$alr" build >/dev/null
+  "$development_alr" build >/dev/null
   FLYOLOGY_HOOK_ELISION_IN_ALIRE=1
   export FLYOLOGY_HOOK_ELISION_IN_ALIRE
-  exec "$alr" exec -- "$0"
+  exec "$development_alr" exec -- "$0"
 fi
 
 probe="$project_root/tests/probes/flyology-test_hook_elision_probe.adb"

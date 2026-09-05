@@ -2,12 +2,12 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=$("$project_root/scripts/find-alr.sh")
+development_alr="$project_root/scripts/alr-development.sh"
 
-if [ "${FLYOLOGY_COMMIT_SEAM_IN_ALIRE:-0}" != 1 ]; then
-  FLYOLOGY_COMMIT_SEAM_IN_ALIRE=1
-  export FLYOLOGY_COMMIT_SEAM_IN_ALIRE
-  exec "$alr" exec -- "$0"
+if [ "${FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE:-0}" != 1 ]; then
+  FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE=1
+  export FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE
+  exec "$development_alr" exec -- "$0"
 fi
 
 temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-commit-seam.XXXXXX")

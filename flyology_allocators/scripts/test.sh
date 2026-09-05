@@ -19,6 +19,8 @@ cd "$CRATE_ROOT"
 "$ALIRE" build
 "$ALIRE" exec -- gprbuild -P tests/allocator_tests.gpr -p
 "$CRATE_ROOT/tests/bin/allocator_smoke"
+"$CRATE_ROOT/scripts/check-atomic-store-c-boundary.sh" \
+   "$CRATE_ROOT/lib/libflyology_allocators.a"
 
 if nm -g "$CRATE_ROOT/lib/libflyology_allocators.a" |
   awk '{ print $NF }' |

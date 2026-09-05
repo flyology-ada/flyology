@@ -3,12 +3,8 @@ with System.Atomic_Primitives;
 package body Flyology_Allocators.Atomics is
    package AP renames System.Atomic_Primitives;
 
-   generic
-      type Atomic_Type is mod <>;
-   procedure Atomic_Store (Address : System.Address; Value : Atomic_Type; Model : AP.Mem_Model := AP.Seq_Cst);
-   pragma Import (Intrinsic, Atomic_Store, "__atomic_store_n");
-
-   procedure Atomic_Store_32 is new Atomic_Store (AP.uint32);
+   procedure Atomic_Store_Release_U32 (Address : System.Address; Value : Interfaces.Unsigned_32);
+   pragma Import (C, Atomic_Store_Release_U32, "flyology_allocators_atomic_store_release_u32");
 
    function Supported return Boolean
    is (AP.Atomic_Always_Lock_Free (4));
@@ -18,7 +14,7 @@ package body Flyology_Allocators.Atomics is
 
    procedure Store_Release_U32 (Address : System.Address; Value : Interfaces.Unsigned_32) is
    begin
-      Atomic_Store_32 (Address, AP.uint32 (Value), AP.Release);
+      Atomic_Store_Release_U32 (Address, Value);
    end Store_Release_U32;
 
    function Compare_Exchange_U32
