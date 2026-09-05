@@ -27,6 +27,63 @@ package body Flyology_Bench is
 
    subtype Float_Array is Internal_Statistics.Float_Array;
 
+   function Observe
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Observe,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      others                     => <>);
+
+   function Pause
+     (On_Pause_Timeout           : Condition_Pause_Fallback;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Pause,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      Stable_Time                => Stable_Time,
+      Poll_Interval              => Poll_Interval,
+      Maximum_Pause_Time         => Maximum_Pause_Time,
+      Rewarm_Time                => Rewarm_Time,
+      On_Pause_Timeout           => On_Pause_Timeout);
+
+   function Fail
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Fail,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      others                     => <>);
+
+   function Mode (Policy : Operating_Conditions_Policy) return Operating_Conditions_Mode
+   is (Policy.Mode_Value);
+
    procedure Sort (Values : in out Float_Array) renames Internal_Statistics.Sort;
 
    function Percentile (Ordered : Float_Array; Fraction : Long_Float) return Long_Float
@@ -1241,7 +1298,7 @@ package body Flyology_Bench is
    is
       Policy : Operating_Conditions_Policy renames Config.Operating_Conditions;
    begin
-      if not Policy.Enabled then
+      if Mode (Policy) = Disabled then
          return False;
       end if;
       declare
@@ -1281,10 +1338,10 @@ package body Flyology_Bench is
       end;
    end Conditions_Unacceptable;
 
-   function Condition_Response_Action
-     (Response : Condition_Response; Rejected : Boolean) return Condition_Action is
+   function Condition_Mode_Action
+     (Policy_Mode : Operating_Conditions_Mode; Rejected : Boolean) return Condition_Action is
    begin
-      case Condition_Policy.Action_For (Response, Rejected) is
+      case Condition_Policy.Action_For (Policy_Mode, Rejected) is
          when Condition_Policy.Policy_Accept =>
             return Accept_Conditions;
 
@@ -1294,7 +1351,7 @@ package body Flyology_Bench is
          when Condition_Policy.Policy_Fail   =>
             return Fail_Conditions;
       end case;
-   end Condition_Response_Action;
+   end Condition_Mode_Action;
 
    procedure Add_Throttle_Events (Watch : in out Interference_Watch; Increase : Interfaces.Unsigned_64) is
    begin
@@ -1672,7 +1729,7 @@ package body Flyology_Bench is
       Current   : Conditions.Snapshot;
       Recovered : Boolean;
    begin
-      Watch.Conditions_Active := Config.Operating_Conditions.Enabled;
+      Watch.Conditions_Active := Mode (Config.Operating_Conditions) /= Disabled;
       if not Watch.Conditions_Active then
          return;
       end if;
@@ -1683,8 +1740,8 @@ package body Flyology_Bench is
       if Current.Process_Profile_Avail = Condition_Available then
          Watch.Process_Baseline := Current.Process_Profile;
       end if;
-      case Condition_Response_Action
-             (Config.Operating_Conditions.Response,
+      case Condition_Mode_Action
+             (Mode (Config.Operating_Conditions),
               Conditions_Unacceptable
                 (Config,
                  Watch,
@@ -1715,8 +1772,8 @@ package body Flyology_Bench is
       if Current.Process_Profile_Avail = Condition_Available then
          Watch.Process_Baseline := Current.Process_Profile;
       end if;
-      case Condition_Response_Action
-             (Config.Operating_Conditions.Response,
+      case Condition_Mode_Action
+             (Mode (Config.Operating_Conditions),
               Conditions_Unacceptable
                 (Config,
                  Watch,
@@ -1840,7 +1897,7 @@ package body Flyology_Bench is
       if Count_Unit then
          Watch.Report.Affected_Units := Watch.Report.Affected_Units + Units;
       end if;
-      Action := Condition_Response_Action (Config.Operating_Conditions.Response, Rejected => True);
+      Action := Condition_Mode_Action (Mode (Config.Operating_Conditions), Rejected => True);
       Watch.Throttle_Recovery_Unresolved := Action = Pause_For_Conditions and then Throttle_Increase > 0;
    end Judge_Condition_Window;
 
@@ -1887,7 +1944,7 @@ package body Flyology_Bench is
       Required : Long_Float;
       Units    : Long_Float;
    begin
-      if (not Config.Interference.Enabled and then not Config.Operating_Conditions.Enabled)
+      if (not Config.Interference.Enabled and then Mode (Config.Operating_Conditions) = Disabled)
         or else Unit_Nanoseconds <= 0.0
       then
          return 1;
@@ -1897,7 +1954,9 @@ package body Flyology_Bench is
           (Duration_Nanoseconds
              (Window_Policy.Required_Window
                 ((if Config.Interference.Enabled then Config.Interference.Window else 0.0),
-                 (if Config.Operating_Conditions.Enabled then Config.Operating_Conditions.Window else 0.0))));
+                 (if Mode (Config.Operating_Conditions) /= Disabled
+                  then Config.Operating_Conditions.Window
+                  else 0.0))));
       --  Batch duration varies from sample to sample, so a window sized to
       --  only just reach the minimum would regularly fall short of it and
       --  silently degrade to observation. The margin buys that back.

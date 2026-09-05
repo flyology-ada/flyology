@@ -72,50 +72,65 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
    end Read_Linux_Fixture;
 
    function Policy
-     (Response : Condition_Response; Fallback : Condition_Pause_Fallback := Fallback_Observe)
-      return Operating_Conditions_Policy is
+     (Policy_Mode : Operating_Conditions_Mode;
+      Window      : Positive_Duration := 0.010) return Operating_Conditions_Policy
+   is
    begin
-      case Response is
+      case Policy_Mode is
+         when Disabled =>
+            return Disabled_Operating_Conditions;
+
          when Observe =>
             return
-              (Enabled                    => True,
-               Response                   => Observe,
-               Require_Nonreduced_Profile => True,
-               Require_Profile_Detection  => True,
-               Maximum_Thermal_State      => Thermal_State_Fair,
-               Require_Thermal_Detection  => True,
-               Window                     => 0.010);
+              Observe
+                (Require_Nonreduced_Profile => True,
+                 Require_Profile_Detection  => True,
+                 Maximum_Thermal_State      => Thermal_State_Fair,
+                 Require_Thermal_Detection  => True,
+                 Window                     => Window);
 
          when Fail    =>
             return
-              (Enabled                    => True,
-               Response                   => Fail,
-               Require_Nonreduced_Profile => True,
-               Require_Profile_Detection  => True,
-               Maximum_Thermal_State      => Thermal_State_Fair,
-               Require_Thermal_Detection  => True,
-               Window                     => 0.010);
+              Fail
+                (Require_Nonreduced_Profile => True,
+                 Require_Profile_Detection  => True,
+                 Maximum_Thermal_State      => Thermal_State_Fair,
+                 Require_Thermal_Detection  => True,
+                 Window                     => Window);
 
          when Pause   =>
-            return
-              (Enabled                    => True,
-               Response                   => Pause,
-               Require_Nonreduced_Profile => True,
-               Require_Profile_Detection  => True,
-               Maximum_Thermal_State      => Thermal_State_Fair,
-               Require_Thermal_Detection  => True,
-               Window                     => 0.010,
-               Stable_Time                => 0.001,
-               Poll_Interval              => 0.001,
-               Maximum_Pause_Time         => 0.100,
-               Rewarm_Time                => 0.0,
-               On_Pause_Timeout           => Fallback);
+            raise Program_Error;
       end case;
    end Policy;
 
+   function Policy
+     (Policy_Mode        : Operating_Conditions_Mode;
+      On_Pause_Timeout   : Condition_Pause_Fallback;
+      Window             : Positive_Duration := 0.010;
+      Stable_Time        : Positive_Duration := 0.001;
+      Poll_Interval      : Positive_Duration := 0.001;
+      Maximum_Pause_Time : Positive_Duration := 0.100) return Operating_Conditions_Policy
+   is
+   begin
+      if Policy_Mode /= Pause then
+         raise Program_Error;
+      end if;
+      return
+        Pause
+          (On_Pause_Timeout           => On_Pause_Timeout,
+           Require_Nonreduced_Profile => True,
+           Require_Profile_Detection  => True,
+           Maximum_Thermal_State      => Thermal_State_Fair,
+           Require_Thermal_Detection  => True,
+           Window                     => Window,
+           Stable_Time                => Stable_Time,
+           Poll_Interval              => Poll_Interval,
+           Maximum_Pause_Time         => Maximum_Pause_Time,
+           Rewarm_Time                => 0.0);
+   end Policy;
+
    function Config
-     (Response     : Condition_Response;
-      Fallback     : Condition_Pause_Fallback := Fallback_Observe;
+     (Policy_Mode  : Operating_Conditions_Mode;
       Interference : Boolean := False) return Configuration
    is (Default_Configuration
        with delta
@@ -136,7 +151,32 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
                Window                      => 0.001,
                others                      => <>)
             else (others => <>)),
-         Operating_Conditions => Policy (Response, Fallback));
+         Operating_Conditions => Policy (Policy_Mode));
+
+   function Config
+     (Policy_Mode      : Operating_Conditions_Mode;
+      On_Pause_Timeout : Condition_Pause_Fallback;
+      Interference     : Boolean := False) return Configuration
+   is (Default_Configuration
+       with delta
+         Warmup_Time          => 0.0,
+         Measurement_Time     => 0.000_100,
+         Samples              => 10,
+         Minimum_Sample_Time  => 0.000_001,
+         Maximum_Iterations   => 1,
+         Subtract_Timer_Cost  => False,
+         Bootstrap_Resamples  => 100,
+         Metrics              => Time_Metrics,
+         Interference         =>
+           (if Interference
+            then
+              (Enabled                     => True,
+               Response                    => Observe,
+               Maximum_Foreign_CPU_Percent => 100.0,
+               Window                      => 0.001,
+               others                      => <>)
+            else (others => <>)),
+         Operating_Conditions => Policy (Policy_Mode, On_Pause_Timeout));
 
 begin
    Check (Hooks.Enabled, "condition integration smoke selected disabled hooks");
@@ -274,7 +314,7 @@ begin
       begin
          Benchmark
            ((Config (Observe)
-             with delta Operating_Conditions => (Policy (Observe) with delta Window => 0.000_001)),
+             with delta Operating_Conditions => Policy (Observe, Window => 0.000_001)),
             Result);
          Check (Hooks.Profile_Read_Count = 4, "intermediate windows bypassed the macOS profile cache");
       end;
@@ -287,7 +327,7 @@ begin
       begin
          Pair_Benchmark
            ((Config (Observe)
-             with delta Operating_Conditions => (Policy (Observe) with delta Window => 0.000_001)),
+             with delta Operating_Conditions => Policy (Observe, Window => 0.000_001)),
             Result);
          Check (Hooks.Profile_Read_Count = 4, "paired terminal window did not force the fourth profile read");
       end;
@@ -302,7 +342,7 @@ begin
               ((Config (Observe)
                 with delta
                   Shootout_Scheduling  => Schedule,
-                  Operating_Conditions => (Policy (Observe) with delta Window => 0.000_001)),
+                  Operating_Conditions => Policy (Observe, Window => 0.000_001)),
                Result);
             Check
               (Hooks.Profile_Read_Count = Expected_Profile_Reads,
@@ -335,7 +375,7 @@ begin
          Result : Measurement;
          Report : Environment_Report;
       begin
-         Benchmark (Config (Pause), Result);
+         Benchmark (Config (Pause, Fallback_Observe), Result);
          Report := Environment (Result);
          Check
            (Report.Condition_Pauses = 1 and then Report.Recollected_Units = 0,
@@ -354,8 +394,10 @@ begin
          Report : Environment_Report;
       begin
          Benchmark
-           ((Config (Pause)
-             with delta Operating_Conditions => (Policy (Pause) with delta Maximum_Pause_Time => 0.005)),
+           ((Config (Pause, Fallback_Observe)
+             with delta
+               Operating_Conditions =>
+                 Policy (Pause, Fallback_Observe, Maximum_Pause_Time => 0.005)),
             Result);
          Report := Environment (Result);
          Check
@@ -384,7 +426,7 @@ begin
          Result : Measurement;
          Report : Environment_Report;
       begin
-         Benchmark (Config (Pause, Interference => True), Result);
+         Benchmark (Config (Pause, Fallback_Observe, Interference => True), Result);
          Report := Environment (Result);
          Check (Samples (Result) = 10, "condition pause changed the retained sample count");
          Check
@@ -424,7 +466,7 @@ begin
          Reference_Report : Environment_Report;
          Contender_Report : Environment_Report;
       begin
-         Pair_Benchmark (Config (Pause), Result);
+         Pair_Benchmark (Config (Pause, Fallback_Observe), Result);
          Reference_Result := Reference_Measurement (Result);
          Contender_Result := Contender_Measurement (Result);
          Reference_Report := Environment (Reference_Result);
@@ -453,7 +495,7 @@ begin
    for Schedule in Shootout_Schedule_Policy loop
       declare
          Test_Config     : constant Configuration :=
-           (Config (Pause) with delta Shootout_Scheduling => Schedule);
+           (Config (Pause, Fallback_Observe) with delta Shootout_Scheduling => Schedule);
          Observe_Config  : constant Configuration :=
            (Config (Observe) with delta Shootout_Scheduling => Schedule);
          Baseline_Result : Multi_Comparison;
@@ -510,7 +552,7 @@ begin
       Result : Measurement;
       Report : Environment_Report;
    begin
-      Benchmark (Config (Pause), Result);
+      Benchmark (Config (Pause, Fallback_Observe), Result);
       Report := Environment (Result);
       Check
         (Report.Condition_Pauses = 2 and then Report.Recollected_Units = 0,
@@ -529,11 +571,15 @@ begin
       Report : Environment_Report;
    begin
       Benchmark
-        ((Config (Pause)
+        ((Config (Pause, Fallback_Observe)
           with delta
             Operating_Conditions =>
-              (Policy (Pause)
-               with delta Stable_Time => 0.001, Poll_Interval => 0.001, Maximum_Pause_Time => 0.004)),
+              Policy
+                (Pause,
+                 Fallback_Observe,
+                 Stable_Time        => 0.001,
+                 Poll_Interval      => 0.001,
+                 Maximum_Pause_Time => 0.004)),
          Result);
       Report := Environment (Result);
       Check
@@ -561,21 +607,16 @@ begin
       Report : Environment_Report;
    begin
       Benchmark
-        ((Config (Pause)
+        ((Config (Pause, Fallback_Observe)
           with delta
             Operating_Conditions =>
-              (Enabled                    => True,
-               Response                   => Pause,
-               Require_Nonreduced_Profile => True,
-               Require_Profile_Detection  => True,
-               Maximum_Thermal_State      => Thermal_State_Fair,
-               Require_Thermal_Detection  => True,
-               Window                     => 0.000_001,
-               Stable_Time                => 0.002,
-               Poll_Interval              => 0.001,
-               Maximum_Pause_Time         => 0.100,
-               Rewarm_Time                => 0.0,
-               On_Pause_Timeout           => Fallback_Observe)),
+              Policy
+                (Pause,
+                 Fallback_Observe,
+                 Window             => 0.000_001,
+                 Stable_Time        => 0.002,
+                 Poll_Interval      => 0.001,
+                 Maximum_Pause_Time => 0.100)),
          Result);
       Report := Environment (Result);
       Check

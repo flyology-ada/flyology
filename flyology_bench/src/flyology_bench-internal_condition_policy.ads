@@ -132,12 +132,12 @@ is
 
    type Policy_Action is (Policy_Accept, Policy_Pause, Policy_Fail);
 
-   function Action_For (Response : Condition_Response; Rejected : Boolean) return Policy_Action
+   function Action_For (Mode : Operating_Conditions_Mode; Rejected : Boolean) return Policy_Action
    is (if not Rejected
        then Policy_Accept
-       elsif Response = Observe
+       elsif Mode in Disabled | Observe
        then Policy_Accept
-       elsif Response = Pause
+       elsif Mode = Pause
        then Policy_Pause
        else Policy_Fail);
 

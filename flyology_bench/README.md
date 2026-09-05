@@ -761,12 +761,13 @@ Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
    else (Enabled => False));
 ```
 
-The three rules that relate two fields — a quiescence timeout that covers its
-stable interval, a poll interval within that timeout, and a pause budget that
-covers one settle interval — are record predicates, checked when a policy
-value is built or assigned. A policy modified one field at a time is not
-checked at that moment, so `Configuration` re-asserts each policy's rule and a
-benchmark call rejects an incoherent one on the way in.
+The quiescence and interference rules that relate two public fields are record
+predicates, checked when a policy value is built or assigned. A policy modified
+one field at a time is not checked at that moment, so `Configuration`
+re-asserts those rules and a benchmark call rejects an incoherent one on the
+way in. The private operating-condition policy is built by checked constructors;
+its `Pause` constructor checks that the pause budget covers its stable and
+polling intervals.
 
 ## CPU quiescence preflight
 
@@ -810,19 +811,23 @@ units within a window:
 
 ```ada
 Config.Operating_Conditions :=
-  (Enabled                    => True,
-   Response                   => Flyology_Bench.Pause,
-   Require_Nonreduced_Profile => True,
-   Require_Profile_Detection  => False,
-   Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
-   Require_Thermal_Detection  => False,
-   Window                     => 0.050,
-   Stable_Time                => 0.500,
-   Poll_Interval              => 0.100,
-   Maximum_Pause_Time         => 30.0,
-   Rewarm_Time                => 0.050,
-   On_Pause_Timeout           => Flyology_Bench.Fallback_Observe);
+  Flyology_Bench.Pause
+    (On_Pause_Timeout           => Flyology_Bench.Fallback_Observe,
+     Require_Nonreduced_Profile => True,
+     Require_Profile_Detection  => False,
+     Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
+     Require_Thermal_Detection  => False,
+     Window                     => 0.050,
+     Stable_Time                => 0.500,
+     Poll_Interval              => 0.100,
+     Maximum_Pause_Time         => 30.0,
+     Rewarm_Time                => 0.050);
 ```
+
+The default is `Disabled`. Opting in names the response directly by constructing
+the policy with `Observe`, `Pause`, or `Fail`; a client cannot enable a policy
+through an aggregate with an omitted response. `Pause` has no overload without
+`On_Pause_Timeout`, so its expiration behavior is always explicit.
 
 `Maximum_Thermal_State` accepts only `Thermal_State_Nominal` through
 `Thermal_State_Critical`; `Thermal_State_Unknown` is an observation result,

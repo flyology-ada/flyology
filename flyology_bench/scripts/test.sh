@@ -42,6 +42,18 @@ cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_probes_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_condition_policy_smoke"
+"$crate_root/tests/bin/operating_conditions_api_compile"
+for invalid_case in aggregate pause
+do
+  if build -q -f -p -P "$crate_root/tests/invalid_operating_conditions.gpr" \
+    -XFLYOLOGY_BENCH_INVALID_CONDITIONS_CASE="$invalid_case" \
+    --subdirs="invalid-operating-conditions-$invalid_case" \
+    >"$work_dir/invalid-operating-conditions-$invalid_case.log" 2>&1
+  then
+    printf '%s\n' "invalid operating-condition API case compiled: $invalid_case" >&2
+    exit 1
+  fi
+done
 build -q -p -P "$crate_root/tests/flyology_bench_condition_tests.gpr" \
   --subdirs=condition-hooks -XFLYOLOGY_BENCH_CONDITION_TEST_HOOKS=true
 "$crate_root/tests/bin/condition-hooks/flyology_bench-internal_condition_integration_smoke"

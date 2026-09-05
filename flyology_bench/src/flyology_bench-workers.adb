@@ -463,15 +463,14 @@ package body Flyology_Bench.Workers is
          end if;
       end if;
 
-      Put_Boolean (Data, Config.Operating_Conditions.Enabled);
-      Put_Natural (Data, Condition_Response'Pos (Config.Operating_Conditions.Response));
-      if Config.Operating_Conditions.Enabled then
+      Put_Natural (Data, Operating_Conditions_Mode'Pos (Mode (Config.Operating_Conditions)));
+      if Mode (Config.Operating_Conditions) /= Disabled then
          Put_Boolean (Data, Config.Operating_Conditions.Require_Nonreduced_Profile);
          Put_Boolean (Data, Config.Operating_Conditions.Require_Profile_Detection);
          Put_Natural (Data, Host_Thermal_State'Pos (Config.Operating_Conditions.Maximum_Thermal_State));
          Put_Boolean (Data, Config.Operating_Conditions.Require_Thermal_Detection);
          Put_Float (Data, Long_Float (Config.Operating_Conditions.Window));
-         if Config.Operating_Conditions.Response = Pause then
+         if Mode (Config.Operating_Conditions) = Pause then
             Put_Float (Data, Long_Float (Config.Operating_Conditions.Stable_Time));
             Put_Float (Data, Long_Float (Config.Operating_Conditions.Poll_Interval));
             Put_Float (Data, Long_Float (Config.Operating_Conditions.Maximum_Pause_Time));
@@ -506,8 +505,7 @@ package body Flyology_Bench.Workers is
       Quiescence_Enabled   : Boolean;
       Interference_Enabled : Boolean;
       Interference_Mode    : Interference_Response;
-      Conditions_Enabled   : Boolean;
-      Conditions_Mode      : Condition_Response;
+      Conditions_Mode      : Operating_Conditions_Mode;
       Placement_Enabled    : Boolean;
       Lock_Enabled         : Boolean;
    begin
@@ -604,10 +602,9 @@ package body Flyology_Bench.Workers is
          end;
       end if;
 
-      Conditions_Enabled := Get_Boolean (Data, Cursor);
-      Conditions_Mode := Condition_Response'Val (Get_Natural (Data, Cursor));
-      if not Conditions_Enabled then
-         Result.Operating_Conditions := (Enabled => False, Response => Conditions_Mode);
+      Conditions_Mode := Operating_Conditions_Mode'Val (Get_Natural (Data, Cursor));
+      if Conditions_Mode = Disabled then
+         Result.Operating_Conditions := Disabled_Operating_Conditions;
       else
          declare
             Nonreduced      : constant Boolean := Get_Boolean (Data, Cursor);
@@ -627,42 +624,39 @@ package body Flyology_Bench.Workers is
                     Condition_Pause_Fallback'Val (Get_Natural (Data, Cursor));
                begin
                   Result.Operating_Conditions :=
-                    (Enabled                    => True,
-                     Response                   => Pause,
-                     Require_Nonreduced_Profile => Nonreduced,
-                     Require_Profile_Detection  => Require_Profile,
-                     Maximum_Thermal_State      => Maximum_Thermal,
-                     Require_Thermal_Detection  => Require_Thermal,
-                     Window                     => Window,
-                     Stable_Time                => Stable,
-                     Poll_Interval              => Poll,
-                     Maximum_Pause_Time         => Maximum,
-                     Rewarm_Time                => Rewarm,
-                     On_Pause_Timeout           => Fallback);
+                    Pause
+                      (On_Pause_Timeout           => Fallback,
+                       Require_Nonreduced_Profile => Nonreduced,
+                       Require_Profile_Detection  => Require_Profile,
+                       Maximum_Thermal_State      => Maximum_Thermal,
+                       Require_Thermal_Detection  => Require_Thermal,
+                       Window                     => Window,
+                       Stable_Time                => Stable,
+                       Poll_Interval              => Poll,
+                       Maximum_Pause_Time         => Maximum,
+                       Rewarm_Time                => Rewarm);
                end;
             else
                case Conditions_Mode is
                   when Observe =>
                      Result.Operating_Conditions :=
-                       (Enabled                    => True,
-                        Response                   => Observe,
-                        Require_Nonreduced_Profile => Nonreduced,
-                        Require_Profile_Detection  => Require_Profile,
-                        Maximum_Thermal_State      => Maximum_Thermal,
-                        Require_Thermal_Detection  => Require_Thermal,
-                        Window                     => Window);
+                       Observe
+                         (Require_Nonreduced_Profile => Nonreduced,
+                          Require_Profile_Detection  => Require_Profile,
+                          Maximum_Thermal_State      => Maximum_Thermal,
+                          Require_Thermal_Detection  => Require_Thermal,
+                          Window                     => Window);
 
                   when Fail =>
                      Result.Operating_Conditions :=
-                       (Enabled                    => True,
-                        Response                   => Fail,
-                        Require_Nonreduced_Profile => Nonreduced,
-                        Require_Profile_Detection  => Require_Profile,
-                        Maximum_Thermal_State      => Maximum_Thermal,
-                        Require_Thermal_Detection  => Require_Thermal,
-                        Window                     => Window);
+                       Fail
+                         (Require_Nonreduced_Profile => Nonreduced,
+                          Require_Profile_Detection  => Require_Profile,
+                          Maximum_Thermal_State      => Maximum_Thermal,
+                          Require_Thermal_Detection  => Require_Thermal,
+                          Window                     => Window);
 
-                  when Pause =>
+                  when Disabled | Pause =>
                      raise Program_Error;
                end case;
             end if;
@@ -1389,9 +1383,9 @@ package body Flyology_Bench.Workers is
             raise Protocol_Error with "worker interference report differs from its configuration";
          end if;
 
-         if Expected_Config.Operating_Conditions.Enabled /= Report.Conditions_Checked then
+         if (Mode (Expected_Config.Operating_Conditions) /= Disabled) /= Report.Conditions_Checked then
             raise Protocol_Error with "worker operating-condition report differs from its configuration";
-         elsif not Expected_Config.Operating_Conditions.Enabled then
+         elsif Mode (Expected_Config.Operating_Conditions) = Disabled then
             if Report.Profile_Availability /= Condition_Not_Checked
               or else Report.Low_Power_Availability /= Condition_Not_Checked
               or else Report.Process_Profile_Avail /= Condition_Not_Checked
@@ -1506,11 +1500,11 @@ package body Flyology_Bench.Workers is
             raise Protocol_Error with "throttle evidence has an invalid detector";
          elsif Report.Condition_Windows = 0 then
             raise Protocol_Error with "enabled operating-condition report contains no sampling window";
-         elsif Expected_Config.Operating_Conditions.Response = Fail
+         elsif Mode (Expected_Config.Operating_Conditions) = Fail
            and then Report.Affected_Units /= 0
          then
             raise Protocol_Error with "successful Fail report contains affected condition units";
-         elsif Expected_Config.Operating_Conditions.Response = Observe
+         elsif Mode (Expected_Config.Operating_Conditions) = Observe
            and then (Report.Recollected_Units /= 0
                      or else Report.Condition_Pauses /= 0
                      or else Report.Condition_Paused_NS /= 0.0
@@ -1518,7 +1512,7 @@ package body Flyology_Bench.Workers is
                      or else Report.Condition_Fallback_Used)
          then
             raise Protocol_Error with "Observe operating-condition report contains an action";
-         elsif Expected_Config.Operating_Conditions.Response /= Pause
+         elsif Mode (Expected_Config.Operating_Conditions) /= Pause
            and then (Report.Condition_Pauses /= 0
                      or else Report.Condition_Paused_NS /= 0.0
                      or else Report.Condition_Budget_Expired
@@ -1531,7 +1525,7 @@ package body Flyology_Bench.Workers is
             raise Protocol_Error with "operating-condition fallback and budget state disagree";
          elsif Report.Recollected_Units > Report.Affected_Units then
             raise Protocol_Error with "worker recollected more condition units than were affected";
-         elsif Expected_Config.Operating_Conditions.Response = Pause
+         elsif Mode (Expected_Config.Operating_Conditions) = Pause
            and then Expected_Config.Operating_Conditions.On_Pause_Timeout = Fallback_Fail
            and then (Report.Condition_Budget_Expired or else Report.Condition_Fallback_Used)
          then

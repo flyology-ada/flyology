@@ -121,25 +121,44 @@ begin
         (Base
          with delta
            Operating_Conditions =>
-             (Enabled                    => True,
-              Response                   => Flyology_Bench.Observe,
-              Require_Nonreduced_Profile => False,
-              Require_Profile_Detection  => False,
-              Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
-              Require_Thermal_Detection  => False,
-              Window                     => 0.002));
+             Flyology_Bench.Observe
+               (Require_Nonreduced_Profile => False,
+                Require_Profile_Detection  => False,
+                Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
+                Require_Thermal_Detection  => False,
+                Window                     => 0.002));
       Fail_Config : constant Flyology_Bench.Configuration :=
         (Observe_Config
          with delta
            Operating_Conditions =>
-             (Enabled                    => True,
-              Response                   => Flyology_Bench.Fail,
-              Require_Nonreduced_Profile => False,
-              Require_Profile_Detection  => False,
-              Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
-              Require_Thermal_Detection  => False,
-              Window                     => 0.002));
+             Flyology_Bench.Fail
+               (Require_Nonreduced_Profile => False,
+                Require_Profile_Detection  => False,
+                Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
+                Require_Thermal_Detection  => False,
+                Window                     => 0.002));
+      Pause_Config : constant Flyology_Bench.Configuration :=
+        (Observe_Config
+         with delta
+           Operating_Conditions =>
+             Flyology_Bench.Pause
+               (On_Pause_Timeout           => Flyology_Bench.Fallback_Observe,
+                Require_Nonreduced_Profile => False,
+                Require_Profile_Detection  => False,
+                Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Critical,
+                Require_Thermal_Detection  => False,
+                Window                     => 0.002,
+                Stable_Time                => 0.001,
+                Poll_Interval              => 0.001,
+                Maximum_Pause_Time         => 0.002,
+                Rewarm_Time                => 0.0));
    begin
+      W.Run
+        (Fixture, "ordinary", W.Ordinary_Measurement, Pause_Config, Default_Launch, Env, Results);
+      Check
+        (W.Outcome (Results (1)) = W.Normal_Result,
+         "Pause operating-condition policy did not round trip through a worker: "
+         & W.Reason (Results (1)));
       W.Run
         (Fixture, "wrong-condition-windows", W.Ordinary_Measurement,
          Observe_Config, Default_Launch, Env, Results);

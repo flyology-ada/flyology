@@ -227,7 +227,7 @@ procedure Flyology_Bench_Smoke is
       Custom_Metrics              => <>,
       CPU_Quiescence              => (others => <>),
       Interference                => (others => <>),
-      Operating_Conditions        => (others => <>),
+      Operating_Conditions        => Flyology_Bench.Disabled_Operating_Conditions,
       Placement                   => (others => <>),
       Host_Lock                   => (others => <>),
       Collect_Process_Telemetry   => False,
@@ -808,13 +808,12 @@ begin
         ((Config
           with delta
             Operating_Conditions =>
-              (Enabled                    => True,
-               Response                   => Flyology_Bench.Observe,
-               Require_Nonreduced_Profile => True,
-               Require_Profile_Detection  => False,
-               Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
-               Require_Thermal_Detection  => False,
-               Window                     => 0.002)),
+              Flyology_Bench.Observe
+                (Require_Nonreduced_Profile => True,
+                 Require_Profile_Detection  => False,
+                 Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
+                 Require_Thermal_Detection  => False,
+                 Window                     => 0.002)),
          Observed);
       Report := Flyology_Bench.Environment (Observed);
       Check (Report.Conditions_Checked, "operating conditions were not checked");

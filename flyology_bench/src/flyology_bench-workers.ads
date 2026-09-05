@@ -20,7 +20,7 @@ with Interfaces.C;
 package Flyology_Bench.Workers is
 
    --  Current binary envelope schema.
-   Protocol_Version                 : constant := 5;
+   Protocol_Version                 : constant := 6;
    --  Largest encoded stable case identity.
    Maximum_Identity_Length          : constant := 512;
    --  Largest effective or edited environment entry count.

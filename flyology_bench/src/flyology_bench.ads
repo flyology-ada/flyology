@@ -618,22 +618,25 @@ package Flyology_Bench is
    type Performance_Degradation is
      (Degradation_Unknown, Not_Degraded, High_Operating_Temperature, Lap_Detected, Other_Degradation);
 
-   --  Response to an operating condition rejected by
-   --  Operating_Conditions_Policy.
+   --  Operating-condition policy mode.
+   --  @enum Disabled Do not probe or gate operating conditions.
    --  @enum Observe Continue and retain the observed evidence.
    --  @enum Pause Wait for acceptable conditions before continuing, subject
-   --  to the total pause budget.
+   --  to the total pause budget and its explicitly selected expiration action.
    --  @enum Fail Raise Operating_Conditions_Unacceptable at the next condition
    --  check boundary.
-   type Condition_Response is (Observe, Pause, Fail);
+   type Operating_Conditions_Mode is (Disabled, Observe, Pause, Fail);
 
    --  What Pause does when its total wait budget is exhausted.
    --  @enum Fallback_Observe Record the expiration and continue.
    --  @enum Fallback_Fail Raise Operating_Conditions_Unacceptable.
    type Condition_Pause_Fallback is (Fallback_Observe, Fallback_Fail);
 
-   --  Controls operating-condition observation and gating. Probes run only
-   --  outside timed regions. A Pause response preserves sample/pair/round
+   --  Controls operating-condition observation and gating. The disabled
+   --  constant and the Observe, Pause, and Fail constructors select one of the
+   --  four explicit modes; clients cannot assemble a policy with an implicit
+   --  response. Probes run only outside timed regions. A Pause
+   --  response preserves sample/pair/round
    --  atomicity: after an unacceptable window it waits for a continuous
    --  stable interval, rewarms, then recollects the complete window. If the
    --  pause budget expires, Fallback_Observe retains the original affected
@@ -642,62 +645,80 @@ package Flyology_Bench is
    --  An unavailable detector result never establishes a clean host.
    --  Require_Profile_Detection and Require_Thermal_Detection make either
    --  absence unacceptable instead of allowing the policy to continue.
-   --  @field Enabled Whether to observe and gate operating conditions.
-   --  @field Response Action for an unacceptable operating condition.
-   --  @field Require_Nonreduced_Profile Whether a reduced configured profile
+   type Operating_Conditions_Policy is private;
+
+   --  Inert operating-condition policy whose mode is Disabled.
+   Disabled_Operating_Conditions : constant Operating_Conditions_Policy;
+
+   --  Construct a policy that records unacceptable conditions and continues.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
    --  or enabled low-power mode is unacceptable.
-   --  @field Require_Profile_Detection Whether missing configured-profile
+   --  @param Require_Profile_Detection Whether missing configured-profile
    --  evidence is unacceptable.
-   --  @field Maximum_Thermal_State Highest acceptable observed thermal state.
-   --  @field Require_Thermal_Detection Whether absence of every supported
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
    --  thermal-state, throttle-counter, and degradation signal is unacceptable.
-   --  @field Window Minimum target duration for each complete collection
-   --  window judged by this policy.
-   --  @field Stable_Time Required continuous acceptable interval after Pause.
-   --  @field Poll_Interval Delay between condition probes while Pause waits.
-   --  @field Maximum_Pause_Time Total condition-wait budget for the complete
-   --  benchmark run.
-   --  @field Rewarm_Time Workload rewarm duration after conditions recover
-   --  during collection.
-   --  @field On_Pause_Timeout Action when the total condition-wait budget
-   --  expires.
-   type Operating_Conditions_Policy
-     (Enabled  : Boolean := False;
-      Response : Condition_Response := Observe)
-   is record
-      case Enabled is
-         when True =>
-            Require_Nonreduced_Profile : Boolean := True;
-            Require_Profile_Detection  : Boolean := False;
-            Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
-            Require_Thermal_Detection  : Boolean := False;
-            Window                     : Positive_Duration := 0.050;
-            case Response is
-               when Pause =>
-                  Stable_Time        : Positive_Duration := 0.500;
-                  Poll_Interval      : Positive_Duration := 0.100;
-                  Maximum_Pause_Time : Positive_Duration := 30.0;
-                  Rewarm_Time        : Nonnegative_Duration := 0.050;
-                  On_Pause_Timeout   : Condition_Pause_Fallback := Fallback_Observe;
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @return An observing operating-condition policy.
+   function Observe
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy;
 
-               when Observe | Fail =>
-                  null;
-            end case;
-
-         when False =>
-            null;
-      end case;
-   end record
+   --  Construct a policy that waits for acceptable conditions and recollects
+   --  the complete affected sample, pair, or round. The pause-budget expiration
+   --  action is mandatory rather than silently defaulted.
+   --  @param On_Pause_Timeout Action when the total condition-wait budget expires.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
+   --  or enabled low-power mode is unacceptable.
+   --  @param Require_Profile_Detection Whether missing configured-profile
+   --  evidence is unacceptable.
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
+   --  thermal-state, throttle-counter, and degradation signal is unacceptable.
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @param Stable_Time Required continuous acceptable interval after Pause.
+   --  @param Poll_Interval Delay between condition probes while Pause waits.
+   --  @param Maximum_Pause_Time Total condition-wait budget for the complete run.
+   --  @param Rewarm_Time Workload rewarm duration after conditions recover.
+   --  @return A pausing operating-condition policy.
+   function Pause
+     (On_Pause_Timeout           : Condition_Pause_Fallback;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050) return Operating_Conditions_Policy
    with
-     Dynamic_Predicate =>
-       (if Operating_Conditions_Policy.Enabled and then Operating_Conditions_Policy.Response = Pause
-        then
-          Operating_Conditions_Policy.Maximum_Pause_Time >= Operating_Conditions_Policy.Stable_Time
-          and then Operating_Conditions_Policy.Poll_Interval
-                   <= Operating_Conditions_Policy.Maximum_Pause_Time),
-     Predicate_Failure =>
-       raise Constraint_Error
-         with "operating-condition pause budget must cover its stable and polling intervals";
+     Pre => Maximum_Pause_Time >= Stable_Time and then Poll_Interval <= Maximum_Pause_Time;
+
+   --  Construct a policy that raises at an unacceptable-condition boundary.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
+   --  or enabled low-power mode is unacceptable.
+   --  @param Require_Profile_Detection Whether missing configured-profile
+   --  evidence is unacceptable.
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
+   --  thermal-state, throttle-counter, and degradation signal is unacceptable.
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @return A failing operating-condition policy.
+   function Fail
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy;
+
+   --  Return a policy's explicit mode.
+   --  @param Policy Operating-condition policy to inspect.
+   --  @return Disabled, Observe, Pause, or Fail.
+   function Mode (Policy : Operating_Conditions_Policy) return Operating_Conditions_Mode;
 
    --  Raised when the operating-condition policy selects Fail, including a
    --  Pause whose configured fallback is Fail.
@@ -1044,7 +1065,7 @@ package Flyology_Bench is
       Custom_Metrics              : Custom_Metric_Registry;
       CPU_Quiescence              : CPU_Quiescence_Policy := (others => <>);
       Interference                : Interference_Policy := (others => <>);
-      Operating_Conditions        : Operating_Conditions_Policy := (others => <>);
+      Operating_Conditions        : Operating_Conditions_Policy := Disabled_Operating_Conditions;
       Placement                   : Placement_Policy := (others => <>);
       Host_Lock                   : Host_Lock_Policy := (others => <>);
       Collect_Process_Telemetry   : Boolean := False;
@@ -1645,6 +1666,33 @@ package Flyology_Bench is
    procedure Clobber_Memory;
 
 private
+   type Operating_Conditions_Policy is record
+      Mode_Value                 : Operating_Conditions_Mode := Disabled;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050;
+      On_Pause_Timeout           : Condition_Pause_Fallback := Fallback_Fail;
+   end record
+   with
+     Dynamic_Predicate =>
+       (if Operating_Conditions_Policy.Mode_Value = Pause
+        then
+          Operating_Conditions_Policy.Maximum_Pause_Time >= Operating_Conditions_Policy.Stable_Time
+          and then Operating_Conditions_Policy.Poll_Interval
+                   <= Operating_Conditions_Policy.Maximum_Pause_Time),
+     Predicate_Failure =>
+       raise Constraint_Error
+         with "operating-condition pause budget must cover its stable and polling intervals";
+
+   Disabled_Operating_Conditions : constant Operating_Conditions_Policy :=
+     (Mode_Value => Disabled, others => <>);
+
    type Custom_Name_Buffer is array (Positive range 1 .. Max_Custom_Metric_Name_Length) of Character;
    type Custom_Unit_Buffer is array (Positive range 1 .. Max_Custom_Metric_Unit_Length) of Character;
    type Timing_Source_Buffer is array (Positive range 1 .. Max_Timing_Source_Name_Length) of Character;

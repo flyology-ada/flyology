@@ -486,22 +486,21 @@ Config.Samples := 75;</code></pre>
               <figcaption>pause until conditions recover, then recollect the affected collection window</figcaption>
               <button class="copy-button" type="button" data-copy>Copy</button>
               <pre><code class="language-ada">Config.Operating_Conditions :=
-  (Enabled                    =&gt; True,
-   Response                   =&gt; Flyology_Bench.Pause,
-   Require_Nonreduced_Profile =&gt; True,
-   Require_Profile_Detection  =&gt; False,
-   Maximum_Thermal_State      =&gt; Flyology_Bench.Thermal_State_Fair,
-   Require_Thermal_Detection  =&gt; False,
-   Window                     =&gt; 0.050,
-   Stable_Time                =&gt; 0.500,
-   Poll_Interval              =&gt; 0.100,
-   Maximum_Pause_Time         =&gt; 30.0,
-   Rewarm_Time                =&gt; 0.050,
-   On_Pause_Timeout           =&gt; Flyology_Bench.Fallback_Observe);</code></pre>
+  Flyology_Bench.Pause
+    (On_Pause_Timeout           =&gt; Flyology_Bench.Fallback_Observe,
+     Require_Nonreduced_Profile =&gt; True,
+     Require_Profile_Detection  =&gt; False,
+     Maximum_Thermal_State      =&gt; Flyology_Bench.Thermal_State_Fair,
+     Require_Thermal_Detection  =&gt; False,
+     Window                     =&gt; 0.050,
+     Stable_Time                =&gt; 0.500,
+     Poll_Interval              =&gt; 0.100,
+     Maximum_Pause_Time         =&gt; 30.0,
+     Rewarm_Time                =&gt; 0.050);</code></pre>
             </figure>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt>Activation</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Enabled</code></a> activates the probes. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Response</code></a> selects the behavior described below.</dd></div>
+                <div class="decision-row"><dt>Activation</dt><dd><code>Disabled</code> is the default. Constructing the policy with <code>Observe</code>, <code>Pause</code>, or <code>Fail</code> opts in and names the response directly. The policy is private, so an aggregate cannot enable it with an omitted response. <code>Pause</code> requires <code>On_Pause_Timeout</code>; there is no implicit expiration action.</dd></div>
                 <div class="decision-row"><dt>Profile rules</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Nonreduced_Profile</code></a> rejects a reduced configured profile or enabled low-power mode. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Profile_Detection</code></a> makes missing profile evidence unacceptable.</dd></div>
                 <div class="decision-row"><dt>Thermal rules</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Maximum_Thermal_State</code></a> sets the highest acceptable thermal state from nominal through critical. The example uses <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#928efbd66951aea6e66070d3788e71c325865579178b510d09645d32b09128af"><code>Thermal_State_Fair</code></a>. Unknown is an observation result, not an acceptable threshold. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Require_Thermal_Detection</code></a> makes absence of every supported thermal-state, throttle-counter, and degradation signal unacceptable.</dd></div>
                 <div class="decision-row"><dt>Collection window</dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#235b01f4a413c8a45abf7fe737492019fa320ebe086b871b016fefd0441bc673"><code>Window</code></a> sets the minimum target duration for each complete group of collection units.</dd></div>
@@ -512,9 +511,10 @@ Config.Samples := 75;</code></pre>
             </div>
             <div class="decision-list">
               <dl>
-                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Observe</code></a></dt><dd>The harness records unacceptable evidence and continues. During collection, it retains the affected collection window. Use this response when a run must finish without a new wait or failure condition.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Pause</code></a></dt><dd>The harness can wait at initial preflight, after workload warmup, and after calibration. If conditions recover during the calibration check, the harness repeats calibration. During collection, it waits for continuous recovery, rewarms, and recollects the complete affected window. Pause and rewarm time do not consume the sampling budget.</dd></div>
-                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#14ed86b2fd77fc4a30171bb3d7389b45201c13b6341d5787d69822846078a6fe"><code>Fail</code></a></dt><dd>During collection, the harness completes the affected window before it raises <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#73bbc322b82eead61be222d5f53310973cfe6839bd57b7534961c2e481aa60b7"><code>Operating_Conditions_Unacceptable</code></a>. At initial, post-warmup, or calibration checks, the harness raises the exception at the check boundary.</dd></div>
+                <div class="decision-row"><dt><code>Disabled</code></dt><dd>The default performs no operating-condition probes and adds no new wait or failure condition.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#a5fe0775b09806adb31f912fe456d91eda638d98ac89fb516e61707dedfd24e0"><code>Observe</code></a></dt><dd>The harness records unacceptable evidence and continues. During collection, it retains the affected collection window. Use this response when a run must finish without a new wait or failure condition.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#659e599c75df75998112c8e9230f589062ae8da00324eb84143f7b997c785dd9"><code>Pause</code></a></dt><dd>The harness can wait at initial preflight, after workload warmup, and after calibration. If conditions recover during the calibration check, the harness repeats calibration. During collection, it waits for continuous recovery, rewarms, and recollects the complete affected window. Pause and rewarm time do not consume the sampling budget.</dd></div>
+                <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#7a4f04b268d952fe26a613c83efb8842010b6aef51d9319cb25b17ba5181f3ea"><code>Fail</code></a></dt><dd>During collection, the harness completes the affected window before it raises <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#73bbc322b82eead61be222d5f53310973cfe6839bd57b7534961c2e481aa60b7"><code>Operating_Conditions_Unacceptable</code></a>. At initial, post-warmup, or calibration checks, the harness raises the exception at the check boundary.</dd></div>
                 <div class="decision-row"><dt><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Condition_Pause_Fallback</code></a></dt><dd><a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Fallback_Observe</code></a> records the expired budget and continues. During collection, it retains the original affected window. At earlier checks, no collection window exists. <a href="../../api/flyology_bench/9fc314b9895a8fdbd35dbc2621b7aeef14a5cdbf2068bb0b8b25ce2c22a8bafc.html#05427b79be44d573726a4254094098403a6824ac8c567fba86d1dc24a63bfc20"><code>Fallback_Fail</code></a> raises the same exception.</dd></div>
               </dl>
             </div>

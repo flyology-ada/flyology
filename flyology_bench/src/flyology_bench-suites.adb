@@ -1041,7 +1041,7 @@ package body Flyology_Bench.Suites is
          Scheduler_Probe           => null,
          CPU_Quiescence            => (Enabled => False),
          Interference              => (Enabled => False, Response => Observe),
-         Operating_Conditions      => (Enabled => False, Response => Observe),
+         Operating_Conditions      => Disabled_Operating_Conditions,
          Placement                 => (Enabled => False),
          Host_Lock                 => (Enabled => False),
          Collect_Process_Telemetry => False,
