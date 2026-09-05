@@ -8,6 +8,7 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
    Rejected_Profile_Reads : Rejection_Map := [others => False];
    Read_Delays_MS         : Delay_Map := [others => 0];
    Reject_From            : Natural := 0;
+   Throttle_From          : Natural := 0;
    Reads                  : Natural := 0;
    Profile_Reads          : Natural := 0;
 
@@ -17,6 +18,7 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       Rejected_Profile_Reads := [others => False];
       Read_Delays_MS := [others => 0];
       Reject_From := 0;
+      Throttle_From := 0;
       Reads := 0;
       Profile_Reads := 0;
    end Reset;
@@ -41,6 +43,14 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       end if;
       Rejected_Profile_Reads (Index) := True;
    end Reject_Profile_Read;
+
+   procedure Begin_Throttle_Event (Index : Positive) is
+   begin
+      if Index > Maximum_Reads then
+         raise Constraint_Error with "condition hook throttle index exceeds its fixed capacity";
+      end if;
+      Throttle_From := Index;
+   end Begin_Throttle_Event;
 
    procedure Delay_Read (Index : Positive; Milliseconds : Positive) is
    begin
@@ -99,7 +109,7 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
          Throttle_Availability       => Condition_Available,
          Throttle_Time_Avail         => Condition_Available,
          Throttle_Detector           => Linux_CPU_Thermal_Throttle,
-         Throttle_Total              => 0,
+         Throttle_Total              => (if Throttle_From /= 0 and then Reads >= Throttle_From then 1 else 0),
          Throttle_Time_Total_MS      => 0,
          Throttle_Discontinuous      => False,
          Throttle_Time_Discontinuous => False);

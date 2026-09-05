@@ -10,6 +10,7 @@ private package Flyology_Bench.Internal_Condition_Test_Hooks is
    procedure Reject_Read (Index : Positive);
    procedure Reject_From_Read (Index : Positive);
    procedure Reject_Profile_Read (Index : Positive);
+   procedure Begin_Throttle_Event (Index : Positive);
    procedure Delay_Read (Index : Positive; Milliseconds : Positive);
 
    function Read_Count return Natural;

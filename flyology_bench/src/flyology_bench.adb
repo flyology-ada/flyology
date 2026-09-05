@@ -818,7 +818,7 @@ package body Flyology_Bench is
       Coarse_Conditions_Valid      : Boolean := False;
       Last_Coarse_Condition_Read   : Interfaces.Unsigned_64 := 0;
       Process_Baseline             : Process_Performance_Profile := Process_Profile_Unknown;
-      Throttle_Time_Required       : Boolean := False;
+      Throttle_Recovery_Unresolved : Boolean := False;
       Report                       : Environment_Report;
       Foreign                      : Sample_Array (Sample_Index'Range) := (others => 0.0);
    end record;
@@ -1275,7 +1275,7 @@ package body Flyology_Bench is
             Discontinuous => Throttle_Time_Discontinuous);
       begin
          return
-           (Watch.Throttle_Time_Required and then Current.Throttle_Time_Avail /= Condition_Available)
+           Watch.Throttle_Recovery_Unresolved
            or else Condition_Policy.Unacceptable
                      (Required, State, Watch.Process_Baseline, Throttle_Events, Throttle_Time);
       end;
@@ -1493,7 +1493,7 @@ package body Flyology_Bench is
       if Watch.Condition_Paused_Total >= Budget then
          Watch.Report.Condition_Budget_Expired := True;
          Watch.Report.Condition_Fallback_Used := True;
-         Watch.Throttle_Time_Required := False;
+         Watch.Throttle_Recovery_Unresolved := False;
          case Condition_Policy.Timeout_Action (Policy.On_Pause_Timeout) is
             when Condition_Policy.Policy_Accept =>
                null;
@@ -1540,9 +1540,12 @@ package body Flyology_Bench is
          if Time_Evidence.Availability = Condition_Available and then not Throttle_Time_Discontinuous then
             Add_Throttle_Time (Watch, Throttle_Time_Increase);
          end if;
-         Watch.Throttle_Time_Required :=
-           Watch.Throttle_Time_Required
-           or else (Throttle_Increase > 0 and then Previous.Throttle_Time_Avail /= Condition_Available);
+         --  Linux cumulative duration changes only after a throttle episode
+         --  ends; a flat value cannot establish that an in-progress episode
+         --  cooled. Without a separate live status, an observed event keeps
+         --  recovery unresolved until the cumulative pause fallback applies.
+         Watch.Throttle_Recovery_Unresolved :=
+           Watch.Throttle_Recovery_Unresolved or else Throttle_Increase > 0;
       end;
       Record_Condition_Snapshot (Watch, Previous);
       Previous_Time := Clock_Now;
@@ -1565,7 +1568,11 @@ package body Flyology_Bench is
             Sleep_NS := Interfaces.Unsigned_64'Min (Poll_NS, Remaining_Budget - Elapsed);
             delay Duration (Long_Float (Sleep_NS) / 1_000_000_000.0);
          end;
-         Read_Conditions (Watch, Current, Force_Profile => True, Deadline => Deadline, Account_Time => False);
+         --  The first pause read above force-refreshes coarse profile state.
+         --  Keep live thermal state on every poll, but let macOS pmset values
+         --  use their one-second cache so the observer does not launch three
+         --  helper processes at every poll interval.
+         Read_Conditions (Watch, Current, Deadline => Deadline, Account_Time => False);
          Now := Clock_Now;
          declare
             Event_Evidence : constant Condition_Policy.Counter_Evidence :=
@@ -1591,9 +1598,8 @@ package body Flyology_Bench is
             if Time_Evidence.Availability = Condition_Available and then not Throttle_Time_Discontinuous then
                Add_Throttle_Time (Watch, Throttle_Time_Increase);
             end if;
-            Watch.Throttle_Time_Required :=
-              Watch.Throttle_Time_Required
-              or else (Throttle_Increase > 0 and then Current.Throttle_Time_Avail /= Condition_Available);
+            Watch.Throttle_Recovery_Unresolved :=
+              Watch.Throttle_Recovery_Unresolved or else Throttle_Increase > 0;
             if Event_Evidence.Availability = Condition_Unavailable
               and then Previous.Throttle_Availability = Condition_Available
             then
@@ -1646,7 +1652,7 @@ package body Flyology_Bench is
       if not Recovered then
          Watch.Report.Condition_Budget_Expired := True;
          Watch.Report.Condition_Fallback_Used := True;
-         Watch.Throttle_Time_Required := False;
+         Watch.Throttle_Recovery_Unresolved := False;
          case Condition_Policy.Timeout_Action (Policy.On_Pause_Timeout) is
             when Condition_Policy.Policy_Accept =>
                null;
@@ -1658,7 +1664,7 @@ package body Flyology_Bench is
                raise Program_Error with "invalid operating-condition timeout action";
          end case;
       else
-         Watch.Throttle_Time_Required := False;
+         Watch.Throttle_Recovery_Unresolved := False;
       end if;
    end Await_Condition_Settle;
 
@@ -1835,10 +1841,7 @@ package body Flyology_Bench is
          Watch.Report.Affected_Units := Watch.Report.Affected_Units + Units;
       end if;
       Action := Condition_Response_Action (Config.Operating_Conditions.Response, Rejected => True);
-      Watch.Throttle_Time_Required :=
-        Action = Pause_For_Conditions
-        and then Throttle_Increase > 0
-        and then Current.Throttle_Time_Avail /= Condition_Available;
+      Watch.Throttle_Recovery_Unresolved := Action = Pause_For_Conditions and then Throttle_Increase > 0;
    end Judge_Condition_Window;
 
    procedure Validate_After_Calibration
@@ -1848,7 +1851,7 @@ package body Flyology_Bench is
       Recovered : Boolean;
    begin
       Recalibrate := False;
-      Judge_Condition_Window (Config, Watch, 1, Action, Count_Unit => False);
+      Judge_Condition_Window (Config, Watch, 1, Action, Count_Unit => False, Force_Profile => True);
       case Action is
          when Accept_Conditions    =>
             null;
@@ -1874,9 +1877,10 @@ package body Flyology_Bench is
       Record_Condition_Snapshot (Watch, Current, Final => True);
    end Finalize_Operating_Conditions;
 
-   --  Number of collection units judged together. Interference watching is
-   --  the only reason to group units at all; without it every unit is judged
-   --  alone and the collection loop keeps its original shape.
+   --  Number of collection units judged together. Interference or operating-
+   --  condition watching is the only reason to group units at all; without
+   --  either, every unit is judged alone and the collection loop keeps its
+   --  original shape.
    function Units_Per_Window
      (Config : Configuration; Unit_Nanoseconds : Long_Float; Total_Units : Positive) return Positive
    is
@@ -3190,6 +3194,7 @@ package body Flyology_Bench is
          Action                   : Window_Action;
          Condition_Result         : Condition_Action;
          Recovered                : Boolean;
+         Terminal_Window          : Boolean;
 
          --  A resumed run has cold caches, predictors, and frequency state.
          --  Without this the first sample after a pause is exactly the
@@ -3238,8 +3243,19 @@ package body Flyology_Bench is
                   end loop;
                   Judge_Window
                     (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
+                  Terminal_Window :=
+                    Window_Last = Total_Samples
+                    or else Sampling_Limit_Reached
+                              (Config,
+                               Sampling_Started,
+                               Completed,
+                               Watch.Paused_Total - Paused_At_Sampling_Start);
                   Judge_Condition_Window
-                    (Config, Watch, Window_Last - Window_First + 1, Condition_Result, Force_Profile => True);
+                    (Config,
+                     Watch,
+                     Window_Last - Window_First + 1,
+                     Condition_Result,
+                     Force_Profile => Terminal_Window);
                   if Condition_Result = Fail_Conditions then
                      raise Operating_Conditions_Unacceptable
                        with "operating conditions changed during measurement";
@@ -3277,9 +3293,7 @@ package body Flyology_Bench is
                   end if;
                end;
             end loop;
-            exit when
-              Sampling_Limit_Reached
-                (Config, Sampling_Started, Completed, Watch.Paused_Total - Paused_At_Sampling_Start);
+            exit when Terminal_Window;
             Window_First := Window_Last + 1;
          end loop;
          Result.Sample_Total := Sample_Count (Completed);
@@ -3592,6 +3606,7 @@ package body Flyology_Bench is
             Action                   : Window_Action;
             Condition_Result         : Condition_Action;
             Recovered                : Boolean;
+            Terminal_Window          : Boolean;
 
             procedure Collect_Pair (Index : Positive) is
                Reference_Time  : Long_Float;
@@ -3712,12 +3727,19 @@ package body Flyology_Bench is
                      end loop;
                      Judge_Window
                        (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
+                     Terminal_Window :=
+                       Window_Last = Total_Samples
+                       or else Sampling_Limit_Reached
+                                 (Config,
+                                  Sampling_Started,
+                                  Completed,
+                                  Watch.Paused_Total - Paused_At_Sampling_Start);
                      Judge_Condition_Window
                        (Config,
                         Watch,
                         Window_Last - Window_First + 1,
                         Condition_Result,
-                        Force_Profile => True);
+                        Force_Profile => Terminal_Window);
                      if Condition_Result = Fail_Conditions then
                         raise Operating_Conditions_Unacceptable
                           with "operating conditions changed during paired comparison";
@@ -3756,9 +3778,7 @@ package body Flyology_Bench is
                      end if;
                   end;
                end loop;
-               exit when
-                 Sampling_Limit_Reached
-                   (Config, Sampling_Started, Completed, Watch.Paused_Total - Paused_At_Sampling_Start);
+               exit when Terminal_Window;
                Window_First := Window_Last + 1;
             end loop;
             Result.Reference_Data.Sample_Total := Sample_Count (Completed);
@@ -4212,6 +4232,7 @@ package body Flyology_Bench is
                Action                   : Window_Action;
                Condition_Result         : Condition_Action;
                Recovered                : Boolean;
+               Terminal_Window          : Boolean;
 
                procedure Collect_Round (Sample : Positive) is
                begin
@@ -4272,12 +4293,19 @@ package body Flyology_Bench is
                         end loop;
                         Judge_Window
                           (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
+                        Terminal_Window :=
+                          Window_Last = Total_Rounds
+                          or else Sampling_Limit_Reached
+                                    (Config,
+                                     Sampling_Started,
+                                     Collected_Samples,
+                                     Watch.Paused_Total - Paused_At_Sampling_Start);
                         Judge_Condition_Window
                           (Config,
                            Watch,
                            Window_Last - Window_First + 1,
                            Condition_Result,
-                           Force_Profile => True);
+                           Force_Profile => Terminal_Window);
                         if Condition_Result = Fail_Conditions then
                            raise Operating_Conditions_Unacceptable
                              with "operating conditions changed during balanced comparison";
@@ -4331,12 +4359,7 @@ package body Flyology_Bench is
                         end if;
                      end;
                   end loop;
-                  exit when
-                    Sampling_Limit_Reached
-                      (Config,
-                       Sampling_Started,
-                       Collected_Samples,
-                       Watch.Paused_Total - Paused_At_Sampling_Start);
+                  exit when Terminal_Window;
                   Window_First := Window_Last + 1;
                end loop;
             end;
@@ -4356,6 +4379,7 @@ package body Flyology_Bench is
                   Recovered            : Boolean;
                   Paused_At_Case_Start : constant Interfaces.Unsigned_64 := Watch.Paused_Total;
                   Reached              : Boolean := False;
+                  Terminal_Window      : Boolean;
 
                   procedure Rewarm (Span : Nonnegative_Duration) is
                      Deadline : Interfaces.Unsigned_64;
@@ -4390,12 +4414,16 @@ package body Flyology_Bench is
                            end loop;
                            Judge_Window
                              (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
+                           Terminal_Window :=
+                             Window_Last = Total_Samples
+                             or else Sequential_Limit_Reached
+                                       (Case_Started, Window_Last, Watch.Paused_Total - Paused_At_Case_Start);
                            Judge_Condition_Window
                              (Config,
                               Watch,
                               Window_Last - Window_First + 1,
                               Condition_Result,
-                              Force_Profile => True);
+                              Force_Profile => Terminal_Window);
                            if Condition_Result = Fail_Conditions then
                               raise Operating_Conditions_Unacceptable
                                 with "operating conditions changed during sequential comparison";
@@ -4437,9 +4465,7 @@ package body Flyology_Bench is
                            end if;
                         end;
                      end loop;
-                     Reached :=
-                       Sequential_Limit_Reached
-                         (Case_Started, Window_Last, Watch.Paused_Total - Paused_At_Case_Start);
+                     Reached := Terminal_Window;
                      Window_First := Window_Last + 1;
                   end loop;
                   --  This case's windows are its own, so it keeps its own

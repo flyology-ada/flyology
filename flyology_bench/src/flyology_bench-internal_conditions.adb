@@ -30,39 +30,32 @@ package body Flyology_Bench.Internal_Conditions is
    use type System.Address;
 
    Maximum_Command_Output : constant := 32 * 1_024;
-   Event_Available_Flag  : constant Interfaces.Unsigned_8 := 1;
-   Time_Available_Flag   : constant Interfaces.Unsigned_8 := 2;
+   Event_Available_Flag   : constant Interfaces.Unsigned_8 := 1;
+   Time_Available_Flag    : constant Interfaces.Unsigned_8 := 2;
    subtype Command_Output_Index is C.size_t range 0 .. Maximum_Command_Output - 1;
-   type Command_Output is array (Command_Output_Index) of aliased C.char
-   with Convention => C;
-   type Discard_Output is array (C.size_t range 0 .. 511) of aliased C.char
-   with Convention => C;
-   type Chars_Ptr_Array is array (C.size_t range <>) of CS.chars_ptr
-   with Convention => C;
+   type Command_Output is array (Command_Output_Index) of aliased C.char with Convention => C;
+   type Discard_Output is array (C.size_t range 0 .. 511) of aliased C.char with Convention => C;
+   type Chars_Ptr_Array is array (C.size_t range <>) of CS.chars_ptr with Convention => C;
    subtype Condition_Text_Index is C.size_t range 0 .. 127;
-   type Condition_Text is array (Condition_Text_Index) of aliased C.char
-   with Convention => C;
+   type Condition_Text is array (Condition_Text_Index) of aliased C.char with Convention => C;
 
-   Capture_EINTR : C.int
+   Capture_EINTR       : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_eintr";
-   Capture_EAGAIN : C.int
+   Capture_EAGAIN      : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_eagain";
    Capture_EWOULDBLOCK : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_ewouldblock";
-   Capture_WNOHANG : C.int
+   Capture_WNOHANG     : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_wnohang";
-   Capture_SIGKILL : C.int
+   Capture_SIGKILL     : C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_sigkill";
 
    function C_Capture_Start
-     (Path        : CS.chars_ptr;
-      Arguments   : System.Address;
-      Descriptor  : access C.int;
-      Child_PID   : access C.int) return C.int
+     (Path : CS.chars_ptr; Arguments : System.Address; Descriptor : access C.int; Child_PID : access C.int)
+      return C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_start";
 
-   function C_Capture_Poll
-     (Descriptor : C.int; Timeout_MS : C.int; Ready : access C.int) return C.int
+   function C_Capture_Poll (Descriptor : C.int; Timeout_MS : C.int; Ready : access C.int) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_capture_poll";
 
    function C_Read (Descriptor : C.int; Output : System.Address; Capacity : C.size_t) return C.long
@@ -93,8 +86,7 @@ package body Flyology_Bench.Internal_Conditions is
    function C_Linux_PPD_Open (Bus : access System.Address) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_linux_ppd_open";
 
-   function C_Linux_PPD_Set_Timeout
-     (Bus : System.Address; Timeout_US : Interfaces.Unsigned_64) return C.int
+   function C_Linux_PPD_Set_Timeout (Bus : System.Address; Timeout_US : Interfaces.Unsigned_64) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_linux_ppd_set_timeout";
 
    function C_Linux_PPD_Get_Name_Credentials
@@ -106,13 +98,13 @@ package body Flyology_Bench.Internal_Conditions is
    with Import, Convention => C, External_Name => "flyology_bench_linux_ppd_copy_unique_name";
 
    function C_Linux_PPD_Get_Property
-     (Bus         : System.Address;
-      Destination : CS.chars_ptr;
-      Path        : CS.chars_ptr;
+     (Bus            : System.Address;
+      Destination    : CS.chars_ptr;
+      Path           : CS.chars_ptr;
       Interface_Name : CS.chars_ptr;
-      Property    : CS.chars_ptr;
-      Target      : System.Address;
-      Capacity    : C.size_t) return C.int
+      Property       : CS.chars_ptr;
+      Target         : System.Address;
+      Capacity       : C.size_t) return C.int
    with Import, Convention => C, External_Name => "flyology_bench_linux_ppd_get_property";
 
    procedure C_Linux_PPD_Credentials_Unref (Credentials : System.Address)
@@ -124,10 +116,8 @@ package body Flyology_Bench.Internal_Conditions is
    type Argument_List is array (Positive range <>) of US.Unbounded_String;
 
    function Capture
-     (Command    : String;
-      Arguments  : Argument_List;
-      Timeout_MS : C.unsigned;
-      Success    : out Boolean) return US.Unbounded_String
+     (Command : String; Arguments : Argument_List; Timeout_MS : C.unsigned; Success : out Boolean)
+      return US.Unbounded_String
    is
       Native_Arguments : Chars_Ptr_Array (0 .. C.size_t (Arguments'Length + 1)) := (others => CS.Null_Ptr);
       Path             : CS.chars_ptr := CS.Null_Ptr;
@@ -249,9 +239,7 @@ package body Flyology_Bench.Internal_Conditions is
                   exit;
                end if;
                Remaining_NS := Deadline - Now;
-               Milliseconds :=
-                 Remaining_NS / 1_000_000
-                 + (if Remaining_NS mod 1_000_000 = 0 then 0 else 1);
+               Milliseconds := Remaining_NS / 1_000_000 + (if Remaining_NS mod 1_000_000 = 0 then 0 else 1);
                Poll_MS := C.int (Interfaces.Unsigned_64'Min (50, Milliseconds));
                if Pipe_EOF then
                   delay Duration (Poll_MS) / 1_000.0;
@@ -292,26 +280,21 @@ package body Flyology_Bench.Internal_Conditions is
    end Capture;
 
    procedure Capture_For_Test
-     (Command      : String;
-      Argument     : String;
-      Timeout_MS   : Positive;
-      Success      : out Boolean;
+     (Command       : String;
+      Argument      : String;
+      Timeout_MS    : Positive;
+      Success       : out Boolean;
       Output_Length : out Natural)
    is
       Result : constant US.Unbounded_String :=
-        Capture
-          (Command,
-           [1 => US.To_Unbounded_String (Argument)],
-           C.unsigned (Timeout_MS),
-           Success);
+        Capture (Command, [1 => US.To_Unbounded_String (Argument)], C.unsigned (Timeout_MS), Success);
    begin
       Output_Length := US.Length (Result);
    end Capture_For_Test;
 
-   function Remaining_Timeout (Deadline : Interfaces.Unsigned_64) return C.unsigned
-   is
-      Now       : Interfaces.Unsigned_64;
-      Remaining : Interfaces.Unsigned_64;
+   function Remaining_Timeout (Deadline : Interfaces.Unsigned_64) return C.unsigned is
+      Now          : Interfaces.Unsigned_64;
+      Remaining    : Interfaces.Unsigned_64;
       Milliseconds : Interfaces.Unsigned_64;
    begin
       if Deadline = Interfaces.Unsigned_64'Last then
@@ -322,17 +305,15 @@ package body Flyology_Bench.Internal_Conditions is
          return 0;
       end if;
       Remaining := Deadline - Now;
-      Milliseconds :=
-        Remaining / 1_000_000 + (if Remaining mod 1_000_000 = 0 then 0 else 1);
-      return
-        (if Milliseconds >= 2_000 then 2_000 else C.unsigned (Milliseconds));
+      Milliseconds := Remaining / 1_000_000 + (if Remaining mod 1_000_000 = 0 then 0 else 1);
+      return (if Milliseconds >= 2_000 then 2_000 else C.unsigned (Milliseconds));
    end Remaining_Timeout;
 
-   function Lower (Value : String) return String is
-     (Ada.Characters.Handling.To_Lower (Value));
+   function Lower (Value : String) return String
+   is (Ada.Characters.Handling.To_Lower (Value));
 
-   function Trim (Value : String) return String is
-     (Ada.Strings.Fixed.Trim (Value, Ada.Strings.Both));
+   function Trim (Value : String) return String
+   is (Ada.Strings.Fixed.Trim (Value, Ada.Strings.Both));
 
    function Text_Value (Value : Condition_Text) return String is
       Result : US.Unbounded_String;
@@ -382,58 +363,59 @@ package body Flyology_Bench.Internal_Conditions is
       end if;
    end Parse_Profile;
 
-   procedure Read_Darwin_Profile
-     (Value : in out Snapshot; Deadline : Interfaces.Unsigned_64) is
-      Batt_OK   : Boolean;
-      Custom_OK : Boolean;
-      Batt_After_OK : Boolean;
-      Batt      : constant String :=
+   procedure Read_Darwin_Profile (Value : in out Snapshot; Deadline : Interfaces.Unsigned_64) is
+      Batt_OK        : Boolean;
+      Custom_OK      : Boolean;
+      Batt_After_OK  : Boolean;
+      Batt           : constant String :=
         US.To_String
           (Capture
              ("/usr/bin/pmset",
               [1 => US.To_Unbounded_String ("-g"), 2 => US.To_Unbounded_String ("batt")],
               Remaining_Timeout (Deadline),
               Batt_OK));
-      Custom    : constant String :=
+      Custom         : constant String :=
         US.To_String
           (Capture
              ("/usr/bin/pmset",
               [1 => US.To_Unbounded_String ("-g"), 2 => US.To_Unbounded_String ("custom")],
               Remaining_Timeout (Deadline),
               Custom_OK));
-      Batt_After : constant String :=
+      Batt_After     : constant String :=
         US.To_String
           (Capture
              ("/usr/bin/pmset",
               [1 => US.To_Unbounded_String ("-g"), 2 => US.To_Unbounded_String ("batt")],
               Remaining_Timeout (Deadline),
               Batt_After_OK));
-      Active_AC : constant Boolean :=
+      Active_AC      : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt), "now drawing from 'ac power'") > 0;
       Active_Battery : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt), "now drawing from 'battery power'") > 0;
-      Active_UPS : constant Boolean :=
+      Active_UPS     : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt), "now drawing from 'ups power'") > 0;
-      After_AC : constant Boolean :=
+      After_AC       : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt_After), "now drawing from 'ac power'") > 0;
-      After_Battery : constant Boolean :=
+      After_Battery  : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt_After), "now drawing from 'battery power'") > 0;
-      After_UPS : constant Boolean :=
+      After_UPS      : constant Boolean :=
         Ada.Strings.Fixed.Index (Lower (Batt_After), "now drawing from 'ups power'") > 0;
-      In_Section : Boolean := False;
-      Cursor     : Positive := Custom'First;
-      Low_Seen   : Boolean := False;
-      Low_Set    : Boolean := False;
-      High_Seen  : Boolean := False;
-      High_Set   : Boolean := False;
+      In_Section     : Boolean := False;
+      Cursor         : Positive := Custom'First;
+      Low_Seen       : Boolean := False;
+      Low_Set        : Boolean := False;
+      High_Seen      : Boolean := False;
+      High_Set       : Boolean := False;
    begin
       if not Batt_OK
         or else not Custom_OK
         or else not Batt_After_OK
-        or else (if Active_AC then 1 else 0) + (if Active_Battery then 1 else 0)
-                  + (if Active_UPS then 1 else 0) /= 1
-        or else (if After_AC then 1 else 0) + (if After_Battery then 1 else 0)
-                  + (if After_UPS then 1 else 0) /= 1
+        or else (if Active_AC then 1 else 0)
+                + (if Active_Battery then 1 else 0)
+                + (if Active_UPS then 1 else 0)
+                /= 1
+        or else (if After_AC then 1 else 0) + (if After_Battery then 1 else 0) + (if After_UPS then 1 else 0)
+                /= 1
         or else Active_AC /= After_AC
         or else Active_Battery /= After_Battery
         or else Active_UPS /= After_UPS
@@ -455,10 +437,9 @@ package body Flyology_Bench.Internal_Conditions is
                if Ada.Strings.Fixed.Index (Normalized, "power:") > 0 then
                   In_Section :=
                     (Active_AC and then Ada.Strings.Fixed.Index (Normalized, "ac power:") > 0)
-                    or else
-                      (Active_Battery and then Ada.Strings.Fixed.Index (Normalized, "battery power:") > 0)
-                    or else
-                      (Active_UPS and then Ada.Strings.Fixed.Index (Normalized, "ups power:") > 0);
+                    or else (Active_Battery
+                             and then Ada.Strings.Fixed.Index (Normalized, "battery power:") > 0)
+                    or else (Active_UPS and then Ada.Strings.Fixed.Index (Normalized, "ups power:") > 0);
                elsif In_Section and then Ada.Strings.Fixed.Index (Normalized, "powermode") = 1 then
                   declare
                      Setting : constant String := Trim (Normalized (10 .. Normalized'Last));
@@ -544,14 +525,13 @@ package body Flyology_Bench.Internal_Conditions is
       if Thermal_Available /= 0 and then Thermal_State in 0 .. 3 then
          Value.Thermal_Availability := Condition_Available;
          Value.Thermal_Detector := Darwin_Process_Info;
-         Value.Thermal_State := Host_Thermal_State'Val (Host_Thermal_State'Pos (Thermal_State_Nominal)
-                                                        + Integer (Thermal_State));
+         Value.Thermal_State :=
+           Host_Thermal_State'Val (Host_Thermal_State'Pos (Thermal_State_Nominal) + Integer (Thermal_State));
       end if;
       if Low_Power_Available /= 0 and then Low_Power in 0 .. 1 then
          Value.Low_Power_Availability := Condition_Available;
          Value.Low_Power_Detector := Darwin_Process_Info;
-         Value.Low_Power_Mode :=
-           (if Low_Power = 0 then Low_Power_Mode_Disabled else Low_Power_Mode_Enabled);
+         Value.Low_Power_Mode := (if Low_Power = 0 then Low_Power_Mode_Disabled else Low_Power_Mode_Enabled);
       end if;
       if Profile_Available /= 0 and then Default_Profile + Sustained_Profile = 1 then
          Value.Process_Profile_Avail := Condition_Available;
@@ -594,17 +574,13 @@ package body Flyology_Bench.Internal_Conditions is
             Event_Discontinuous := True;
             Time_Discontinuous := True;
          else
-            if (Continuity.Flags (Position) and Event_Available_Flag)
-                 /= (Flags and Event_Available_Flag)
-              or else
-                (Event_Available and then Event_Total < Continuity.Events (Position))
+            if (Continuity.Flags (Position) and Event_Available_Flag) /= (Flags and Event_Available_Flag)
+              or else (Event_Available and then Event_Total < Continuity.Events (Position))
             then
                Event_Discontinuous := True;
             end if;
-            if (Continuity.Flags (Position) and Time_Available_Flag)
-                 /= (Flags and Time_Available_Flag)
-              or else
-                (Time_Available and then Time_Total_MS < Continuity.Times_MS (Position))
+            if (Continuity.Flags (Position) and Time_Available_Flag) /= (Flags and Time_Available_Flag)
+              or else (Time_Available and then Time_Total_MS < Continuity.Times_MS (Position))
             then
                Time_Discontinuous := True;
             end if;
@@ -620,8 +596,7 @@ package body Flyology_Bench.Internal_Conditions is
      (Continuity          : in out Throttle_Continuity;
       Count               : Natural;
       Event_Discontinuous : in out Boolean;
-      Time_Discontinuous  : in out Boolean)
-   is
+      Time_Discontinuous  : in out Boolean) is
    begin
       if Continuity.Initialized and then Count /= Continuity.Count then
          Event_Discontinuous := True;
@@ -632,15 +607,15 @@ package body Flyology_Bench.Internal_Conditions is
    end Complete_Throttle_Observation;
 
    procedure Read_Linux_Throttle
-     (Value : in out Snapshot; Continuity : in out Throttle_Continuity)
+     (Value : in out Snapshot; Continuity : in out Throttle_Continuity; Sysfs_Root : String := "/sys")
    is
-      Present_OK : Boolean;
-      Present    : constant String := First_Line ("/sys/devices/system/cpu/online", Present_OK);
-      Cursor     : Positive := (if Present'Length = 0 then 1 else Present'First);
-      Any        : Boolean := False;
-      Any_Time   : Boolean := False;
-      Total      : Interfaces.Unsigned_64 := 0;
-      Total_Time : Interfaces.Unsigned_64 := 0;
+      Present_OK     : Boolean;
+      Present        : constant String := First_Line (Sysfs_Root & "/devices/system/cpu/online", Present_OK);
+      Cursor         : Positive := (if Present'Length = 0 then 1 else Present'First);
+      Any            : Boolean := False;
+      Any_Time       : Boolean := False;
+      Total          : Interfaces.Unsigned_64 := 0;
+      Total_Time     : Interfaces.Unsigned_64 := 0;
       Event_Overflow : Boolean := False;
       Time_Overflow  : Boolean := False;
       Current_Count  : Natural range 0 .. Maximum_Throttle_Sources := 0;
@@ -651,9 +626,9 @@ package body Flyology_Bench.Internal_Conditions is
       end record;
       type Core_Key_Array is array (Positive range <>) of Core_Key;
       type Package_Key_Array is array (Positive range <>) of Interfaces.Unsigned_64;
-      Core_Keys    : Core_Key_Array (1 .. Internal_Probes.Maximum_Host_CPUs);
-      Package_Keys : Package_Key_Array (1 .. Internal_Probes.Maximum_Host_CPUs);
-      Core_Count   : Natural := 0;
+      Core_Keys     : Core_Key_Array (1 .. Internal_Probes.Maximum_Host_CPUs);
+      Package_Keys  : Package_Key_Array (1 .. Internal_Probes.Maximum_Host_CPUs);
+      Core_Count    : Natural := 0;
       Package_Count : Natural := 0;
 
       function Core_Seen (Package_Id, Core_Id : Interfaces.Unsigned_64) return Boolean is
@@ -677,16 +652,15 @@ package body Flyology_Bench.Internal_Conditions is
       end Package_Seen;
 
       procedure Register_Source
-        (CPU             : Natural;
-         Package_Source  : Boolean;
+        (CPU            : Natural;
+         Package_Source : Boolean;
          Event_OK       : Boolean;
          Event_Total    : Interfaces.Unsigned_64;
          Time_OK        : Boolean;
          Time_Total_MS  : Interfaces.Unsigned_64)
       is
          Key   : constant Interfaces.Unsigned_16 :=
-           Interfaces.Unsigned_16
-             (CPU + (if Package_Source then Internal_Probes.Maximum_Host_CPUs else 0));
+           Interfaces.Unsigned_16 (CPU + (if Package_Source then Internal_Probes.Maximum_Host_CPUs else 0));
          Index : Throttle_Source_Index;
       begin
          if not Event_OK and then not Time_OK then
@@ -723,16 +697,16 @@ package body Flyology_Bench.Internal_Conditions is
       end Register_Source;
 
       procedure Add_CPU (CPU : Natural) is
-         Core_OK          : Boolean;
-         Core_Time_OK     : Boolean;
-         Package_OK       : Boolean;
-         Package_Time_OK  : Boolean;
-         Package_Id_OK    : Boolean;
-         Core_Id_OK       : Boolean;
-         Prefix           : constant String :=
-           "/sys/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/thermal_throttle/";
-         Topology_Prefix  : constant String :=
-           "/sys/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/topology/";
+         Core_OK         : Boolean;
+         Core_Time_OK    : Boolean;
+         Package_OK      : Boolean;
+         Package_Time_OK : Boolean;
+         Package_Id_OK   : Boolean;
+         Core_Id_OK      : Boolean;
+         Prefix          : constant String :=
+           Sysfs_Root & "/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/thermal_throttle/";
+         Topology_Prefix : constant String :=
+           Sysfs_Root & "/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/topology/";
          Package_Id      : constant Interfaces.Unsigned_64 :=
            Read_U64 (Topology_Prefix & "physical_package_id", Package_Id_OK);
          Core_Id         : constant Interfaces.Unsigned_64 :=
@@ -741,7 +715,7 @@ package body Flyology_Bench.Internal_Conditions is
          if Package_Id_OK and then Core_Id_OK then
             if not Core_Seen (Package_Id, Core_Id) then
                declare
-                  Core : constant Interfaces.Unsigned_64 :=
+                  Core      : constant Interfaces.Unsigned_64 :=
                     Read_U64 (Prefix & "core_throttle_count", Core_OK);
                   Core_Time : constant Interfaces.Unsigned_64 :=
                     Read_U64 (Prefix & "core_throttle_total_time_ms", Core_Time_OK);
@@ -750,18 +724,12 @@ package body Flyology_Bench.Internal_Conditions is
                      Core_Count := Core_Count + 1;
                      Core_Keys (Core_Count) := (Package_Id => Package_Id, Core_Id => Core_Id);
                   end if;
-                  Register_Source
-                    (CPU,
-                     False,
-                     Core_OK,
-                     Core,
-                     Core_Time_OK,
-                     Core_Time);
+                  Register_Source (CPU, False, Core_OK, Core, Core_Time_OK, Core_Time);
                end;
             end if;
             if not Package_Seen (Package_Id) then
                declare
-                  Count : constant Interfaces.Unsigned_64 :=
+                  Count        : constant Interfaces.Unsigned_64 :=
                     Read_U64 (Prefix & "package_throttle_count", Package_OK);
                   Package_Time : constant Interfaces.Unsigned_64 :=
                     Read_U64 (Prefix & "package_throttle_total_time_ms", Package_Time_OK);
@@ -770,43 +738,25 @@ package body Flyology_Bench.Internal_Conditions is
                      Package_Count := Package_Count + 1;
                      Package_Keys (Package_Count) := Package_Id;
                   end if;
-                  Register_Source
-                    (CPU,
-                     True,
-                     Package_OK,
-                     Count,
-                     Package_Time_OK,
-                     Package_Time);
+                  Register_Source (CPU, True, Package_OK, Count, Package_Time_OK, Package_Time);
                end;
             end if;
          else
             --  Very old kernels may expose counters without topology. Keep a
             --  conservative per-logical-CPU core sum and one package value.
             declare
-               Core : constant Interfaces.Unsigned_64 :=
+               Core         : constant Interfaces.Unsigned_64 :=
                  Read_U64 (Prefix & "core_throttle_count", Core_OK);
-               Count : constant Interfaces.Unsigned_64 :=
+               Count        : constant Interfaces.Unsigned_64 :=
                  Read_U64 (Prefix & "package_throttle_count", Package_OK);
-               Core_Time : constant Interfaces.Unsigned_64 :=
+               Core_Time    : constant Interfaces.Unsigned_64 :=
                  Read_U64 (Prefix & "core_throttle_total_time_ms", Core_Time_OK);
                Package_Time : constant Interfaces.Unsigned_64 :=
                  Read_U64 (Prefix & "package_throttle_total_time_ms", Package_Time_OK);
             begin
-               Register_Source
-                 (CPU,
-                  False,
-                  Core_OK,
-                  Core,
-                  Core_Time_OK,
-                  Core_Time);
+               Register_Source (CPU, False, Core_OK, Core, Core_Time_OK, Core_Time);
                if CPU = 0 then
-                  Register_Source
-                    (CPU,
-                     True,
-                     Package_OK,
-                     Count,
-                     Package_Time_OK,
-                     Package_Time);
+                  Register_Source (CPU, True, Package_OK, Count, Package_Time_OK, Package_Time);
                end if;
             end;
          end if;
@@ -853,10 +803,7 @@ package body Flyology_Bench.Internal_Conditions is
          end;
       end loop;
       Complete_Throttle_Observation
-        (Continuity,
-         Current_Count,
-         Value.Throttle_Discontinuous,
-         Value.Throttle_Time_Discontinuous);
+        (Continuity, Current_Count, Value.Throttle_Discontinuous, Value.Throttle_Time_Discontinuous);
       if Event_Overflow then
          Value.Throttle_Discontinuous := True;
       end if;
@@ -875,16 +822,53 @@ package body Flyology_Bench.Internal_Conditions is
       end if;
    end Read_Linux_Throttle;
 
+   procedure Apply_Linux_PPD
+     (Value                 : in out Snapshot;
+      Profile_Text          : String;
+      Profile_Available     : Boolean;
+      Degradation_Text      : String;
+      Degradation_Available : Boolean)
+   is
+      Parsed   : constant Performance_Profile := Parse_Profile (Profile_Text);
+      Degraded : constant String := Lower (Trim (Degradation_Text));
+   begin
+      if Profile_Available and then Parsed /= Profile_Unknown then
+         Value.Profile_Availability := Condition_Available;
+         Value.Profile_Detector := Linux_Power_Profiles_Daemon;
+         Value.Profile := Parsed;
+      end if;
+      if Degradation_Available then
+         Value.Degradation_Availability := Condition_Available;
+         if Degraded = "" then
+            Value.Degradation := Not_Degraded;
+         elsif Degraded = "high-operating-temperature" then
+            Value.Degradation := High_Operating_Temperature;
+         elsif Degraded = "lap-detected" then
+            Value.Degradation := Lap_Detected;
+         else
+            Value.Degradation := Other_Degradation;
+         end if;
+      end if;
+   end Apply_Linux_PPD;
+
    procedure Read_Linux_Profile
-     (Value : in out Snapshot; Deadline : Interfaces.Unsigned_64) is
-      Profile_Buffer      : aliased Condition_Text := (others => C.nul);
-      Degradation_Buffer  : aliased Condition_Text := (others => C.nul);
-      Owner_Buffer        : aliased Condition_Text := (others => C.nul);
-      Bus                 : aliased System.Address := System.Null_Address;
-      Status              : C.int;
-      Sysfs_OK            : Boolean;
-      Selected_Path       : US.Unbounded_String;
-      Selected_Interface  : US.Unbounded_String;
+     (Value                      : in out Snapshot;
+      Deadline                   : Interfaces.Unsigned_64;
+      Sysfs_Root                 : String := "/sys";
+      Query_PPD                  : Boolean := True;
+      Test_Profile               : String := "";
+      Test_Profile_Available     : Boolean := False;
+      Test_Degradation           : String := "";
+      Test_Degradation_Available : Boolean := False)
+   is
+      Profile_Buffer     : aliased Condition_Text := (others => C.nul);
+      Degradation_Buffer : aliased Condition_Text := (others => C.nul);
+      Owner_Buffer       : aliased Condition_Text := (others => C.nul);
+      Bus                : aliased System.Address := System.Null_Address;
+      Status             : C.int;
+      Sysfs_OK           : Boolean;
+      Selected_Path      : US.Unbounded_String;
+      Selected_Interface : US.Unbounded_String;
 
       function Refresh_Timeout return Boolean is
          Now        : Interfaces.Unsigned_64;
@@ -905,9 +889,7 @@ package body Flyology_Bench.Internal_Conditions is
          return C_Linux_PPD_Set_Timeout (Bus, Timeout_US) >= 0;
       end Refresh_Timeout;
 
-      function Resolve
-        (Destination : String; Path : String; Interface_Name : String) return Boolean
-      is
+      function Resolve (Destination : String; Path : String; Interface_Name : String) return Boolean is
          Name        : CS.chars_ptr := CS.New_String (Destination);
          Credentials : aliased System.Address := System.Null_Address;
          Result      : Boolean := False;
@@ -942,8 +924,8 @@ package body Flyology_Bench.Internal_Conditions is
       end Resolve;
 
       function Read_Property (Name : String; Buffer : in out Condition_Text) return Boolean is
-         Destination : CS.chars_ptr := CS.New_String (Text_Value (Owner_Buffer));
-         Path        : CS.chars_ptr := CS.New_String (US.To_String (Selected_Path));
+         Destination    : CS.chars_ptr := CS.New_String (Text_Value (Owner_Buffer));
+         Path           : CS.chars_ptr := CS.New_String (US.To_String (Selected_Path));
          Interface_Name : CS.chars_ptr := CS.New_String (US.To_String (Selected_Interface));
          Property       : CS.chars_ptr := CS.New_String (Name);
          Result         : Boolean;
@@ -957,13 +939,7 @@ package body Flyology_Bench.Internal_Conditions is
          end if;
          Result :=
            C_Linux_PPD_Get_Property
-             (Bus,
-              Destination,
-              Path,
-              Interface_Name,
-              Property,
-              Buffer'Address,
-              C.size_t (Buffer'Length))
+             (Bus, Destination, Path, Interface_Name, Property, Buffer'Address, C.size_t (Buffer'Length))
            >= 0;
          CS.Free (Destination);
          CS.Free (Path);
@@ -980,17 +956,17 @@ package body Flyology_Bench.Internal_Conditions is
       end Read_Property;
 
       function Read_Class_Profile return Boolean is
-         Search       : Ada.Directories.Search_Type;
-         Search_Open  : Boolean := False;
-         Item         : Ada.Directories.Directory_Entry_Type;
-         Present      : Boolean := False;
-         Found        : Boolean := False;
-         Ambiguous    : Boolean := False;
-         Candidate    : Performance_Profile := Profile_Unknown;
+         Search      : Ada.Directories.Search_Type;
+         Search_Open : Boolean := False;
+         Item        : Ada.Directories.Directory_Entry_Type;
+         Present     : Boolean := False;
+         Found       : Boolean := False;
+         Ambiguous   : Boolean := False;
+         Candidate   : Performance_Profile := Profile_Unknown;
       begin
          Ada.Directories.Start_Search
            (Search,
-            "/sys/class/platform-profile",
+            Sysfs_Root & "/class/platform-profile",
             "platform-profile-*",
             (Ada.Directories.Directory => True, others => False));
          Search_Open := True;
@@ -999,8 +975,7 @@ package body Flyology_Bench.Internal_Conditions is
             Present := True;
             declare
                OK     : Boolean;
-               Text   : constant String :=
-                 First_Line (Ada.Directories.Full_Name (Item) & "/profile", OK);
+               Text   : constant String := First_Line (Ada.Directories.Full_Name (Item) & "/profile", OK);
                Parsed : constant Performance_Profile := Parse_Profile (Text);
             begin
                if OK then
@@ -1038,52 +1013,37 @@ package body Flyology_Bench.Internal_Conditions is
             return Present;
       end Read_Class_Profile;
    begin
-      --  Opening the system bus is a synchronous libsystemd operation. Do not
-      --  begin it after the caller's absolute budget has already expired.
-      Status :=
-        (if Deadline /= Interfaces.Unsigned_64'Last
-             and then Internal_Probes.Clock_Now >= Deadline
-         then -1
-         else C_Linux_PPD_Open (Bus'Access));
-      if Status >= 0 and then Bus /= System.Null_Address then
-         if
-             (Resolve
-                ("org.freedesktop.UPower.PowerProfiles",
-                 "/org/freedesktop/UPower/PowerProfiles",
-                 "org.freedesktop.UPower.PowerProfiles")
-              or else
-                Resolve
-                  ("net.hadess.PowerProfiles",
-                   "/net/hadess/PowerProfiles",
-                   "net.hadess.PowerProfiles"))
+      Status := -1;
+      if Query_PPD then
+         --  Opening the system bus is a synchronous libsystemd operation. Do
+         --  not begin it after the caller's absolute budget has expired.
+         Status :=
+           (if Deadline /= Interfaces.Unsigned_64'Last and then Internal_Probes.Clock_Now >= Deadline
+            then -1
+            else C_Linux_PPD_Open (Bus'Access));
+      else
+         Apply_Linux_PPD
+           (Value, Test_Profile, Test_Profile_Available, Test_Degradation, Test_Degradation_Available);
+      end if;
+      if Query_PPD and then Status >= 0 and then Bus /= System.Null_Address then
+         if (Resolve
+               ("org.freedesktop.UPower.PowerProfiles",
+                "/org/freedesktop/UPower/PowerProfiles",
+                "org.freedesktop.UPower.PowerProfiles")
+             or else Resolve
+                       ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles"))
          then
-            if Read_Property ("ActiveProfile", Profile_Buffer) then
-               declare
-                  Parsed : constant Performance_Profile := Parse_Profile (Text_Value (Profile_Buffer));
-               begin
-                  if Parsed /= Profile_Unknown then
-                     Value.Profile_Availability := Condition_Available;
-                     Value.Profile_Detector := Linux_Power_Profiles_Daemon;
-                     Value.Profile := Parsed;
-                  end if;
-               end;
-            end if;
-            if Read_Property ("PerformanceDegraded", Degradation_Buffer) then
-               declare
-                  Degraded : constant String := Lower (Trim (Text_Value (Degradation_Buffer)));
-               begin
-                  Value.Degradation_Availability := Condition_Available;
-                  if Degraded = "" then
-                     Value.Degradation := Not_Degraded;
-                  elsif Degraded = "high-operating-temperature" then
-                     Value.Degradation := High_Operating_Temperature;
-                  elsif Degraded = "lap-detected" then
-                     Value.Degradation := Lap_Detected;
-                  else
-                     Value.Degradation := Other_Degradation;
-                  end if;
-               end;
-            end if;
+            declare
+               Profile_OK     : constant Boolean := Read_Property ("ActiveProfile", Profile_Buffer);
+               Degradation_OK : constant Boolean := Read_Property ("PerformanceDegraded", Degradation_Buffer);
+            begin
+               Apply_Linux_PPD
+                 (Value,
+                  Text_Value (Profile_Buffer),
+                  Profile_OK,
+                  Text_Value (Degradation_Buffer),
+                  Degradation_OK);
+            end;
          end if;
          C_Linux_PPD_Bus_Unref (Bus);
          Bus := System.Null_Address;
@@ -1095,7 +1055,8 @@ package body Flyology_Bench.Internal_Conditions is
          return;
       end if;
       declare
-         Sysfs_Profile : constant String := First_Line ("/sys/firmware/acpi/platform_profile", Sysfs_OK);
+         Sysfs_Profile : constant String :=
+           First_Line (Sysfs_Root & "/firmware/acpi/platform_profile", Sysfs_OK);
          Parsed        : constant Performance_Profile := Parse_Profile (Sysfs_Profile);
       begin
          if Sysfs_OK and then Parsed /= Profile_Unknown then
@@ -1110,6 +1071,28 @@ package body Flyology_Bench.Internal_Conditions is
             C_Linux_PPD_Bus_Unref (Bus);
          end if;
    end Read_Linux_Profile;
+
+   procedure Read_Linux_For_Test
+     (Sysfs_Root                : String;
+      PPD_Profile               : String;
+      PPD_Profile_Available     : Boolean;
+      PPD_Degradation           : String;
+      PPD_Degradation_Available : Boolean;
+      Value                     : out Snapshot;
+      Continuity                : in out Throttle_Continuity) is
+   begin
+      Value := (others => <>);
+      Read_Linux_Throttle (Value, Continuity, Sysfs_Root);
+      Read_Linux_Profile
+        (Value,
+         Interfaces.Unsigned_64'Last,
+         Sysfs_Root,
+         Query_PPD                  => False,
+         Test_Profile               => PPD_Profile,
+         Test_Profile_Available     => PPD_Profile_Available,
+         Test_Degradation           => PPD_Degradation,
+         Test_Degradation_Available => PPD_Degradation_Available);
+   end Read_Linux_For_Test;
 
    procedure Read
      (Value           : out Snapshot;
@@ -1139,13 +1122,13 @@ package body Flyology_Bench.Internal_Conditions is
             else Now + 2_000_000_000);
       end if;
       case Internal_Probes.Operating_System is
-         when Internal_Probes.Darwin =>
+         when Internal_Probes.Darwin         =>
             Read_Darwin_Live (Value);
             if Include_Profile then
                Read_Darwin_Profile (Value, Effective_Deadline);
             end if;
 
-         when Internal_Probes.Linux =>
+         when Internal_Probes.Linux          =>
             Read_Linux_Throttle (Value, Continuity);
             --  The PPD read is passive, bounded, and is also the only common
             --  live thermal-degradation signal on AMD64 and AArch64.
