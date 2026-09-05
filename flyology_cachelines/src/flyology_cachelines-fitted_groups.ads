@@ -32,32 +32,22 @@ package Flyology_Cachelines.Fitted_Groups is
    Payload_Size_In_Storage_Elements : constant Natural :=
      (Element_Array'Object_Size + System.Storage_Unit - 1) / System.Storage_Unit;
 
-   pragma
-     Compile_Time_Error
-       (Element_Array'Object_Size > Destructive_Interference_Size * System.Storage_Unit,
-        "automatically fitted group payload exceeds its interference region");
-
    pragma Warnings (Off, "suspiciously large alignment specified for ""Group""");
    --  One isolated group of automatically fitted, same-owner elements.
    type Group is new Element_Array with Alignment => Destructive_Interference_Size;
    pragma Warnings (On, "suspiciously large alignment specified for ""Group""");
 
-   pragma
-     Compile_Time_Error
-       (Group'Object_Size /= Destructive_Interference_Size * System.Storage_Unit,
-        "automatically fitted group must occupy exactly one region");
+   --  Array of physically isolated groups.
+   type Group_Array is array (Positive range <>) of aliased Group;
 
-   --  Object size of Group in System.Storage_Unit elements.
-   Group_Size_In_Storage_Elements : constant Positive := Group'Object_Size / System.Storage_Unit;
+   --  Storage stride of Group in System.Storage_Unit elements.
+   Group_Size_In_Storage_Elements : constant Positive := Group_Array'Component_Size / System.Storage_Unit;
 
    --  Construct a physical group from compact element values.
    --  @param Values Values to place in the group.
    --  @return An isolated group containing Values.
    function Create (Values : Element_Array) return Group
    is (Group (Values));
-
-   --  Array of physically isolated groups.
-   type Group_Array is array (Positive range <>) of aliased Group;
 
    --  @exclude Iterator protocol cursor.
    type Cursor is private;
@@ -168,6 +158,16 @@ package Flyology_Cachelines.Fitted_Groups is
    function Create (Element_Count : Positive; Initial_Value : Element_Type) return Grouped_Array;
 
 private
+   pragma
+     Compile_Time_Error
+       (Group_Array'Component_Size > Destructive_Interference_Size * System.Storage_Unit,
+        "automatically fitted group payload exceeds its interference region");
+
+   pragma
+     Compile_Time_Error
+       (Group_Array'Component_Size < Destructive_Interference_Size * System.Storage_Unit,
+        "automatically fitted group must occupy exactly one region");
+
    type Cursor is new Natural;
    No_Element : constant Cursor := 0;
 

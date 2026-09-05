@@ -26,6 +26,11 @@ cd "$test_directory"
 "$test_directory/bin/tests"
 
 overflow_log="$test_directory/obj/group_overflow.log"
+
+"$alr_command" exec -- \
+  gprbuild -p -c -P group_overflow_tests.gpr group_guard_compatibility.adb
+echo "valid cache-line group layout guards compiled"
+
 expect_group_overflow()
 {
    main=$1
@@ -39,7 +44,8 @@ expect_group_overflow()
       exit 1
    fi
 
-   if ! grep -Fq "$expected_message" "$overflow_log"
+   if ! grep -Fq "$expected_message" "$overflow_log" \
+     || grep -Fq "condition is not known at compile time" "$overflow_log"
    then
       echo "$main failed for an unexpected reason" >&2
       sed -n '1,160p' "$overflow_log" >&2
