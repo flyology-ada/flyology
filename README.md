@@ -3249,10 +3249,16 @@ artifact I/O, bootstrap orchestration, and reporter formatting remain
 behaviorally tested boundaries.
 
 The standalone benchmark crate uses the same narrow boundary for its exact
-empirical-scaling range classifier. GNATprove establishes the overflow-free
-decision between a sub-twofold and at-least-twofold unsigned 64-bit input range;
-floating-point model fitting and benchmark collection remain outside SPARK and
-are covered by deterministic synthetic-data and behavioral tests.
+empirical-scaling range classifier and operating-condition policy. GNATprove
+establishes the overflow-free decision between a sub-twofold and
+at-least-twofold unsigned 64-bit input range. For operating conditions it
+proves counter-reset handling and exact nonwrapping event and throttled-time
+deltas, while the proved policy functions decide whether normalized evidence is unacceptable
+and select Observe, Pause, Fail, or the configured pause-timeout fallback.
+Foreign command output, kernel counters, Objective-C calls, floating-point
+model fitting, and benchmark collection remain outside SPARK. ABI tests,
+bounded-capture edge cases, pure-policy tests, and live-host behavior cover
+those boundaries.
 
 The public-library proof boundary also covers native `poll` and `accept` result
 classification, including `EINTR` retry and would-block handling. Socket policy

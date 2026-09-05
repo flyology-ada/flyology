@@ -62,13 +62,22 @@ package Flyology_Bench is
    --  @enum Starting The run is initializing its clock and state.
    --  @enum Waiting_For_CPU_Quiescence The harness is waiting for sustained
    --  low host CPU utilization before warmup.
+   --  @enum Waiting_For_Operating_Conditions The harness is waiting for an
+   --  accepted profile and stable thermal conditions.
    --  @enum Warming The operation is executing outside timed sampling.
    --  @enum Calibrating The harness is selecting a batch size.
    --  @enum Sampling Timed samples are being collected.
    --  @enum Analyzing Statistics and confidence intervals are being computed.
    --  @enum Finished The result is complete.
    type Progress_Phase is
-     (Starting, Waiting_For_CPU_Quiescence, Warming, Calibrating, Sampling, Analyzing, Finished);
+     (Starting,
+      Waiting_For_CPU_Quiescence,
+      Warming,
+      Calibrating,
+      Sampling,
+      Analyzing,
+      Finished,
+      Waiting_For_Operating_Conditions);
 
    --  Receives coarse benchmark progress. Total is zero when a phase has no
    --  meaningful bounded work count.
@@ -518,6 +527,203 @@ package Flyology_Bench is
    --  resume, bounded by Maximum_Pause_Time.
    type Interference_Response is (Observe, Retake, Pause);
 
+   --  Whether a host condition probe produced a meaningful answer.
+   --  @enum Condition_Not_Checked The operating-conditions policy was disabled.
+   --  @enum Condition_Unavailable The policy was enabled, but no usable and
+   --  continuous answer was available for the condition.
+   --  @enum Condition_Available A supported detector produced an answer.
+   type Condition_Availability is (Condition_Not_Checked, Condition_Unavailable, Condition_Available);
+
+   --  Mechanism that supplied an operating-condition value.
+   --  @enum No_Condition_Detector No supported detector supplied a value.
+   --  @enum Darwin_PMSet The macOS pmset command supplied the configured power
+   --  profile or power source.
+   --  @enum Darwin_Process_Info The macOS NSProcessInfo API supplied a live
+   --  low-power, process-profile, or thermal value.
+   --  @enum Linux_Power_Profiles_Daemon The Linux power-profiles-daemon D-Bus
+   --  interface supplied the profile or degradation reason.
+   --  @enum Linux_Platform_Profile A Linux platform_profile sysfs interface
+   --  supplied the configured profile.
+   --  @enum Linux_CPU_Thermal_Throttle Linux thermal-throttle sysfs counters
+   --  supplied event or duration totals.
+   type Condition_Detector is
+     (No_Condition_Detector,
+      Darwin_PMSet,
+      Darwin_Process_Info,
+      Linux_Power_Profiles_Daemon,
+      Linux_Platform_Profile,
+      Linux_CPU_Thermal_Throttle);
+
+   --  Configured host performance profile. Unknown is distinct from a
+   --  balanced/default profile and is never treated as evidence of a good
+   --  benchmarking condition.
+   --  @enum Profile_Unknown No supported detector supplied a configured
+   --  performance profile.
+   --  @enum Profile_Reduced The host selected a reduced-power profile.
+   --  @enum Profile_Balanced The host selected a balanced or default profile.
+   --  @enum Profile_Performance The host selected a performance profile.
+   type Performance_Profile is (Profile_Unknown, Profile_Reduced, Profile_Balanced, Profile_Performance);
+
+   --  Power source reported by the host.
+   --  @enum Power_Source_Unknown No supported detector supplied a power source.
+   --  @enum Battery_Power The host is using battery power.
+   --  @enum External_Power The host is using external power.
+   type Host_Power_Source is (Power_Source_Unknown, Battery_Power, External_Power);
+
+   --  Current low-power-mode setting. This is deliberately separate from the
+   --  configured performance profile. It is not an inference from idle DVFS.
+   --  @enum Low_Power_Mode_Unknown No supported detector supplied the setting.
+   --  @enum Low_Power_Mode_Disabled Low-power mode is disabled.
+   --  @enum Low_Power_Mode_Enabled Low-power mode is enabled.
+   type Low_Power_Mode_State is (Low_Power_Mode_Unknown, Low_Power_Mode_Disabled, Low_Power_Mode_Enabled);
+
+   --  Process performance profile exposed by newer macOS releases. Neither
+   --  Default nor Sustained is intrinsically unacceptable; changing away from
+   --  the profile established after warmup is the transient event.
+   --  @enum Process_Profile_Unknown No supported detector supplied a process
+   --  performance profile.
+   --  @enum Process_Profile_Default The process uses the default profile.
+   --  @enum Process_Profile_Sustained The process uses the sustained profile.
+   type Process_Performance_Profile is
+     (Process_Profile_Unknown, Process_Profile_Default, Process_Profile_Sustained);
+
+   --  Thermal-pressure state reported by the host operating system.
+   --  @enum Thermal_State_Unknown No supported detector supplied a thermal state.
+   --  @enum Thermal_State_Nominal Thermal pressure is nominal.
+   --  @enum Thermal_State_Fair Thermal pressure is elevated but fair.
+   --  @enum Thermal_State_Serious Thermal pressure is serious.
+   --  @enum Thermal_State_Critical Thermal pressure is critical.
+   type Host_Thermal_State is
+     (Thermal_State_Unknown,
+      Thermal_State_Nominal,
+      Thermal_State_Fair,
+      Thermal_State_Serious,
+      Thermal_State_Critical);
+
+   --  A policy threshold must name an observed thermal state. Unknown is an
+   --  observation result, not an ordering threshold.
+   subtype Thermal_State_Threshold is
+     Host_Thermal_State range Thermal_State_Nominal .. Thermal_State_Critical;
+
+   --  Performance degradation reason reported by the configured-profile
+   --  detector.
+   --  @enum Degradation_Unknown No supported detector supplied a degradation
+   --  reason.
+   --  @enum Not_Degraded The detector reports no performance degradation.
+   --  @enum High_Operating_Temperature The detector reports a high operating
+   --  temperature.
+   --  @enum Lap_Detected The detector reports that the host is operating on a
+   --  lap or a similar restricted surface.
+   --  @enum Other_Degradation The detector reports another degradation reason.
+   type Performance_Degradation is
+     (Degradation_Unknown, Not_Degraded, High_Operating_Temperature, Lap_Detected, Other_Degradation);
+
+   --  Operating-condition policy mode.
+   --  @enum Disabled Do not probe or gate operating conditions.
+   --  @enum Observe Continue and retain the observed evidence.
+   --  @enum Pause Wait for acceptable conditions before continuing, subject
+   --  to the total pause budget and its explicitly selected expiration action.
+   --  @enum Fail Raise Operating_Conditions_Unacceptable at the next condition
+   --  check boundary.
+   type Operating_Conditions_Mode is (Disabled, Observe, Pause, Fail);
+
+   --  What Pause does when its total wait budget is exhausted.
+   --  @enum Fallback_Observe Record the expiration and continue.
+   --  @enum Fallback_Fail Raise Operating_Conditions_Unacceptable.
+   type Condition_Pause_Fallback is (Fallback_Observe, Fallback_Fail);
+
+   --  Controls operating-condition observation and gating. The disabled
+   --  constant and the Observe, Pause, and Fail constructors select one of the
+   --  four explicit modes; clients cannot assemble a policy with an implicit
+   --  response. Probes run only outside timed regions. A Pause
+   --  response preserves sample/pair/round
+   --  atomicity: after an unacceptable window it waits for a continuous
+   --  stable interval, rewarms, then recollects the complete window. If the
+   --  pause budget expires, Fallback_Observe retains the original affected
+   --  window while Fallback_Fail raises Operating_Conditions_Unacceptable.
+   --
+   --  An unavailable detector result never establishes a clean host.
+   --  Require_Profile_Detection and Require_Thermal_Detection make either
+   --  absence unacceptable instead of allowing the policy to continue.
+   type Operating_Conditions_Policy is private;
+
+   --  Inert operating-condition policy whose mode is Disabled.
+   Disabled_Operating_Conditions : constant Operating_Conditions_Policy;
+
+   --  Construct a policy that records unacceptable conditions and continues.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
+   --  or enabled low-power mode is unacceptable.
+   --  @param Require_Profile_Detection Whether missing configured-profile
+   --  evidence is unacceptable.
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
+   --  thermal-state, throttle-counter, and degradation signal is unacceptable.
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @return An observing operating-condition policy.
+   function Observe
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy;
+
+   --  Construct a policy that waits for acceptable conditions and recollects
+   --  the complete affected sample, pair, or round. The pause-budget expiration
+   --  action is mandatory rather than silently defaulted.
+   --  @param On_Pause_Timeout Action when the total condition-wait budget expires.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
+   --  or enabled low-power mode is unacceptable.
+   --  @param Require_Profile_Detection Whether missing configured-profile
+   --  evidence is unacceptable.
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
+   --  thermal-state, throttle-counter, and degradation signal is unacceptable.
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @param Stable_Time Required continuous acceptable interval after Pause.
+   --  @param Poll_Interval Delay between condition probes while Pause waits.
+   --  @param Maximum_Pause_Time Total condition-wait budget for the complete run.
+   --  @param Rewarm_Time Workload rewarm duration after conditions recover.
+   --  @return A pausing operating-condition policy.
+   function Pause
+     (On_Pause_Timeout           : Condition_Pause_Fallback;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050) return Operating_Conditions_Policy
+   with
+     Pre => Maximum_Pause_Time >= Stable_Time and then Poll_Interval <= Maximum_Pause_Time;
+
+   --  Construct a policy that raises at an unacceptable-condition boundary.
+   --  @param Require_Nonreduced_Profile Whether a reduced configured profile
+   --  or enabled low-power mode is unacceptable.
+   --  @param Require_Profile_Detection Whether missing configured-profile
+   --  evidence is unacceptable.
+   --  @param Maximum_Thermal_State Highest acceptable observed thermal state.
+   --  @param Require_Thermal_Detection Whether absence of every supported
+   --  thermal-state, throttle-counter, and degradation signal is unacceptable.
+   --  @param Window Minimum target duration for each complete collection window.
+   --  @return A failing operating-condition policy.
+   function Fail
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy;
+
+   --  Return a policy's explicit mode.
+   --  @param Policy Operating-condition policy to inspect.
+   --  @return Disabled, Observe, Pause, or Fail.
+   function Mode (Policy : Operating_Conditions_Policy) return Operating_Conditions_Mode;
+
+   --  Raised when the operating-condition policy selects Fail, including a
+   --  Pause whose configured fallback is Fail.
+   Operating_Conditions_Unacceptable : exception;
+
    --  How foreign CPU load was attributed.
    --  @enum Host_Wide Foreign load is the host's busy time minus this
    --  process's own CPU time. Available on every supported platform.
@@ -697,6 +903,51 @@ package Flyology_Bench is
    --  continues host-wide instead of reporting its own runtime as
    --  interference.
    --  @field Host_Lock Host CPU claim outcome.
+   --  @field Conditions_Checked Whether operating-condition observation was enabled.
+   --  @field Profile_Availability Whether a configured host profile was observed.
+   --  @field Profile_Detector Provider for the configured host profile.
+   --  @field Initial_Profile Profile before warmup and calibration.
+   --  @field Final_Profile Profile at the last completed condition boundary.
+   --  @field Initial_Power_Source Power source before warmup and calibration.
+   --  @field Final_Power_Source Power source at the last completed condition boundary.
+   --  @field Profile_Changes Number of observed configured-profile transitions.
+   --  @field Low_Power_Availability Whether macOS low-power mode was observed.
+   --  @field Low_Power_Detector Provider for low-power mode.
+   --  @field Initial_Low_Power_Mode Low-power mode before warmup and calibration.
+   --  @field Worst_Low_Power_Mode Whether low-power mode was enabled at any boundary.
+   --  @field Final_Low_Power_Mode Low-power mode at the last completed condition boundary.
+   --  @field Process_Profile_Avail Whether the macOS process performance profile was observed.
+   --  @field Process_Profile_Detector Provider for the process performance profile.
+   --  @field Initial_Process_Profile Process profile before warmup and calibration.
+   --  @field Final_Process_Profile Process profile at the last completed condition boundary.
+   --  @field Process_Profile_Changes Number of observed process-profile transitions.
+   --  @field Thermal_Availability Whether a live macOS thermal-pressure state was observed.
+   --  @field Thermal_Detector Provider for live thermal pressure.
+   --  @field Initial_Thermal_State Thermal pressure before warmup and calibration.
+   --  @field Worst_Thermal_State Highest thermal pressure observed at a boundary.
+   --  @field Final_Thermal_State Thermal pressure at the last completed condition boundary.
+   --  @field Degradation_Availability Whether Linux PPD degradation was observed.
+   --  @field Initial_Degradation PPD degradation before warmup and calibration.
+   --  @field Worst_Degradation Most recently observed nonempty PPD degradation
+   --  reason; otherwise Not_Degraded when the detector reported no degradation,
+   --  or Degradation_Unknown when it never supplied a reason.
+   --  @field Final_Degradation PPD degradation at the last completed condition boundary.
+   --  @field Throttle_Availability Whether Linux throttle-event counters remained continuously
+   --  observable; unavailable also records continuity loss after detection.
+   --  @field Throttle_Time_Avail Whether Linux cumulative throttle-time counters remained
+   --  continuously observable; unavailable also records continuity loss after detection.
+   --  @field Throttle_Detector Provider for Linux throttle counters.
+   --  @field Throttle_Events Aggregate counter increase across observed core and package objects.
+   --  @field Throttle_Milliseconds Aggregate cumulative-throttle-time increase across those objects.
+   --  @field Condition_Windows Number of benchmark windows checked for condition changes.
+   --  @field Affected_Units Samples, comparison pairs, or balanced rounds
+   --  observed under unacceptable conditions, including units later discarded
+   --  and recollected after recovery.
+   --  @field Recollected_Units Units discarded and collected again after condition recovery.
+   --  @field Condition_Pauses Number of waits for acceptable, stable conditions.
+   --  @field Condition_Paused_NS Total wall time in operating-condition waits.
+   --  @field Condition_Budget_Expired Whether an operating-condition pause budget ran out.
+   --  @field Condition_Fallback_Used Whether pause timeout fell back to Observe or Fail.
    type Environment_Report is record
       Watched                  : Boolean := False;
       Attribution              : Interference_Source := Host_Wide;
@@ -713,6 +964,45 @@ package Flyology_Bench is
       Watched_CPUs             : Natural := 0;
       Attribution_Diluted      : Boolean := False;
       Host_Lock                : Host_Lock_Outcome := Lock_Not_Requested;
+      Conditions_Checked       : Boolean := False;
+      Profile_Availability     : Condition_Availability := Condition_Not_Checked;
+      Profile_Detector         : Condition_Detector := No_Condition_Detector;
+      Initial_Profile          : Performance_Profile := Profile_Unknown;
+      Final_Profile            : Performance_Profile := Profile_Unknown;
+      Initial_Power_Source     : Host_Power_Source := Power_Source_Unknown;
+      Final_Power_Source       : Host_Power_Source := Power_Source_Unknown;
+      Profile_Changes          : Natural := 0;
+      Low_Power_Availability   : Condition_Availability := Condition_Not_Checked;
+      Low_Power_Detector       : Condition_Detector := No_Condition_Detector;
+      Initial_Low_Power_Mode   : Low_Power_Mode_State := Low_Power_Mode_Unknown;
+      Worst_Low_Power_Mode     : Low_Power_Mode_State := Low_Power_Mode_Unknown;
+      Final_Low_Power_Mode     : Low_Power_Mode_State := Low_Power_Mode_Unknown;
+      Process_Profile_Avail    : Condition_Availability := Condition_Not_Checked;
+      Process_Profile_Detector : Condition_Detector := No_Condition_Detector;
+      Initial_Process_Profile  : Process_Performance_Profile := Process_Profile_Unknown;
+      Final_Process_Profile    : Process_Performance_Profile := Process_Profile_Unknown;
+      Process_Profile_Changes  : Natural := 0;
+      Thermal_Availability     : Condition_Availability := Condition_Not_Checked;
+      Thermal_Detector         : Condition_Detector := No_Condition_Detector;
+      Initial_Thermal_State    : Host_Thermal_State := Thermal_State_Unknown;
+      Worst_Thermal_State      : Host_Thermal_State := Thermal_State_Unknown;
+      Final_Thermal_State      : Host_Thermal_State := Thermal_State_Unknown;
+      Degradation_Availability : Condition_Availability := Condition_Not_Checked;
+      Initial_Degradation      : Performance_Degradation := Degradation_Unknown;
+      Worst_Degradation        : Performance_Degradation := Degradation_Unknown;
+      Final_Degradation        : Performance_Degradation := Degradation_Unknown;
+      Throttle_Availability    : Condition_Availability := Condition_Not_Checked;
+      Throttle_Time_Avail      : Condition_Availability := Condition_Not_Checked;
+      Throttle_Detector        : Condition_Detector := No_Condition_Detector;
+      Throttle_Events          : Interfaces.Unsigned_64 := 0;
+      Throttle_Milliseconds    : Interfaces.Unsigned_64 := 0;
+      Condition_Windows        : Natural := 0;
+      Affected_Units           : Natural := 0;
+      Recollected_Units        : Natural := 0;
+      Condition_Pauses         : Natural := 0;
+      Condition_Paused_NS      : Long_Float := 0.0;
+      Condition_Budget_Expired : Boolean := False;
+      Condition_Fallback_Used  : Boolean := False;
    end record;
 
    --  Controls warmup, calibration, and timed sampling.
@@ -745,6 +1035,8 @@ package Flyology_Bench is
    --  before clock characterization and workload warmup.
    --  @field Interference Optional watch for foreign CPU load arriving after
    --  the preflight gate has already passed.
+   --  @field Operating_Conditions Optional power-profile, thermal-state,
+   --  transient-profile, and hardware-throttle observation and gating.
    --  @field Placement Optional harness-applied placement of the benchmark
    --  thread, which also sharpens interference attribution.
    --  @field Host_Lock Optional host CPU claim coordinating this run with
@@ -773,6 +1065,7 @@ package Flyology_Bench is
       Custom_Metrics              : Custom_Metric_Registry;
       CPU_Quiescence              : CPU_Quiescence_Policy := (others => <>);
       Interference                : Interference_Policy := (others => <>);
+      Operating_Conditions        : Operating_Conditions_Policy := Disabled_Operating_Conditions;
       Placement                   : Placement_Policy := (others => <>);
       Host_Lock                   : Host_Lock_Policy := (others => <>);
       Collect_Process_Telemetry   : Boolean := False;
@@ -786,7 +1079,8 @@ package Flyology_Bench is
    with
      Dynamic_Predicate =>
        Configuration.CPU_Quiescence in CPU_Quiescence_Policy
-       and then Configuration.Interference in Interference_Policy,
+       and then Configuration.Interference in Interference_Policy
+       and then Configuration.Operating_Conditions in Operating_Conditions_Policy,
      Predicate_Failure => raise Constraint_Error with "incoherent benchmark configuration";
 
    --  Default configuration for interactive microbenchmark runs.
@@ -1372,6 +1666,33 @@ package Flyology_Bench is
    procedure Clobber_Memory;
 
 private
+   type Operating_Conditions_Policy is record
+      Mode_Value                 : Operating_Conditions_Mode := Disabled;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050;
+      On_Pause_Timeout           : Condition_Pause_Fallback := Fallback_Fail;
+   end record
+   with
+     Dynamic_Predicate =>
+       (if Operating_Conditions_Policy.Mode_Value = Pause
+        then
+          Operating_Conditions_Policy.Maximum_Pause_Time >= Operating_Conditions_Policy.Stable_Time
+          and then Operating_Conditions_Policy.Poll_Interval
+                   <= Operating_Conditions_Policy.Maximum_Pause_Time),
+     Predicate_Failure =>
+       raise Constraint_Error
+         with "operating-condition pause budget must cover its stable and polling intervals";
+
+   Disabled_Operating_Conditions : constant Operating_Conditions_Policy :=
+     (Mode_Value => Disabled, others => <>);
+
    type Custom_Name_Buffer is array (Positive range 1 .. Max_Custom_Metric_Name_Length) of Character;
    type Custom_Unit_Buffer is array (Positive range 1 .. Max_Custom_Metric_Unit_Length) of Character;
    type Timing_Source_Buffer is array (Positive range 1 .. Max_Timing_Source_Name_Length) of Character;
