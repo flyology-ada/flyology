@@ -1,4 +1,4 @@
-# Proof Status: Flyology_Bench baseline numeric policy
+# Proof Status: Flyology_Bench SPARK policy units
 <!-- Reflect the top-level goal given. Items in the list below are moved from
      Not Started to In Progress to Reviewed and finally to Proved and Finalized. -->
 
@@ -7,7 +7,10 @@ and `Time_Change` can exhaust the default one-second prover time limit.  Their
 nonlinear obligations are split into smaller proof steps, and the isolated
 benchmark proof receives a five-second timeout.  The contracts, returned values,
 and global proof level are unchanged.
-`Flyology_Bench.Baselines` remains outside SPARK because it owns file I/O,
+`scripts/prove.sh` defines the maintained crate proof boundary: baseline
+arithmetic, operating-condition decisions, shared observation-window sizing,
+and exact scaling-range classification. `Flyology_Bench.Baselines` remains
+outside SPARK because it owns file I/O,
 exceptions, bootstrap orchestration, and controlled measurements; behavioral
 tests cover that integration and its explicit range guards.
 
@@ -19,6 +22,9 @@ tests cover that integration and its explicit range guards.
      wider scope is thus a critical means to detect these situations. -->
 
 - [x] `Flyology_Bench.Baseline_Math` (level 1, mode all, 5-second timeout)
+- [x] `Flyology_Bench.Internal_Condition_Policy` (level 1, mode all, 5-second timeout)
+- [x] `Flyology_Bench.Internal_Window_Policy` (level 1, mode all, 5-second timeout)
+- [x] `Flyology_Bench.Scaling_Policy` (level 1, mode all, 5-second timeout)
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -41,3 +47,11 @@ tests cover that integration and its explicit range guards.
   - [x] `Time_Change` bounded result contract and run-time checks
   - [x] `Interpolate` bounded floating-point run-time checks
   - [x] `Classify` complete, disjoint interval-verdict contract cases
+- [x] `Flyology_Bench.Internal_Condition_Policy` (level 1, mode all)
+  - [x] Counter availability, reset, and nonwrapping delta classification
+  - [x] Worst-state accumulation and operating-condition rejection decisions
+  - [x] Window, mode, and pause-timeout action selection
+- [x] `Flyology_Bench.Internal_Window_Policy` (level 1, mode all)
+  - [x] Positive shared-window selection covering every enabled observer
+- [x] `Flyology_Bench.Scaling_Policy` (level 1, mode all)
+  - [x] Overflow-safe exact factor-of-two range classification
