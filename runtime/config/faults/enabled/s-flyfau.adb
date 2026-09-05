@@ -26,6 +26,31 @@ package body System.Flyology.Faults is
    procedure Test_Release_Create_Registration;
    pragma Import (C, Test_Release_Create_Registration, "flyology_test_release_create_registration");
 
+   procedure Test_Begin_Poller_Translation;
+   pragma Import (C, Test_Begin_Poller_Translation, "flyology_test_begin_poller_translation");
+
+   function Test_Poller_Translation_Released return Interfaces.C.int;
+   pragma Import (C, Test_Poller_Translation_Released, "flyology_test_poller_translation_released");
+
+   procedure Test_Begin_Descriptor_Cancel_Budget;
+   pragma Import (C, Test_Begin_Descriptor_Cancel_Budget, "flyology_test_begin_descriptor_cancel_budget");
+
+   function Test_Descriptor_Cancel_Budget_Released return Interfaces.C.int;
+   pragma
+     Import (C, Test_Descriptor_Cancel_Budget_Released, "flyology_test_descriptor_cancel_budget_released");
+
+   function Usleep (Microseconds : Interfaces.C.unsigned) return Interfaces.C.int;
+   pragma Import (C, Usleep, "usleep");
+
+   procedure Test_Note_Poller_Cancel;
+   pragma Import (C, Test_Note_Poller_Cancel, "flyology_test_note_poller_cancel");
+
+   procedure Test_Note_Descriptor_Cancel_Queued;
+   pragma Import (C, Test_Note_Descriptor_Cancel_Queued, "flyology_test_note_descriptor_cancel_queued");
+
+   procedure Test_Note_Descriptor_Cancel_Processed;
+   pragma Import (C, Test_Note_Descriptor_Cancel_Processed, "flyology_test_note_descriptor_cancel_processed");
+
    function Fail (Point : Fault_Point) return Boolean
    is (Test_Fault_Hit (Interfaces.C.int (Fault_Point'Enum_Rep (Point))) /= 0);
 
@@ -57,5 +82,42 @@ package body System.Flyology.Faults is
    begin
       Test_Release_Create_Registration;
    end Release_Create_Registration;
+
+   procedure Pause_Poller_Translation is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
+   begin
+      --  Ada owns rendezvous progress. C exposes only atomic state and the
+      --  fixed-signature POSIX sleep primitive used by this test-only path.
+      Test_Begin_Poller_Translation;
+      while Test_Poller_Translation_Released = 0 loop
+         Ignored := Usleep (1_000);
+      end loop;
+   end Pause_Poller_Translation;
+
+   procedure Pause_Descriptor_Cancel_Budget is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
+   begin
+      Test_Begin_Descriptor_Cancel_Budget;
+      while Test_Descriptor_Cancel_Budget_Released = 0 loop
+         Ignored := Usleep (1_000);
+      end loop;
+   end Pause_Descriptor_Cancel_Budget;
+
+   procedure Note_Poller_Cancel is
+   begin
+      Test_Note_Poller_Cancel;
+   end Note_Poller_Cancel;
+
+   procedure Note_Descriptor_Cancel_Queued is
+   begin
+      Test_Note_Descriptor_Cancel_Queued;
+   end Note_Descriptor_Cancel_Queued;
+
+   procedure Note_Descriptor_Cancel_Processed is
+   begin
+      Test_Note_Descriptor_Cancel_Processed;
+   end Note_Descriptor_Cancel_Processed;
 
 end System.Flyology.Faults;

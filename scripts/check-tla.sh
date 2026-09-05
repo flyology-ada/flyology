@@ -159,6 +159,12 @@ expect_safe \
 expect_safe \
   CompletionSetFinalize CompletionSetFinalize.cfg completion-finalize-safe
 expect_safe \
+  PollerRegistrationOwnership PollerRegistrationOwnership.cfg \
+  poller-registration-safe
+expect_safe \
+  PollerRegistrationOwnership PollerRegistrationOwnership_timer.cfg \
+  poller-registration-timer-safe
+expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_buddy.cfg allocator-buddy
 expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_best_fit.cfg allocator-best-fit
@@ -225,6 +231,15 @@ then
     'broken driver-raise transition did not expose a source-less pending root' >&2
   exit 1
 fi
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_broken.cfg \
+  SingleRegistrationWriter poller-registration-broken
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_budget_broken.cfg \
+  QueuedCancellationMatchesWaitGeneration poller-registration-budget-broken
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_reap_broken.cfg \
+  CancellationQueueReferencesLiveFiber poller-registration-reap-broken
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
   DriverFailureCompletes completion-finalize-blocking-close
@@ -353,6 +368,22 @@ if ! grep -Fq 'All 2 obligations proved' "$adaptive_proof_log"; then
   exit 1
 fi
 printf '%s\n' 'TLAPS proved       AdaptivePoolLifecycleProof    2 obligations'
+
+poller_proof_log="$run_root/poller-registration-proof.log"
+if ! "$FLYOLOGY_TLAPM" \
+  --cache-dir "$run_root/tlapm-cache" --cleanfp --nofp \
+  --strict --method smt "$model_root/PollerRegistrationOwnershipProof.tla" \
+  >"$poller_proof_log" 2>&1
+then
+  cat "$poller_proof_log" >&2
+  exit 1
+fi
+if ! grep -Fq 'All 2 obligations proved' "$poller_proof_log"; then
+  cat "$poller_proof_log" >&2
+  printf '%s\n' 'poller-registration proof did not discharge both obligations' >&2
+  exit 1
+fi
+printf '%s\n' 'TLAPS proved       PollerRegistrationOwnershipProof 2 obligations'
 
 finalize_raw="$run_root/completion-set-finalize-raw.json"
 finalize_log="$run_root/completion-set-finalize-witness.log"
@@ -510,6 +541,78 @@ adaptive_trace="$run_root/adaptive-pool.trace.json"
 cmp \
   "$project_root/tests/adaptive_pool_conformance/traces/adaptive_pool_lifecycle.trace.json" \
   "$adaptive_trace"
+
+poller_raw="$run_root/poller-registration-raw.json"
+poller_log="$run_root/poller-registration-witness.log"
+poller_meta="$run_root/poller-registration-witness-states"
+poller_config="$project_root/tests/poller_registration_conformance/PollerRegistrationOwnership_trace.cfg"
+set +e
+"$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+  -workers 1 -coverage 1 -noGenerateSpecTE -metadir "$poller_meta" \
+  -config "$poller_config" \
+  -dumpTrace json "$poller_raw" PollerRegistrationOwnership.tla \
+  >"$poller_log" 2>&1
+poller_status=$?
+set -e
+if [ "$poller_status" -ne 12 ] \
+  || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$poller_log" \
+  || ! grep -Fq '6 states generated, 5 distinct states found' "$poller_log"
+then
+  cat "$poller_log" >&2
+  printf '%s\n' 'poller-registration witness did not reach its exact terminal state' >&2
+  exit 1
+fi
+for action in BeginWaitBatch ForeignWake DrainBudget DeliverTarget; do
+  if ! grep -Eq "^<$action .*: [1-9]" "$poller_log"; then
+    cat "$poller_log" >&2
+    printf '%s\n' "poller-registration witness did not cover $action" >&2
+    exit 1
+  fi
+done
+if grep -q '^Warning:' "$poller_log"; then
+  cat "$poller_log" >&2
+  printf '%s\n' 'poller-registration witness emitted a TLC warning' >&2
+  exit 1
+fi
+
+poller_generated_one="$run_root/poller-generated-one"
+poller_generated_two="$run_root/poller-generated-two"
+"$tla_cli" ada generate \
+  "$model_root/PollerRegistrationOwnership.tla" \
+  --config "$poller_config" \
+  --package Poller_Registration_Ownership_Model \
+  --output "$poller_generated_one" \
+  --type-invariant TypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+"$tla_cli" ada generate \
+  "$model_root/PollerRegistrationOwnership.tla" \
+  --config "$poller_config" \
+  --package Poller_Registration_Ownership_Model \
+  --output "$poller_generated_two" \
+  --type-invariant TypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+for generated_file in \
+  poller_registration_ownership_model.ads \
+  poller_registration_ownership_model.adb \
+  poller_registration_ownership_model.inference.json
+do
+  cmp "$poller_generated_one/$generated_file" \
+    "$poller_generated_two/$generated_file"
+  cmp \
+    "$project_root/tests/poller_registration_conformance/generated/$generated_file" \
+    "$poller_generated_one/$generated_file"
+done
+
+poller_trace="$run_root/poller-registration-ownership.trace.json"
+"$tla_cli" trace normalize \
+  "$poller_raw" "$poller_trace" \
+  "$model_root/PollerRegistrationOwnership.tla" \
+  --config "$poller_config" \
+  --toolchain tla2tools-1.8.0+b123b22 8 32
+"$tla_cli" trace validate "$poller_trace" 8 32
+cmp \
+  "$project_root/tests/poller_registration_conformance/traces/poller-registration-ownership.trace.json" \
+  "$poller_trace"
 
 if [ -n "${ALR:-}" ]; then
   alire=$ALR
@@ -673,5 +776,66 @@ grep -Fq '"verdict":"conformant"' \
 grep -Fq '"compared_steps":4' \
   "$run_root/adaptive-pool-result.json"
 printf '%s\n' 'Ada/TLA+ match    AdaptivePoolLifecycle          4 transitions'
+
+if [ "$(uname -s)" = Linux ]; then
+  poller_conformance_source="$project_root/tests/poller_registration_conformance"
+  poller_conformance_root="$run_root/poller-registration-conformance"
+  mkdir -p \
+    "$poller_conformance_root/src" "$poller_conformance_root/generated" \
+    "$poller_conformance_root/traces"
+  cp \
+    "$poller_conformance_source/alire.toml" \
+    "$poller_conformance_source/poller_registration_conformance.gpr" \
+    "$poller_conformance_source/PollerRegistrationOwnership_trace.cfg" \
+    "$poller_conformance_root/"
+  cp "$poller_conformance_source/src/"* "$poller_conformance_root/src/"
+  cp "$poller_conformance_source/generated/"* "$poller_conformance_root/generated/"
+  cp "$poller_conformance_source/traces/"* "$poller_conformance_root/traces/"
+  cp "$project_root/tests/fault_control.ads" \
+    "$project_root/tests/fault_control.adb" \
+    "$poller_conformance_root/src/"
+  cd "$poller_conformance_root"
+  poller_pin_flyology_log="$run_root/poller-registration-pin-flyology.log"
+  if ! "$alire" -n with flyology --use "$project_root" \
+    >"$poller_pin_flyology_log" 2>&1
+  then
+    cat "$poller_pin_flyology_log" >&2
+    exit 1
+  fi
+  poller_pin_harness_log="$run_root/poller-registration-pin-harness.log"
+  if ! "$alire" -n with flyology_tla --use "$harness_root" \
+    >"$poller_pin_harness_log" 2>&1
+  then
+    cat "$poller_pin_harness_log" >&2
+    exit 1
+  fi
+  FLYOLOGY_DEFAULT=native \
+  FLYOLOGY_LOOP_POOL_SIZE=1 \
+  FLYOLOGY_TEST_FAULTS=1 \
+    "$project_root/scripts/prepare-rts.sh" >/dev/null
+  poller_conformance_build_log="$run_root/poller-registration-build.log"
+  if ! "$alire" -n exec -- env -u GPR_CONFIG gprbuild \
+    --RTS="$project_root/build/rts" -f -p -j0 \
+    -P poller_registration_conformance.gpr \
+    >"$poller_conformance_build_log" 2>&1
+  then
+    cat "$poller_conformance_build_log" >&2
+    exit 1
+  fi
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    ./bin/poller-registration-conformance --format json \
+    --result-json "$run_root/poller-registration-result.json" \
+    "$poller_trace" >"$run_root/poller-registration-stdout.json"
+  cmp \
+    "$run_root/poller-registration-result.json" \
+    "$run_root/poller-registration-stdout.json"
+  grep -Fq '"verdict":"conformant"' \
+    "$run_root/poller-registration-result.json"
+  grep -Fq '"compared_steps":4' \
+    "$run_root/poller-registration-result.json"
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   4 transitions'
+else
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   Linux-only replay deferred'
+fi
 
 printf '%s\n' "Flyology TLA+ model checks passed"

@@ -274,4 +274,30 @@ check_production_archive Os -Os
 check_production_archive Oz -Oz
 check_production_archive Ofast -Ofast
 
+printf '%s\n' 'test-hook-elision: production runtime fault sentinels'
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+for artifact in \
+  "$project_root/build/rts/obj/s-flysch.o" \
+  "$project_root/build/rts/adalib/libgnat.a"
+do
+  if [ ! -f "$artifact" ]; then
+    printf '%s\n' "runtime hook-elision audit did not produce $artifact" >&2
+    exit 1
+  fi
+  symbols=$(undefined_symbols "$artifact")
+  if printf '%s\n' "$symbols" | grep -E \
+    'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_translation|poller_translation_released|begin_descriptor_cancel_budget|descriptor_cancel_budget_released|note_poller_cancel|note_descriptor_cancel)' \
+    >/dev/null
+  then
+    printf '%s\n' "production runtime hook reference survived in $artifact" >&2
+    printf '%s\n' "$symbols" | grep -E \
+      'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_translation|poller_translation_released|begin_descriptor_cancel_budget|descriptor_cancel_budget_released|note_poller_cancel|note_descriptor_cancel)' \
+      >&2 || true
+    exit 1
+  fi
+done
+
 printf '%s\n' 'test-hook-elision: PASS'

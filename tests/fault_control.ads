@@ -39,7 +39,9 @@ package Fault_Control is
       File_Uring_Synchronous_Eventfd,
       Connect_Interrupted,
       Create_Lifecycle_Window,
-      Automatic_Placement_Window);
+      Automatic_Placement_Window,
+      Poller_Translation_Pause,
+      Descriptor_Cancel_Budget_Pause);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -78,11 +80,14 @@ package Fault_Control is
       File_Uring_Synchronous_Eventfd => 34,
       Connect_Interrupted            => 35,
       Create_Lifecycle_Window        => 36,
-      Automatic_Placement_Window     => 37);
+      Automatic_Placement_Window     => 37,
+      Poller_Translation_Pause       => 38,
+      Descriptor_Cancel_Budget_Pause => 39);
 
    function Enabled return Boolean;
    procedure Reset;
-   procedure Arm (At_Point : Point; First : Natural := 0; Count : Positive := 1);
+   procedure Arm
+     (At_Point : Point; First : Natural := 0; Count : Positive := 1);
    procedure Disarm (At_Point : Point);
    function Calls (At_Point : Point) return Natural;
 
@@ -93,23 +98,44 @@ package Fault_Control is
    procedure Release_Create_Registration;
    procedure Release_Automatic_Placement;
 
-   type File_Cancel_Backend is (Darwin_AIO, Linux_IO_Uring, Linux_Native_AIO);
-   for File_Cancel_Backend use (Darwin_AIO => 1, Linux_IO_Uring => 2, Linux_Native_AIO => 3);
+   function Poller_Translation_Parked return Boolean;
+   procedure Release_Poller_Translation;
+   function Descriptor_Cancel_Budget_Parked return Boolean;
+   procedure Release_Descriptor_Cancel_Budget;
+   function Poller_Cancel_During_Translation_Count return Natural;
+   function Descriptor_Cancel_Queued_Count return Natural;
+   function Descriptor_Cancel_Processed_Count return Natural;
 
-   type File_Cancel_Disposition is (Submitted, Already_Completing, Not_Cancelable, Failed);
+   type File_Cancel_Backend is (Darwin_AIO, Linux_IO_Uring, Linux_Native_AIO);
+   for File_Cancel_Backend use
+     (Darwin_AIO => 1, Linux_IO_Uring => 2, Linux_Native_AIO => 3);
+
+   type File_Cancel_Disposition is
+     (Submitted, Already_Completing, Not_Cancelable, Failed);
    for File_Cancel_Disposition use
-     (Submitted => 1, Already_Completing => 2, Not_Cancelable => 3, Failed => 4);
+     (Submitted          => 1,
+      Already_Completing => 2,
+      Not_Cancelable     => 3,
+      Failed             => 4);
 
    function File_Cancel_Count
-     (Backend : File_Cancel_Backend; Disposition : File_Cancel_Disposition; Terminal : Boolean)
-      return Natural;
+     (Backend     : File_Cancel_Backend;
+      Disposition : File_Cancel_Disposition;
+      Terminal    : Boolean) return Natural;
 
    --  Memory orders the runtime handed to the C atomic-store bridge. Invalid
    --  collects every value outside the __ATOMIC_* range, which is what an
    --  import that omits the model argument leaves in the argument register.
-   type Memory_Model is (Relaxed, Consume, Acquire, Release, Acq_Rel, Seq_Cst, Invalid);
+   type Memory_Model is
+     (Relaxed, Consume, Acquire, Release, Acq_Rel, Seq_Cst, Invalid);
    for Memory_Model use
-     (Relaxed => 0, Consume => 1, Acquire => 2, Release => 3, Acq_Rel => 4, Seq_Cst => 5, Invalid => 6);
+     (Relaxed => 0,
+      Consume => 1,
+      Acquire => 2,
+      Release => 3,
+      Acq_Rel => 4,
+      Seq_Cst => 5,
+      Invalid => 6);
 
    function Atomic_Store_Model_Count (Model : Memory_Model) return Natural;
 
@@ -125,8 +151,9 @@ private
    pragma Import (C, C_Reset, "flyology_test_fault_reset");
 
    function C_Arm
-     (At_Point : Interfaces.C.int; First : Interfaces.C.unsigned; Count : Interfaces.C.unsigned)
-      return Interfaces.C.int;
+     (At_Point : Interfaces.C.int;
+      First    : Interfaces.C.unsigned;
+      Count    : Interfaces.C.unsigned) return Interfaces.C.int;
    pragma Import (C, C_Arm, "flyology_test_fault_arm");
 
    function C_Disarm (At_Point : Interfaces.C.int) return Interfaces.C.int;
@@ -136,33 +163,113 @@ private
    pragma Import (C, C_Calls, "flyology_test_fault_calls");
 
    function C_Create_Registration_Parked return Interfaces.C.int;
-   pragma Import (C, C_Create_Registration_Parked, "flyology_test_create_race_parked");
+   pragma
+     Import
+       (C, C_Create_Registration_Parked, "flyology_test_create_race_parked");
 
    procedure C_Release_Create_Registration;
-   pragma Import (C, C_Release_Create_Registration, "flyology_test_release_create_registration");
+   pragma
+     Import
+       (C,
+        C_Release_Create_Registration,
+        "flyology_test_release_create_registration");
 
    function C_Automatic_Placement_Claim_Group return Interfaces.C.int;
-   pragma Import (C, C_Automatic_Placement_Claim_Group, "flyology_test_automatic_placement_claim_group");
+   pragma
+     Import
+       (C,
+        C_Automatic_Placement_Claim_Group,
+        "flyology_test_automatic_placement_claim_group");
 
    function C_Automatic_Placement_Parked return Interfaces.C.int;
-   pragma Import (C, C_Automatic_Placement_Parked, "flyology_test_automatic_placement_parked");
+   pragma
+     Import
+       (C,
+        C_Automatic_Placement_Parked,
+        "flyology_test_automatic_placement_parked");
 
    procedure C_Release_Automatic_Placement;
-   pragma Import (C, C_Release_Automatic_Placement, "flyology_test_release_automatic_placement");
+   pragma
+     Import
+       (C,
+        C_Release_Automatic_Placement,
+        "flyology_test_release_automatic_placement");
+
+   function C_Poller_Translation_Parked return Interfaces.C.int;
+   pragma
+     Import
+       (C,
+        C_Poller_Translation_Parked,
+        "flyology_test_poller_translation_parked");
+
+   procedure C_Release_Poller_Translation;
+   pragma
+     Import
+       (C,
+        C_Release_Poller_Translation,
+        "flyology_test_release_poller_translation");
+
+   function C_Descriptor_Cancel_Budget_Parked return Interfaces.C.int;
+   pragma
+     Import
+       (C,
+        C_Descriptor_Cancel_Budget_Parked,
+        "flyology_test_descriptor_cancel_budget_parked");
+
+   procedure C_Release_Descriptor_Cancel_Budget;
+   pragma
+     Import
+       (C,
+        C_Release_Descriptor_Cancel_Budget,
+        "flyology_test_release_descriptor_cancel_budget");
+
+   function C_Poller_Cancel_During_Translation_Count
+      return Interfaces.C.unsigned;
+   pragma
+     Import
+       (C,
+        C_Poller_Cancel_During_Translation_Count,
+        "flyology_test_poller_cancel_during_translation_count");
+
+   function C_Descriptor_Cancel_Queued_Count return Interfaces.C.unsigned;
+   pragma
+     Import
+       (C,
+        C_Descriptor_Cancel_Queued_Count,
+        "flyology_test_descriptor_cancel_queued_count");
+
+   function C_Descriptor_Cancel_Processed_Count return Interfaces.C.unsigned;
+   pragma
+     Import
+       (C,
+        C_Descriptor_Cancel_Processed_Count,
+        "flyology_test_descriptor_cancel_processed_count");
 
    function C_File_Cancel_Count
-     (Backend : Interfaces.C.int; Disposition : Interfaces.C.int; Terminal : Interfaces.C.int)
-      return Interfaces.C.unsigned;
+     (Backend     : Interfaces.C.int;
+      Disposition : Interfaces.C.int;
+      Terminal    : Interfaces.C.int) return Interfaces.C.unsigned;
    pragma Import (C, C_File_Cancel_Count, "flyology_test_file_cancel_count");
 
-   function C_Atomic_Store_Model_Count (Model : Interfaces.C.int) return Interfaces.C.unsigned;
-   pragma Import (C, C_Atomic_Store_Model_Count, "flyology_test_atomic_store_model_count");
+   function C_Atomic_Store_Model_Count
+     (Model : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma
+     Import
+       (C,
+        C_Atomic_Store_Model_Count,
+        "flyology_test_atomic_store_model_count");
 
-   function C_Uring_Identity_Count (Reused : Interfaces.C.int) return Interfaces.C.unsigned;
-   pragma Import (C, C_Uring_Identity_Count, "flyology_test_uring_identity_count");
+   function C_Uring_Identity_Count
+     (Reused : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma
+     Import (C, C_Uring_Identity_Count, "flyology_test_uring_identity_count");
 
    function C_Uring_Admin_Complete_Count return Interfaces.C.unsigned;
-   pragma Import (C, C_Uring_Admin_Complete_Count, "flyology_test_uring_admin_complete_count");
+   pragma
+     Import
+       (C,
+        C_Uring_Admin_Complete_Count,
+        "flyology_test_uring_admin_complete_count");
 
    function C_Uring_CQ_Capacity return Interfaces.C.unsigned;
    pragma Import (C, C_Uring_CQ_Capacity, "flyology_test_uring_cq_capacity");
