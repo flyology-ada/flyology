@@ -97,6 +97,7 @@ project Runtime_Smoke is
       "observability_native_smoke.adb",
       "observability_smoke.adb",
       "operations_smoke.adb",
+      "operations_finalize_smoke.adb",
       "operation_gates_smoke.adb",
       "operation_composition_smoke.adb",
       "operation_return_boundary_smoke.adb",

@@ -1,0 +1,25 @@
+with "flyology.gpr";
+with "flyology_tla.gpr";
+
+project Operations_Finalize_Conformance is
+   for Languages use ("Ada");
+   for Source_Dirs use ("src", "generated");
+   for Object_Dir use "build/obj";
+   for Exec_Dir use "bin";
+   for Main use ("operations_finalize_conformance.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatw.X", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Builder is
+      for Executable ("operations_finalize_conformance.adb") use
+        "operations-finalize-conformance";
+   end Builder;
+end Operations_Finalize_Conformance;

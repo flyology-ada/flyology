@@ -187,13 +187,20 @@ jobs:
           grep -Fqx 'Flyology SPARK proof suite passed' "$proof_log"
 
   tla:
-    name: TLA+ models / ubuntu-latest / TLC 2.19
+    name: TLA+ models and Ada replay / ubuntu-latest / TLC 1.8.0
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out sources
         timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check out the reviewed TLA+ harness
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: flyology-ada/tla
+          ref: dea289018a3eef2ac2aeab7a5ee8bc4e287fe231
+          path: build/flyology-tla
       - name: Install Alire
         timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
@@ -213,24 +220,22 @@ jobs:
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
-      - name: Install Java
-        timeout-minutes: 10
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: '21'
-      - name: Install TLA+ CLI 1.7.4
+      - name: Build the TLA+ harness and provision its toolchain
         shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 15
+        working-directory: build/flyology-tla
         run: |
-          tla_jar="$RUNNER_TEMP/tla2tools-1.7.4.jar"
-          curl --fail --location --retry 3 \
-            --connect-timeout 30 --max-time 120 \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar \
-            --output "$tla_jar"
-          printf '%s  %s\n' \
-            '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88' \
-            "$tla_jar" | sha256sum --check -
-          printf 'TLA2TOOLS_JAR=%s\n' "$tla_jar" >> "$GITHUB_ENV"
-      - name: Check TLA+ models
+          alr -n build
+          toolchain_root="$GITHUB_WORKSPACE/build/flyology-tla-toolchain"
+          ./bin/flyology-tla toolchain install "$toolchain_root"
+          ./bin/flyology-tla toolchain verify "$toolchain_root"
+          eval "$(./bin/flyology-tla toolchain env "$toolchain_root")"
+          {
+            printf 'FLYOLOGY_TLA_HARNESS_ROOT=%s\n' "$GITHUB_WORKSPACE/build/flyology-tla"
+            printf 'FLYOLOGY_TLA_TOOLCHAIN=%s\n' "$FLYOLOGY_TLA_TOOLCHAIN"
+            printf 'FLYOLOGY_TLA_JAVA=%s\n' "$FLYOLOGY_TLA_JAVA"
+            printf 'FLYOLOGY_TLA_TLC_JAR=%s\n' "$FLYOLOGY_TLA_TLC_JAR"
+            printf 'FLYOLOGY_TLAPM=%s\n' "$FLYOLOGY_TLAPM"
+          } >> "$GITHUB_ENV"
+      - name: Check TLA+ models and replay the completion-finalization trace
         run: ./scripts/check-tla.sh
