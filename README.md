@@ -1814,6 +1814,9 @@ operation as `in out`; composite providers use that form for child record
 components. The older readiness and relative-timer `Rearm` names remain aliases
 for the same route. Array and socket actuals passed through explicit access
 parameters must outlive the operation and remain untouched while it is pending.
+Raw socket operations capture an array's base address and scalar bounds during
+initiation; they do not retain a slice descriptor whose bounds may belong to
+the initiating frame.
 The owner of a scoped high-level connection operation must finish it or cancel
 and drain it before that same task calls synchronous `Connections.Close`;
 `Close` may wait for registered work, while only the owner task can drive its

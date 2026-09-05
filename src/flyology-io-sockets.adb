@@ -6,7 +6,6 @@ with Flyology.Operations.Drivers;
 with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with GNAT.OS_Lib;
-with System;
 with System.Atomic_Primitives;
 with System.Storage_Elements;
 
@@ -1904,6 +1903,29 @@ package body Flyology.IO.Sockets is
       Flyology.Buffers.With_Readable_Data (Item, Borrow'Access);
    end Send_All;
 
+   procedure Clear_Array_View (Item : in out Socket_Operation'Class) is
+   begin
+      Item.Has_Array := False;
+      Item.Array_Address := System.Null_Address;
+      Item.Array_First := 1;
+      Item.Array_Last := 0;
+      Item.Array_Length := 0;
+   end Clear_Array_View;
+
+   procedure Capture_Array_View
+     (Item    : in out Socket_Operation'Class;
+      First   : Ada.Streams.Stream_Element_Offset;
+      Last    : Ada.Streams.Stream_Element_Offset;
+      Length  : Natural;
+      Address : System.Address) is
+   begin
+      Item.Has_Array := True;
+      Item.Array_Address := Address;
+      Item.Array_First := First;
+      Item.Array_Last := Last;
+      Item.Array_Length := Length;
+   end Capture_Array_View;
+
    procedure Start_Scoped
      (Item        : in out Socket_Operation'Class;
       Kind        : Scoped_IO_Kind;
@@ -1916,7 +1938,18 @@ package body Flyology.IO.Sockets is
       Prepare (Socket.all);
       Item.Kind := Kind;
       Item.Socket := Socket.all'Unchecked_Access;
-      Item.Array_Item := (if Array_Item = null then null else Array_Item.all'Unchecked_Access);
+      if Array_Item = null then
+         Clear_Array_View (Item);
+      else
+         Capture_Array_View
+           (Item,
+            Array_Item.all'First,
+            Array_Item.all'Last,
+            Array_Item.all'Length,
+            (if Array_Item.all'Length = 0
+             then System.Null_Address
+             else Array_Item.all (Array_Item.all'First)'Address));
+      end if;
       Item.Buffer_Item := (if Buffer_Item = null then null else Buffer_Item.all'Unchecked_Access);
       Item.Transferred := 0;
       Item.Error_Code := 0;
@@ -1982,8 +2015,27 @@ package body Flyology.IO.Sockets is
       Prepare (Socket.all);
       Item.Kind := Kind;
       Item.Socket := Socket.all'Unchecked_Access;
-      Item.Array_Item := (if Array_Item = null then null else Array_Item.all'Unchecked_Access);
-      Item.Datagram_Item := (if Datagram_Item = null then null else Datagram_Item.all'Unchecked_Access);
+      if Array_Item /= null then
+         Capture_Array_View
+           (Item,
+            Array_Item.all'First,
+            Array_Item.all'Last,
+            Array_Item.all'Length,
+            (if Array_Item.all'Length = 0
+             then System.Null_Address
+             else Array_Item.all (Array_Item.all'First)'Address));
+      elsif Datagram_Item /= null then
+         Capture_Array_View
+           (Item,
+            Datagram_Item.all'First,
+            Datagram_Item.all'Last,
+            Datagram_Item.all'Length,
+            (if Datagram_Item.all'Length = 0
+             then System.Null_Address
+             else Datagram_Item.all (Datagram_Item.all'First)'Address));
+      else
+         Clear_Array_View (Item);
+      end if;
       Item.Buffer_Item := null;
       Item.Transferred := 0;
       Item.Error_Code := 0;
@@ -2045,7 +2097,7 @@ package body Flyology.IO.Sockets is
       Prepare (Socket.all);
       Item.Kind := Connect_Internet;
       Item.Socket := Socket.all'Unchecked_Access;
-      Item.Array_Item := null;
+      Clear_Array_View (Item);
       Item.Buffer_Item := null;
       Item.Transferred := 0;
       Item.Error_Code := 0;
@@ -2087,7 +2139,7 @@ package body Flyology.IO.Sockets is
       Prepare (Socket.all);
       Item.Kind := Connect_Unix;
       Item.Socket := Socket.all'Unchecked_Access;
-      Item.Array_Item := null;
+      Clear_Array_View (Item);
       Item.Buffer_Item := null;
       Item.Transferred := 0;
       Item.Error_Code := 0;
@@ -2144,7 +2196,7 @@ package body Flyology.IO.Sockets is
    begin
       Item.Kind := Kind;
       Item.Socket := Server.all'Unchecked_Access;
-      Item.Array_Item := null;
+      Clear_Array_View (Item);
       Item.Buffer_Item := null;
       Item.Transferred := 0;
       Item.Error_Code := 0;
@@ -2292,13 +2344,8 @@ package body Flyology.IO.Sockets is
          Fail (Deadline_Failure);
       elsif Interrupted then
          Fail (Interrupted_Failure);
-      elsif Item.Array_Item /= null then
-         Attempt
-           (Item.Array_Item.all'First,
-            Item.Array_Item.all'Last,
-            (if Item.Array_Item.all'Length = 0
-             then System.Null_Address
-             else Item.Array_Item.all (Item.Array_Item.all'First)'Address));
+      elsif Item.Has_Array then
+         Attempt (Item.Array_First, Item.Array_Last, Item.Array_Address);
       elsif Item.Buffer_Item /= null then
          case Item.Kind is
             when Buffer_Receive_One                     =>
@@ -2584,16 +2631,8 @@ package body Flyology.IO.Sockets is
    overriding
    procedure Drive (Item : in out Datagram_Operation; Event : Flyology.Operations.Driver_Event) is
       Sending        : constant Boolean := Item.Kind = Datagram_Send;
-      Data_First     : constant Ada.Streams.Stream_Element_Offset :=
-        (if Sending then Item.Datagram_Item.all'First else Item.Array_Item.all'First);
-      Data_Length    : constant Natural :=
-        (if Sending then Item.Datagram_Item.all'Length else Item.Array_Item.all'Length);
-      Buffer         : constant System.Address :=
-        (if Data_Length = 0
-         then System.Null_Address
-         elsif Sending
-         then Item.Datagram_Item.all (Data_First)'Address
-         else Item.Array_Item.all (Data_First)'Address);
+      Data_Length    : constant Natural := Item.Array_Length;
+      Buffer         : constant System.Address := Item.Array_Address;
       Error          : aliased Interfaces.C.int := 0;
       Result         : Interfaces.C.long;
       Retry_Attempt  : Natural := 0;
@@ -2634,7 +2673,9 @@ package body Flyology.IO.Sockets is
          Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
       end Fail;
    begin
-      if Event = Flyology.Operations.Deadline_Reached then
+      if not Item.Has_Array then
+         raise Program_Error with "datagram operation has no array";
+      elsif Event = Flyology.Operations.Deadline_Reached then
          Fail (Deadline_Failure);
          return;
       elsif Interrupted then
@@ -3140,10 +3181,9 @@ package body Flyology.IO.Sockets is
 
    procedure Finish (Operation : in out Receive_Operation; Last : out Ada.Streams.Stream_Element_Offset) is
    begin
-      Last := Operation.Array_Item.all'First - 1;
+      Last := Operation.Array_First - 1;
       if Operation.Transferred > 0 then
-         Last :=
-           Operation.Array_Item.all'First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
+         Last := Operation.Array_First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
       end if;
       Finish_Common (Operation);
    end Finish;
@@ -3155,10 +3195,9 @@ package body Flyology.IO.Sockets is
 
    procedure Finish (Operation : in out Send_Operation; Last : out Ada.Streams.Stream_Element_Offset) is
    begin
-      Last := Operation.Array_Item.all'First - 1;
+      Last := Operation.Array_First - 1;
       if Operation.Transferred > 0 then
-         Last :=
-           Operation.Array_Item.all'First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
+         Last := Operation.Array_First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1;
       end if;
       Finish_Common (Operation);
    end Finish;
@@ -3201,9 +3240,8 @@ package body Flyology.IO.Sockets is
       if Flyology.Operations.Outcome (Operation) = Flyology.Operations.Succeeded then
          Last :=
            (if Operation.Transferred = 0
-            then Operation.Array_Item.all'First - 1
-            else
-              Operation.Array_Item.all'First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
+            then Operation.Array_First - 1
+            else Operation.Array_First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
          Metadata :=
            (Source          =>
               Make_Endpoint
@@ -3218,7 +3256,7 @@ package body Flyology.IO.Sockets is
                  Operation.Destination_Port,
                  Operation.Destination_Scope),
             Original_Length => Operation.Datagram_Length,
-            Truncated       => Operation.Datagram_Length > Operation.Array_Item.all'Length,
+            Truncated       => Operation.Datagram_Length > Operation.Array_Length,
             ECN             =>
               (case Operation.Datagram_ECN is
                  when 0      => Not_ECT,
@@ -3235,9 +3273,8 @@ package body Flyology.IO.Sockets is
    begin
       Last :=
         (if Operation.Transferred = 0
-         then Operation.Datagram_Item.all'First - 1
-         else
-           Operation.Datagram_Item.all'First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
+         then Operation.Array_First - 1
+         else Operation.Array_First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
       Finish_Common (Operation);
    end Finish;
 
