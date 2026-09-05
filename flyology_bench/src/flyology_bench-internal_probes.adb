@@ -92,11 +92,13 @@ package body Flyology_Bench.Internal_Probes is
    --  Ordinary libc entry points                                      --
    ---------------------------------------------------------------------
 
-   --  The two time structures differ between the platforms only in the
-   --  width of their sub-second field, which the runtime already records.
+   --  The compiler-generated platform specification records the timeval
+   --  field widths. GCC 13 through 15 do not expose SIZEOF_tv_nsec, so use
+   --  C long for that field; the native bridge checks its header type at
+   --  compile time, and the elaboration check below verifies the total layout.
    Seconds_Bits      : constant := OSC.SIZEOF_tv_sec * 8;
    Microseconds_Bits : constant := OSC.SIZEOF_tv_usec * 8;
-   Nanoseconds_Bits  : constant := OSC.SIZEOF_tv_nsec * 8;
+   Nanoseconds_Bits  : constant := C.long'Size;
 
    type Seconds_Field is range -(2**(Seconds_Bits - 1)) .. 2**(Seconds_Bits - 1) - 1;
    for Seconds_Field'Size use Seconds_Bits;
