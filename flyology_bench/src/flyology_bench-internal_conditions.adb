@@ -785,11 +785,13 @@ package body Flyology_Bench.Internal_Conditions is
                First_CPU := Natural'Value (Present (Cursor .. Dash - 1));
                Last_CPU := Natural'Value (Present (Dash + 1 .. Last));
             end if;
-            if Last_CPU >= First_CPU and then Last_CPU < Internal_Probes.Maximum_Host_CPUs then
-               for CPU in First_CPU .. Last_CPU loop
-                  Add_CPU (CPU);
-               end loop;
+            if Last_CPU < First_CPU or else Last_CPU >= Internal_Probes.Maximum_Host_CPUs then
+               Mark_Unavailable;
+               return;
             end if;
+            for CPU in First_CPU .. Last_CPU loop
+               Add_CPU (CPU);
+            end loop;
             exit when Separator = 0;
             Cursor := Separator + 1;
          exception

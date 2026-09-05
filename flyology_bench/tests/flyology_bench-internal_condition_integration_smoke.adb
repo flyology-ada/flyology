@@ -187,6 +187,13 @@ begin
          and then Value.Profile_Detector = Linux_Platform_Profile
          and then Value.Profile = Profile_Performance,
          "agreeing modern Linux profile handlers were not accepted");
+
+      Continuity := (others => <>);
+      Read_Linux_Fixture ("oversized", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Availability = Condition_Unavailable
+         and then Value.Throttle_Time_Avail = Condition_Unavailable,
+         "out-of-range Linux CPUs produced a partial throttle aggregate");
    end;
 
    declare
@@ -545,10 +552,10 @@ begin
    Hooks.Reset;
    Hooks.Reject_Read (6);
    Hooks.Reject_Read (12);
-   Hooks.Delay_Read (7, 1);
-   Hooks.Delay_Read (8, 1);
-   Hooks.Delay_Read (13, 60);
-   Hooks.Delay_Read (14, 60);
+   Hooks.Delay_Read (7, 30);
+   Hooks.Delay_Read (8, 30);
+   Hooks.Delay_Read (13, 30);
+   Hooks.Delay_Read (14, 30);
    declare
       Result : Measurement;
       Report : Environment_Report;
