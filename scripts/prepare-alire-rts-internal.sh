@@ -5,6 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 generated_config_temp=
 policy_temp=
 stamp_temp=
+validation_root=
 
 #  The external-consumer race regression holds each critical section long
 #  enough to make an omitted or ineffective preparation lock deterministic.
@@ -18,6 +19,9 @@ cleanup_transaction () {
   fi
   if [ -n "$stamp_temp" ]; then
     rm -f -- "$stamp_temp"
+  fi
+  if [ -n "$validation_root" ]; then
+    rm -rf -- "$validation_root"
   fi
   if [ -n "$lock_probe" ]; then
     rmdir "$lock_probe" 2>/dev/null || true
@@ -42,6 +46,7 @@ rts_root="$project_root/build/alire-rts"
 generated_config_file="$project_root/build/flyology.cgpr"
 policy_file="$project_root/build/flyology-rts.conf"
 stamp_file="$rts_root/.flyology-input-stamp"
+patched_core_manifest="$rts_root/.flyology-patched-core-manifest"
 
 mode=prepare
 case "$#:$*" in
@@ -166,6 +171,26 @@ hash_file () {
   hash_stream <"$1" | awk '{ print $1 }'
 }
 
+archive_member_has_symbol () {
+  checked_member=$1
+  checked_symbol=$2
+
+  nm -g "$validation_root/$checked_member" 2>/dev/null |
+    awk '{ print $NF }' |
+    sed 's/^_//' |
+    grep -Fx "$checked_symbol" >/dev/null
+}
+
+record_patched_core () {
+  entry_kind=$1
+  entry_name=$2
+  entry_file=$3
+
+  printf '%s %s %s\n' \
+    "$entry_kind" "$entry_name" "$(hash_file "$entry_file")" \
+    >>"$expected_manifest"
+}
+
 input_stamp=$(
   {
     printf '%s\n' \
@@ -206,12 +231,125 @@ input_stamp=$(
 runtime_artifacts_valid () {
   object="$rts_root/obj/context_switch.o"
   archive="$rts_root/adalib/libgnarl.a"
-  [ -f "$object" ] && [ -f "$archive" ] || return 1
+  include="$rts_root/adainclude"
+  [ -f "$object" ] && [ -f "$archive" ] \
+    && [ -f "$patched_core_manifest" ] \
+    && [ ! -L "$patched_core_manifest" ] || return 1
+  [ -f "$include/s-taprop.adb" ] \
+    && [ -f "$include/s-tassta.adb" ] \
+    && [ -f "$include/s-taskin.adb" ] || return 1
   ar -t "$archive" | grep '^context_switch[.]o$' >/dev/null || return 1
   object_hash=$(hash_file "$object")
   archived_hash=$(ar -p "$archive" context_switch.o | hash_stream |
     awk '{ print $1 }')
   [ "$object_hash" = "$archived_hash" ] || return 1
+
+  if [ -n "$validation_root" ]; then
+    rm -rf -- "$validation_root"
+    validation_root=
+  fi
+  validation_root=$(mktemp -d \
+    "$project_root/build/.flyology-rts-validation.XXXXXX")
+  set -- s-taprop.o s-taskin.o s-tassta.o
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      set -- "$@" a-sytaco.o
+      ;;
+  esac
+  (
+    cd "$validation_root"
+    ar -x "$archive" "$@"
+  ) || return 1
+
+  expected_manifest="$validation_root/expected-manifest"
+  printf '%s\n' "Flyology patched core manifest version 1" \
+    >"$expected_manifest"
+  record_patched_core source adainclude/s-taprop.adb \
+    "$include/s-taprop.adb"
+  record_patched_core source adainclude/s-tassta.adb \
+    "$include/s-tassta.adb"
+  record_patched_core source adainclude/s-taskin.adb \
+    "$include/s-taskin.adb"
+  if [ "$(uname -s)" = Darwin ]; then
+    record_patched_core source adainclude/s-tpopmo.adb \
+      "$include/s-tpopmo.adb"
+  fi
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      record_patched_core source adainclude/a-sytaco.ads \
+        "$include/a-sytaco.ads"
+      record_patched_core source adainclude/a-sytaco.adb \
+        "$include/a-sytaco.adb"
+      ;;
+  esac
+  record_patched_core archive adalib/libgnarl.a:s-taprop.o \
+    "$validation_root/s-taprop.o"
+  record_patched_core archive adalib/libgnarl.a:s-tassta.o \
+    "$validation_root/s-tassta.o"
+  record_patched_core archive adalib/libgnarl.a:s-taskin.o \
+    "$validation_root/s-taskin.o"
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
+        "$validation_root/a-sytaco.o"
+      ;;
+  esac
+  cmp -s "$expected_manifest" "$patched_core_manifest" || return 1
+
+  grep -F "renames System.Flyology.Scheduler.Create;" \
+    "$include/s-taprop.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Scheduler.Finalize;" \
+    "$include/s-tassta.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Task_Results.Publish" \
+    "$include/s-tassta.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Scheduler.Current_Task" \
+    "$include/s-taskin.adb" >/dev/null || return 1
+  archive_member_has_symbol \
+    s-taprop.o system__flyology__scheduler__create || return 1
+  archive_member_has_symbol \
+    s-taprop.o flyology_runtime_file_io || return 1
+  archive_member_has_symbol \
+    s-tassta.o system__flyology__scheduler__finalize || return 1
+  archive_member_has_symbol \
+    s-tassta.o system__flyology__task_results__publish || return 1
+  archive_member_has_symbol \
+    s-taskin.o system__flyology__scheduler__current_task || return 1
+
+  case "$(uname -s)" in
+    Darwin)
+      [ -f "$include/s-tpopmo.adb" ] || return 1
+      grep -F '"flyology_monotonic_clock"' \
+        "$include/s-tpopmo.adb" >/dev/null || return 1
+      grep -F '"flyology_darwin_cond_timedwait_relative"' \
+        "$include/s-tpopmo.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_monotonic_clock || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_darwin_cond_timedwait_relative || return 1
+      ;;
+    Linux)
+      grep -F '"flyology_linux_pthread_stack_min"' \
+        "$include/s-taprop.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_linux_pthread_stack_min || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      [ -f "$include/a-sytaco.ads" ] \
+        && [ -f "$include/a-sytaco.adb" ] || return 1
+      grep -F "Suspended_Task : System.Tasking.Task_Id;" \
+        "$include/a-sytaco.ads" >/dev/null || return 1
+      grep -F "S.Suspended_Task := Self_ID;" \
+        "$include/a-sytaco.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        a-sytaco.o system__soft_links__abort_defer || return 1
+      ;;
+  esac
 
   case "$(uname -m)" in
     arm64|aarch64)
@@ -237,6 +375,11 @@ runtime_artifacts_valid () {
 runtime_is_current () {
   [ -f "$stamp_file" ] || return 1
   [ "$(sed -n '1p' "$stamp_file")" = "$input_stamp" ] || return 1
+  [ -f "$patched_core_manifest" ] || return 1
+  manifest_hash=$(hash_file "$patched_core_manifest")
+  [ "$(sed -n '2p' "$stamp_file")" = \
+    "patched_core_manifest=$manifest_hash" ] || return 1
+  [ -z "$(sed -n '3p' "$stamp_file")" ] || return 1
   runtime_artifacts_valid
 }
 
@@ -261,7 +404,7 @@ fi
 
 if ! runtime_artifacts_valid; then
   printf '%s\n' \
-    "prepared Flyology RTS lacks a current context-switch archive member" \
+    "prepared Flyology RTS lacks required patched core artifacts" \
     >&2
   exit 1
 fi
@@ -307,7 +450,10 @@ esac
 
 if [ "$rebuilt" -eq 1 ]; then
   stamp_temp=$(mktemp "$rts_root/.flyology-input-stamp.XXXXXX")
-  printf '%s\n' "$input_stamp" >"$stamp_temp"
+  manifest_hash=$(hash_file "$patched_core_manifest")
+  printf '%s\n' \
+    "$input_stamp" \
+    "patched_core_manifest=$manifest_hash" >"$stamp_temp"
   mv "$stamp_temp" "$stamp_file"
   stamp_temp=
 fi
