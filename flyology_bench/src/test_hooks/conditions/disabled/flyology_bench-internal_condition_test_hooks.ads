@@ -13,4 +13,26 @@ private package Flyology_Bench.Internal_Condition_Test_Hooks is
      (Value : out Internal_Conditions.Snapshot; Include_Profile : Boolean; Supplied : out Boolean)
    with Import, External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_supply";
 
+   function Linux_Fixture_Enabled return Boolean
+   with Import, External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_fixture_enabled";
+
+   function Linux_Sysfs_Root return String
+   with Import, External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_sysfs_root";
+
+   function Linux_PPD_Profile return String
+   with Import, External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_ppd_profile";
+
+   function Linux_PPD_Profile_Available return Boolean
+   with
+     Import,
+     External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_ppd_profile_available";
+
+   function Linux_PPD_Degradation return String
+   with Import, External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_ppd_degradation";
+
+   function Linux_PPD_Degradation_Available return Boolean
+   with
+     Import,
+     External_Name => "flyology_bench_disabled_condition_hook_must_be_elided_ppd_degradation_available";
+
 end Flyology_Bench.Internal_Condition_Test_Hooks;
