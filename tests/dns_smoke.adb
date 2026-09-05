@@ -558,6 +558,9 @@ procedure DNS_Smoke is
                if Name = "a.test" then
                   Control.A_Query;
                   Send_Response (Name, IPv4 => "192.0.2.1");
+               elsif Name = "default-deadline.test" then
+                  delay 0.05;
+                  Send_Response (Name, IPv4 => "192.0.2.179");
                elsif Name = "v6.test" then
                   Send_Response (Name, IPv6 => "2001:db8::5");
                elsif Name = "alias.test" then
@@ -908,6 +911,30 @@ procedure DNS_Smoke is
             function Ref (Item : Operations.Operation'Class) return Operations.Operation_Reference
             renames Operations.Reference;
          begin
+            Set_Stage ("scoped default deadline");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "default-deadline.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.179";
+               end;
+            end;
+
             Set_Stage ("scoped UDP and hidden child");
             DNS.Clear_Cache;
             declare

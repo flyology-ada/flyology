@@ -40,6 +40,24 @@ is
        Selected_Endpoint'Result < Count
        and then Selected_Endpoint'Result = (Attempt - 1 + Rotation) mod Count;
 
+   --  Seconds assigned to one attempt. Overall_Remaining may carry the
+   --  caller's negative infinite sentinel only when Infinite is true; that
+   --  sentinel must never participate in deadline arithmetic.
+   --  @param Per_Attempt Configured duration of one attempt
+   --  @param Overall_Remaining Seconds left in the caller's deadline
+   --  @param Infinite The caller supplied no overall deadline
+   --  @return Seconds assigned to the attempt
+   function Attempt_Window
+     (Per_Attempt : Duration; Overall_Remaining : Duration; Infinite : Boolean) return Duration
+   with
+     Global => null,
+     Pre    => Per_Attempt > 0.0 and then (Infinite or else Overall_Remaining >= 0.0),
+     Post   =>
+       Attempt_Window'Result
+       = (if Infinite then Per_Attempt else Duration'Min (Per_Attempt, Overall_Remaining))
+       and then Attempt_Window'Result >= 0.0
+       and then Attempt_Window'Result <= Per_Attempt;
+
    --  Seconds a receive wait may last. A hostile peer can keep a socket
    --  readable indefinitely, so the caller re-evaluates this before every
    --  wait and abandons the attempt once it reaches zero. Overall_Remaining

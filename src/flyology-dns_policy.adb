@@ -8,6 +8,12 @@ is
       return (Attempt - 1 + Rotation) mod Count;
    end Selected_Endpoint;
 
+   function Attempt_Window
+     (Per_Attempt : Duration; Overall_Remaining : Duration; Infinite : Boolean) return Duration is
+   begin
+      return (if Infinite then Per_Attempt else Duration'Min (Per_Attempt, Overall_Remaining));
+   end Attempt_Window;
+
    function Receive_Window
      (Attempt_Remaining : Duration; Overall_Remaining : Duration; Infinite : Boolean) return Duration is
    begin

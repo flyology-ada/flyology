@@ -86,6 +86,14 @@ selection, socket byte acceptance, partial-send reporting, and the coupling
 between the driver and the policy remain outside SPARK; the second-slot
 regression runs through that integration boundary in both task lanes.
 
+Issue #179 proves that an attempt with no overall deadline receives the full
+configured per-attempt window and that a finite overall deadline bounds the
+window by both remaining budgets. The negative infinite sentinel is excluded
+from the finite minimum by the policy precondition. Clock sampling, the mapping
+of `Time_Last` to that sentinel, deadline construction, and DNS transport remain
+outside SPARK; a delayed default-deadline regression exercises that integration
+boundary in both task lanes.
+
 The supervision policy strengthening proves that every successful start plan
 contains each configured child once with all prerequisites earlier, and that a
 dependent-recovery set contains the failed child, excludes unconfigured ids,
@@ -220,6 +228,11 @@ remain the live integration boundary.
   - [x] `Flyology.Socket_Policy.Complete_Transfer_First`
   - [x] Whole `Flyology.Socket_Policy` unit widening
   - [x] Application and runtime policy suite widening
+- [x] Issue #179 production-used DNS attempt-window policy
+      (level 1, mode all)
+  - [x] `Flyology.DNS_Policy.Attempt_Window`
+  - [x] Whole `Flyology.DNS_Policy` unit widening
+  - [x] Application and runtime policy suite widening
 
 ## Reviewed
 <!-- Before marking an item complete here, review it following the Review
@@ -258,6 +271,7 @@ remain the live integration boundary.
 - [x] HTTP client upload-policy proof and integration boundary
 - [x] Task-result lifecycle policy and runtime integration boundary
 - [x] Issue #105 complete-transfer cursor proof and socket-driver integration
+- [x] Issue #179 DNS attempt-window proof and resolver integration
 - [x] Supervision policy contract strengthening (level 1, mode all)
   - [x] `Flyology.Supervision_Policy.Plan_Start_Order` (level 1, mode all)
     - [x] Readiness-table invariant
