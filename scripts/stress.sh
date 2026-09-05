@@ -94,7 +94,11 @@ if [ "$run_faults" = 1 ]; then
   if [ "$(uname -s)" = Linux ]; then
     run_gprbuild \
       --RTS="$project_root/build/rts" \
-      -f -P tests/runtime_smoke.gpr linux_poller_fairness_smoke.adb
+      -f -P tests/runtime_smoke.gpr \
+      linux_abort_readiness_waiter_smoke.adb linux_poller_fairness_smoke.adb
+    printf '%s\n' "fault case=linux-abort-readiness-waiter"
+    run_timed "$case_timeout" \
+      "$project_root/tests/bin/linux_abort_readiness_waiter_smoke"
     printf '%s\n' "fault case=linux-poller-fairness"
     run_timed "$case_timeout" \
       "$project_root/tests/bin/linux_poller_fairness_smoke"
