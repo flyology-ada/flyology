@@ -279,6 +279,7 @@ package body System.Flyology.Scheduler is
       IO_Wait                 : Boolean := False;
       IO_Interrupt_Wait       : Boolean := False;
       IO_Result               : C.int := 0;
+      Descriptor_Cancel_Queued : Boolean := False;
       --  File cancellation needs one descriptor link that outlives the
       --  submission call. Descriptor-set waits keep their bounded link array
       --  on the suspended fiber's stack instead.
@@ -323,6 +324,7 @@ package body System.Flyology.Scheduler is
       Next_Group              : Fiber_Access;
       Next_File               : Fiber_Access;
       Next_File_Cancel        : Fiber_Access;
+      Next_Descriptor_Cancel  : Fiber_Access;
       Next_Registry           : Fiber_Access;
       Registry_Bucket         : Registry_Bucket_Index := 0;
       Registry_Shard          : Registry_Shard_Index := 0;
@@ -368,6 +370,8 @@ package body System.Flyology.Scheduler is
       Pending_Async_File_Count : Natural := 0;
       File_Cancel_Head         : Fiber_Access;
       File_Cancel_Tail         : Fiber_Access;
+      Descriptor_Cancel_Head   : Fiber_Access;
+      Descriptor_Cancel_Tail   : Fiber_Access;
       Timers                   : Timer_Heap_Access;
       Timer_Count              : Natural := 0;
       Timer_Capacity           : Natural := 0;
@@ -565,6 +569,9 @@ package body System.Flyology.Scheduler is
       Consumed_Descriptor : C.int := -1;
       Read_Consumed       : Boolean := False;
       Write_Consumed      : Boolean := False);
+   procedure Queue_Descriptor_Cancel_Locked
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
+   procedure Process_Descriptor_Cancellations_Locked (Group : not null Loop_Group_Access);
    procedure Queue_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
    procedure Remove_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
    procedure Queue_File_Cancel_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
@@ -858,6 +865,8 @@ package body System.Flyology.Scheduler is
        and then Group.Pending_Async_File_Count = 0
        and then Group.File_Cancel_Head = null
        and then Group.File_Cancel_Tail = null
+       and then Group.Descriptor_Cancel_Head = null
+       and then Group.Descriptor_Cancel_Tail = null
        and then Pollers.File_Quiescent (Group.Scheduler_Poller));
 
    procedure Fatal (Context : C.int := Scheduler_Invariant) is
@@ -1341,6 +1350,68 @@ package body System.Flyology.Scheduler is
       Item.IO_Interrupt_Wait := False;
    end Remove_IO_Waits_Locked;
 
+   procedure Queue_Descriptor_Cancel_Locked
+     (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
+   begin
+      if Item.Group /= Group or else Item.State /= Waiting or else not Item.IO_Wait then
+         Fatal;
+      elsif Item.Descriptor_Cancel_Queued then
+         return;
+      end if;
+      Item.Descriptor_Cancel_Queued := True;
+      Item.Next_Descriptor_Cancel := null;
+      if Group.Descriptor_Cancel_Tail = null then
+         Group.Descriptor_Cancel_Head := Item;
+      else
+         Group.Descriptor_Cancel_Tail.Next_Descriptor_Cancel := Item;
+      end if;
+      Group.Descriptor_Cancel_Tail := Item;
+      if Faults.Enabled then
+         Faults.Note_Descriptor_Cancel_Queued;
+      end if;
+   end Queue_Descriptor_Cancel_Locked;
+
+   procedure Process_Descriptor_Cancellations_Locked (Group : not null Loop_Group_Access) is
+      Descriptor_Cancel_Budget : constant Positive := 64;
+      Item                     : Fiber_Access;
+      Processed                : Natural := 0;
+   begin
+      --  Only the loop thread drains this queue. In particular, it cannot
+      --  overlap Linux Wait_Batch while that routine translates and removes
+      --  records from the poller's process-side registration list.
+      while Group.Descriptor_Cancel_Head /= null and then Processed < Descriptor_Cancel_Budget loop
+         Item := Group.Descriptor_Cancel_Head;
+         if not Item.Descriptor_Cancel_Queued then
+            Fatal;
+         end if;
+         Group.Descriptor_Cancel_Head := Item.Next_Descriptor_Cancel;
+         if Group.Descriptor_Cancel_Head = null then
+            Group.Descriptor_Cancel_Tail := null;
+         end if;
+         Item.Next_Descriptor_Cancel := null;
+         Item.Descriptor_Cancel_Queued := False;
+         Processed := Processed + 1;
+         if Item.Group = Group and then Item.State = Waiting and then Item.IO_Wait then
+            Remove_Timer_Locked (Group, Item);
+            Item.Timed_Out := False;
+            Remove_IO_Waits_Locked (Group, Item);
+            Enqueue (Group, Item);
+            if Faults.Enabled then
+               Faults.Note_Descriptor_Cancel_Processed;
+            end if;
+         end if;
+      end loop;
+      if Group.Descriptor_Cancel_Head /= null
+        and then Faults.Enabled
+        and then Faults.Fail (Faults.Descriptor_Cancel_Budget_Pause)
+      then
+         Faults.Pause_Descriptor_Cancel_Budget;
+      end if;
+      if Group.Descriptor_Cancel_Head /= null and then not Pollers.Wake (Group.Scheduler_Poller) then
+         Fatal (Poller_Failure);
+      end if;
+   end Process_Descriptor_Cancellations_Locked;
+
    procedure Queue_Pending_File_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
    begin
       if not Item.File_Wait or else Item.File_Pending then
@@ -1800,6 +1871,9 @@ package body System.Flyology.Scheduler is
       Bucket   : Ready_Bucket renames Group.Ready_Buckets (Priority);
       At_Head  : constant Boolean := Item.Enqueue_At_Head;
    begin
+      if Item.Descriptor_Cancel_Queued then
+         Fatal;
+      end if;
       Clear_Stack_Advice (Group, Item);
       Item.State := Ready;
       Item.Enqueue_At_Head := False;
@@ -1884,7 +1958,7 @@ package body System.Flyology.Scheduler is
       end if;
 
       Item := Group.Ready_Buckets (Group.Highest_Ready).Head;
-      if Item = null then
+      if Item = null or else Item.Descriptor_Cancel_Queued then
          Fatal;
       end if;
       Remove_From_Ready (Group, Item);
@@ -1935,6 +2009,7 @@ package body System.Flyology.Scheduler is
       if Scheduling.Plan_Destroy (Phase_Of (Item.State)) = Scheduling.Defer
         or else Item.File_Wait
         or else Item.Active_Async_Files /= 0
+        or else Item.Descriptor_Cancel_Queued
       then
          Fatal;
       end if;
@@ -2177,6 +2252,12 @@ package body System.Flyology.Scheduler is
                Fatal;
 
             when Scheduling.Expired         =>
+               --  A queued descriptor cancellation owns every way out of the
+               --  original wait. The next scheduler turn drains it before
+               --  timer promotion can make the fiber runnable or reusable.
+               if Item.Descriptor_Cancel_Queued then
+                  return 0.0;
+               end if;
                Remove_Timer_Locked (Group, Item);
                Item.Timed_Out := True;
                if Item.IO_Wait then
@@ -4062,6 +4143,16 @@ package body System.Flyology.Scheduler is
          Queue_File_Cancel_Locked (Group, Item);
          Need_Wake := True;
          Group.Wakeups := Group.Wakeups + 1;
+      elsif Item.State = Waiting
+        and then Item.IO_Wait
+        and then not Pollers.Retains_Orphaned_One_Shots
+      then
+         --  Linux Wait_Batch is the sole owner of the poller's linked
+         --  registration records while the group lock is released. A foreign
+         --  abort or ATC therefore queues cancellation for the loop thread.
+         Queue_Descriptor_Cancel_Locked (Group, Item);
+         Need_Wake := True;
+         Group.Wakeups := Group.Wakeups + 1;
       elsif Item.State = Waiting then
          Remove_Timer_Locked (Group, Item);
          Item.Timed_Out := False;
@@ -4229,7 +4320,13 @@ package body System.Flyology.Scheduler is
                      or else (Event.Kind in Pollers.Writable_Event | Pollers.Read_Write_Event
                               and then Link.Interest = Pollers.Writable));
          if Matches then
-            if Item.File_Wait and then Link.Descriptor = Item.File_Cancel_Descriptor then
+            if Item.Descriptor_Cancel_Queued then
+               --  The bounded cancellation drain may leave this selected
+               --  target queued. Its cancellation owns the readiness hint;
+               --  retaining the wait prevents dispatch, reuse, and reap until
+               --  the loop consumes the queue entry on its next turn.
+               Link := Link.Next;
+            elsif Item.File_Wait and then Link.Descriptor = Item.File_Cancel_Descriptor then
                if Request_File_Cancel_Locked (Group, Item) then
                   Submit_Pending_Files_Locked (Group);
                end if;
@@ -4270,6 +4367,7 @@ package body System.Flyology.Scheduler is
       end if;
       Group.Poll_Batches := Group.Poll_Batches + 1;
       Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
+      Process_Descriptor_Cancellations_Locked (Group);
       Process_File_Cancellations_Locked (Group);
       for Index in 1 .. Count loop
          Handle_Poll_Event (Group, Events (Index));
@@ -4298,6 +4396,7 @@ package body System.Flyology.Scheduler is
             Unlock_Group (Group);
             return;
          end if;
+         Process_Descriptor_Cancellations_Locked (Group);
          Process_File_Cancellations_Locked (Group);
          Timeout := No_Deadline;
          if Scheduling.Maintenance_Due (Ready_Present (Group), Dispatches_Until_Timer_Check) then
@@ -4376,6 +4475,7 @@ package body System.Flyology.Scheduler is
             end if;
             Group.Poll_Batches := Group.Poll_Batches + 1;
             Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
+            Process_Descriptor_Cancellations_Locked (Group);
             Process_File_Cancellations_Locked (Group);
             for Index in 1 .. Count loop
                Handle_Poll_Event (Group, Events (Index));
