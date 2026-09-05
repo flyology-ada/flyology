@@ -10,6 +10,7 @@ with GNAT.OS_Lib;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
+with Flyology_Bench.Internal_Condition_Test_Hooks;
 with Flyology_Bench.Internal_Probes;
 
 package body Flyology_Bench.Internal_Conditions is
@@ -1119,6 +1120,16 @@ package body Flyology_Bench.Internal_Conditions is
       Effective_Deadline : Interfaces.Unsigned_64 := Deadline;
       Now                : Interfaces.Unsigned_64;
    begin
+      if Internal_Condition_Test_Hooks.Enabled then
+         declare
+            Supplied : Boolean;
+         begin
+            Internal_Condition_Test_Hooks.Supply (Value, Include_Profile, Supplied);
+            if Supplied then
+               return;
+            end if;
+         end;
+      end if;
       Value := (others => <>);
       if Effective_Deadline = Interfaces.Unsigned_64'Last then
          Now := Internal_Probes.Clock_Now;

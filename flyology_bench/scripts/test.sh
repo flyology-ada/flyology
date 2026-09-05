@@ -42,6 +42,19 @@ cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_probes_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_condition_policy_smoke"
+build -q -p -P "$crate_root/tests/flyology_bench_condition_tests.gpr" \
+  --subdirs=condition-hooks -XFLYOLOGY_BENCH_CONDITION_TEST_HOOKS=true
+"$crate_root/tests/bin/condition-hooks/flyology_bench-internal_condition_integration_smoke"
+build -q -f -p -P "$crate_root/flyology_bench.gpr" \
+  --subdirs=condition-hooks-disabled-o0 \
+  -XFLYOLOGY_BENCH_CONDITION_TEST_HOOKS=false \
+  -cargs:Ada -O0 -fno-inline -fno-inline-functions -fno-tree-dce -fno-dce
+if nm -u "$crate_root/lib/condition-hooks-disabled-o0/libflyology_bench.a" \
+  | grep -q 'flyology_bench_disabled_condition_hook_must_be_elided'
+then
+  printf '%s\n' "disabled condition hook survived strict -O0 compilation" >&2
+  exit 1
+fi
 "$crate_root/tests/bin/custom_metrics_smoke" >"$work_dir/custom.out"
 cat "$work_dir/custom.out"
 grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
@@ -205,6 +218,12 @@ if nm -g "$crate_root/lib/libflyology_bench.a" \
   | grep -q 'flyology_bench_worker_test_'
 then
   printf '%s\n' "test-only worker symbols leaked into the production library" >&2
+  exit 1
+fi
+if nm -g "$crate_root/lib/libflyology_bench.a" \
+  | grep -Eq 'flyology_bench_disabled_condition_hook|internal_condition_test_hooks__supply'
+then
+  printf '%s\n' "test-only condition hooks leaked into the production library" >&2
   exit 1
 fi
 

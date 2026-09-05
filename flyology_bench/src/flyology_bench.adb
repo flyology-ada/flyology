@@ -1513,7 +1513,7 @@ package body Flyology_Bench is
         (if Started > Interfaces.Unsigned_64'Last - Remaining_Budget
          then Interfaces.Unsigned_64'Last
          else Started + Remaining_Budget);
-      Read_Conditions (Watch, Previous, Deadline => Deadline, Account_Time => False);
+      Read_Conditions (Watch, Previous, Force_Profile => True, Deadline => Deadline, Account_Time => False);
       declare
          Event_Evidence : constant Condition_Policy.Counter_Evidence :=
            Condition_Policy.Compare_Counter
@@ -1565,7 +1565,7 @@ package body Flyology_Bench is
             Sleep_NS := Interfaces.Unsigned_64'Min (Poll_NS, Remaining_Budget - Elapsed);
             delay Duration (Long_Float (Sleep_NS) / 1_000_000_000.0);
          end;
-         Read_Conditions (Watch, Current, Deadline => Deadline, Account_Time => False);
+         Read_Conditions (Watch, Current, Force_Profile => True, Deadline => Deadline, Account_Time => False);
          Now := Clock_Now;
          declare
             Event_Evidence : constant Condition_Policy.Counter_Evidence :=
@@ -1746,11 +1746,12 @@ package body Flyology_Bench is
    end Open_Condition_Window;
 
    procedure Judge_Condition_Window
-     (Config     : Configuration;
-      Watch      : in out Interference_Watch;
-      Units      : Positive;
-      Action     : out Condition_Action;
-      Count_Unit : Boolean := True)
+     (Config        : Configuration;
+      Watch         : in out Interference_Watch;
+      Units         : Positive;
+      Action        : out Condition_Action;
+      Count_Unit    : Boolean := True;
+      Force_Profile : Boolean := False)
    is
       Current                     : Conditions.Snapshot;
       Throttle_Increase           : Interfaces.Unsigned_64 := 0;
@@ -1765,7 +1766,7 @@ package body Flyology_Bench is
          return;
       end if;
       Watch.Condition_Open := False;
-      Read_Conditions (Watch, Current);
+      Read_Conditions (Watch, Current, Force_Profile => Force_Profile);
       declare
          Event_Evidence : constant Condition_Policy.Counter_Evidence :=
            Condition_Policy.Compare_Counter
@@ -1862,12 +1863,14 @@ package body Flyology_Bench is
    end Validate_After_Calibration;
 
    procedure Finalize_Operating_Conditions (Watch : in out Interference_Watch) is
-      Current : Conditions.Snapshot;
+      Current : constant Conditions.Snapshot := Watch.Condition_Last;
    begin
       if not Watch.Conditions_Active then
          return;
       end if;
-      Read_Conditions (Watch, Current, Force_Profile => True);
+      --  A sampling window's forced closing read has already been judged.
+      --  Re-reading here would discover a state too late for Pause or Fail to
+      --  reject the affected window.
       Record_Condition_Snapshot (Watch, Current, Final => True);
    end Finalize_Operating_Conditions;
 
@@ -3235,7 +3238,8 @@ package body Flyology_Bench is
                   end loop;
                   Judge_Window
                     (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                  Judge_Condition_Window (Config, Watch, Window_Last - Window_First + 1, Condition_Result);
+                  Judge_Condition_Window
+                    (Config, Watch, Window_Last - Window_First + 1, Condition_Result, Force_Profile => True);
                   if Condition_Result = Fail_Conditions then
                      raise Operating_Conditions_Unacceptable
                        with "operating conditions changed during measurement";
@@ -3708,7 +3712,12 @@ package body Flyology_Bench is
                      end loop;
                      Judge_Window
                        (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                     Judge_Condition_Window (Config, Watch, Window_Last - Window_First + 1, Condition_Result);
+                     Judge_Condition_Window
+                       (Config,
+                        Watch,
+                        Window_Last - Window_First + 1,
+                        Condition_Result,
+                        Force_Profile => True);
                      if Condition_Result = Fail_Conditions then
                         raise Operating_Conditions_Unacceptable
                           with "operating conditions changed during paired comparison";
@@ -4264,7 +4273,11 @@ package body Flyology_Bench is
                         Judge_Window
                           (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
                         Judge_Condition_Window
-                          (Config, Watch, Window_Last - Window_First + 1, Condition_Result);
+                          (Config,
+                           Watch,
+                           Window_Last - Window_First + 1,
+                           Condition_Result,
+                           Force_Profile => True);
                         if Condition_Result = Fail_Conditions then
                            raise Operating_Conditions_Unacceptable
                              with "operating conditions changed during balanced comparison";
@@ -4378,7 +4391,11 @@ package body Flyology_Bench is
                            Judge_Window
                              (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
                            Judge_Condition_Window
-                             (Config, Watch, Window_Last - Window_First + 1, Condition_Result);
+                             (Config,
+                              Watch,
+                              Window_Last - Window_First + 1,
+                              Condition_Result,
+                              Force_Profile => True);
                            if Condition_Result = Fail_Conditions then
                               raise Operating_Conditions_Unacceptable
                                 with "operating conditions changed during sequential comparison";

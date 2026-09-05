@@ -1,6 +1,17 @@
 project Flyology_Bench is
+   type Condition_Test_Hooks_Type is ("false", "true");
+   Condition_Test_Hooks : Condition_Test_Hooks_Type :=
+     external ("FLYOLOGY_BENCH_CONDITION_TEST_HOOKS", "false");
+   Condition_Test_Hook_Source_Dir := "src/test_hooks/conditions/disabled";
+   case Condition_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Condition_Test_Hook_Source_Dir := "src/test_hooks/conditions/enabled";
+   end case;
+
    for Languages use ("Ada", "C");
-   for Source_Dirs use ("src", "src/native");
+   for Source_Dirs use ("src", "src/native", Condition_Test_Hook_Source_Dir);
    for Library_Name use "flyology_bench";
    for Library_Kind use "static";
    for Library_Dir use "lib";
