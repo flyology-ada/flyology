@@ -17,9 +17,15 @@ compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$development_
 case "$compiler_release" in
   13.2.2|14.1.3|14.2.1)
     atomic_store_family=gnat-13-14
+    controlled_subpool_family=affected
     ;;
-  15.1.2|15.3.1|16.1.0|16.2.0)
+  15.1.2)
     atomic_store_family=gnat-15-plus
+    controlled_subpool_family=affected
+    ;;
+  15.3.1|16.1.0|16.2.0)
+    atomic_store_family=gnat-15-plus
+    controlled_subpool_family=corrected
     ;;
   *)
     printf '%s\n' "unsupported atomic-store compiler release: $compiler_release" >&2
@@ -193,6 +199,8 @@ export FLYOLOGY_BUFFER_TEST_HOOKS
 "$development_alr" build
 "$project_root/scripts/check-atomic-store-selection.sh" \
   "$compiler_release" "$atomic_store_family"
+"$project_root/scripts/check-controlled-subpool-selection.sh" \
+  "$compiler_release" "$controlled_subpool_family"
 "$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"

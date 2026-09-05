@@ -1,9 +1,22 @@
 with "../flyology.gpr";
+with "../config/flyology_atomic_store_config.gpr";
 
 project Runtime_Smoke is
 
+   type Compiler_Release_Type is
+     ("13.2.2", "14.1.3", "14.2.1", "15.1.2", "15.3.1", "16.1.0", "16.2.0");
+   Compiler_Release : Compiler_Release_Type :=
+     Flyology_Atomic_Store_Config.Compiler_Release;
+   Controlled_Subpool_Source_Dir := "controlled_subpools/corrected";
+   case Compiler_Release is
+      when "13.2.2" | "14.1.3" | "14.2.1" | "15.1.2" =>
+         Controlled_Subpool_Source_Dir := "controlled_subpools/affected";
+      when "15.3.1" | "16.1.0" | "16.2.0" =>
+         null;
+   end case;
+
    for Languages use ("Ada", "C");
-   for Source_Dirs use (".", "native");
+   for Source_Dirs use (".", "native", Controlled_Subpool_Source_Dir);
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
    for Main use

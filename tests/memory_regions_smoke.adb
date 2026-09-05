@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Flyology;
 with Flyology.Memory_Regions;
+with Memory_Regions_Controlled_Allocations;
 with System.Storage_Elements;
 
 procedure Memory_Regions_Smoke is
@@ -47,37 +48,31 @@ procedure Memory_Regions_Smoke is
       is (Light_Passed);
    end Results;
 
-   type Tracked is new Ada.Finalization.Controlled with record
-      Value : Natural := 0;
-   end record;
-
-   overriding
-   procedure Finalize (Item : in out Tracked);
-
-   overriding
-   procedure Finalize (Item : in out Tracked) is
+   procedure Note_Finalization (Value : Natural) is
    begin
       Results.Finalized;
-      if Item.Value = 99 then
+      if Value = 99 then
          raise Constraint_Error with "injected region finalization failure";
       end if;
-   end Finalize;
+   end Note_Finalization;
 
    procedure Check_Explicit_Release is
       Pool : aliased Regions.Task_Pool;
       type Integer_Access is access Integer;
       for Integer_Access'Storage_Pool use Pool;
-      type Tracked_Access is access Tracked;
-      for Tracked_Access'Storage_Pool use Pool;
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
 
-      Region           : Regions.Region_Handle := Regions.Create_Region (Pool, Chunk_Storage => 128);
+      Region           : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 128);
       Number           : Integer_Access;
-      Object           : Tracked_Access;
+      Object           : Allocations.Tracked_Access;
       Sample           : Regions.Pool_Statistics;
       Unnamed_Accepted : Boolean := False;
    begin
       begin
-         Object := new Tracked'(Ada.Finalization.Controlled with 1);
+         Object :=
+           new Allocations.Tracked'(Ada.Finalization.Controlled with 1);
          Unnamed_Accepted := True;
       exception
          when Program_Error =>
@@ -88,7 +83,7 @@ procedure Memory_Regions_Smoke is
       end if;
 
       Number := new (Region) Integer'(42);
-      Object := new (Region) Tracked'(Ada.Finalization.Controlled with 7);
+      Object := Allocations.Allocate (Region, 7);
       if Number.all /= 42 or else Object.Value /= 7 then
          raise Program_Error with "region allocator corrupted an object";
       end if;
@@ -107,7 +102,9 @@ procedure Memory_Regions_Smoke is
       end if;
 
       Sample := Regions.Statistics (Pool);
-      if Sample.Live_Regions /= 0 or else Sample.Consumed_Storage /= 0 or else Sample.Reserved_Storage /= 0
+      if Sample.Live_Regions /= 0
+        or else Sample.Consumed_Storage /= 0
+        or else Sample.Reserved_Storage /= 0
       then
          raise Program_Error with "released region retained accounting";
       end if;
@@ -118,10 +115,12 @@ procedure Memory_Regions_Smoke is
    procedure Check_Failing_Finalization is
       Before : constant Natural := Results.Finalization_Count;
       Pool   : aliased Regions.Task_Pool;
-      type Tracked_Access is access Tracked;
-      for Tracked_Access'Storage_Pool use Pool;
-      Region : Regions.Region_Handle := Regions.Create_Region (Pool, Chunk_Storage => 128);
-      Object : constant Tracked_Access := new (Region) Tracked'(Ada.Finalization.Controlled with 99);
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+      Region : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 128);
+      Object : constant Allocations.Tracked_Access :=
+        Allocations.Allocate (Region, 99);
       pragma Unreferenced (Object);
       Failed : Boolean := False;
       Sample : Regions.Pool_Statistics;
@@ -141,7 +140,9 @@ procedure Memory_Regions_Smoke is
       end if;
 
       Sample := Regions.Statistics (Pool);
-      if Sample.Live_Regions /= 0 or else Sample.Consumed_Storage /= 0 or else Sample.Reserved_Storage /= 0
+      if Sample.Live_Regions /= 0
+        or else Sample.Consumed_Storage /= 0
+        or else Sample.Reserved_Storage /= 0
       then
          raise Program_Error with "failed finalization retained storage";
       end if;
@@ -152,10 +153,12 @@ procedure Memory_Regions_Smoke is
    begin
       declare
          Pool   : aliased Regions.Task_Pool;
-         type Tracked_Access is access Tracked;
-         for Tracked_Access'Storage_Pool use Pool;
-         Region : constant Regions.Region_Handle := Regions.Create_Region (Pool);
-         Object : constant Tracked_Access := new (Region) Tracked'(Ada.Finalization.Controlled with 11);
+         package Allocations is new
+           Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+         Region : constant Regions.Region_Handle :=
+           Regions.Create_Region (Pool);
+         Object : constant Allocations.Tracked_Access :=
+           Allocations.Allocate (Region, 11);
          pragma Unreferenced (Object);
       begin
          null;
@@ -176,10 +179,12 @@ procedure Memory_Regions_Smoke is
 
          task body Native_Owner is
             Pool   : aliased Regions.Task_Pool;
-            type Tracked_Access is access Tracked;
-            for Tracked_Access'Storage_Pool use Pool;
-            Region : constant Regions.Region_Handle := Regions.Create_Region (Pool);
-            Object : constant Tracked_Access := new (Region) Tracked'(Ada.Finalization.Controlled with 12);
+            package Allocations is new
+              Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Allocations.Tracked_Access :=
+              Allocations.Allocate (Region, 12);
             pragma Unreferenced (Object);
          begin
             null;
@@ -191,10 +196,12 @@ procedure Memory_Regions_Smoke is
 
          task body Lightweight_Owner is
             Pool   : aliased Regions.Task_Pool;
-            type Tracked_Access is access Tracked;
-            for Tracked_Access'Storage_Pool use Pool;
-            Region : constant Regions.Region_Handle := Regions.Create_Region (Pool);
-            Object : constant Tracked_Access := new (Region) Tracked'(Ada.Finalization.Controlled with 13);
+            package Allocations is new
+              Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Allocations.Tracked_Access :=
+              Allocations.Allocate (Region, 13);
             pragma Unreferenced (Object);
          begin
             null;
@@ -204,7 +211,9 @@ procedure Memory_Regions_Smoke is
       end;
 
       if Results.Finalization_Count /= Before + 2 then
-         raise Program_Error with "task termination did not release native and lightweight regions";
+         raise Program_Error
+           with
+             "task termination did not release native and lightweight regions";
       end if;
    end Check_Task_Finalization;
 
@@ -244,13 +253,13 @@ procedure Memory_Regions_Smoke is
 
    task body Lightweight_Owner is
       Pool   : aliased Regions.Task_Pool;
-      type Byte_Array is array (Storage.Storage_Offset range <>) of Character;
-      type Byte_Array_Access is access Byte_Array;
-      for Byte_Array_Access'Storage_Pool use Pool;
-      Region : Regions.Region_Handle := Regions.Create_Region (Pool, Chunk_Storage => 256);
-      Buffer : Byte_Array_Access;
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+      Region : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 256);
+      Buffer : Allocations.Byte_Array_Access;
    begin
-      Buffer := new (Region) Byte_Array'(1 .. 513 => 'x');
+      Buffer := Allocations.Allocate_Buffer (Region, 1, 513, 'x');
       if Buffer (Buffer'First) /= 'x'
         or else Buffer (Buffer'Last) /= 'x'
         or else Regions.Statistics (Pool).Live_Regions /= 1
