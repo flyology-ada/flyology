@@ -1,15 +1,8 @@
+with Flyology.Atomic_Primitives;
 with System.Atomic_Primitives;
 
 package body Flyology.Data_Structures.Atomics is
    package AP renames System.Atomic_Primitives;
-
-   generic
-      type Atomic_Type is mod <>;
-   procedure Atomic_Store (Address : System.Address; Value : Atomic_Type; Model : AP.Mem_Model := AP.Seq_Cst);
-   pragma Import (Intrinsic, Atomic_Store, "__atomic_store_n");
-
-   procedure Atomic_Store_32 is new Atomic_Store (AP.uint32);
-   procedure Atomic_Store_64 is new Atomic_Store (AP.uint64);
 
    function Supported return Boolean
    is (AP.Atomic_Always_Lock_Free (4) and then AP.Atomic_Always_Lock_Free (8));
@@ -25,12 +18,12 @@ package body Flyology.Data_Structures.Atomics is
 
    procedure Store_Release_U32 (Address : System.Address; Value : Interfaces.Unsigned_32) is
    begin
-      Atomic_Store_32 (Address, AP.uint32 (Value), AP.Release);
+      Flyology.Atomic_Primitives.Store_Release_U32 (Address, Value);
    end Store_Release_U32;
 
    procedure Store_Release_U64 (Address : System.Address; Value : Interfaces.Unsigned_64) is
    begin
-      Atomic_Store_64 (Address, AP.uint64 (Value), AP.Release);
+      Flyology.Atomic_Primitives.Store_Release_U64 (Address, Value);
    end Store_Release_U64;
 
    function Compare_Exchange_U32

@@ -3185,6 +3185,9 @@ The shared Linux rings require acquire/release ordering against the kernel.
 Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
 not expose the corresponding store operation, so the narrow C ABI shim calls
 the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
+The Ada binding and lowering arrived in GCC 14 in upstream commit
+`4784601d726e5b70b6c4e050c77749706536ccf3`, “ada: Add __atomic_store_n
+binding to System.Atomic_Primitives.”
 
 The OpenSSL adapter adds a C ABI table for dynamically resolved OpenSSL 3
 functions. Ada owns session lifetime, readiness retry, timeout, cancellation,

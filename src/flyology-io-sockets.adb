@@ -1,5 +1,6 @@
 with Ada.Strings;
 with Ada.Strings.Fixed;
+with Flyology.Atomic_Primitives;
 with Flyology.Connection_Test_Hooks;
 with Flyology.Socket_Policy;
 with Flyology.Operations.Drivers;
@@ -28,14 +29,6 @@ package body Flyology.IO.Sockets is
 
    Unprepared : constant Atomics.uint32 := 0;
    Prepared   : constant Atomics.uint32 := 1;
-
-   generic
-      type Atomic_Type is mod <>;
-   procedure Atomic_Store
-     (Address : System.Address; Value : Atomic_Type; Model : Atomics.Mem_Model := Atomics.Seq_Cst);
-   pragma Import (Intrinsic, Atomic_Store, "__atomic_store_n");
-
-   procedure Atomic_Store_32 is new Atomic_Store (Atomics.uint32);
 
    function C_Unix_Path_Max return Interfaces.C.unsigned;
    pragma Import (C, C_Unix_Path_Max, "flyology_socket_unix_path_max");
@@ -70,7 +63,7 @@ package body Flyology.IO.Sockets is
 
    procedure Set_Preparation_State (Address : System.Address; State : Atomics.uint32) is
    begin
-      Atomic_Store_32 (Address, State, Atomics.Release);
+      Flyology.Atomic_Primitives.Store_Release_U32 (Address, Interfaces.Unsigned_32 (State));
    end Set_Preparation_State;
 
    function C_Errno_Would_Block return Interfaces.C.int;

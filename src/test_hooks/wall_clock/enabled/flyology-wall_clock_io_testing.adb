@@ -1,5 +1,6 @@
 with Ada.Unchecked_Conversion;
 with System.Atomic_Primitives;
+with Flyology.Atomic_Primitives;
 
 package body Flyology.Wall_Clock_IO_Testing is
    package Atomics renames System.Atomic_Primitives;
@@ -18,18 +19,20 @@ package body Flyology.Wall_Clock_IO_Testing is
    procedure Configure (Steady_Nanoseconds : Interfaces.Integer_64; Wall_Nanoseconds : Interfaces.Integer_64)
    is
    begin
-      Atomics.Atomic_Store_64 (Requested_Steady'Address, To_Bits (Steady_Nanoseconds), Atomics.Relaxed);
-      Atomics.Atomic_Store_64 (Requested_Wall'Address, To_Bits (Wall_Nanoseconds), Atomics.Relaxed);
-      Atomics.Atomic_Store_64 (Current_Steady'Address, 0, Atomics.Relaxed);
-      Atomics.Atomic_Store_64 (Current_Wall'Address, 0, Atomics.Relaxed);
-      Atomics.Atomic_Store_32 (Count'Address, 0, Atomics.Relaxed);
-      Atomics.Atomic_Store_32 (Pending'Address, 1, Atomics.Relaxed);
+      Flyology.Atomic_Primitives.Store_Release_U64
+        (Requested_Steady'Address, Interfaces.Unsigned_64 (To_Bits (Steady_Nanoseconds)));
+      Flyology.Atomic_Primitives.Store_Release_U64
+        (Requested_Wall'Address, Interfaces.Unsigned_64 (To_Bits (Wall_Nanoseconds)));
+      Flyology.Atomic_Primitives.Store_Release_U64 (Current_Steady'Address, 0);
+      Flyology.Atomic_Primitives.Store_Release_U64 (Current_Wall'Address, 0);
+      Flyology.Atomic_Primitives.Store_Release_U32 (Count'Address, 0);
+      Flyology.Atomic_Primitives.Store_Release_U32 (Pending'Address, 1);
    end Configure;
 
    procedure Reset is
    begin
       Configure (0, 0);
-      Atomics.Atomic_Store_32 (Pending'Address, 0, Atomics.Relaxed);
+      Flyology.Atomic_Primitives.Store_Release_U32 (Pending'Address, 0);
    end Reset;
 
    function Take_EINTR return Boolean is
@@ -46,14 +49,12 @@ package body Flyology.Wall_Clock_IO_Testing is
       then
          return False;
       end if;
-      Atomics.Atomic_Store_64
+      Flyology.Atomic_Primitives.Store_Release_U64
         (Current_Steady'Address,
-         Atomics.Atomic_Load_64 (Requested_Steady'Address, Atomics.Relaxed),
-         Atomics.Relaxed);
-      Atomics.Atomic_Store_64
+         Interfaces.Unsigned_64 (Atomics.Atomic_Load_64 (Requested_Steady'Address, Atomics.Relaxed)));
+      Flyology.Atomic_Primitives.Store_Release_U64
         (Current_Wall'Address,
-         Atomics.Atomic_Load_64 (Requested_Wall'Address, Atomics.Relaxed),
-         Atomics.Relaxed);
+         Interfaces.Unsigned_64 (Atomics.Atomic_Load_64 (Requested_Wall'Address, Atomics.Relaxed)));
       Current_Count := Atomics.Atomic_Load_32 (Count'Address, Atomics.Relaxed);
       loop
          exit when

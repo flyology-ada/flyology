@@ -150,6 +150,8 @@ export FLYOLOGY_BUFFER_TEST_HOOKS
 "$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
+"$project_root/scripts/check-atomic-store-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
 assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
 assert_archive_includes \
@@ -157,6 +159,12 @@ assert_archive_includes \
 "$project_root/scripts/check-subprocess-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 mkdir -p "$project_root/build/tests"
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  "$project_root/tests/probes/atomic_store_abi_probe.c" \
+  "$project_root/src/native/flyology_atomic_stores.c" \
+  -o "$project_root/build/tests/atomic_store_abi_probe"
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$project_root/build/tests/atomic_store_abi_probe"
 cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/tests/probes/shared_memory_abi_probe.c" \
   "$project_root/src/native/flyology_shared_memory.c" \
