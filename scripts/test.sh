@@ -2,7 +2,15 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-alr=$("$project_root/scripts/find-alr.sh")
+development_alr="$project_root/scripts/alr-development.sh"
+base_alr=${FLYOLOGY_BASE_ALR:-$("$project_root/scripts/find-alr.sh")}
+
+if [ "${FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE:-0}" != 1 ]; then
+  FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE=1
+  export FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE
+  exec "$development_alr" exec -- "$0"
+fi
+
 test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
 worker_pool_test_subdir=behavioral-worker-pool-hooks
@@ -38,6 +46,22 @@ cleanup_test_temp () {
   rmdir -- "$test_temp_root" 2>/dev/null || true
 }
 
+run_independent_alire_workspace () {
+  env \
+    -u ALIRE \
+    -u FLYOLOGY_ALIRE_PREFIX \
+    -u FLYOLOGY_ALLOCATORS_ALIRE_PREFIX \
+    -u FLYOLOGY_DEVELOPMENT_WORKSPACE_ALIRE_PREFIX \
+    -u FLYOLOGY_ROOT \
+    -u GNAT_FLYOLOGY_NATIVE_ALIRE_PREFIX \
+    -u GNAT_NATIVE_ALIRE_PREFIX \
+    -u GPRBUILD_ALIRE_PREFIX \
+    -u GPR_CONFIG \
+    -u GPR_PROJECT_PATH \
+    ALR="$base_alr" \
+    "$@"
+}
+
 trap cleanup_test_temp EXIT
 trap 'exit 1' HUP INT TERM
 
@@ -47,9 +71,12 @@ cd "$project_root"
 "$project_root/scripts/test-run-with-timeout.sh"
 "$project_root/scripts/test-compiler-identities.sh"
 "$project_root/scripts/test-gnatdoc-log.sh"
-"$project_root/flyology_cachelines/scripts/test.sh"
-"$project_root/flyology_numa/scripts/test.sh"
-ALR="$alr" "$project_root/flyology_allocators/scripts/test.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_cachelines/scripts/test.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_numa/scripts/test.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_allocators/scripts/test.sh"
 
 #  DNS lifecycle regressions observe the receive-loop boundary. The project
 #  default is false, so normal builds compile the observation calls away.
@@ -58,17 +85,17 @@ export FLYOLOGY_DNS_TEST_HOOKS
 
 run_gprbuild () {
   if [ "$(uname -s)" = Darwin ]; then
-    compiler_sysroot=$("$alr" exec -- gcc -print-sysroot)
+    compiler_sysroot=$("$development_alr" exec -- gcc -print-sysroot)
     if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
       current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
-      "$alr" exec -- env -u GPR_CONFIG gprbuild "$@" \
+      "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@" \
         -largs "-Wl,-syslibroot,$current_sysroot" -nodefaultrpaths
       return
     fi
-    "$alr" exec -- env -u GPR_CONFIG gprbuild "$@" -largs -nodefaultrpaths
+    "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@" -largs -nodefaultrpaths
     return
   fi
-  "$alr" exec -- env -u GPR_CONFIG gprbuild "$@"
+  "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@"
 }
 
 assert_archive_excludes () {
@@ -146,9 +173,11 @@ FLYOLOGY_CHANNEL_TEST_HOOKS=false
 export FLYOLOGY_CHANNEL_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
-"$alr" build
+"$development_alr" build
 "$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
+"$project_root/scripts/check-atomic-store-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
@@ -157,6 +186,12 @@ assert_archive_includes \
 "$project_root/scripts/check-subprocess-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 mkdir -p "$project_root/build/tests"
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  "$project_root/tests/probes/atomic_store_abi_probe.c" \
+  "$project_root/src/native/flyology_atomic_stores.c" \
+  -o "$project_root/build/tests/atomic_store_abi_probe"
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$project_root/build/tests/atomic_store_abi_probe"
 cc -std=c11 -Wall -Wextra -Werror \
   "$project_root/tests/probes/shared_memory_abi_probe.c" \
   "$project_root/src/native/flyology_shared_memory.c" \
@@ -180,7 +215,7 @@ assert_archive_excludes \
   "production library exposes test-only symbols"
 FLYOLOGY_TLS_TEST_HOOKS=true
 export FLYOLOGY_TLS_TEST_HOOKS
-"$alr" build
+"$development_alr" build
 assert_archive_excludes \
   "$project_root/lib/libFlyology.a" \
   'test_waiting_operations|test_operation_active|test_close_requested' \
@@ -616,6 +651,8 @@ $ordinary_unhooked_mains
 process_generation_agent_v1
 process_generation_agent_v2"
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+"$project_root/scripts/check-development-allocator-link.sh" \
+  "$test_bin/data_structures_smoke"
 
 #  The website's process-upgrade example is the source of truth for its
 #  coordinator block. Extract it without rewriting, compose a temporary mini
@@ -1050,4 +1087,5 @@ fi
 #  Prove that a separate Alire workspace can locate the crate, prepare its own
 #  runtime outside the dependency checkout, and build against only public GPR
 #  and Ada interfaces.
-ALR="$alr" "$project_root/scripts/test-external-consumer.sh"
+run_independent_alire_workspace \
+  "$project_root/scripts/test-external-consumer.sh"

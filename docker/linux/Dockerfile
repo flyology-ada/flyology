@@ -45,8 +45,10 @@ RUN alr --non-interactive toolchain \
 WORKDIR /workspace
 COPY . .
 
-# Resolve project dependencies and catch public-library portability failures.
-RUN alr --non-interactive build
+# Resolve the development workspace so the root build uses the in-tree
+# allocator while the publishable Flyology manifest retains its indexed
+# dependency constraint.
+RUN ./scripts/alr-development.sh build
 RUN cd flyology_debug && alr --non-interactive build
 RUN cd flyology_bench && alr --non-interactive build
 

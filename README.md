@@ -3185,6 +3185,9 @@ The shared Linux rings require acquire/release ordering against the kernel.
 Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
 not expose the corresponding store operation, so the narrow C ABI shim calls
 the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
+The Ada binding and lowering arrived in GCC 14 in upstream commit
+`4784601d726e5b70b6c4e050c77749706536ccf3`, “ada: Add __atomic_store_n
+binding to System.Atomic_Primitives.”
 
 The OpenSSL adapter adds a C ABI table for dynamically resolved OpenSSL 3
 functions. Ada owns session lifetime, readiness retry, timeout, cancellation,
@@ -3786,6 +3789,13 @@ Run the complete verification suite with:
 ./scripts/prove.sh
 TLA2TOOLS_JAR=/path/to/tla2tools.jar ./scripts/check-tla.sh
 ```
+
+The root test runner resolves the development-only `tests/development` Alire
+workspace. That workspace path-pins both this checkout and its nested
+`flyology_allocators` crate, so root behavioral links exercise allocator
+changes from the same checkout. The publishable root `alire.toml` retains its
+indexed version constraint and contains no development pin. Use
+`./scripts/alr-development.sh build` for the same root development build.
 
 The root test runner includes the standalone `flyology_cachelines` and
 `flyology_numa` suites. Their focused test and documentation runners remain

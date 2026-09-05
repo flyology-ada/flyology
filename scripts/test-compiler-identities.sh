@@ -159,7 +159,7 @@ if [ "$selected_prefix" != "$native_prefix" ]; then
   exit 1
 fi
 
-selected_prefix=$(env \
+selected_prefix=$(env -u GPRBUILD_ALIRE_PREFIX \
   FLYOLOGY_ROOT=/stale/flyology \
   GPR_CONFIG=/stale/flyology/build/flyology.cgpr \
   FLYOLOGY_ALIRE_PREFIX=/stale/flyology \

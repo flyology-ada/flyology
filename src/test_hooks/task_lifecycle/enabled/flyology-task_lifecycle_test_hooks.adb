@@ -1,4 +1,5 @@
 with System.Atomic_Primitives;
+with Flyology.Atomic_Primitives;
 
 package body Flyology.Task_Lifecycle_Test_Hooks is
 
@@ -21,7 +22,7 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
    begin
       Armed := (others => False);
       Arrived := (others => False);
-      Atomics.Atomic_Store_32 (References'Address, 0, Atomics.Relaxed);
+      Flyology.Atomic_Primitives.Store_Release_U32 (References'Address, 0);
       Force_Prepared_Final := False;
       Force_Prepared_Monitor_End := False;
       Interrupt_Admission_Signal := False;
