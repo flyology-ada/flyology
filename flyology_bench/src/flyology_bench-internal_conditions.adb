@@ -279,19 +279,6 @@ package body Flyology_Bench.Internal_Conditions is
          return US.Null_Unbounded_String;
    end Capture;
 
-   procedure Capture_For_Test
-     (Command       : String;
-      Argument      : String;
-      Timeout_MS    : Positive;
-      Success       : out Boolean;
-      Output_Length : out Natural)
-   is
-      Result : constant US.Unbounded_String :=
-        Capture (Command, [1 => US.To_Unbounded_String (Argument)], C.unsigned (Timeout_MS), Success);
-   begin
-      Output_Length := US.Length (Result);
-   end Capture_For_Test;
-
    function Remaining_Timeout (Deadline : Interfaces.Unsigned_64) return C.unsigned is
       Now          : Interfaces.Unsigned_64;
       Remaining    : Interfaces.Unsigned_64;
@@ -606,11 +593,20 @@ package body Flyology_Bench.Internal_Conditions is
       Continuity.Initialized := True;
    end Complete_Throttle_Observation;
 
-   procedure Read_Linux_Throttle
-     (Value : in out Snapshot; Continuity : in out Throttle_Continuity; Sysfs_Root : String := "/sys")
-   is
+   function Linux_Sysfs_Path (Suffix : String) return String is
+   begin
+      if Internal_Condition_Test_Hooks.Enabled then
+         if Internal_Condition_Test_Hooks.Linux_Fixture_Enabled then
+            return Internal_Condition_Test_Hooks.Linux_Sysfs_Root & Suffix;
+         end if;
+      end if;
+      return "/sys" & Suffix;
+   end Linux_Sysfs_Path;
+
+   procedure Read_Linux_Throttle (Value : in out Snapshot; Continuity : in out Throttle_Continuity) is
       Present_OK     : Boolean;
-      Present        : constant String := First_Line (Sysfs_Root & "/devices/system/cpu/online", Present_OK);
+      Present        : constant String :=
+        First_Line (Linux_Sysfs_Path ("/devices/system/cpu/online"), Present_OK);
       Cursor         : Positive := (if Present'Length = 0 then 1 else Present'First);
       Any            : Boolean := False;
       Any_Time       : Boolean := False;
@@ -704,9 +700,9 @@ package body Flyology_Bench.Internal_Conditions is
          Package_Id_OK   : Boolean;
          Core_Id_OK      : Boolean;
          Prefix          : constant String :=
-           Sysfs_Root & "/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/thermal_throttle/";
+           Linux_Sysfs_Path ("/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/thermal_throttle/");
          Topology_Prefix : constant String :=
-           Sysfs_Root & "/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/topology/";
+           Linux_Sysfs_Path ("/devices/system/cpu/cpu" & Trim (Natural'Image (CPU)) & "/topology/");
          Package_Id      : constant Interfaces.Unsigned_64 :=
            Read_U64 (Topology_Prefix & "physical_package_id", Package_Id_OK);
          Core_Id         : constant Interfaces.Unsigned_64 :=
@@ -851,16 +847,7 @@ package body Flyology_Bench.Internal_Conditions is
       end if;
    end Apply_Linux_PPD;
 
-   procedure Read_Linux_Profile
-     (Value                      : in out Snapshot;
-      Deadline                   : Interfaces.Unsigned_64;
-      Sysfs_Root                 : String := "/sys";
-      Query_PPD                  : Boolean := True;
-      Test_Profile               : String := "";
-      Test_Profile_Available     : Boolean := False;
-      Test_Degradation           : String := "";
-      Test_Degradation_Available : Boolean := False)
-   is
+   procedure Read_Linux_Profile (Value : in out Snapshot; Deadline : Interfaces.Unsigned_64) is
       Profile_Buffer     : aliased Condition_Text := (others => C.nul);
       Degradation_Buffer : aliased Condition_Text := (others => C.nul);
       Owner_Buffer       : aliased Condition_Text := (others => C.nul);
@@ -869,6 +856,7 @@ package body Flyology_Bench.Internal_Conditions is
       Sysfs_OK           : Boolean;
       Selected_Path      : US.Unbounded_String;
       Selected_Interface : US.Unbounded_String;
+      Query_Live_PPD     : Boolean := True;
 
       function Refresh_Timeout return Boolean is
          Now        : Interfaces.Unsigned_64;
@@ -966,7 +954,7 @@ package body Flyology_Bench.Internal_Conditions is
       begin
          Ada.Directories.Start_Search
            (Search,
-            Sysfs_Root & "/class/platform-profile",
+            Linux_Sysfs_Path ("/class/platform-profile"),
             "platform-profile-*",
             (Ada.Directories.Directory => True, others => False));
          Search_Open := True;
@@ -1014,18 +1002,26 @@ package body Flyology_Bench.Internal_Conditions is
       end Read_Class_Profile;
    begin
       Status := -1;
-      if Query_PPD then
+      if Internal_Condition_Test_Hooks.Enabled then
+         if Internal_Condition_Test_Hooks.Linux_Fixture_Enabled then
+            Query_Live_PPD := False;
+            Apply_Linux_PPD
+              (Value,
+               Internal_Condition_Test_Hooks.Linux_PPD_Profile,
+               Internal_Condition_Test_Hooks.Linux_PPD_Profile_Available,
+               Internal_Condition_Test_Hooks.Linux_PPD_Degradation,
+               Internal_Condition_Test_Hooks.Linux_PPD_Degradation_Available);
+         end if;
+      end if;
+      if Query_Live_PPD then
          --  Opening the system bus is a synchronous libsystemd operation. Do
          --  not begin it after the caller's absolute budget has expired.
          Status :=
            (if Deadline /= Interfaces.Unsigned_64'Last and then Internal_Probes.Clock_Now >= Deadline
             then -1
             else C_Linux_PPD_Open (Bus'Access));
-      else
-         Apply_Linux_PPD
-           (Value, Test_Profile, Test_Profile_Available, Test_Degradation, Test_Degradation_Available);
       end if;
-      if Query_PPD and then Status >= 0 and then Bus /= System.Null_Address then
+      if Status >= 0 and then Bus /= System.Null_Address then
          if (Resolve
                ("org.freedesktop.UPower.PowerProfiles",
                 "/org/freedesktop/UPower/PowerProfiles",
@@ -1056,7 +1052,7 @@ package body Flyology_Bench.Internal_Conditions is
       end if;
       declare
          Sysfs_Profile : constant String :=
-           First_Line (Sysfs_Root & "/firmware/acpi/platform_profile", Sysfs_OK);
+           First_Line (Linux_Sysfs_Path ("/firmware/acpi/platform_profile"), Sysfs_OK);
          Parsed        : constant Performance_Profile := Parse_Profile (Sysfs_Profile);
       begin
          if Sysfs_OK and then Parsed /= Profile_Unknown then
@@ -1072,28 +1068,6 @@ package body Flyology_Bench.Internal_Conditions is
          end if;
    end Read_Linux_Profile;
 
-   procedure Read_Linux_For_Test
-     (Sysfs_Root                : String;
-      PPD_Profile               : String;
-      PPD_Profile_Available     : Boolean;
-      PPD_Degradation           : String;
-      PPD_Degradation_Available : Boolean;
-      Value                     : out Snapshot;
-      Continuity                : in out Throttle_Continuity) is
-   begin
-      Value := (others => <>);
-      Read_Linux_Throttle (Value, Continuity, Sysfs_Root);
-      Read_Linux_Profile
-        (Value,
-         Interfaces.Unsigned_64'Last,
-         Sysfs_Root,
-         Query_PPD                  => False,
-         Test_Profile               => PPD_Profile,
-         Test_Profile_Available     => PPD_Profile_Available,
-         Test_Degradation           => PPD_Degradation,
-         Test_Degradation_Available => PPD_Degradation_Available);
-   end Read_Linux_For_Test;
-
    procedure Read
      (Value           : out Snapshot;
       Continuity      : in out Throttle_Continuity;
@@ -1107,8 +1081,31 @@ package body Flyology_Bench.Internal_Conditions is
          declare
             Supplied : Boolean;
          begin
+            if Internal_Condition_Test_Hooks.Capture_Test_Enabled then
+               declare
+                  Success : Boolean;
+                  Result  : constant US.Unbounded_String :=
+                    Capture
+                      (Internal_Condition_Test_Hooks.Capture_Test_Command,
+                       [1 => US.To_Unbounded_String (Internal_Condition_Test_Hooks.Capture_Test_Argument)],
+                       C.unsigned (Internal_Condition_Test_Hooks.Capture_Test_Timeout_MS),
+                       Success);
+               begin
+                  Internal_Condition_Test_Hooks.Record_Capture_Test_Result (Success, US.Length (Result));
+                  Value := (others => <>);
+                  return;
+               end;
+            end if;
             Internal_Condition_Test_Hooks.Supply (Value, Include_Profile, Supplied);
             if Supplied then
+               return;
+            end if;
+            if Internal_Condition_Test_Hooks.Linux_Fixture_Enabled then
+               Value := (others => <>);
+               Read_Linux_Throttle (Value, Continuity);
+               if Include_Profile then
+                  Read_Linux_Profile (Value, Effective_Deadline);
+               end if;
                return;
             end if;
          end;

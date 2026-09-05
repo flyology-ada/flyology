@@ -1,4 +1,7 @@
+with Ada.Strings.Unbounded;
+
 package body Flyology_Bench.Internal_Condition_Test_Hooks is
+   package US renames Ada.Strings.Unbounded;
 
    Maximum_Reads : constant := 128;
    type Rejection_Map is array (Positive range 1 .. Maximum_Reads) of Boolean;
@@ -11,6 +14,18 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
    Throttle_From          : Natural := 0;
    Reads                  : Natural := 0;
    Profile_Reads          : Natural := 0;
+   Fixture_Active         : Boolean := False;
+   Fixture_Sysfs_Root     : US.Unbounded_String;
+   Fixture_PPD_Profile    : US.Unbounded_String;
+   Fixture_Profile_OK     : Boolean := False;
+   Fixture_Degradation    : US.Unbounded_String;
+   Fixture_Degradation_OK : Boolean := False;
+   Capture_Active         : Boolean := False;
+   Capture_Command        : US.Unbounded_String;
+   Capture_Argument       : US.Unbounded_String;
+   Capture_Timeout_MS     : Positive := 1;
+   Capture_Success        : Boolean := False;
+   Capture_Output_Length  : Natural := 0;
 
    procedure Reset is
    begin
@@ -21,6 +36,18 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       Throttle_From := 0;
       Reads := 0;
       Profile_Reads := 0;
+      Fixture_Active := False;
+      Fixture_Sysfs_Root := US.Null_Unbounded_String;
+      Fixture_PPD_Profile := US.Null_Unbounded_String;
+      Fixture_Profile_OK := False;
+      Fixture_Degradation := US.Null_Unbounded_String;
+      Fixture_Degradation_OK := False;
+      Capture_Active := False;
+      Capture_Command := US.Null_Unbounded_String;
+      Capture_Argument := US.Null_Unbounded_String;
+      Capture_Timeout_MS := 1;
+      Capture_Success := False;
+      Capture_Output_Length := 0;
    end Reset;
 
    procedure Reject_Read (Index : Positive) is
@@ -60,11 +87,76 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       Read_Delays_MS (Index) := Milliseconds;
    end Delay_Read;
 
+   procedure Use_Linux_Fixture
+     (Sysfs_Root                : String;
+      PPD_Profile               : String;
+      PPD_Profile_Available     : Boolean;
+      PPD_Degradation           : String;
+      PPD_Degradation_Available : Boolean) is
+   begin
+      Fixture_Active := True;
+      Fixture_Sysfs_Root := US.To_Unbounded_String (Sysfs_Root);
+      Fixture_PPD_Profile := US.To_Unbounded_String (PPD_Profile);
+      Fixture_Profile_OK := PPD_Profile_Available;
+      Fixture_Degradation := US.To_Unbounded_String (PPD_Degradation);
+      Fixture_Degradation_OK := PPD_Degradation_Available;
+   end Use_Linux_Fixture;
+
+   procedure Use_Capture_Test (Command : String; Argument : String; Timeout_MS : Positive) is
+   begin
+      Capture_Active := True;
+      Capture_Command := US.To_Unbounded_String (Command);
+      Capture_Argument := US.To_Unbounded_String (Argument);
+      Capture_Timeout_MS := Timeout_MS;
+   end Use_Capture_Test;
+
+   procedure Capture_Test_Result (Success : out Boolean; Output_Length : out Natural) is
+   begin
+      Success := Capture_Success;
+      Output_Length := Capture_Output_Length;
+   end Capture_Test_Result;
+
    function Read_Count return Natural
    is (Reads);
 
    function Profile_Read_Count return Natural
    is (Profile_Reads);
+
+   function Linux_Fixture_Enabled return Boolean
+   is (Fixture_Active);
+
+   function Linux_Sysfs_Root return String
+   is (US.To_String (Fixture_Sysfs_Root));
+
+   function Linux_PPD_Profile return String
+   is (US.To_String (Fixture_PPD_Profile));
+
+   function Linux_PPD_Profile_Available return Boolean
+   is (Fixture_Profile_OK);
+
+   function Linux_PPD_Degradation return String
+   is (US.To_String (Fixture_Degradation));
+
+   function Linux_PPD_Degradation_Available return Boolean
+   is (Fixture_Degradation_OK);
+
+   function Capture_Test_Enabled return Boolean
+   is (Capture_Active);
+
+   function Capture_Test_Command return String
+   is (US.To_String (Capture_Command));
+
+   function Capture_Test_Argument return String
+   is (US.To_String (Capture_Argument));
+
+   function Capture_Test_Timeout_MS return Positive
+   is (Capture_Timeout_MS);
+
+   procedure Record_Capture_Test_Result (Success : Boolean; Output_Length : Natural) is
+   begin
+      Capture_Success := Success;
+      Capture_Output_Length := Output_Length;
+   end Record_Capture_Test_Result;
 
    procedure Supply
      (Value : out Internal_Conditions.Snapshot; Include_Profile : Boolean; Supplied : out Boolean)
@@ -73,6 +165,11 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       Reject_Profile : Boolean := False;
    begin
       Reads := Reads + 1;
+      if Fixture_Active then
+         Value := (others => <>);
+         Supplied := False;
+         return;
+      end if;
       if Reads <= Maximum_Reads and then Read_Delays_MS (Reads) > 0 then
          delay Duration (Read_Delays_MS (Reads)) / 1_000.0;
       end if;

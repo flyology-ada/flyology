@@ -220,8 +220,9 @@ then
   printf '%s\n' "test-only worker symbols leaked into the production library" >&2
   exit 1
 fi
-if nm -g "$crate_root/lib/libflyology_bench.a" \
-  | grep -Eq 'flyology_bench_disabled_condition_hook|internal_condition_test_hooks__supply'
+condition_test_symbols='flyology_bench_disabled_condition_hook|capture_for_test|read_linux_for_test'
+condition_test_symbols="$condition_test_symbols|internal_condition_test_hooks__(capture|record_capture|supply|use_capture)"
+if nm -g "$crate_root/lib/libflyology_bench.a" | grep -Eq "$condition_test_symbols"
 then
   printf '%s\n' "test-only condition hooks leaked into the production library" >&2
   exit 1

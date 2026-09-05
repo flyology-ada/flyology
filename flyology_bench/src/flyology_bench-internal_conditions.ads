@@ -75,25 +75,4 @@ private package Flyology_Bench.Internal_Conditions is
       Include_Profile : Boolean := True;
       Deadline        : Interfaces.Unsigned_64 := Interfaces.Unsigned_64'Last);
 
-   --  Exercise the bounded command mechanism without exposing it through the
-   --  public benchmark API. Used by the crate's native-boundary smoke test.
-   procedure Capture_For_Test
-     (Command       : String;
-      Argument      : String;
-      Timeout_MS    : Positive;
-      Success       : out Boolean;
-      Output_Length : out Natural);
-
-   --  Exercise the real Linux sysfs and profile classifiers against a
-   --  caller-selected fixture root without opening the system bus. This is a
-   --  private crate-test seam, not part of the benchmark API.
-   procedure Read_Linux_For_Test
-     (Sysfs_Root                : String;
-      PPD_Profile               : String;
-      PPD_Profile_Available     : Boolean;
-      PPD_Degradation           : String;
-      PPD_Degradation_Available : Boolean;
-      Value                     : out Snapshot;
-      Continuity                : in out Throttle_Continuity);
-
 end Flyology_Bench.Internal_Conditions;

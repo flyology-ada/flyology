@@ -1,18 +1,28 @@
 --  Copyright (c) 2026 Yurii Rashkovskii
 --  SPDX-License-Identifier: MIT OR Apache-2.0
 
+with Ada.Command_Line;
+with Ada.Directories;
 with Ada.Text_IO;
+with Flyology_Bench.Internal_Conditions;
 with Flyology_Bench.Internal_Condition_Test_Hooks;
 with Flyology_Bench.Internal_Probes;
+with Interfaces;
 
 procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
    package Hooks renames Flyology_Bench.Internal_Condition_Test_Hooks;
    use type Internal_Probes.Host_System;
+   use type Interfaces.Unsigned_64;
 
-   Calls : Natural := 0
+   Calls           : Natural := 0
    with Volatile;
-   Work  : Natural := 0
+   Work            : Natural := 0
    with Volatile;
+   Tests_Directory : constant String :=
+     Ada.Directories.Containing_Directory
+       (Ada.Directories.Containing_Directory
+          (Ada.Directories.Containing_Directory (Ada.Command_Line.Command_Name)));
+   Fixture_Root    : constant String := Tests_Directory & "/fixtures/linux_conditions/";
 
    procedure Batch (Iterations : Iteration_Count) is
    begin
@@ -45,6 +55,21 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
          raise Program_Error with Message;
       end if;
    end Check;
+
+   procedure Read_Linux_Fixture
+     (Name                      : String;
+      PPD_Profile               : String;
+      PPD_Profile_Available     : Boolean;
+      PPD_Degradation           : String;
+      PPD_Degradation_Available : Boolean;
+      Value                     : out Internal_Conditions.Snapshot;
+      Continuity                : in out Internal_Conditions.Throttle_Continuity) is
+   begin
+      Hooks.Reset;
+      Hooks.Use_Linux_Fixture
+        (Fixture_Root & Name, PPD_Profile, PPD_Profile_Available, PPD_Degradation, PPD_Degradation_Available);
+      Internal_Conditions.Read (Value, Continuity);
+   end Read_Linux_Fixture;
 
    function Policy
      (Response : Condition_Response; Fallback : Condition_Pause_Fallback := Fallback_Observe)
@@ -115,6 +140,121 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
 
 begin
    Check (Hooks.Enabled, "condition integration smoke selected disabled hooks");
+
+   declare
+      Exact      : constant String (1 .. 32 * 1_024) := (others => 'x');
+      Oversized  : constant String (1 .. 32 * 1_024 + 1) := (others => 'x');
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+      Success    : Boolean;
+      Length     : Natural;
+
+      procedure Capture (Command : String; Argument : String; Timeout_MS : Positive) is
+      begin
+         Hooks.Reset;
+         Hooks.Use_Capture_Test (Command, Argument, Timeout_MS);
+         Internal_Conditions.Read (Value, Continuity);
+         Hooks.Capture_Test_Result (Success, Length);
+      end Capture;
+   begin
+      Capture ("/usr/bin/printf", Exact, 1_000);
+      Check (Success and then Length = Exact'Length, "exact-capacity output was rejected");
+      Capture ("/usr/bin/printf", Oversized, 1_000);
+      Check (not Success and then Length = 0, "oversized output was accepted");
+      Capture ("/bin/sleep", "2", 10);
+      Check (not Success and then Length = 0, "command deadline was ignored");
+   end;
+
+   --  Run the real Linux detector against committed sysfs fixtures on every
+   --  host. The enabled hook supplies raw paths and PPD values; normal Read
+   --  still performs all parsing, aggregation, selection, and continuity.
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Read_Linux_Fixture ("aggregate", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Availability = Condition_Available
+         and then Value.Throttle_Time_Avail = Condition_Available
+         and then Value.Throttle_Total = 15
+         and then Value.Throttle_Time_Total_MS = 150,
+         "Linux throttle fixture did not deduplicate sibling CPUs and package counters");
+      Check
+        (not Value.Throttle_Discontinuous and then not Value.Throttle_Time_Discontinuous,
+         "initial Linux throttle fixture was marked discontinuous");
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Platform_Profile
+         and then Value.Profile = Profile_Performance,
+         "agreeing modern Linux profile handlers were not accepted");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Read_Linux_Fixture ("conflict", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Availability = Condition_Unavailable,
+         "malformed Linux online CPU map produced throttle data");
+      Check
+        (Value.Profile_Availability = Condition_Unavailable,
+         "conflicting modern handlers fell through to the legacy Linux profile");
+
+      Continuity := (others => <>);
+      Read_Linux_Fixture ("unreadable", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Unavailable,
+         "unreadable modern handler fell through to the legacy Linux profile");
+
+      Continuity := (others => <>);
+      Read_Linux_Fixture ("legacy", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Platform_Profile
+         and then Value.Profile = Profile_Balanced,
+         "legacy Linux platform profile was not used when no modern handler existed");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Read_Linux_Fixture ("reset-a", "", False, "", False, Value, Continuity);
+      Check
+        (not Value.Throttle_Discontinuous and then not Value.Throttle_Time_Discontinuous,
+         "initial Linux reset fixture was marked discontinuous");
+      Read_Linux_Fixture ("reset-b", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Discontinuous and then Value.Throttle_Time_Discontinuous,
+         "Linux counter reset was not reported as discontinuous");
+      Read_Linux_Fixture ("missing", "", False, "", False, Value, Continuity);
+      Check
+        (Value.Throttle_Discontinuous and then Value.Throttle_Time_Discontinuous,
+         "disappearing Linux throttle sources were not reported as discontinuous");
+   end;
+
+   declare
+      Continuity : Internal_Conditions.Throttle_Continuity;
+      Value      : Internal_Conditions.Snapshot;
+   begin
+      Read_Linux_Fixture
+        ("legacy", "power-saver", True, "high-operating-temperature", True, Value, Continuity);
+      Check
+        (Value.Profile_Availability = Condition_Available
+         and then Value.Profile_Detector = Linux_Power_Profiles_Daemon
+         and then Value.Profile = Profile_Reduced
+         and then Value.Degradation_Availability = Condition_Available
+         and then Value.Degradation = High_Operating_Temperature,
+         "Linux power-profiles-daemon values were not classified");
+      Read_Linux_Fixture ("legacy", "performance", True, "lap-detected", True, Value, Continuity);
+      Check (Value.Degradation = Lap_Detected, "Linux lap degradation was not classified");
+      Read_Linux_Fixture ("legacy", "performance", True, "firmware-limit", True, Value, Continuity);
+      Check (Value.Degradation = Other_Degradation, "unknown Linux degradation was not retained");
+      Read_Linux_Fixture ("legacy", "performance", True, "", True, Value, Continuity);
+      Check (Value.Degradation = Not_Degraded, "empty Linux degradation was not classified as clear");
+   end;
+   Hooks.Reset;
 
    if Internal_Probes.Operating_System = Internal_Probes.Darwin then
       --  Intermediate sub-second windows reuse the macOS coarse profile
@@ -407,8 +547,8 @@ begin
    Hooks.Reject_Read (12);
    Hooks.Delay_Read (7, 1);
    Hooks.Delay_Read (8, 1);
-   Hooks.Delay_Read (13, 4);
-   Hooks.Delay_Read (14, 4);
+   Hooks.Delay_Read (13, 60);
+   Hooks.Delay_Read (14, 60);
    declare
       Result : Measurement;
       Report : Environment_Report;
@@ -426,7 +566,7 @@ begin
                Window                     => 0.000_001,
                Stable_Time                => 0.002,
                Poll_Interval              => 0.001,
-               Maximum_Pause_Time         => 0.010,
+               Maximum_Pause_Time         => 0.100,
                Rewarm_Time                => 0.0,
                On_Pause_Timeout           => Fallback_Observe)),
          Result);
