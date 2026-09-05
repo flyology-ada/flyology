@@ -41,7 +41,9 @@ package System.Flyology.Faults is
       Poller_File_Drain_Pause,
       File_Uring_Synchronous_Eventfd,
       Create_Lifecycle_Window,
-      Automatic_Placement_Window);
+      Automatic_Placement_Window,
+      Poller_Translation_Pause,
+      Descriptor_Cancel_Budget_Pause);
 
    for Fault_Point use
      (Fiber_Allocation               => 1,
@@ -79,7 +81,9 @@ package System.Flyology.Faults is
       Poller_File_Drain_Pause        => 33,
       File_Uring_Synchronous_Eventfd => 34,
       Create_Lifecycle_Window        => 36,
-      Automatic_Placement_Window     => 37);
+      Automatic_Placement_Window     => 37,
+      Poller_Translation_Pause       => 38,
+      Descriptor_Cancel_Budget_Pause => 39);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
@@ -98,4 +102,14 @@ package System.Flyology.Faults is
    function Pause_Automatic_Placement return Boolean;
    procedure Note_Create_Registering;
    procedure Release_Create_Registration;
+
+   --  Linux poller ownership rendezvous. The event-loop thread parks after it
+   --  selects a descriptor event and before it touches the registration list.
+   --  The observations distinguish a foreign direct cancellation from a
+   --  cancellation queued for the loop thread.
+   procedure Pause_Poller_Translation;
+   procedure Pause_Descriptor_Cancel_Budget;
+   procedure Note_Poller_Cancel;
+   procedure Note_Descriptor_Cancel_Queued;
+   procedure Note_Descriptor_Cancel_Processed;
 end System.Flyology.Faults;
