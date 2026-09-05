@@ -40,6 +40,7 @@ printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
 }
 cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
+"$crate_root/tests/bin/flyology_bench-internal_probes_smoke"
 "$crate_root/tests/bin/custom_metrics_smoke" >"$work_dir/custom.out"
 cat "$work_dir/custom.out"
 grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \

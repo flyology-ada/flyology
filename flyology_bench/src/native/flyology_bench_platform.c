@@ -53,6 +53,14 @@
 #error "flyology_bench supports Darwin and Linux"
 #endif
 
+/* GCC 13 through 15 do not expose SIZEOF_tv_nsec in System.OS_Constants.
+ * Ada therefore derives the field width from Interfaces.C.long. Fail the
+ * build if a supported target's headers give timespec.tv_nsec another type.
+ */
+_Static_assert(
+    _Generic(((struct timespec *)0)->tv_nsec, long: 1, default: 0),
+    "struct timespec.tv_nsec must have C long type");
+
 /* ------------------------------------------------------------------ */
 /* Platform identity.                                                  */
 /* ------------------------------------------------------------------ */
