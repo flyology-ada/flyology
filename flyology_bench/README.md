@@ -732,6 +732,11 @@ phase changes; they are not permission to discard inconvenient runs.
 
 ## Configuration rules
 
+Prefer `Default_Configuration with delta` for caller-owned configurations.
+`Configuration` and `Environment_Report` are experimental records whose
+components can grow; a complete positional or named aggregate without
+`others => <>` requires a source update when a field is added.
+
 `Configuration` carries its own rules rather than checking them on entry to a
 run. Fields whose meaning excludes a value use a subtype that excludes it:
 `Nonnegative_Duration`, `Positive_Duration`, `Percentage`,
@@ -756,12 +761,13 @@ Gate : constant Flyology_Bench.CPU_Quiescence_Policy :=
    else (Enabled => False));
 ```
 
-The three rules that relate two fields — a quiescence timeout that covers its
-stable interval, a poll interval within that timeout, and a pause budget that
-covers one settle interval — are record predicates, checked when a policy
-value is built or assigned. A policy modified one field at a time is not
-checked at that moment, so `Configuration` re-asserts each policy's rule and a
-benchmark call rejects an incoherent one on the way in.
+The quiescence and interference rules that relate two public fields are record
+predicates, checked when a policy value is built or assigned. A policy modified
+one field at a time is not checked at that moment, so `Configuration`
+re-asserts those rules and a benchmark call rejects an incoherent one on the
+way in. The private operating-condition policy is built by checked constructors;
+its `Pause` constructor checks that the pause budget covers its stable and
+polling intervals.
 
 ## CPU quiescence preflight
 
@@ -792,6 +798,108 @@ detect storage traffic, thermal state, frequency changes, or later competing
 work. Process telemetry during collection remains relevant. The maintained
 example enables this gate only when `FLYOLOGY_BENCH_QUIESCENCE=1`, so ordinary
 example and CI runs do not acquire a new wait or failure condition.
+
+## Operating conditions
+
+`Operating_Conditions` is an independent, opt-in policy for configured power
+profiles, thermal pressure, transient process profiles, and hardware throttle
+events. `Observe` keeps the complete affected collection window and records
+the evidence; `Fail` raises after that window; `Pause` preserves the window,
+waits for a continuously acceptable interval, re-warms, and recollects it.
+Samples, comparison pairs, and multi-case rounds remain indivisible collection
+units within a window:
+
+```ada
+Config.Operating_Conditions :=
+  Flyology_Bench.Pause
+    (On_Pause_Timeout           => Flyology_Bench.Fallback_Observe,
+     Require_Nonreduced_Profile => True,
+     Require_Profile_Detection  => False,
+     Maximum_Thermal_State      => Flyology_Bench.Thermal_State_Fair,
+     Require_Thermal_Detection  => False,
+     Window                     => 0.050,
+     Stable_Time                => 0.500,
+     Poll_Interval              => 0.100,
+     Maximum_Pause_Time         => 30.0,
+     Rewarm_Time                => 0.050);
+```
+
+The default is `Disabled`. Opting in names the response directly by constructing
+the policy with `Observe`, `Pause`, or `Fail`; a client cannot enable a policy
+through an aggregate with an omitted response. `Pause` has no overload without
+`On_Pause_Timeout`, so its expiration behavior is always explicit.
+
+`Maximum_Thermal_State` accepts only `Thermal_State_Nominal` through
+`Thermal_State_Critical`; `Thermal_State_Unknown` is an observation result,
+not a policy threshold.
+
+The fallback is explicit. `Fallback_Observe` keeps the original affected collection window
+and marks the expired budget; `Fallback_Fail` raises
+`Operating_Conditions_Unacceptable`. A direct `Fail` policy is useful for
+strict baseline runs. Waiting and re-warming are outside harness timing and
+the sampling-time budget.
+
+On macOS the collector reads the configured `pmset` power mode, power source,
+`NSProcessInfo` low-power and thermal-pressure state, and, when available, the
+process Default/Sustained performance profile introduced in newer systems.
+The live `NSProcessInfo` values are sampled at every condition boundary. The
+configured `pmset` values are force-refreshed at preflight, after warmup, after
+calibration, at the terminal sampling-window close, and on entry to `Pause`.
+Ordinary collection-window openings, intermediate closes, and subsequent
+`Pause` polls reuse the one-second coarse cache so the probe does not become a
+stream of helper processes. Live `NSProcessInfo` values continue to be sampled
+at every poll. Final reporting reuses the last already-judged snapshot.
+Neither process profile is classified as bad by itself: a change from the
+post-warmup profile is the transient event. Thermal pressure is evidence of
+system thermal stress, not a claim that Apple exposes a public hardware
+throttle counter. `available` means the public selector answered; it does not
+claim a separate physical sensor exists behind every value Apple returns.
+
+On Linux the collector reads power-profiles-daemon or the firmware
+`platform_profile` fallback and Intel thermal-throttle event counters when the
+kernel exports them. These counters are cumulative history, not a live
+throttle-state signal: an event count increases when throttling begins, while
+the cumulative duration is updated after that episode ends. A counter increase
+proves that throttling occurred during the observation window, but flat counters
+cannot prove that an in-progress episode cooled. After observing an event,
+`Pause` therefore remains unresolved until its cumulative budget applies the
+configured fallback.
+Reported throttle deltas also include increases observed while `Pause` waits;
+after continuity is lost, the retained totals are partial and their
+availability remains `unavailable`.
+Missing sysfs files, daemons, or platform facilities remain `unavailable`; the
+harness never infers thermal throttling from a low instantaneous CPU frequency.
+`Require_Profile_Detection` and
+`Require_Thermal_Detection` turn missing evidence into an unacceptable
+condition instead of treating it as clean.
+
+Linux throttle counters, configured profile, and power-profiles-daemon
+degradation remain live at every condition boundary. Only macOS `pmset` uses a
+one-second coarse cache; the public process and thermal selectors remain live.
+The Linux D-Bus calls use the remaining absolute probe deadline for every
+method call and are skipped once it expires. Opening the local system bus is a
+synchronous libsystemd operation, so a stalled local bus connection can still
+extend that bound. All condition-probe time is excluded from harness sampling
+timestamps and `Maximum_Sampling_Time`.
+
+The native boundary is limited to APIs that need C-owned opaque spawn objects,
+Objective-C message dispatch, or optional `libsystemd` function pointers. Ada
+selects commands, parses and normalizes every value, compares counters, applies
+the proved policy, and owns wait/retry decisions. The crate test checks the
+retained symbols and exercises capture success, output overflow, timeout
+cleanup, platform stubs, and the available platform bridge.
+
+`Environment (Result)` retains detector identities, initial/final/worst
+states, changes, throttle-event deltas, affected and recollected units, pause
+time, cumulative throttled-millisecond deltas, and fallback use. Calibration
+is bracketed by the same probes. If conditions recover during the
+post-calibration check, the harness repeats calibration so a batch size chosen
+under rejected conditions is not carried into collection. A recovery during
+collection instead rewarms and recollects the affected window. Console and JSON
+reporters expose these fields when the policy is enabled. JSON adds the condition
+object only for enabled runs, so
+the default document shape stays unchanged; the stable CSV schema is likewise
+unchanged.
 
 ## Interference during collection
 

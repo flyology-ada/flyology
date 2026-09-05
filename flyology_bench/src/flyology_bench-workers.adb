@@ -463,6 +463,23 @@ package body Flyology_Bench.Workers is
          end if;
       end if;
 
+      Put_Natural (Data, Operating_Conditions_Mode'Pos (Mode (Config.Operating_Conditions)));
+      if Mode (Config.Operating_Conditions) /= Disabled then
+         Put_Boolean (Data, Config.Operating_Conditions.Require_Nonreduced_Profile);
+         Put_Boolean (Data, Config.Operating_Conditions.Require_Profile_Detection);
+         Put_Natural (Data, Host_Thermal_State'Pos (Config.Operating_Conditions.Maximum_Thermal_State));
+         Put_Boolean (Data, Config.Operating_Conditions.Require_Thermal_Detection);
+         Put_Float (Data, Long_Float (Config.Operating_Conditions.Window));
+         if Mode (Config.Operating_Conditions) = Pause then
+            Put_Float (Data, Long_Float (Config.Operating_Conditions.Stable_Time));
+            Put_Float (Data, Long_Float (Config.Operating_Conditions.Poll_Interval));
+            Put_Float (Data, Long_Float (Config.Operating_Conditions.Maximum_Pause_Time));
+            Put_Float (Data, Long_Float (Config.Operating_Conditions.Rewarm_Time));
+            Put_Natural
+              (Data, Condition_Pause_Fallback'Pos (Config.Operating_Conditions.On_Pause_Timeout));
+         end if;
+      end if;
+
       Put_Boolean (Data, Config.Placement.Enabled);
       if Config.Placement.Enabled then
          Put_Natural (Data, Config.Placement.CPU);
@@ -488,6 +505,7 @@ package body Flyology_Bench.Workers is
       Quiescence_Enabled   : Boolean;
       Interference_Enabled : Boolean;
       Interference_Mode    : Interference_Response;
+      Conditions_Mode      : Operating_Conditions_Mode;
       Placement_Enabled    : Boolean;
       Lock_Enabled         : Boolean;
    begin
@@ -581,6 +599,67 @@ package body Flyology_Bench.Workers is
                when Pause   =>
                   raise Program_Error;
             end case;
+         end;
+      end if;
+
+      Conditions_Mode := Operating_Conditions_Mode'Val (Get_Natural (Data, Cursor));
+      if Conditions_Mode = Disabled then
+         Result.Operating_Conditions := Disabled_Operating_Conditions;
+      else
+         declare
+            Nonreduced      : constant Boolean := Get_Boolean (Data, Cursor);
+            Require_Profile : constant Boolean := Get_Boolean (Data, Cursor);
+            Maximum_Thermal : constant Thermal_State_Threshold :=
+              Thermal_State_Threshold'Val (Get_Natural (Data, Cursor));
+            Require_Thermal : constant Boolean := Get_Boolean (Data, Cursor);
+            Window          : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+         begin
+            if Conditions_Mode = Pause then
+               declare
+                  Stable  : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+                  Poll    : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+                  Maximum : constant Positive_Duration := Positive_Duration (Get_Float (Data, Cursor));
+                  Rewarm  : constant Nonnegative_Duration := Nonnegative_Duration (Get_Float (Data, Cursor));
+                  Fallback : constant Condition_Pause_Fallback :=
+                    Condition_Pause_Fallback'Val (Get_Natural (Data, Cursor));
+               begin
+                  Result.Operating_Conditions :=
+                    Pause
+                      (On_Pause_Timeout           => Fallback,
+                       Require_Nonreduced_Profile => Nonreduced,
+                       Require_Profile_Detection  => Require_Profile,
+                       Maximum_Thermal_State      => Maximum_Thermal,
+                       Require_Thermal_Detection  => Require_Thermal,
+                       Window                     => Window,
+                       Stable_Time                => Stable,
+                       Poll_Interval              => Poll,
+                       Maximum_Pause_Time         => Maximum,
+                       Rewarm_Time                => Rewarm);
+               end;
+            else
+               case Conditions_Mode is
+                  when Observe =>
+                     Result.Operating_Conditions :=
+                       Observe
+                         (Require_Nonreduced_Profile => Nonreduced,
+                          Require_Profile_Detection  => Require_Profile,
+                          Maximum_Thermal_State      => Maximum_Thermal,
+                          Require_Thermal_Detection  => Require_Thermal,
+                          Window                     => Window);
+
+                  when Fail =>
+                     Result.Operating_Conditions :=
+                       Fail
+                         (Require_Nonreduced_Profile => Nonreduced,
+                          Require_Profile_Detection  => Require_Profile,
+                          Maximum_Thermal_State      => Maximum_Thermal,
+                          Require_Thermal_Detection  => Require_Thermal,
+                          Window                     => Window);
+
+                  when Disabled | Pause =>
+                     raise Program_Error;
+               end case;
+            end if;
          end;
       end if;
 
@@ -856,6 +935,45 @@ package body Flyology_Bench.Workers is
       Put_Natural (Data, Value.Watched_CPUs);
       Put_Boolean (Data, Value.Attribution_Diluted);
       Put_Natural (Data, Host_Lock_Outcome'Pos (Value.Host_Lock));
+      Put_Boolean (Data, Value.Conditions_Checked);
+      Put_Natural (Data, Condition_Availability'Pos (Value.Profile_Availability));
+      Put_Natural (Data, Condition_Detector'Pos (Value.Profile_Detector));
+      Put_Natural (Data, Performance_Profile'Pos (Value.Initial_Profile));
+      Put_Natural (Data, Performance_Profile'Pos (Value.Final_Profile));
+      Put_Natural (Data, Host_Power_Source'Pos (Value.Initial_Power_Source));
+      Put_Natural (Data, Host_Power_Source'Pos (Value.Final_Power_Source));
+      Put_Natural (Data, Value.Profile_Changes);
+      Put_Natural (Data, Condition_Availability'Pos (Value.Low_Power_Availability));
+      Put_Natural (Data, Condition_Detector'Pos (Value.Low_Power_Detector));
+      Put_Natural (Data, Low_Power_Mode_State'Pos (Value.Initial_Low_Power_Mode));
+      Put_Natural (Data, Low_Power_Mode_State'Pos (Value.Worst_Low_Power_Mode));
+      Put_Natural (Data, Low_Power_Mode_State'Pos (Value.Final_Low_Power_Mode));
+      Put_Natural (Data, Condition_Availability'Pos (Value.Process_Profile_Avail));
+      Put_Natural (Data, Condition_Detector'Pos (Value.Process_Profile_Detector));
+      Put_Natural (Data, Process_Performance_Profile'Pos (Value.Initial_Process_Profile));
+      Put_Natural (Data, Process_Performance_Profile'Pos (Value.Final_Process_Profile));
+      Put_Natural (Data, Value.Process_Profile_Changes);
+      Put_Natural (Data, Condition_Availability'Pos (Value.Thermal_Availability));
+      Put_Natural (Data, Condition_Detector'Pos (Value.Thermal_Detector));
+      Put_Natural (Data, Host_Thermal_State'Pos (Value.Initial_Thermal_State));
+      Put_Natural (Data, Host_Thermal_State'Pos (Value.Worst_Thermal_State));
+      Put_Natural (Data, Host_Thermal_State'Pos (Value.Final_Thermal_State));
+      Put_Natural (Data, Condition_Availability'Pos (Value.Degradation_Availability));
+      Put_Natural (Data, Performance_Degradation'Pos (Value.Initial_Degradation));
+      Put_Natural (Data, Performance_Degradation'Pos (Value.Worst_Degradation));
+      Put_Natural (Data, Performance_Degradation'Pos (Value.Final_Degradation));
+      Put_Natural (Data, Condition_Availability'Pos (Value.Throttle_Availability));
+      Put_Natural (Data, Condition_Availability'Pos (Value.Throttle_Time_Avail));
+      Put_Natural (Data, Condition_Detector'Pos (Value.Throttle_Detector));
+      Put_U64 (Data, U64 (Value.Throttle_Events));
+      Put_U64 (Data, U64 (Value.Throttle_Milliseconds));
+      Put_Natural (Data, Value.Condition_Windows);
+      Put_Natural (Data, Value.Affected_Units);
+      Put_Natural (Data, Value.Recollected_Units);
+      Put_Natural (Data, Value.Condition_Pauses);
+      Put_Float (Data, Value.Condition_Paused_NS);
+      Put_Boolean (Data, Value.Condition_Budget_Expired);
+      Put_Boolean (Data, Value.Condition_Fallback_Used);
    end Put_Environment_Report;
 
    function Get_Environment_Report (Data : String; Cursor : aliased in out Natural) return Environment_Report
@@ -877,6 +995,46 @@ package body Flyology_Bench.Workers is
       Result.Watched_CPUs := Get_Natural (Data, Cursor);
       Result.Attribution_Diluted := Get_Boolean (Data, Cursor);
       Result.Host_Lock := Host_Lock_Outcome'Val (Get_Natural (Data, Cursor));
+      Result.Conditions_Checked := Get_Boolean (Data, Cursor);
+      Result.Profile_Availability := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Profile_Detector := Condition_Detector'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Profile := Performance_Profile'Val (Get_Natural (Data, Cursor));
+      Result.Final_Profile := Performance_Profile'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Power_Source := Host_Power_Source'Val (Get_Natural (Data, Cursor));
+      Result.Final_Power_Source := Host_Power_Source'Val (Get_Natural (Data, Cursor));
+      Result.Profile_Changes := Get_Natural (Data, Cursor);
+      Result.Low_Power_Availability := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Low_Power_Detector := Condition_Detector'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Low_Power_Mode := Low_Power_Mode_State'Val (Get_Natural (Data, Cursor));
+      Result.Worst_Low_Power_Mode := Low_Power_Mode_State'Val (Get_Natural (Data, Cursor));
+      Result.Final_Low_Power_Mode := Low_Power_Mode_State'Val (Get_Natural (Data, Cursor));
+      Result.Process_Profile_Avail := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Process_Profile_Detector := Condition_Detector'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Process_Profile :=
+        Process_Performance_Profile'Val (Get_Natural (Data, Cursor));
+      Result.Final_Process_Profile := Process_Performance_Profile'Val (Get_Natural (Data, Cursor));
+      Result.Process_Profile_Changes := Get_Natural (Data, Cursor);
+      Result.Thermal_Availability := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Thermal_Detector := Condition_Detector'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Thermal_State := Host_Thermal_State'Val (Get_Natural (Data, Cursor));
+      Result.Worst_Thermal_State := Host_Thermal_State'Val (Get_Natural (Data, Cursor));
+      Result.Final_Thermal_State := Host_Thermal_State'Val (Get_Natural (Data, Cursor));
+      Result.Degradation_Availability := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Initial_Degradation := Performance_Degradation'Val (Get_Natural (Data, Cursor));
+      Result.Worst_Degradation := Performance_Degradation'Val (Get_Natural (Data, Cursor));
+      Result.Final_Degradation := Performance_Degradation'Val (Get_Natural (Data, Cursor));
+      Result.Throttle_Availability := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Throttle_Time_Avail := Condition_Availability'Val (Get_Natural (Data, Cursor));
+      Result.Throttle_Detector := Condition_Detector'Val (Get_Natural (Data, Cursor));
+      Result.Throttle_Events := Interfaces.Unsigned_64 (Get_U64 (Data, Cursor));
+      Result.Throttle_Milliseconds := Interfaces.Unsigned_64 (Get_U64 (Data, Cursor));
+      Result.Condition_Windows := Get_Natural (Data, Cursor);
+      Result.Affected_Units := Get_Natural (Data, Cursor);
+      Result.Recollected_Units := Get_Natural (Data, Cursor);
+      Result.Condition_Pauses := Get_Natural (Data, Cursor);
+      Result.Condition_Paused_NS := Get_Float (Data, Cursor);
+      Result.Condition_Budget_Expired := Get_Boolean (Data, Cursor);
+      Result.Condition_Fallback_Used := Get_Boolean (Data, Cursor);
       return Result;
    end Get_Environment_Report;
 
@@ -1224,6 +1382,155 @@ package body Flyology_Bench.Workers is
          then
             raise Protocol_Error with "worker interference report differs from its configuration";
          end if;
+
+         if (Mode (Expected_Config.Operating_Conditions) /= Disabled) /= Report.Conditions_Checked then
+            raise Protocol_Error with "worker operating-condition report differs from its configuration";
+         elsif Mode (Expected_Config.Operating_Conditions) = Disabled then
+            if Report.Profile_Availability /= Condition_Not_Checked
+              or else Report.Low_Power_Availability /= Condition_Not_Checked
+              or else Report.Process_Profile_Avail /= Condition_Not_Checked
+              or else Report.Thermal_Availability /= Condition_Not_Checked
+              or else Report.Degradation_Availability /= Condition_Not_Checked
+              or else Report.Throttle_Availability /= Condition_Not_Checked
+              or else Report.Throttle_Time_Avail /= Condition_Not_Checked
+              or else Report.Profile_Detector /= No_Condition_Detector
+              or else Report.Initial_Profile /= Profile_Unknown
+              or else Report.Final_Profile /= Profile_Unknown
+              or else Report.Initial_Power_Source /= Power_Source_Unknown
+              or else Report.Final_Power_Source /= Power_Source_Unknown
+              or else Report.Profile_Changes /= 0
+              or else Report.Low_Power_Detector /= No_Condition_Detector
+              or else Report.Initial_Low_Power_Mode /= Low_Power_Mode_Unknown
+              or else Report.Worst_Low_Power_Mode /= Low_Power_Mode_Unknown
+              or else Report.Final_Low_Power_Mode /= Low_Power_Mode_Unknown
+              or else Report.Process_Profile_Detector /= No_Condition_Detector
+              or else Report.Initial_Process_Profile /= Process_Profile_Unknown
+              or else Report.Final_Process_Profile /= Process_Profile_Unknown
+              or else Report.Process_Profile_Changes /= 0
+              or else Report.Thermal_Detector /= No_Condition_Detector
+              or else Report.Initial_Thermal_State /= Thermal_State_Unknown
+              or else Report.Worst_Thermal_State /= Thermal_State_Unknown
+              or else Report.Final_Thermal_State /= Thermal_State_Unknown
+              or else Report.Initial_Degradation /= Degradation_Unknown
+              or else Report.Worst_Degradation /= Degradation_Unknown
+              or else Report.Final_Degradation /= Degradation_Unknown
+              or else Report.Throttle_Detector /= No_Condition_Detector
+              or else Report.Throttle_Events /= 0
+              or else Report.Throttle_Milliseconds /= 0
+              or else Report.Condition_Windows /= 0
+              or else Report.Affected_Units /= 0
+              or else Report.Recollected_Units /= 0
+              or else Report.Condition_Pauses /= 0
+              or else Report.Condition_Paused_NS /= 0.0
+              or else Report.Condition_Budget_Expired
+              or else Report.Condition_Fallback_Used
+            then
+               raise Protocol_Error with "disabled operating-condition report is not empty";
+            end if;
+         elsif Report.Profile_Availability = Condition_Not_Checked
+           or else Report.Low_Power_Availability = Condition_Not_Checked
+           or else Report.Process_Profile_Avail = Condition_Not_Checked
+           or else Report.Thermal_Availability = Condition_Not_Checked
+           or else Report.Degradation_Availability = Condition_Not_Checked
+           or else Report.Throttle_Availability = Condition_Not_Checked
+           or else Report.Throttle_Time_Avail = Condition_Not_Checked
+         then
+            raise Protocol_Error with "enabled operating-condition detector remained not checked";
+         elsif Report.Profile_Availability = Condition_Unavailable
+           and then (Report.Profile_Detector /= No_Condition_Detector
+                     or else Report.Initial_Profile /= Profile_Unknown
+                     or else Report.Final_Profile /= Profile_Unknown
+                     or else Report.Profile_Changes /= 0)
+         then
+            raise Protocol_Error with "unavailable profile detector carries observed state";
+         elsif Report.Profile_Availability = Condition_Available
+           and then Report.Profile_Detector not in
+             Darwin_PMSet | Linux_Power_Profiles_Daemon | Linux_Platform_Profile
+         then
+            raise Protocol_Error with "available profile has an invalid detector";
+         elsif Report.Low_Power_Availability = Condition_Unavailable
+           and then (Report.Low_Power_Detector /= No_Condition_Detector
+                     or else Report.Initial_Low_Power_Mode /= Low_Power_Mode_Unknown
+                     or else Report.Worst_Low_Power_Mode /= Low_Power_Mode_Unknown
+                     or else Report.Final_Low_Power_Mode /= Low_Power_Mode_Unknown)
+         then
+            raise Protocol_Error with "unavailable low-power detector carries observed state";
+         elsif Report.Low_Power_Availability = Condition_Available
+           and then Report.Low_Power_Detector /= Darwin_Process_Info
+         then
+            raise Protocol_Error with "available low-power state has an invalid detector";
+         elsif Report.Process_Profile_Avail = Condition_Unavailable
+           and then (Report.Process_Profile_Detector /= No_Condition_Detector
+                     or else Report.Initial_Process_Profile /= Process_Profile_Unknown
+                     or else Report.Final_Process_Profile /= Process_Profile_Unknown
+                     or else Report.Process_Profile_Changes /= 0)
+         then
+            raise Protocol_Error with "unavailable process profile carries observed state";
+         elsif Report.Process_Profile_Avail = Condition_Available
+           and then Report.Process_Profile_Detector /= Darwin_Process_Info
+         then
+            raise Protocol_Error with "available process profile has an invalid detector";
+         elsif Report.Thermal_Availability = Condition_Unavailable
+           and then (Report.Thermal_Detector /= No_Condition_Detector
+                     or else Report.Initial_Thermal_State /= Thermal_State_Unknown
+                     or else Report.Worst_Thermal_State /= Thermal_State_Unknown
+                     or else Report.Final_Thermal_State /= Thermal_State_Unknown)
+         then
+            raise Protocol_Error with "unavailable thermal detector carries observed state";
+         elsif Report.Thermal_Availability = Condition_Available
+           and then Report.Thermal_Detector /= Darwin_Process_Info
+         then
+            raise Protocol_Error with "available thermal state has an invalid detector";
+         elsif Report.Degradation_Availability = Condition_Unavailable
+           and then (Report.Initial_Degradation /= Degradation_Unknown
+                     or else Report.Worst_Degradation /= Degradation_Unknown
+                     or else Report.Final_Degradation /= Degradation_Unknown)
+         then
+            raise Protocol_Error with "unavailable degradation detector carries observed state";
+         elsif (Report.Throttle_Availability = Condition_Available
+                or else Report.Throttle_Time_Avail = Condition_Available
+                or else Report.Throttle_Events /= 0
+                or else Report.Throttle_Milliseconds /= 0)
+           and then Report.Throttle_Detector /= Linux_CPU_Thermal_Throttle
+         then
+            raise Protocol_Error with "available throttle evidence has an invalid detector";
+         elsif Report.Throttle_Detector not in
+           No_Condition_Detector | Linux_CPU_Thermal_Throttle
+         then
+            raise Protocol_Error with "throttle evidence has an invalid detector";
+         elsif Report.Condition_Windows = 0 then
+            raise Protocol_Error with "enabled operating-condition report contains no sampling window";
+         elsif Mode (Expected_Config.Operating_Conditions) = Fail
+           and then Report.Affected_Units /= 0
+         then
+            raise Protocol_Error with "successful Fail report contains affected condition units";
+         elsif Mode (Expected_Config.Operating_Conditions) = Observe
+           and then (Report.Recollected_Units /= 0
+                     or else Report.Condition_Pauses /= 0
+                     or else Report.Condition_Paused_NS /= 0.0
+                     or else Report.Condition_Budget_Expired
+                     or else Report.Condition_Fallback_Used)
+         then
+            raise Protocol_Error with "Observe operating-condition report contains an action";
+         elsif Mode (Expected_Config.Operating_Conditions) /= Pause
+           and then (Report.Condition_Pauses /= 0
+                     or else Report.Condition_Paused_NS /= 0.0
+                     or else Report.Condition_Budget_Expired
+                     or else Report.Condition_Fallback_Used)
+         then
+            raise Protocol_Error with "non-pause operating-condition report contains a pause";
+         elsif (Report.Condition_Pauses = 0) /= (Report.Condition_Paused_NS = 0.0) then
+            raise Protocol_Error with "operating-condition pause count and duration disagree";
+         elsif Report.Condition_Fallback_Used /= Report.Condition_Budget_Expired then
+            raise Protocol_Error with "operating-condition fallback and budget state disagree";
+         elsif Report.Recollected_Units > Report.Affected_Units then
+            raise Protocol_Error with "worker recollected more condition units than were affected";
+         elsif Mode (Expected_Config.Operating_Conditions) = Pause
+           and then Expected_Config.Operating_Conditions.On_Pause_Timeout = Fallback_Fail
+           and then (Report.Condition_Budget_Expired or else Report.Condition_Fallback_Used)
+         then
+            raise Protocol_Error with "successful worker report contains a fail-mode condition fallback";
+         end if;
       end Validate_Environment_Metadata;
    begin
       if Value.Sample_Total > Expected_Config.Samples
@@ -1240,6 +1547,7 @@ package body Flyology_Bench.Workers is
       elsif Report.Mean_Foreign_CPU_Percent < 0.0
         or else Report.Peak_Foreign_CPU_Percent < Report.Mean_Foreign_CPU_Percent
         or else Report.Paused_Nanoseconds < 0.0
+        or else Report.Condition_Paused_NS < 0.0
         or else Report.Contaminated_Samples > Report.Observed_Samples
         or else (Expected_Config.Interference.Enabled
                  and then Report.Retaken_Samples > Expected_Config.Interference.Maximum_Retakes)

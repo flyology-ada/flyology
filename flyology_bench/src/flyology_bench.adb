@@ -9,17 +9,80 @@ with Ada.Text_IO;
 with Ada.Unchecked_Deallocation;
 with Flyology_Bench.Host_Control;
 with Flyology_Bench.Host_Lock;
+with Flyology_Bench.Internal_Condition_Policy;
+with Flyology_Bench.Internal_Conditions;
 with Flyology_Bench.Internal_Statistics;
+with Flyology_Bench.Internal_Window_Policy;
 with Flyology_Bench.Internal_Probes.Counters;
 
 package body Flyology_Bench is
    package Math renames Ada.Numerics.Long_Elementary_Functions;
    package Counters renames Flyology_Bench.Internal_Probes.Counters;
+   package Conditions renames Flyology_Bench.Internal_Conditions;
+   package Condition_Policy renames Flyology_Bench.Internal_Condition_Policy;
+   package Window_Policy renames Flyology_Bench.Internal_Window_Policy;
    use Flyology_Bench.Internal_Probes;
 
    use type Interfaces.Unsigned_64;
 
    subtype Float_Array is Internal_Statistics.Float_Array;
+
+   function Observe
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Observe,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      others                     => <>);
+
+   function Pause
+     (On_Pause_Timeout           : Condition_Pause_Fallback;
+      Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050;
+      Stable_Time                : Positive_Duration := 0.500;
+      Poll_Interval              : Positive_Duration := 0.100;
+      Maximum_Pause_Time         : Positive_Duration := 30.0;
+      Rewarm_Time                : Nonnegative_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Pause,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      Stable_Time                => Stable_Time,
+      Poll_Interval              => Poll_Interval,
+      Maximum_Pause_Time         => Maximum_Pause_Time,
+      Rewarm_Time                => Rewarm_Time,
+      On_Pause_Timeout           => On_Pause_Timeout);
+
+   function Fail
+     (Require_Nonreduced_Profile : Boolean := True;
+      Require_Profile_Detection  : Boolean := False;
+      Maximum_Thermal_State      : Thermal_State_Threshold := Thermal_State_Fair;
+      Require_Thermal_Detection  : Boolean := False;
+      Window                     : Positive_Duration := 0.050) return Operating_Conditions_Policy
+   is
+     (Mode_Value                 => Fail,
+      Require_Nonreduced_Profile => Require_Nonreduced_Profile,
+      Require_Profile_Detection  => Require_Profile_Detection,
+      Maximum_Thermal_State      => Maximum_Thermal_State,
+      Require_Thermal_Detection  => Require_Thermal_Detection,
+      Window                     => Window,
+      others                     => <>);
+
+   function Mode (Policy : Operating_Conditions_Policy) return Operating_Conditions_Mode
+   is (Policy.Mode_Value);
 
    procedure Sort (Values : in out Float_Array) renames Internal_Statistics.Sort;
 
@@ -785,22 +848,36 @@ package body Flyology_Bench is
    --  so a response never lands between the two halves of a paired sample or
    --  inside a balanced multi-way round.
    type Interference_Watch is record
-      Active        : Boolean := False;
-      Watched       : Watched_CPU_Array := (others => 0);
-      Watched_Total : Natural := 0;
-      Open          : Boolean := False;
-      Busy          : Host_CPU_Counters := (others => 0);
-      Total         : Host_CPU_Counters := (others => 0);
-      CPU_Count     : Natural := 0;
-      Own_Process   : Interfaces.Unsigned_64 := 0;
-      Own_Thread    : Interfaces.Unsigned_64 := 0;
-      Own_Valid     : Boolean := False;
-      Wall          : Interfaces.Unsigned_64 := 0;
-      Retakes       : Natural := 0;
-      Paused_Total  : Interfaces.Unsigned_64 := 0;
-      Foreign_Sum   : Long_Float := 0.0;
-      Report        : Environment_Report;
-      Foreign       : Sample_Array (Sample_Index'Range) := (others => 0.0);
+      Active                       : Boolean := False;
+      Watched                      : Watched_CPU_Array := (others => 0);
+      Watched_Total                : Natural := 0;
+      Open                         : Boolean := False;
+      Busy                         : Host_CPU_Counters := (others => 0);
+      Total                        : Host_CPU_Counters := (others => 0);
+      CPU_Count                    : Natural := 0;
+      Own_Process                  : Interfaces.Unsigned_64 := 0;
+      Own_Thread                   : Interfaces.Unsigned_64 := 0;
+      Own_Valid                    : Boolean := False;
+      Wall                         : Interfaces.Unsigned_64 := 0;
+      Retakes                      : Natural := 0;
+      Paused_Total                 : Interfaces.Unsigned_64 := 0;
+      Interference_Paused_Total    : Interfaces.Unsigned_64 := 0;
+      Condition_Paused_Total       : Interfaces.Unsigned_64 := 0;
+      Foreign_Sum                  : Long_Float := 0.0;
+      Conditions_Active            : Boolean := False;
+      Condition_Open               : Boolean := False;
+      Condition_Start              : Conditions.Snapshot;
+      Condition_Last               : Conditions.Snapshot;
+      Coarse_Conditions            : Conditions.Snapshot;
+      Throttle_Continuity          : Conditions.Throttle_Continuity;
+      Throttle_Report_Invalid      : Boolean := False;
+      Throttle_Time_Report_Invalid : Boolean := False;
+      Coarse_Conditions_Valid      : Boolean := False;
+      Last_Coarse_Condition_Read   : Interfaces.Unsigned_64 := 0;
+      Process_Baseline             : Process_Performance_Profile := Process_Profile_Unknown;
+      Throttle_Recovery_Unresolved : Boolean := False;
+      Report                       : Environment_Report;
+      Foreign                      : Sample_Array (Sample_Index'Range) := (others => 0.0);
    end record;
 
    --  What the caller must do with the window that just closed.
@@ -808,6 +885,10 @@ package body Flyology_Bench is
    --  @enum Retake_Window Discard them and collect the same units again.
    --  @enum Settle_And_Retake Wait for the host, re-warm, then collect again.
    type Window_Action is (Accept_Window, Retake_Window, Settle_And_Retake);
+
+   type Condition_Action is (Accept_Conditions, Pause_For_Conditions, Fail_Conditions);
+
+   Coarse_Condition_Interval_NS : constant Interfaces.Unsigned_64 := 1_000_000_000;
 
    --  Per-sample telemetry is written by index and survives a retake intact,
    --  but the summary fields are running sums and a running maximum. A
@@ -1091,7 +1172,7 @@ package body Flyology_Bench is
       Completed     : Natural;
       Dilution      : Long_Float;
    begin
-      if Watch.Paused_Total >= Budget then
+      if Watch.Interference_Paused_Total >= Budget then
          Watch.Report.Budget_Exhausted := True;
          return;
       end if;
@@ -1145,7 +1226,7 @@ package body Flyology_Bench is
          exit when Stable >= Required;
          --  Exhausting the budget degrades the run to Observe rather than
          --  discarding everything collected so far.
-         if Clock_Now - Started >= Budget - Watch.Paused_Total then
+         if Clock_Now - Started >= Budget - Watch.Interference_Paused_Total then
             Watch.Report.Budget_Exhausted := True;
             exit;
          end if;
@@ -1154,23 +1235,725 @@ package body Flyology_Bench is
          Spent : constant Interfaces.Unsigned_64 := Clock_Now - Started;
       begin
          Watch.Paused_Total := Watch.Paused_Total + Spent;
+         Watch.Interference_Paused_Total := Watch.Interference_Paused_Total + Spent;
          Watch.Report.Paused_Nanoseconds := Watch.Report.Paused_Nanoseconds + Long_Float (Spent);
       end;
    end Await_Foreign_Settle;
 
-   --  Number of collection units judged together. Interference watching is
-   --  the only reason to group units at all; without it every unit is judged
-   --  alone and the collection loop keeps its original shape.
+   procedure Read_Conditions
+     (Watch         : in out Interference_Watch;
+      Value         : out Conditions.Snapshot;
+      Force_Profile : Boolean := False;
+      Deadline      : Interfaces.Unsigned_64 := Interfaces.Unsigned_64'Last;
+      Account_Time  : Boolean := True)
+   is
+      Started         : constant Interfaces.Unsigned_64 := Clock_Now;
+      Now             : constant Interfaces.Unsigned_64 := Started;
+      Include_Profile : constant Boolean :=
+        Force_Profile
+        or else Operating_System = Linux
+        or else not Watch.Coarse_Conditions_Valid
+        or else Now < Watch.Last_Coarse_Condition_Read
+        or else Now - Watch.Last_Coarse_Condition_Read >= Coarse_Condition_Interval_NS;
+   begin
+      Conditions.Read
+        (Value, Watch.Throttle_Continuity, Include_Profile => Include_Profile, Deadline => Deadline);
+      if Include_Profile then
+         Watch.Coarse_Conditions.Profile_Availability := Value.Profile_Availability;
+         Watch.Coarse_Conditions.Profile_Detector := Value.Profile_Detector;
+         Watch.Coarse_Conditions.Profile := Value.Profile;
+         Watch.Coarse_Conditions.Power_Source := Value.Power_Source;
+         Watch.Coarse_Conditions.Degradation_Availability := Value.Degradation_Availability;
+         Watch.Coarse_Conditions.Degradation := Value.Degradation;
+         Watch.Coarse_Conditions_Valid := True;
+         Watch.Last_Coarse_Condition_Read := Clock_Now;
+      else
+         Value.Profile_Availability := Watch.Coarse_Conditions.Profile_Availability;
+         Value.Profile_Detector := Watch.Coarse_Conditions.Profile_Detector;
+         Value.Profile := Watch.Coarse_Conditions.Profile;
+         Value.Power_Source := Watch.Coarse_Conditions.Power_Source;
+         Value.Degradation_Availability := Watch.Coarse_Conditions.Degradation_Availability;
+         Value.Degradation := Watch.Coarse_Conditions.Degradation;
+      end if;
+      if Account_Time then
+         declare
+            Spent : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+         begin
+            Watch.Paused_Total :=
+              (if Watch.Paused_Total > Interfaces.Unsigned_64'Last - Spent
+               then Interfaces.Unsigned_64'Last
+               else Watch.Paused_Total + Spent);
+         end;
+      end if;
+   end Read_Conditions;
+
+   function Conditions_Unacceptable
+     (Config                      : Configuration;
+      Watch                       : Interference_Watch;
+      Current                     : Conditions.Snapshot;
+      Throttle_Delta              : Interfaces.Unsigned_64 := 0;
+      Throttle_Time_Delta         : Interfaces.Unsigned_64 := 0;
+      Throttle_Discontinuous      : Boolean := False;
+      Throttle_Time_Discontinuous : Boolean := False) return Boolean
+   is
+      Policy : Operating_Conditions_Policy renames Config.Operating_Conditions;
+   begin
+      if Mode (Policy) = Disabled then
+         return False;
+      end if;
+      declare
+         Required        : constant Condition_Policy.Requirements :=
+           (Require_Nonreduced_Profile => Policy.Require_Nonreduced_Profile,
+            Require_Profile_Detection  => Policy.Require_Profile_Detection,
+            Maximum_Thermal_State      => Policy.Maximum_Thermal_State,
+            Require_Thermal_Detection  => Policy.Require_Thermal_Detection);
+         State           : constant Condition_Policy.State :=
+           (Profile_Availability     => Current.Profile_Availability,
+            Profile                  => Current.Profile,
+            Low_Power_Availability   => Current.Low_Power_Availability,
+            Low_Power_Mode           => Current.Low_Power_Mode,
+            Process_Profile_Avail    => Current.Process_Profile_Avail,
+            Process_Profile          => Current.Process_Profile,
+            Thermal_Availability     => Current.Thermal_Availability,
+            Thermal_State            => Current.Thermal_State,
+            Degradation_Availability => Current.Degradation_Availability,
+            Degradation              => Current.Degradation,
+            Throttle_Availability    => Current.Throttle_Availability,
+            Throttle_Time_Avail      => Current.Throttle_Time_Avail);
+         Throttle_Events : constant Condition_Policy.Counter_Evidence :=
+           (Availability  => Current.Throttle_Availability,
+            Increased     => Throttle_Delta > 0,
+            Increase      => Throttle_Delta,
+            Discontinuous => Throttle_Discontinuous);
+         Throttle_Time   : constant Condition_Policy.Counter_Evidence :=
+           (Availability  => Current.Throttle_Time_Avail,
+            Increased     => Throttle_Time_Delta > 0,
+            Increase      => Throttle_Time_Delta,
+            Discontinuous => Throttle_Time_Discontinuous);
+      begin
+         return
+           Watch.Throttle_Recovery_Unresolved
+           or else Condition_Policy.Unacceptable
+                     (Required, State, Watch.Process_Baseline, Throttle_Events, Throttle_Time);
+      end;
+   end Conditions_Unacceptable;
+
+   function Condition_Mode_Action
+     (Policy_Mode : Operating_Conditions_Mode; Rejected : Boolean) return Condition_Action is
+   begin
+      case Condition_Policy.Action_For (Policy_Mode, Rejected) is
+         when Condition_Policy.Policy_Accept =>
+            return Accept_Conditions;
+
+         when Condition_Policy.Policy_Pause  =>
+            return Pause_For_Conditions;
+
+         when Condition_Policy.Policy_Fail   =>
+            return Fail_Conditions;
+      end case;
+   end Condition_Mode_Action;
+
+   procedure Add_Throttle_Events (Watch : in out Interference_Watch; Increase : Interfaces.Unsigned_64) is
+   begin
+      if Watch.Throttle_Report_Invalid then
+         return;
+      end if;
+      if Watch.Report.Throttle_Events > Interfaces.Unsigned_64'Last - Increase then
+         Watch.Throttle_Report_Invalid := True;
+         Watch.Report.Throttle_Availability := Condition_Unavailable;
+      else
+         Watch.Report.Throttle_Events := Watch.Report.Throttle_Events + Increase;
+      end if;
+   end Add_Throttle_Events;
+
+   procedure Add_Throttle_Time (Watch : in out Interference_Watch; Increase : Interfaces.Unsigned_64) is
+   begin
+      if Watch.Throttle_Time_Report_Invalid then
+         return;
+      end if;
+      if Watch.Report.Throttle_Milliseconds > Interfaces.Unsigned_64'Last - Increase then
+         Watch.Throttle_Time_Report_Invalid := True;
+         Watch.Report.Throttle_Time_Avail := Condition_Unavailable;
+      else
+         Watch.Report.Throttle_Milliseconds := Watch.Report.Throttle_Milliseconds + Increase;
+      end if;
+   end Add_Throttle_Time;
+
+   procedure Record_Condition_Snapshot
+     (Watch   : in out Interference_Watch;
+      Current : Conditions.Snapshot;
+      Initial : Boolean := False;
+      Final   : Boolean := False)
+   is
+      Report : Environment_Report renames Watch.Report;
+   begin
+      if Current.Profile_Availability = Condition_Available then
+         if Report.Profile_Availability = Condition_Available
+           and then Watch.Condition_Last.Profile_Availability = Condition_Available
+           and then Current.Profile /= Watch.Condition_Last.Profile
+         then
+            Report.Profile_Changes := Report.Profile_Changes + 1;
+         end if;
+         Report.Profile_Availability := Condition_Available;
+         Report.Profile_Detector := Current.Profile_Detector;
+         Report.Final_Profile := Current.Profile;
+         if Initial then
+            Report.Initial_Profile := Current.Profile;
+         end if;
+      else
+         if Initial then
+            Report.Profile_Availability := Condition_Unavailable;
+         end if;
+         if Final then
+            Report.Final_Profile := Profile_Unknown;
+         end if;
+      end if;
+
+      if Current.Power_Source /= Power_Source_Unknown then
+         Report.Final_Power_Source := Current.Power_Source;
+         if Initial then
+            Report.Initial_Power_Source := Current.Power_Source;
+         end if;
+      elsif Final then
+         Report.Final_Power_Source := Power_Source_Unknown;
+      end if;
+
+      if Current.Low_Power_Availability = Condition_Available then
+         Report.Low_Power_Availability := Condition_Available;
+         Report.Low_Power_Detector := Current.Low_Power_Detector;
+         Report.Final_Low_Power_Mode := Current.Low_Power_Mode;
+         if Initial then
+            Report.Initial_Low_Power_Mode := Current.Low_Power_Mode;
+         end if;
+         Report.Worst_Low_Power_Mode :=
+           Condition_Policy.Merge_Low_Power_Worst (Report.Worst_Low_Power_Mode, Current.Low_Power_Mode);
+      else
+         if Initial then
+            Report.Low_Power_Availability := Condition_Unavailable;
+         end if;
+         if Final then
+            Report.Final_Low_Power_Mode := Low_Power_Mode_Unknown;
+         end if;
+      end if;
+
+      if Current.Process_Profile_Avail = Condition_Available then
+         if Report.Process_Profile_Avail = Condition_Available
+           and then Watch.Condition_Last.Process_Profile_Avail = Condition_Available
+           and then Current.Process_Profile /= Watch.Condition_Last.Process_Profile
+         then
+            Report.Process_Profile_Changes := Report.Process_Profile_Changes + 1;
+         end if;
+         Report.Process_Profile_Avail := Condition_Available;
+         Report.Process_Profile_Detector := Current.Process_Profile_Detector;
+         Report.Final_Process_Profile := Current.Process_Profile;
+         if Initial then
+            Report.Initial_Process_Profile := Current.Process_Profile;
+         end if;
+      else
+         if Initial then
+            Report.Process_Profile_Avail := Condition_Unavailable;
+         end if;
+         if Final then
+            Report.Final_Process_Profile := Process_Profile_Unknown;
+         end if;
+      end if;
+
+      if Current.Thermal_Availability = Condition_Available then
+         Report.Thermal_Availability := Condition_Available;
+         Report.Thermal_Detector := Current.Thermal_Detector;
+         Report.Final_Thermal_State := Current.Thermal_State;
+         if Initial or else Report.Worst_Thermal_State = Thermal_State_Unknown then
+            Report.Worst_Thermal_State := Current.Thermal_State;
+         else
+            Report.Worst_Thermal_State :=
+              Host_Thermal_State'Max (Report.Worst_Thermal_State, Current.Thermal_State);
+         end if;
+         if Initial then
+            Report.Initial_Thermal_State := Current.Thermal_State;
+         end if;
+      else
+         if Initial then
+            Report.Thermal_Availability := Condition_Unavailable;
+         end if;
+         if Final then
+            Report.Final_Thermal_State := Thermal_State_Unknown;
+         end if;
+      end if;
+
+      if Current.Degradation_Availability = Condition_Available then
+         Report.Degradation_Availability := Condition_Available;
+         Report.Final_Degradation := Current.Degradation;
+         if Initial then
+            Report.Initial_Degradation := Current.Degradation;
+         end if;
+         Report.Worst_Degradation :=
+           Condition_Policy.Merge_Degradation_Worst (Report.Worst_Degradation, Current.Degradation);
+      else
+         if Initial then
+            Report.Degradation_Availability := Condition_Unavailable;
+         end if;
+         if Final then
+            Report.Final_Degradation := Degradation_Unknown;
+         end if;
+      end if;
+
+      Watch.Throttle_Report_Invalid := Watch.Throttle_Report_Invalid or else Current.Throttle_Discontinuous;
+      Watch.Throttle_Time_Report_Invalid :=
+        Watch.Throttle_Time_Report_Invalid or else Current.Throttle_Time_Discontinuous;
+      if Current.Throttle_Detector = Linux_CPU_Thermal_Throttle then
+         Report.Throttle_Detector := Current.Throttle_Detector;
+      end if;
+      if Watch.Throttle_Report_Invalid then
+         Report.Throttle_Availability := Condition_Unavailable;
+      elsif Current.Throttle_Availability = Condition_Available then
+         Report.Throttle_Availability := Condition_Available;
+      elsif Initial then
+         Report.Throttle_Availability := Condition_Unavailable;
+      end if;
+      if Watch.Throttle_Time_Report_Invalid then
+         Report.Throttle_Time_Avail := Condition_Unavailable;
+      elsif Current.Throttle_Time_Avail = Condition_Available then
+         Report.Throttle_Time_Avail := Condition_Available;
+      elsif Initial then
+         Report.Throttle_Time_Avail := Condition_Unavailable;
+      end if;
+      Watch.Condition_Last := Current;
+   end Record_Condition_Snapshot;
+
+   procedure Await_Condition_Settle
+     (Config : Configuration; Watch : in out Interference_Watch; Recovered : out Boolean)
+   is
+      Policy                      : Operating_Conditions_Policy renames Config.Operating_Conditions;
+      Budget                      : constant Interfaces.Unsigned_64 :=
+        Duration_Nanoseconds (Policy.Maximum_Pause_Time);
+      Required                    : constant Interfaces.Unsigned_64 :=
+        Duration_Nanoseconds (Policy.Stable_Time);
+      Poll_NS                     : constant Interfaces.Unsigned_64 :=
+        Duration_Nanoseconds (Policy.Poll_Interval);
+      Started                     : Interfaces.Unsigned_64;
+      Deadline                    : Interfaces.Unsigned_64;
+      Remaining_Budget            : Interfaces.Unsigned_64;
+      Previous_Time               : Interfaces.Unsigned_64;
+      Previous_Acceptable         : Boolean;
+      Current_Acceptable          : Boolean;
+      Stable                      : Interfaces.Unsigned_64 := 0;
+      Previous                    : Conditions.Snapshot;
+      Current                     : Conditions.Snapshot;
+      Throttle_Increase           : Interfaces.Unsigned_64;
+      Throttle_Time_Increase      : Interfaces.Unsigned_64;
+      Throttle_Discontinuous      : Boolean;
+      Throttle_Time_Discontinuous : Boolean;
+      Now                         : Interfaces.Unsigned_64;
+      Completed                   : Natural;
+   begin
+      Recovered := False;
+      if Watch.Condition_Paused_Total >= Budget then
+         Watch.Report.Condition_Budget_Expired := True;
+         Watch.Report.Condition_Fallback_Used := True;
+         Watch.Throttle_Recovery_Unresolved := False;
+         case Condition_Policy.Timeout_Action (Policy.On_Pause_Timeout) is
+            when Condition_Policy.Policy_Accept =>
+               null;
+
+            when Condition_Policy.Policy_Fail   =>
+               raise Operating_Conditions_Unacceptable with "operating-condition pause budget exhausted";
+
+            when Condition_Policy.Policy_Pause  =>
+               raise Program_Error with "invalid operating-condition timeout action";
+         end case;
+         return;
+      end if;
+      Remaining_Budget := Budget - Watch.Condition_Paused_Total;
+      Watch.Report.Condition_Pauses := Watch.Report.Condition_Pauses + 1;
+      Started := Clock_Now;
+      Deadline :=
+        (if Started > Interfaces.Unsigned_64'Last - Remaining_Budget
+         then Interfaces.Unsigned_64'Last
+         else Started + Remaining_Budget);
+      Read_Conditions (Watch, Previous, Force_Profile => True, Deadline => Deadline, Account_Time => False);
+      declare
+         Event_Evidence : constant Condition_Policy.Counter_Evidence :=
+           Condition_Policy.Compare_Counter
+             ((Availability => Watch.Condition_Last.Throttle_Availability,
+               Value        => Watch.Condition_Last.Throttle_Total),
+              (Availability => Previous.Throttle_Availability, Value => Previous.Throttle_Total));
+         Time_Evidence  : constant Condition_Policy.Counter_Evidence :=
+           Condition_Policy.Compare_Counter
+             ((Availability => Watch.Condition_Last.Throttle_Time_Avail,
+               Value        => Watch.Condition_Last.Throttle_Time_Total_MS),
+              (Availability => Previous.Throttle_Time_Avail, Value => Previous.Throttle_Time_Total_MS));
+      begin
+         Throttle_Increase := Event_Evidence.Increase;
+         Throttle_Time_Increase := Time_Evidence.Increase;
+         Throttle_Discontinuous := Event_Evidence.Discontinuous or else Previous.Throttle_Discontinuous;
+         Throttle_Time_Discontinuous :=
+           Time_Evidence.Discontinuous or else Previous.Throttle_Time_Discontinuous;
+         Watch.Throttle_Report_Invalid := Watch.Throttle_Report_Invalid or else Throttle_Discontinuous;
+         Watch.Throttle_Time_Report_Invalid :=
+           Watch.Throttle_Time_Report_Invalid or else Throttle_Time_Discontinuous;
+         if Event_Evidence.Availability = Condition_Available and then not Throttle_Discontinuous then
+            Add_Throttle_Events (Watch, Throttle_Increase);
+         end if;
+         if Time_Evidence.Availability = Condition_Available and then not Throttle_Time_Discontinuous then
+            Add_Throttle_Time (Watch, Throttle_Time_Increase);
+         end if;
+         --  Linux cumulative duration changes only after a throttle episode
+         --  ends; a flat value cannot establish that an in-progress episode
+         --  cooled. Without a separate live status, an observed event keeps
+         --  recovery unresolved until the cumulative pause fallback applies.
+         Watch.Throttle_Recovery_Unresolved :=
+           Watch.Throttle_Recovery_Unresolved or else Throttle_Increase > 0;
+      end;
+      Record_Condition_Snapshot (Watch, Previous);
+      Previous_Time := Clock_Now;
+      Previous_Acceptable :=
+        not Conditions_Unacceptable
+              (Config,
+               Watch,
+               Previous,
+               Throttle_Increase,
+               Throttle_Time_Increase,
+               Throttle_Discontinuous,
+               Throttle_Time_Discontinuous);
+      Notify (Config, Waiting_For_Operating_Conditions, 0, 100);
+      loop
+         declare
+            Elapsed  : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+            Sleep_NS : Interfaces.Unsigned_64;
+         begin
+            exit when Elapsed >= Remaining_Budget;
+            Sleep_NS := Interfaces.Unsigned_64'Min (Poll_NS, Remaining_Budget - Elapsed);
+            delay Duration (Long_Float (Sleep_NS) / 1_000_000_000.0);
+         end;
+         --  The first pause read above force-refreshes coarse profile state.
+         --  Keep live thermal state on every poll, but let macOS pmset values
+         --  use their one-second cache so the observer does not launch three
+         --  helper processes at every poll interval.
+         Read_Conditions (Watch, Current, Deadline => Deadline, Account_Time => False);
+         Now := Clock_Now;
+         declare
+            Event_Evidence : constant Condition_Policy.Counter_Evidence :=
+              Condition_Policy.Compare_Counter
+                ((Availability => Previous.Throttle_Availability, Value => Previous.Throttle_Total),
+                 (Availability => Current.Throttle_Availability, Value => Current.Throttle_Total));
+            Time_Evidence  : constant Condition_Policy.Counter_Evidence :=
+              Condition_Policy.Compare_Counter
+                ((Availability => Previous.Throttle_Time_Avail, Value => Previous.Throttle_Time_Total_MS),
+                 (Availability => Current.Throttle_Time_Avail, Value => Current.Throttle_Time_Total_MS));
+         begin
+            Throttle_Increase := Event_Evidence.Increase;
+            Throttle_Time_Increase := Time_Evidence.Increase;
+            Throttle_Discontinuous := Event_Evidence.Discontinuous or else Current.Throttle_Discontinuous;
+            Throttle_Time_Discontinuous :=
+              Time_Evidence.Discontinuous or else Current.Throttle_Time_Discontinuous;
+            Watch.Throttle_Report_Invalid := Watch.Throttle_Report_Invalid or else Throttle_Discontinuous;
+            Watch.Throttle_Time_Report_Invalid :=
+              Watch.Throttle_Time_Report_Invalid or else Throttle_Time_Discontinuous;
+            if Event_Evidence.Availability = Condition_Available and then not Throttle_Discontinuous then
+               Add_Throttle_Events (Watch, Throttle_Increase);
+            end if;
+            if Time_Evidence.Availability = Condition_Available and then not Throttle_Time_Discontinuous then
+               Add_Throttle_Time (Watch, Throttle_Time_Increase);
+            end if;
+            Watch.Throttle_Recovery_Unresolved :=
+              Watch.Throttle_Recovery_Unresolved or else Throttle_Increase > 0;
+            if Event_Evidence.Availability = Condition_Unavailable
+              and then Previous.Throttle_Availability = Condition_Available
+            then
+               Current.Throttle_Availability := Condition_Unavailable;
+            end if;
+            if Time_Evidence.Availability = Condition_Unavailable
+              and then Previous.Throttle_Time_Avail = Condition_Available
+            then
+               Current.Throttle_Time_Avail := Condition_Unavailable;
+            end if;
+         end;
+         Record_Condition_Snapshot (Watch, Current);
+         Current_Acceptable :=
+           not Conditions_Unacceptable
+                 (Config,
+                  Watch,
+                  Current,
+                  Throttle_Increase,
+                  Throttle_Time_Increase,
+                  Throttle_Discontinuous,
+                  Throttle_Time_Discontinuous);
+         if not Current_Acceptable then
+            Stable := 0;
+         elsif Previous_Acceptable then
+            Stable := Stable + (Now - Previous_Time);
+         end if;
+         Completed :=
+           Natural'Min
+             (100,
+              Natural
+                (Long_Float'Floor
+                   (100.0 * Long_Float (Stable) / Long_Float'Max (1.0, Long_Float (Required)))));
+         Notify (Config, Waiting_For_Operating_Conditions, Completed, 100);
+         if Stable >= Required and then Now - Started <= Remaining_Budget then
+            Recovered := True;
+            exit;
+         end if;
+         exit when Now - Started >= Remaining_Budget;
+         Previous := Current;
+         Previous_Time := Now;
+         Previous_Acceptable := Current_Acceptable;
+      end loop;
+      declare
+         Spent : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+      begin
+         Watch.Paused_Total := Watch.Paused_Total + Spent;
+         Watch.Condition_Paused_Total := Watch.Condition_Paused_Total + Spent;
+         Watch.Report.Condition_Paused_NS := Watch.Report.Condition_Paused_NS + Long_Float (Spent);
+      end;
+      if not Recovered then
+         Watch.Report.Condition_Budget_Expired := True;
+         Watch.Report.Condition_Fallback_Used := True;
+         Watch.Throttle_Recovery_Unresolved := False;
+         case Condition_Policy.Timeout_Action (Policy.On_Pause_Timeout) is
+            when Condition_Policy.Policy_Accept =>
+               null;
+
+            when Condition_Policy.Policy_Fail   =>
+               raise Operating_Conditions_Unacceptable with "operating conditions did not stabilize";
+
+            when Condition_Policy.Policy_Pause  =>
+               raise Program_Error with "invalid operating-condition timeout action";
+         end case;
+      else
+         Watch.Throttle_Recovery_Unresolved := False;
+      end if;
+   end Await_Condition_Settle;
+
+   procedure Prepare_Operating_Conditions (Config : Configuration; Watch : in out Interference_Watch) is
+      Current   : Conditions.Snapshot;
+      Recovered : Boolean;
+   begin
+      Watch.Conditions_Active := Mode (Config.Operating_Conditions) /= Disabled;
+      if not Watch.Conditions_Active then
+         return;
+      end if;
+      Watch.Report.Conditions_Checked := True;
+      Read_Conditions (Watch, Current, Force_Profile => True);
+      Watch.Condition_Last := Current;
+      Record_Condition_Snapshot (Watch, Current, Initial => True);
+      case Condition_Mode_Action
+             (Mode (Config.Operating_Conditions),
+              Conditions_Unacceptable
+                (Config,
+                 Watch,
+                 Current,
+                 Throttle_Discontinuous      => Current.Throttle_Discontinuous,
+                 Throttle_Time_Discontinuous => Current.Throttle_Time_Discontinuous))
+      is
+         when Accept_Conditions    =>
+            null;
+
+         when Fail_Conditions      =>
+            raise Operating_Conditions_Unacceptable with "initial operating conditions are unacceptable";
+
+         when Pause_For_Conditions =>
+            Await_Condition_Settle (Config, Watch, Recovered);
+      end case;
+   end Prepare_Operating_Conditions;
+
+   procedure Establish_Operating_Baseline (Config : Configuration; Watch : in out Interference_Watch) is
+      Current   : Conditions.Snapshot;
+      Recovered : Boolean;
+   begin
+      if not Watch.Conditions_Active then
+         return;
+      end if;
+      Read_Conditions (Watch, Current, Force_Profile => True);
+      Record_Condition_Snapshot (Watch, Current);
+      if Current.Process_Profile_Avail = Condition_Available then
+         Watch.Process_Baseline := Current.Process_Profile;
+      end if;
+      case Condition_Mode_Action
+             (Mode (Config.Operating_Conditions),
+              Conditions_Unacceptable
+                (Config,
+                 Watch,
+                 Current,
+                 Throttle_Discontinuous      => Current.Throttle_Discontinuous,
+                 Throttle_Time_Discontinuous => Current.Throttle_Time_Discontinuous))
+      is
+         when Accept_Conditions    =>
+            null;
+
+         when Fail_Conditions      =>
+            raise Operating_Conditions_Unacceptable
+              with "operating conditions after workload warmup are unacceptable";
+
+         when Pause_For_Conditions =>
+            Await_Condition_Settle (Config, Watch, Recovered);
+            if Recovered and then Watch.Condition_Last.Process_Profile_Avail = Condition_Available then
+               Watch.Process_Baseline := Watch.Condition_Last.Process_Profile;
+            end if;
+      end case;
+   end Establish_Operating_Baseline;
+
+   procedure Open_Condition_Window (Watch : in out Interference_Watch) is
+      Current : Conditions.Snapshot;
+   begin
+      if not Watch.Conditions_Active then
+         return;
+      end if;
+      Read_Conditions (Watch, Current);
+      Watch.Condition_Start := Current;
+      Record_Condition_Snapshot (Watch, Current);
+      Watch.Condition_Open := True;
+   end Open_Condition_Window;
+
+   procedure Judge_Condition_Window
+     (Config        : Configuration;
+      Watch         : in out Interference_Watch;
+      Units         : Positive;
+      Action        : out Condition_Action;
+      Count_Unit    : Boolean := True;
+      Force_Profile : Boolean := False)
+   is
+      Current                     : Conditions.Snapshot;
+      Throttle_Increase           : Interfaces.Unsigned_64 := 0;
+      Throttle_Time_Increase      : Interfaces.Unsigned_64 := 0;
+      Throttle_Discontinuous      : Boolean := False;
+      Throttle_Time_Discontinuous : Boolean := False;
+      Start_Unacceptable          : Boolean;
+      Current_Unacceptable        : Boolean;
+   begin
+      Action := Accept_Conditions;
+      if not Watch.Conditions_Active or else not Watch.Condition_Open then
+         return;
+      end if;
+      Watch.Condition_Open := False;
+      Read_Conditions (Watch, Current, Force_Profile => Force_Profile);
+      declare
+         Event_Evidence : constant Condition_Policy.Counter_Evidence :=
+           Condition_Policy.Compare_Counter
+             ((Availability => Watch.Condition_Start.Throttle_Availability,
+               Value        => Watch.Condition_Start.Throttle_Total),
+              (Availability => Current.Throttle_Availability, Value => Current.Throttle_Total));
+         Time_Evidence  : constant Condition_Policy.Counter_Evidence :=
+           Condition_Policy.Compare_Counter
+             ((Availability => Watch.Condition_Start.Throttle_Time_Avail,
+               Value        => Watch.Condition_Start.Throttle_Time_Total_MS),
+              (Availability => Current.Throttle_Time_Avail, Value => Current.Throttle_Time_Total_MS));
+      begin
+         Throttle_Increase := Event_Evidence.Increase;
+         Throttle_Time_Increase := Time_Evidence.Increase;
+         Throttle_Discontinuous :=
+           Event_Evidence.Discontinuous
+           or else Watch.Condition_Start.Throttle_Discontinuous
+           or else Current.Throttle_Discontinuous;
+         Throttle_Time_Discontinuous :=
+           Time_Evidence.Discontinuous
+           or else Watch.Condition_Start.Throttle_Time_Discontinuous
+           or else Current.Throttle_Time_Discontinuous;
+         if Event_Evidence.Availability = Condition_Available and then not Throttle_Discontinuous then
+            Add_Throttle_Events (Watch, Throttle_Increase);
+         elsif Watch.Condition_Start.Throttle_Availability = Condition_Available
+           or else Throttle_Discontinuous
+         then
+            Current.Throttle_Availability := Condition_Unavailable;
+            Watch.Throttle_Report_Invalid := True;
+            Watch.Report.Throttle_Availability := Condition_Unavailable;
+         end if;
+         if Time_Evidence.Availability = Condition_Available and then not Throttle_Time_Discontinuous then
+            Add_Throttle_Time (Watch, Throttle_Time_Increase);
+         elsif Watch.Condition_Start.Throttle_Time_Avail = Condition_Available
+           or else Throttle_Time_Discontinuous
+         then
+            Current.Throttle_Time_Avail := Condition_Unavailable;
+            Watch.Throttle_Time_Report_Invalid := True;
+            Watch.Report.Throttle_Time_Avail := Condition_Unavailable;
+         end if;
+      end;
+      Start_Unacceptable :=
+        Conditions_Unacceptable
+          (Config,
+           Watch,
+           Watch.Condition_Start,
+           Throttle_Discontinuous      => Watch.Condition_Start.Throttle_Discontinuous,
+           Throttle_Time_Discontinuous => Watch.Condition_Start.Throttle_Time_Discontinuous);
+      Current_Unacceptable :=
+        Conditions_Unacceptable
+          (Config,
+           Watch,
+           Current,
+           Throttle_Increase,
+           Throttle_Time_Increase,
+           Throttle_Discontinuous,
+           Throttle_Time_Discontinuous);
+      Record_Condition_Snapshot (Watch, Current);
+      if Count_Unit then
+         Watch.Report.Condition_Windows := Watch.Report.Condition_Windows + 1;
+      end if;
+      if not Condition_Policy.Window_Unacceptable (Start_Unacceptable, Current_Unacceptable) then
+         return;
+      end if;
+      if Count_Unit then
+         Watch.Report.Affected_Units := Watch.Report.Affected_Units + Units;
+      end if;
+      Action := Condition_Mode_Action (Mode (Config.Operating_Conditions), Rejected => True);
+      Watch.Throttle_Recovery_Unresolved := Action = Pause_For_Conditions and then Throttle_Increase > 0;
+   end Judge_Condition_Window;
+
+   procedure Validate_After_Calibration
+     (Config : Configuration; Watch : in out Interference_Watch; Recalibrate : out Boolean)
+   is
+      Action    : Condition_Action;
+      Recovered : Boolean;
+   begin
+      Recalibrate := False;
+      Judge_Condition_Window (Config, Watch, 1, Action, Count_Unit => False, Force_Profile => True);
+      case Action is
+         when Accept_Conditions    =>
+            null;
+
+         when Fail_Conditions      =>
+            raise Operating_Conditions_Unacceptable with "operating conditions changed during calibration";
+
+         when Pause_For_Conditions =>
+            Await_Condition_Settle (Config, Watch, Recovered);
+            Recalibrate := Recovered;
+      end case;
+   end Validate_After_Calibration;
+
+   procedure Finalize_Operating_Conditions (Watch : in out Interference_Watch) is
+      Current : constant Conditions.Snapshot := Watch.Condition_Last;
+   begin
+      if not Watch.Conditions_Active then
+         return;
+      end if;
+      --  A sampling window's forced closing read has already been judged.
+      --  Re-reading here would discover a state too late for Pause or Fail to
+      --  reject the affected window.
+      Record_Condition_Snapshot (Watch, Current, Final => True);
+   end Finalize_Operating_Conditions;
+
+   --  Number of collection units judged together. Interference or operating-
+   --  condition watching is the only reason to group units at all; without
+   --  either, every unit is judged alone and the collection loop keeps its
+   --  original shape.
    function Units_Per_Window
      (Config : Configuration; Unit_Nanoseconds : Long_Float; Total_Units : Positive) return Positive
    is
       Required : Long_Float;
       Units    : Long_Float;
    begin
-      if not Config.Interference.Enabled or else Unit_Nanoseconds <= 0.0 then
+      if (not Config.Interference.Enabled and then Mode (Config.Operating_Conditions) = Disabled)
+        or else Unit_Nanoseconds <= 0.0
+      then
          return 1;
       end if;
-      Required := Long_Float (Duration_Nanoseconds (Config.Interference.Window));
+      Required :=
+        Long_Float
+          (Duration_Nanoseconds
+             (Window_Policy.Required_Window
+                ((if Config.Interference.Enabled then Config.Interference.Window else 0.0),
+                 (if Mode (Config.Operating_Conditions) /= Disabled
+                  then Config.Operating_Conditions.Window
+                  else 0.0))));
       --  Batch duration varies from sample to sample, so a window sized to
       --  only just reach the minimum would regularly fall short of it and
       --  silently degrade to observation. The margin buys that back.
@@ -2298,13 +3081,15 @@ package body Flyology_Bench is
    procedure Measure_Core (Config : Configuration; Result : out Measurement);
 
    procedure Measure_Core (Config : Configuration; Result : out Measurement) is
-      Batch_Iterations : Iteration_Count := 1;
-      Target_NS        : Long_Float;
-      Clock_Cost       : Long_Float;
-      Calibration_Hits : Natural := 0;
-      Perf             : Counters.Handle;
-      Watch            : Interference_Watch;
-      Lock             : Host_Lock.Claim;
+      Batch_Iterations            : Iteration_Count := 1;
+      Calibration_Base_Iterations : Iteration_Count := 1;
+      Target_NS                   : Long_Float;
+      Clock_Cost                  : Long_Float;
+      Calibration_Hits            : Natural := 0;
+      Recalibrate                 : Boolean;
+      Perf                        : Counters.Handle;
+      Watch                       : Interference_Watch;
+      Lock                        : Host_Lock.Claim;
 
       function Time_Batch (Iterations : Iteration_Count) return Long_Float is
          Started  : Interfaces.Unsigned_64;
@@ -2387,6 +3172,7 @@ package body Flyology_Bench is
       Initialize_Metrics (Config, Result);
       Notify (Config, Starting);
       Prepare_Environment (Config, Watch, Lock);
+      Prepare_Operating_Conditions (Config, Watch);
       Await_CPU_Quiescence (Config);
       Characterize_Clock
         (Backend             => Result.Clock_Backend_Id,
@@ -2427,49 +3213,65 @@ package body Flyology_Bench is
          end;
       end if;
 
-      Notify (Config, Calibrating);
+      Establish_Operating_Baseline (Config, Watch);
+      Calibration_Base_Iterations := Batch_Iterations;
       loop
-         declare
-            Elapsed : constant Long_Float := Time_Batch (Batch_Iterations);
-         begin
-            if Elapsed >= Target_NS * 0.9 then
-               Calibration_Hits := Calibration_Hits + 1;
-            else
-               Calibration_Hits := 0;
-               Increase_Batch (Elapsed);
-            end if;
-            exit when Calibration_Hits >= 3 or else Batch_Iterations = Config.Maximum_Iterations;
-         end;
+         Batch_Iterations := Calibration_Base_Iterations;
+         Calibration_Hits := 0;
+         Open_Condition_Window (Watch);
+         Notify (Config, Calibrating);
+         loop
+            declare
+               Elapsed : constant Long_Float := Time_Batch (Batch_Iterations);
+            begin
+               if Elapsed >= Target_NS * 0.9 then
+                  Calibration_Hits := Calibration_Hits + 1;
+               else
+                  Calibration_Hits := 0;
+                  Increase_Batch (Elapsed);
+               end if;
+               exit when Calibration_Hits >= 3 or else Batch_Iterations = Config.Maximum_Iterations;
+            end;
+         end loop;
+         Validate_After_Calibration (Config, Watch, Recalibrate);
+         exit when not Recalibrate;
       end loop;
 
       Result.Iterations := Batch_Iterations;
       Initialize_Perf (Config, Perf);
       declare
-         Sampling_Started : constant Interfaces.Unsigned_64 := Clock_Now;
-         Completed        : Natural := 0;
-         Total_Samples    : constant Positive := Natural (Config.Samples);
-         Group            : constant Positive := Units_Per_Window (Config, Target_NS, Total_Samples);
-         Window_First     : Positive := 1;
-         Window_Last      : Positive;
-         Action           : Window_Action;
+         Sampling_Started         : constant Interfaces.Unsigned_64 := Clock_Now;
+         Paused_At_Sampling_Start : constant Interfaces.Unsigned_64 := Watch.Paused_Total;
+         Completed                : Natural := 0;
+         Total_Samples            : constant Positive := Natural (Config.Samples);
+         Group                    : constant Positive := Units_Per_Window (Config, Target_NS, Total_Samples);
+         Window_First             : Positive := 1;
+         Window_Last              : Positive;
+         Action                   : Window_Action;
+         Condition_Result         : Condition_Action;
+         Recovered                : Boolean;
+         Terminal_Window          : Boolean;
 
          --  A resumed run has cold caches, predictors, and frequency state.
          --  Without this the first sample after a pause is exactly the
          --  outlier the pause was meant to avoid.
-         procedure Rewarm is
+         procedure Rewarm (Span : Nonnegative_Duration) is
             Deadline : Interfaces.Unsigned_64;
             Elapsed  : Long_Float;
+            Started  : Interfaces.Unsigned_64;
          begin
-            if Config.Interference.Rewarm_Time <= 0.0 then
+            if Span <= 0.0 then
                return;
             end if;
-            Deadline := Clock_Now + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+            Started := Clock_Now;
+            Deadline := Started + Duration_Nanoseconds (Span);
             Notify (Config, Warming, 0, 100);
             loop
                Elapsed := Time_Batch (Batch_Iterations);
                Internal_Probes.Escape (Elapsed'Address);
                exit when Clock_Now >= Deadline;
             end loop;
+            Watch.Paused_Total := Watch.Paused_Total + (Clock_Now - Started);
             Notify (Config, Warming, 100, 100);
          end Rewarm;
       begin
@@ -2481,6 +3283,7 @@ package body Flyology_Bench is
                   Saved : constant Telemetry_Snapshot := Save_Telemetry (Result);
                begin
                   Open_Interference_Window (Watch);
+                  Open_Condition_Window (Watch);
                   for Index in Window_First .. Window_Last loop
                      declare
                         Elapsed : Long_Float;
@@ -2496,19 +3299,62 @@ package body Flyology_Bench is
                   end loop;
                   Judge_Window
                     (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                  exit when Action = Accept_Window;
-                  Restore_Telemetry (Result, Saved);
-                  if Action = Settle_And_Retake then
-                     Await_Foreign_Settle (Config, Watch);
-                     Rewarm;
+                  Terminal_Window :=
+                    Window_Last = Total_Samples
+                    or else Sampling_Limit_Reached
+                              (Config,
+                               Sampling_Started,
+                               Completed,
+                               Watch.Paused_Total - Paused_At_Sampling_Start);
+                  Judge_Condition_Window
+                    (Config,
+                     Watch,
+                     Window_Last - Window_First + 1,
+                     Condition_Result,
+                     Force_Profile => Terminal_Window);
+                  if Condition_Result = Fail_Conditions then
+                     raise Operating_Conditions_Unacceptable
+                       with "operating conditions changed during measurement";
+                  elsif Condition_Result = Pause_For_Conditions then
+                     Await_Condition_Settle (Config, Watch, Recovered);
+                     if Recovered then
+                        Watch.Report.Recollected_Units :=
+                          Watch.Report.Recollected_Units + Window_Last - Window_First + 1;
+                        Restore_Telemetry (Result, Saved);
+                        if Action = Settle_And_Retake then
+                           Await_Foreign_Settle (Config, Watch);
+                           Rewarm
+                             (Duration'Max
+                                (Config.Operating_Conditions.Rewarm_Time, Config.Interference.Rewarm_Time));
+                        else
+                           Rewarm (Config.Operating_Conditions.Rewarm_Time);
+                        end if;
+                     elsif Action = Accept_Window then
+                        exit;
+                     else
+                        Restore_Telemetry (Result, Saved);
+                        if Action = Settle_And_Retake then
+                           Await_Foreign_Settle (Config, Watch);
+                           Rewarm (Config.Interference.Rewarm_Time);
+                        end if;
+                     end if;
+                  elsif Action = Accept_Window then
+                     exit;
+                  else
+                     Restore_Telemetry (Result, Saved);
+                     if Action = Settle_And_Retake then
+                        Await_Foreign_Settle (Config, Watch);
+                        Rewarm (Config.Interference.Rewarm_Time);
+                     end if;
                   end if;
                end;
             end loop;
-            exit when Sampling_Limit_Reached (Config, Sampling_Started, Completed, Watch.Paused_Total);
+            exit when Terminal_Window;
             Window_First := Window_Last + 1;
          end loop;
          Result.Sample_Total := Sample_Count (Completed);
       end;
+      Finalize_Operating_Conditions (Watch);
       Apply_Environment (Watch, Result);
       Notify (Config, Analyzing);
       Analyze (Result);
@@ -2526,17 +3372,21 @@ package body Flyology_Bench is
    procedure Compare_Core (Config : Configuration; Result : out Comparison) is
       type Order_Array is array (Positive range <>) of Boolean;
 
-      Batch_Iterations     : Iteration_Count := 1;
-      Reference_Iterations : Iteration_Count := 1;
-      Contender_Iterations : Iteration_Count := 1;
-      Target_NS            : Long_Float;
-      Clock_Cost           : Long_Float;
-      Calibration_Hits     : Natural := 0;
-      Slow_Limit_Hits      : Natural := 0;
-      Perf                 : Counters.Handle;
-      Watch                : Interference_Watch;
-      Lock                 : Host_Lock.Claim;
-      Warmup_State         : Interfaces.Unsigned_64 :=
+      Batch_Iterations           : Iteration_Count := 1;
+      Reference_Iterations       : Iteration_Count := 1;
+      Contender_Iterations       : Iteration_Count := 1;
+      Calibration_Base_Batch     : Iteration_Count := 1;
+      Calibration_Base_Reference : Iteration_Count := 1;
+      Calibration_Base_Contender : Iteration_Count := 1;
+      Target_NS                  : Long_Float;
+      Clock_Cost                 : Long_Float;
+      Calibration_Hits           : Natural := 0;
+      Slow_Limit_Hits            : Natural := 0;
+      Recalibrate                : Boolean;
+      Perf                       : Counters.Handle;
+      Watch                      : Interference_Watch;
+      Lock                       : Host_Lock.Claim;
+      Warmup_State               : Interfaces.Unsigned_64 :=
         16#A076_1D64_78BD_642F# xor Interfaces.Unsigned_64 (Config.Random_Seed);
 
       function Reference_Count return Iteration_Count
@@ -2638,6 +3488,7 @@ package body Flyology_Bench is
       Result := (others => <>);
       Notify (Config, Starting);
       Prepare_Environment (Config, Watch, Lock);
+      Prepare_Operating_Conditions (Config, Watch);
       Await_CPU_Quiescence (Config);
       Result.Reference_Data.Sample_Total := Config.Samples;
       Result.Contender_Data.Sample_Total := Config.Samples;
@@ -2711,52 +3562,67 @@ package body Flyology_Bench is
          end;
       end if;
 
-      Notify (Config, Calibrating);
+      Establish_Operating_Baseline (Config, Watch);
+      Calibration_Base_Batch := Batch_Iterations;
+      Calibration_Base_Reference := Reference_Iterations;
+      Calibration_Base_Contender := Contender_Iterations;
       loop
-         declare
-            Reference_Time : Long_Float;
-            Contender_Time : Long_Float;
-         begin
-            Time_Pair
-              (Reference_First => Next_Random (Warmup_State) mod 2 = 0,
-               Reference_Time  => Reference_Time,
-               Contender_Time  => Contender_Time);
-            if Config.Comparison_Batching = Equal_Time then
-               if (Reference_Time >= Target_NS * 0.9 or else Reference_Iterations = Config.Maximum_Iterations)
-                 and then (Contender_Time >= Target_NS * 0.9
-                           or else Contender_Iterations = Config.Maximum_Iterations)
-               then
-                  Calibration_Hits := Calibration_Hits + 1;
+         Batch_Iterations := Calibration_Base_Batch;
+         Reference_Iterations := Calibration_Base_Reference;
+         Contender_Iterations := Calibration_Base_Contender;
+         Calibration_Hits := 0;
+         Slow_Limit_Hits := 0;
+         Open_Condition_Window (Watch);
+         Notify (Config, Calibrating);
+         loop
+            declare
+               Reference_Time : Long_Float;
+               Contender_Time : Long_Float;
+            begin
+               Time_Pair
+                 (Reference_First => Next_Random (Warmup_State) mod 2 = 0,
+                  Reference_Time  => Reference_Time,
+                  Contender_Time  => Contender_Time);
+               if Config.Comparison_Batching = Equal_Time then
+                  if (Reference_Time >= Target_NS * 0.9
+                      or else Reference_Iterations = Config.Maximum_Iterations)
+                    and then (Contender_Time >= Target_NS * 0.9
+                              or else Contender_Iterations = Config.Maximum_Iterations)
+                  then
+                     Calibration_Hits := Calibration_Hits + 1;
+                  else
+                     Calibration_Hits := 0;
+                  end if;
+                  exit when Calibration_Hits >= 3;
+                  if Reference_Time < Target_NS * 0.9 then
+                     Increase_Individual_Batch (Reference_Iterations, Reference_Time);
+                  end if;
+                  if Contender_Time < Target_NS * 0.9 then
+                     Increase_Individual_Batch (Contender_Iterations, Contender_Time);
+                  end if;
                else
-                  Calibration_Hits := 0;
+                  if Long_Float'Min (Reference_Time, Contender_Time) >= Target_NS * 0.9 then
+                     Calibration_Hits := Calibration_Hits + 1;
+                  else
+                     Calibration_Hits := 0;
+                  end if;
+                  if Long_Float'Max (Reference_Time, Contender_Time) >= Target_NS * 8.0 then
+                     Slow_Limit_Hits := Slow_Limit_Hits + 1;
+                  else
+                     Slow_Limit_Hits := 0;
+                  end if;
+                  exit when
+                    Calibration_Hits >= 3
+                    or else Slow_Limit_Hits >= 3
+                    or else Batch_Iterations = Config.Maximum_Iterations;
+                  Increase_Batch
+                    (Fastest => Long_Float'Min (Reference_Time, Contender_Time),
+                     Slowest => Long_Float'Max (Reference_Time, Contender_Time));
                end if;
-               exit when Calibration_Hits >= 3;
-               if Reference_Time < Target_NS * 0.9 then
-                  Increase_Individual_Batch (Reference_Iterations, Reference_Time);
-               end if;
-               if Contender_Time < Target_NS * 0.9 then
-                  Increase_Individual_Batch (Contender_Iterations, Contender_Time);
-               end if;
-            else
-               if Long_Float'Min (Reference_Time, Contender_Time) >= Target_NS * 0.9 then
-                  Calibration_Hits := Calibration_Hits + 1;
-               else
-                  Calibration_Hits := 0;
-               end if;
-               if Long_Float'Max (Reference_Time, Contender_Time) >= Target_NS * 8.0 then
-                  Slow_Limit_Hits := Slow_Limit_Hits + 1;
-               else
-                  Slow_Limit_Hits := 0;
-               end if;
-               exit when
-                 Calibration_Hits >= 3
-                 or else Slow_Limit_Hits >= 3
-                 or else Batch_Iterations = Config.Maximum_Iterations;
-               Increase_Batch
-                 (Fastest => Long_Float'Min (Reference_Time, Contender_Time),
-                  Slowest => Long_Float'Max (Reference_Time, Contender_Time));
-            end if;
-         end;
+            end;
+         end loop;
+         Validate_After_Calibration (Config, Watch, Recalibrate);
+         exit when not Recalibrate;
       end loop;
 
       Result.Reference_Data.Iterations := Reference_Count;
@@ -2783,15 +3649,20 @@ package body Flyology_Bench is
          end loop;
 
          declare
-            Sampling_Started : constant Interfaces.Unsigned_64 := Clock_Now;
-            Completed        : Natural := 0;
-            Total_Samples    : constant Positive := Orders'Length;
+            Sampling_Started         : constant Interfaces.Unsigned_64 := Clock_Now;
+            Paused_At_Sampling_Start : constant Interfaces.Unsigned_64 := Watch.Paused_Total;
+            Completed                : Natural := 0;
+            Total_Samples            : constant Positive := Orders'Length;
             --  One unit is a complete pair, so a window never splits the two
             --  halves that make the comparison paired.
-            Group            : constant Positive := Units_Per_Window (Config, 2.0 * Target_NS, Total_Samples);
-            Window_First     : Positive := 1;
-            Window_Last      : Positive;
-            Action           : Window_Action;
+            Group                    : constant Positive :=
+              Units_Per_Window (Config, 2.0 * Target_NS, Total_Samples);
+            Window_First             : Positive := 1;
+            Window_Last              : Positive;
+            Action                   : Window_Action;
+            Condition_Result         : Condition_Action;
+            Recovered                : Boolean;
+            Terminal_Window          : Boolean;
 
             procedure Collect_Pair (Index : Positive) is
                Reference_Time  : Long_Float;
@@ -2856,15 +3727,17 @@ package body Flyology_Bench is
                end if;
             end Collect_Pair;
 
-            procedure Rewarm is
+            procedure Rewarm (Span : Nonnegative_Duration) is
                Deadline       : Interfaces.Unsigned_64;
                Reference_Time : Long_Float;
                Contender_Time : Long_Float;
+               Started        : Interfaces.Unsigned_64;
             begin
-               if Config.Interference.Rewarm_Time <= 0.0 then
+               if Span <= 0.0 then
                   return;
                end if;
-               Deadline := Clock_Now + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+               Started := Clock_Now;
+               Deadline := Started + Duration_Nanoseconds (Span);
                Notify (Config, Warming, 0, 100);
                loop
                   Time_Pair
@@ -2875,8 +3748,23 @@ package body Flyology_Bench is
                   Internal_Probes.Escape (Contender_Time'Address);
                   exit when Clock_Now >= Deadline;
                end loop;
+               Watch.Paused_Total := Watch.Paused_Total + (Clock_Now - Started);
                Notify (Config, Warming, 100, 100);
             end Rewarm;
+
+            procedure Roll_Back_Window
+              (Saved_Reference : Telemetry_Snapshot; Saved_Contender : Telemetry_Snapshot) is
+            begin
+               for Index in Window_First .. Window_Last loop
+                  if Orders (Index) then
+                     Result.Reference_First := Result.Reference_First - 1;
+                  else
+                     Result.Contender_First := Result.Contender_First - 1;
+                  end if;
+               end loop;
+               Restore_Telemetry (Result.Reference_Data, Saved_Reference);
+               Restore_Telemetry (Result.Contender_Data, Saved_Contender);
+            end Roll_Back_Window;
          begin
             Notify (Config, Sampling, 0, Natural (Config.Samples));
             while Window_First <= Total_Samples loop
@@ -2887,6 +3775,7 @@ package body Flyology_Bench is
                      Saved_Contender : constant Telemetry_Snapshot := Save_Telemetry (Result.Contender_Data);
                   begin
                      Open_Interference_Window (Watch);
+                     Open_Condition_Window (Watch);
                      for Index in Window_First .. Window_Last loop
                         Collect_Pair (Index);
                         Completed := Natural'Max (Completed, Index);
@@ -2894,31 +3783,65 @@ package body Flyology_Bench is
                      end loop;
                      Judge_Window
                        (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                     exit when Action = Accept_Window;
-                     --  Undo this pass's position tally and telemetry before
-                     --  collecting the same pairs again.
-                     for Index in Window_First .. Window_Last loop
-                        if Orders (Index) then
-                           Result.Reference_First := Result.Reference_First - 1;
+                     Terminal_Window :=
+                       Window_Last = Total_Samples
+                       or else Sampling_Limit_Reached
+                                 (Config,
+                                  Sampling_Started,
+                                  Completed,
+                                  Watch.Paused_Total - Paused_At_Sampling_Start);
+                     Judge_Condition_Window
+                       (Config,
+                        Watch,
+                        Window_Last - Window_First + 1,
+                        Condition_Result,
+                        Force_Profile => Terminal_Window);
+                     if Condition_Result = Fail_Conditions then
+                        raise Operating_Conditions_Unacceptable
+                          with "operating conditions changed during paired comparison";
+                     elsif Condition_Result = Pause_For_Conditions then
+                        Await_Condition_Settle (Config, Watch, Recovered);
+                        if Recovered then
+                           Watch.Report.Recollected_Units :=
+                             Watch.Report.Recollected_Units + Window_Last - Window_First + 1;
+                           Roll_Back_Window (Saved_Reference, Saved_Contender);
+                           if Action = Settle_And_Retake then
+                              Await_Foreign_Settle (Config, Watch);
+                              Rewarm
+                                (Duration'Max
+                                   (Config.Operating_Conditions.Rewarm_Time,
+                                    Config.Interference.Rewarm_Time));
+                           else
+                              Rewarm (Config.Operating_Conditions.Rewarm_Time);
+                           end if;
+                        elsif Action = Accept_Window then
+                           exit;
                         else
-                           Result.Contender_First := Result.Contender_First - 1;
+                           Roll_Back_Window (Saved_Reference, Saved_Contender);
+                           if Action = Settle_And_Retake then
+                              Await_Foreign_Settle (Config, Watch);
+                              Rewarm (Config.Interference.Rewarm_Time);
+                           end if;
                         end if;
-                     end loop;
-                     Restore_Telemetry (Result.Reference_Data, Saved_Reference);
-                     Restore_Telemetry (Result.Contender_Data, Saved_Contender);
-                     if Action = Settle_And_Retake then
-                        Await_Foreign_Settle (Config, Watch);
-                        Rewarm;
+                     elsif Action = Accept_Window then
+                        exit;
+                     else
+                        Roll_Back_Window (Saved_Reference, Saved_Contender);
+                        if Action = Settle_And_Retake then
+                           Await_Foreign_Settle (Config, Watch);
+                           Rewarm (Config.Interference.Rewarm_Time);
+                        end if;
                      end if;
                   end;
                end loop;
-               exit when Sampling_Limit_Reached (Config, Sampling_Started, Completed, Watch.Paused_Total);
+               exit when Terminal_Window;
                Window_First := Window_Last + 1;
             end loop;
             Result.Reference_Data.Sample_Total := Sample_Count (Completed);
             Result.Contender_Data.Sample_Total := Sample_Count (Completed);
          end;
       end;
+      Finalize_Operating_Conditions (Watch);
       Apply_Environment (Watch, Result.Reference_Data);
       Apply_Environment (Watch, Result.Contender_Data);
 
@@ -3031,11 +3954,14 @@ package body Flyology_Bench is
 
       Batch_Iterations         : Iteration_Count := 1;
       Case_Iterations          : Case_Iteration_Array := [others => 1];
+      Calibration_Base_Batch   : Iteration_Count := 1;
+      Calibration_Base_Cases   : Case_Iteration_Array := [others => 1];
       Target_NS                : Long_Float;
       Case_Target_NS           : Long_Float;
       Minimum_Case_NS          : Long_Float;
       Clock_Cost               : Long_Float;
       Calibration_Hits         : Natural := 0;
+      Recalibrate              : Boolean;
       State                    : Interfaces.Unsigned_64 :=
         16#E703_7ED1_A0B4_28DB# xor Interfaces.Unsigned_64 (Config.Random_Seed);
       Collected_Samples        : Natural := 0;
@@ -3162,6 +4088,7 @@ package body Flyology_Bench is
       Result.Batch_Policy := Config.Comparison_Batching;
       Notify (Config, Starting);
       Prepare_Environment (Config, Watch, Lock);
+      Prepare_Operating_Conditions (Config, Watch);
       Await_CPU_Quiescence (Config);
       for Index in 1 .. Count loop
          Result.Data (Comparison_Case_Index (Index)).Sample_Total := Config.Samples;
@@ -3231,44 +4158,55 @@ package body Flyology_Bench is
          end;
       end if;
 
-      Notify (Config, Calibrating);
+      Establish_Operating_Baseline (Config, Watch);
+      Calibration_Base_Batch := Batch_Iterations;
+      Calibration_Base_Cases := Case_Iterations;
       loop
-         declare
-            Fastest     : Long_Float;
-            Total       : Long_Float;
-            Times       : Case_Time_Array;
-            All_Settled : Boolean := True;
-         begin
-            Time_Round (Fastest, Total, Times);
-            if Config.Comparison_Batching = Equal_Time then
-               for Index in 1 .. Count loop
-                  declare
-                     Case_Index : constant Comparison_Case_Index := Comparison_Case_Index (Index);
-                  begin
-                     if Times (Case_Index) < Case_Target_NS * 0.9
-                       and then Case_Iterations (Case_Index) < Config.Maximum_Iterations
-                     then
-                        All_Settled := False;
-                        Increase_Individual_Batch (Case_Index, Times (Case_Index));
-                     end if;
-                  end;
-               end loop;
-               if All_Settled then
+         Batch_Iterations := Calibration_Base_Batch;
+         Case_Iterations := Calibration_Base_Cases;
+         Calibration_Hits := 0;
+         Open_Condition_Window (Watch);
+         Notify (Config, Calibrating);
+         loop
+            declare
+               Fastest     : Long_Float;
+               Total       : Long_Float;
+               Times       : Case_Time_Array;
+               All_Settled : Boolean := True;
+            begin
+               Time_Round (Fastest, Total, Times);
+               if Config.Comparison_Batching = Equal_Time then
+                  for Index in 1 .. Count loop
+                     declare
+                        Case_Index : constant Comparison_Case_Index := Comparison_Case_Index (Index);
+                     begin
+                        if Times (Case_Index) < Case_Target_NS * 0.9
+                          and then Case_Iterations (Case_Index) < Config.Maximum_Iterations
+                        then
+                           All_Settled := False;
+                           Increase_Individual_Batch (Case_Index, Times (Case_Index));
+                        end if;
+                     end;
+                  end loop;
+                  if All_Settled then
+                     Calibration_Hits := Calibration_Hits + 1;
+                  else
+                     Calibration_Hits := 0;
+                  end if;
+                  exit when Calibration_Hits >= 3;
+               elsif Fastest >= Minimum_Case_NS * 0.9 and then Total >= Target_NS * 0.9 then
                   Calibration_Hits := Calibration_Hits + 1;
                else
                   Calibration_Hits := 0;
                end if;
-               exit when Calibration_Hits >= 3;
-            elsif Fastest >= Minimum_Case_NS * 0.9 and then Total >= Target_NS * 0.9 then
-               Calibration_Hits := Calibration_Hits + 1;
-            else
-               Calibration_Hits := 0;
-            end if;
-            if Config.Comparison_Batching = Shared_Iterations then
-               exit when Calibration_Hits >= 3 or else Batch_Iterations = Config.Maximum_Iterations;
-               Increase_Batch (Fastest, Total);
-            end if;
-         end;
+               if Config.Comparison_Batching = Shared_Iterations then
+                  exit when Calibration_Hits >= 3 or else Batch_Iterations = Config.Maximum_Iterations;
+                  Increase_Batch (Fastest, Total);
+               end if;
+            end;
+         end loop;
+         Validate_After_Calibration (Config, Watch, Recalibrate);
+         exit when not Recalibrate;
       end loop;
 
       Initialize_Perf (Config, Perf);
@@ -3338,14 +4276,19 @@ package body Flyology_Bench is
 
             Sampling_Started := Clock_Now;
             declare
-               Total_Rounds : constant Positive := Natural (Config.Samples);
+               Paused_At_Sampling_Start : constant Interfaces.Unsigned_64 := Watch.Paused_Total;
+               Total_Rounds             : constant Positive := Natural (Config.Samples);
                --  One unit is a complete balanced round. Interference that
                --  arrives mid-round would otherwise be spread unevenly across
                --  the cases the round is meant to compare fairly.
-               Group        : constant Positive := Units_Per_Window (Config, Target_NS, Total_Rounds);
-               Window_First : Positive := 1;
-               Window_Last  : Positive;
-               Action       : Window_Action;
+               Group                    : constant Positive :=
+                 Units_Per_Window (Config, Target_NS, Total_Rounds);
+               Window_First             : Positive := 1;
+               Window_Last              : Positive;
+               Action                   : Window_Action;
+               Condition_Result         : Condition_Action;
+               Recovered                : Boolean;
+               Terminal_Window          : Boolean;
 
                procedure Collect_Round (Sample : Positive) is
                begin
@@ -3363,16 +4306,18 @@ package body Flyology_Bench is
                   end loop;
                end Collect_Round;
 
-               procedure Rewarm is
+               procedure Rewarm (Span : Nonnegative_Duration) is
                   Deadline : Interfaces.Unsigned_64;
                   Fastest  : Long_Float;
                   Spent    : Long_Float;
                   Times    : Case_Time_Array;
+                  Started  : Interfaces.Unsigned_64;
                begin
-                  if Config.Interference.Rewarm_Time <= 0.0 then
+                  if Span <= 0.0 then
                      return;
                   end if;
-                  Deadline := Clock_Now + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+                  Started := Clock_Now;
+                  Deadline := Started + Duration_Nanoseconds (Span);
                   Notify (Config, Warming, 0, 100);
                   loop
                      Time_Round (Fastest, Spent, Times);
@@ -3381,6 +4326,7 @@ package body Flyology_Bench is
                      Internal_Probes.Escape (Times'Address);
                      exit when Clock_Now >= Deadline;
                   end loop;
+                  Watch.Paused_Total := Watch.Paused_Total + (Clock_Now - Started);
                   Notify (Config, Warming, 100, 100);
                end Rewarm;
             begin
@@ -3396,30 +4342,80 @@ package body Flyology_Bench is
                              Save_Telemetry (Result.Data (Comparison_Case_Index (Index)));
                         end loop;
                         Open_Interference_Window (Watch);
+                        Open_Condition_Window (Watch);
                         for Sample in Window_First .. Window_Last loop
                            Collect_Round (Sample);
                            Collected_Samples := Natural'Max (Collected_Samples, Sample);
                         end loop;
                         Judge_Window
                           (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                        exit when Action = Accept_Window;
-                        --  Progress counts collected case batches, so a
-                        --  discarded window must give its units back, and so
-                        --  must every case's telemetry totals.
-                        Completed := Completed - Count * (Window_Last - Window_First + 1);
-                        for Index in 1 .. Count loop
-                           Restore_Telemetry
-                             (Result.Data (Comparison_Case_Index (Index)),
-                              Saved (Comparison_Case_Index (Index)));
-                        end loop;
-                        if Action = Settle_And_Retake then
-                           Await_Foreign_Settle (Config, Watch);
-                           Rewarm;
+                        Terminal_Window :=
+                          Window_Last = Total_Rounds
+                          or else Sampling_Limit_Reached
+                                    (Config,
+                                     Sampling_Started,
+                                     Collected_Samples,
+                                     Watch.Paused_Total - Paused_At_Sampling_Start);
+                        Judge_Condition_Window
+                          (Config,
+                           Watch,
+                           Window_Last - Window_First + 1,
+                           Condition_Result,
+                           Force_Profile => Terminal_Window);
+                        if Condition_Result = Fail_Conditions then
+                           raise Operating_Conditions_Unacceptable
+                             with "operating conditions changed during balanced comparison";
+                        elsif Condition_Result = Pause_For_Conditions then
+                           Await_Condition_Settle (Config, Watch, Recovered);
+                           if Recovered then
+                              Watch.Report.Recollected_Units :=
+                                Watch.Report.Recollected_Units + Window_Last - Window_First + 1;
+                              Completed := Completed - Count * (Window_Last - Window_First + 1);
+                              for Index in 1 .. Count loop
+                                 Restore_Telemetry
+                                   (Result.Data (Comparison_Case_Index (Index)),
+                                    Saved (Comparison_Case_Index (Index)));
+                              end loop;
+                              if Action = Settle_And_Retake then
+                                 Await_Foreign_Settle (Config, Watch);
+                                 Rewarm
+                                   (Duration'Max
+                                      (Config.Operating_Conditions.Rewarm_Time,
+                                       Config.Interference.Rewarm_Time));
+                              else
+                                 Rewarm (Config.Operating_Conditions.Rewarm_Time);
+                              end if;
+                           elsif Action = Accept_Window then
+                              exit;
+                           else
+                              Completed := Completed - Count * (Window_Last - Window_First + 1);
+                              for Index in 1 .. Count loop
+                                 Restore_Telemetry
+                                   (Result.Data (Comparison_Case_Index (Index)),
+                                    Saved (Comparison_Case_Index (Index)));
+                              end loop;
+                              if Action = Settle_And_Retake then
+                                 Await_Foreign_Settle (Config, Watch);
+                                 Rewarm (Config.Interference.Rewarm_Time);
+                              end if;
+                           end if;
+                        elsif Action = Accept_Window then
+                           exit;
+                        else
+                           Completed := Completed - Count * (Window_Last - Window_First + 1);
+                           for Index in 1 .. Count loop
+                              Restore_Telemetry
+                                (Result.Data (Comparison_Case_Index (Index)),
+                                 Saved (Comparison_Case_Index (Index)));
+                           end loop;
+                           if Action = Settle_And_Retake then
+                              Await_Foreign_Settle (Config, Watch);
+                              Rewarm (Config.Interference.Rewarm_Time);
+                           end if;
                         end if;
                      end;
                   end loop;
-                  exit when
-                    Sampling_Limit_Reached (Config, Sampling_Started, Collected_Samples, Watch.Paused_Total);
+                  exit when Terminal_Window;
                   Window_First := Window_Last + 1;
                end loop;
             end;
@@ -3435,23 +4431,29 @@ package body Flyology_Bench is
                   Window_First         : Positive := 1;
                   Window_Last          : Positive;
                   Action               : Window_Action;
+                  Condition_Result     : Condition_Action;
+                  Recovered            : Boolean;
                   Paused_At_Case_Start : constant Interfaces.Unsigned_64 := Watch.Paused_Total;
                   Reached              : Boolean := False;
+                  Terminal_Window      : Boolean;
 
-                  procedure Rewarm is
+                  procedure Rewarm (Span : Nonnegative_Duration) is
                      Deadline : Interfaces.Unsigned_64;
                      Elapsed  : Long_Float;
+                     Started  : Interfaces.Unsigned_64;
                   begin
-                     if Config.Interference.Rewarm_Time <= 0.0 then
+                     if Span <= 0.0 then
                         return;
                      end if;
-                     Deadline := Clock_Now + Duration_Nanoseconds (Config.Interference.Rewarm_Time);
+                     Started := Clock_Now;
+                     Deadline := Started + Duration_Nanoseconds (Span);
                      Notify (Config, Warming, 0, 100);
                      loop
                         Elapsed := Time_One (Case_Id'Val (Case_Number - 1), Iterations_For (Case_Index));
                         Internal_Probes.Escape (Elapsed'Address);
                         exit when Clock_Now >= Deadline;
                      end loop;
+                     Watch.Paused_Total := Watch.Paused_Total + (Clock_Now - Started);
                      Notify (Config, Warming, 100, 100);
                   end Rewarm;
                begin
@@ -3462,23 +4464,64 @@ package body Flyology_Bench is
                            Saved : constant Telemetry_Snapshot := Save_Telemetry (Result.Data (Case_Index));
                         begin
                            Open_Interference_Window (Watch);
+                           Open_Condition_Window (Watch);
                            for Sample in Window_First .. Window_Last loop
                               Collect_One (Case_Number, Sample, Case_Number);
                            end loop;
                            Judge_Window
                              (Config, Watch, Sample_Index (Window_First), Sample_Index (Window_Last), Action);
-                           exit when Action = Accept_Window;
-                           Completed := Completed - (Window_Last - Window_First + 1);
-                           Restore_Telemetry (Result.Data (Case_Index), Saved);
-                           if Action = Settle_And_Retake then
-                              Await_Foreign_Settle (Config, Watch);
-                              Rewarm;
+                           Terminal_Window :=
+                             Window_Last = Total_Samples
+                             or else Sequential_Limit_Reached
+                                       (Case_Started, Window_Last, Watch.Paused_Total - Paused_At_Case_Start);
+                           Judge_Condition_Window
+                             (Config,
+                              Watch,
+                              Window_Last - Window_First + 1,
+                              Condition_Result,
+                              Force_Profile => Terminal_Window);
+                           if Condition_Result = Fail_Conditions then
+                              raise Operating_Conditions_Unacceptable
+                                with "operating conditions changed during sequential comparison";
+                           elsif Condition_Result = Pause_For_Conditions then
+                              Await_Condition_Settle (Config, Watch, Recovered);
+                              if Recovered then
+                                 Watch.Report.Recollected_Units :=
+                                   Watch.Report.Recollected_Units + Window_Last - Window_First + 1;
+                                 Completed := Completed - (Window_Last - Window_First + 1);
+                                 Restore_Telemetry (Result.Data (Case_Index), Saved);
+                                 if Action = Settle_And_Retake then
+                                    Await_Foreign_Settle (Config, Watch);
+                                    Rewarm
+                                      (Duration'Max
+                                         (Config.Operating_Conditions.Rewarm_Time,
+                                          Config.Interference.Rewarm_Time));
+                                 else
+                                    Rewarm (Config.Operating_Conditions.Rewarm_Time);
+                                 end if;
+                              elsif Action = Accept_Window then
+                                 exit;
+                              else
+                                 Completed := Completed - (Window_Last - Window_First + 1);
+                                 Restore_Telemetry (Result.Data (Case_Index), Saved);
+                                 if Action = Settle_And_Retake then
+                                    Await_Foreign_Settle (Config, Watch);
+                                    Rewarm (Config.Interference.Rewarm_Time);
+                                 end if;
+                              end if;
+                           elsif Action = Accept_Window then
+                              exit;
+                           else
+                              Completed := Completed - (Window_Last - Window_First + 1);
+                              Restore_Telemetry (Result.Data (Case_Index), Saved);
+                              if Action = Settle_And_Retake then
+                                 Await_Foreign_Settle (Config, Watch);
+                                 Rewarm (Config.Interference.Rewarm_Time);
+                              end if;
                            end if;
                         end;
                      end loop;
-                     Reached :=
-                       Sequential_Limit_Reached
-                         (Case_Started, Window_Last, Watch.Paused_Total - Paused_At_Case_Start);
+                     Reached := Terminal_Window;
                      Window_First := Window_Last + 1;
                   end loop;
                   --  This case's windows are its own, so it keeps its own
@@ -3501,6 +4544,7 @@ package body Flyology_Bench is
          end if;
       end;
 
+      Finalize_Operating_Conditions (Watch);
       Notify (Config, Analyzing);
       for Index in 1 .. Count loop
          declare

@@ -8,9 +8,11 @@ project Flyology_Bench_Tests is
       "recording_smoke.adb",
       "flyology_bench-internal_statistics_smoke.adb",
       "flyology_bench-internal_probes_smoke.adb",
+      "flyology_bench-internal_condition_policy_smoke.adb",
       "custom_metrics_smoke.adb",
       "baseline_gate_smoke.adb",
       "delta_aggregate_expression_function_compile.adb",
+      "operating_conditions_api_compile.adb",
       "sweeps_smoke.adb",
       "suite_smoke.adb",
       "worker_fixture.adb", "workers_smoke.adb");

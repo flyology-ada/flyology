@@ -1,0 +1,24 @@
+with "../flyology_bench.gpr";
+
+project Invalid_Operating_Conditions is
+   Case_Name := external ("FLYOLOGY_BENCH_INVALID_CONDITIONS_CASE", "aggregate");
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("invalid");
+   for Object_Dir use "obj/invalid-operating-conditions";
+   for Exec_Dir use "bin/invalid-operating-conditions";
+   for Create_Missing_Dirs use "True";
+
+   case Case_Name is
+      when "aggregate" =>
+         for Main use ("invalid_operating_conditions_aggregate.adb");
+      when "pause" =>
+         for Main use ("invalid_pause_without_expiration.adb");
+      when others =>
+         for Main use ();
+   end case;
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-O0", "-gnat2022", "-gnatVa");
+   end Compiler;
+end Invalid_Operating_Conditions;

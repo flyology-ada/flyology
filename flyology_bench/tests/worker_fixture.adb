@@ -264,6 +264,16 @@ begin
             Flyology_Bench.Workers.Test_Support.Corrupt_Unavailable_Telemetry (Result);
          elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-controls" then
             Flyology_Bench.Workers.Test_Support.Corrupt_Control_Metadata (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-condition-windows" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Condition_Windows (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-disabled-condition-state" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Disabled_Condition_State (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-enabled-condition-state" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Enabled_Condition_State (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-condition-detector" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Condition_Detector_Category (Result);
+         elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-fail-affected" then
+            Flyology_Bench.Workers.Test_Support.Corrupt_Fail_Affected (Result);
          elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-interference" then
             Flyology_Bench.Workers.Test_Support.Corrupt_Interference_Metadata (Result);
          elsif Ada.Strings.Unbounded.To_String (Name) = "wrong-unrequested-metric" then

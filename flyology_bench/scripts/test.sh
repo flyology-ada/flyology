@@ -41,6 +41,32 @@ printf '%s\n' "Running $crate_root/tests/bin/recording_smoke"
 cat "$work_dir/recording.out"
 "$crate_root/tests/bin/flyology_bench-internal_statistics_smoke"
 "$crate_root/tests/bin/flyology_bench-internal_probes_smoke"
+"$crate_root/tests/bin/flyology_bench-internal_condition_policy_smoke"
+"$crate_root/tests/bin/operating_conditions_api_compile"
+for invalid_case in aggregate pause
+do
+  if build -q -f -p -P "$crate_root/tests/invalid_operating_conditions.gpr" \
+    -XFLYOLOGY_BENCH_INVALID_CONDITIONS_CASE="$invalid_case" \
+    --subdirs="invalid-operating-conditions-$invalid_case" \
+    >"$work_dir/invalid-operating-conditions-$invalid_case.log" 2>&1
+  then
+    printf '%s\n' "invalid operating-condition API case compiled: $invalid_case" >&2
+    exit 1
+  fi
+done
+build -q -p -P "$crate_root/tests/flyology_bench_condition_tests.gpr" \
+  --subdirs=condition-hooks -XFLYOLOGY_BENCH_CONDITION_TEST_HOOKS=true
+"$crate_root/tests/bin/condition-hooks/flyology_bench-internal_condition_integration_smoke"
+build -q -f -p -P "$crate_root/flyology_bench.gpr" \
+  --subdirs=condition-hooks-disabled-o0 \
+  -XFLYOLOGY_BENCH_CONDITION_TEST_HOOKS=false \
+  -cargs:Ada -O0 -fno-inline -fno-inline-functions -fno-tree-dce -fno-dce
+if nm -u "$crate_root/lib/condition-hooks-disabled-o0/libflyology_bench.a" \
+  | grep -q 'flyology_bench_disabled_condition_hook_must_be_elided'
+then
+  printf '%s\n' "disabled condition hook survived strict -O0 compilation" >&2
+  exit 1
+fi
 "$crate_root/tests/bin/custom_metrics_smoke" >"$work_dir/custom.out"
 cat "$work_dir/custom.out"
 grep -q 'flyology_bench.metrics.v2,"fake, timer",custom,primary_time' \
@@ -154,7 +180,7 @@ cc_command=${CC:-cc}
 link_abi_probe() {
   "$cc_command" -std=c11 -Wall -Wextra -Werror \
     "$crate_root/tests/native/workers_abi_probe.c" \
-    "$crate_root/lib/libflyology_bench.a" -lpthread "$@" \
+    "$crate_root/lib/libflyology_bench.a" -lpthread -ldl "$@" \
     -o "$work_dir/workers_abi_probe"
 }
 if [ "$(uname -s)" = Linux ]; then
@@ -165,7 +191,30 @@ else
   link_abi_probe
 fi
 "$work_dir/workers_abi_probe"
+link_conditions_abi_probe() {
+  "$cc_command" -std=c11 -Wall -Wextra -Werror \
+    "$crate_root/tests/native/conditions_abi_probe.c" \
+    "$crate_root/lib/libflyology_bench.a" -lpthread -ldl "$@" \
+    -o "$work_dir/conditions_abi_probe"
+}
+if [ "$(uname -s)" = Linux ]; then
+  link_conditions_abi_probe -no-pie
+else
+  link_conditions_abi_probe
+fi
+"$work_dir/conditions_abi_probe"
 for symbol in \
+  flyology_bench_capture_start \
+  flyology_bench_capture_poll \
+  flyology_bench_capture_exit_status \
+  flyology_bench_darwin_process_conditions \
+  flyology_bench_linux_ppd_open \
+  flyology_bench_linux_ppd_set_timeout \
+  flyology_bench_linux_ppd_get_name_credentials \
+  flyology_bench_linux_ppd_copy_unique_name \
+  flyology_bench_linux_ppd_get_property \
+  flyology_bench_linux_ppd_credentials_unref \
+  flyology_bench_linux_ppd_bus_unref \
   flyology_bench_worker_spawn \
   flyology_bench_worker_set_nonblocking \
   flyology_bench_worker_observe_exit \
@@ -181,6 +230,13 @@ if nm -g "$crate_root/lib/libflyology_bench.a" \
   | grep -q 'flyology_bench_worker_test_'
 then
   printf '%s\n' "test-only worker symbols leaked into the production library" >&2
+  exit 1
+fi
+condition_test_symbols='flyology_bench_disabled_condition_hook|capture_for_test|read_linux_for_test'
+condition_test_symbols="$condition_test_symbols|internal_condition_test_hooks__(capture|record_capture|supply|use_capture)"
+if nm -g "$crate_root/lib/libflyology_bench.a" | grep -Eq "$condition_test_symbols"
+then
+  printf '%s\n' "test-only condition hooks leaked into the production library" >&2
   exit 1
 fi
 
