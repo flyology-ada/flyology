@@ -29,6 +29,9 @@ cp "$project_root/flyology_allocators/alire.toml" \
   "$pin_root/flyology_allocators/"
 cp -R "$project_root/flyology_allocators/src" \
   "$pin_root/flyology_allocators/"
+mkdir -p "$pin_root/flyology_allocators/scripts"
+cp "$project_root/flyology_allocators/scripts/configure-atomic-store-family.sh" \
+  "$pin_root/flyology_allocators/scripts/"
 cd "$consumer_root"
 
 sentinel_value='valuable directory contents remain intact'
@@ -141,9 +144,25 @@ cd "$consumer_root"
 runtime_archive="$pin_root/build/alire-rts/adalib/libgnarl.a"
 runtime_object="$pin_root/build/alire-rts/obj/context_switch.o"
 generated_config="$pin_root/build/flyology.cgpr"
+atomic_store_config="$pin_root/config/flyology_atomic_store_config.gpr"
 persisted_policy="$pin_root/build/flyology-rts.conf"
 runtime_marker="$pin_root/build/alire-rts/.flyology-rts-root"
 archive_probe="$consumer_root/context_switch.o"
+consumer_compiler_release=$("$pin_root/scripts/gnat-native-release.sh" "$alr")
+case "$consumer_compiler_release" in
+  13.2.2|14.1.3|14.2.1)
+    consumer_atomic_store_dir=src/atomic_stores/gnat-13-14/
+    ;;
+  *) consumer_atomic_store_dir=src/atomic_stores/gnat-15-plus/ ;;
+esac
+if ! grep -F "Compiler_Release := \"$consumer_compiler_release\";" \
+  "$atomic_store_config" >/dev/null \
+  || ! grep -F "Source_Dir := \"$consumer_atomic_store_dir\";" \
+    "$atomic_store_config" >/dev/null
+then
+  printf '%s\n' "external consumer omitted its atomic-store source selection" >&2
+  exit 1
+fi
 if ! grep '^Flyology prepared RTS version 1$' "$runtime_marker" >/dev/null; then
   printf '%s\n' "prepared runtime lacks its Flyology ownership marker" >&2
   exit 1

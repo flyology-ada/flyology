@@ -5,6 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 development_alr="$project_root/scripts/alr-development.sh"
 
 if [ "${FLYOLOGY_HOOK_ELISION_IN_ALIRE:-0}" != 1 ]; then
+  "$project_root/scripts/prepare-atomic-store-config.sh" >/dev/null
   "$development_alr" build >/dev/null
   FLYOLOGY_HOOK_ELISION_IN_ALIRE=1
   export FLYOLOGY_HOOK_ELISION_IN_ALIRE

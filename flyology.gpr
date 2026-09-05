@@ -1,6 +1,11 @@
 with "config/flyology_config.gpr";
+with "config/flyology_atomic_store_config.gpr";
 with "flyology_allocators.gpr";
 project Flyology is
+
+   for Languages use ("Ada", "C");
+
+   Atomic_Store_Source_Dir := Flyology_Atomic_Store_Config.Source_Dir;
 
    type Buffer_Test_Hooks_Type is ("false", "true");
    Buffer_Test_Hooks : Buffer_Test_Hooks_Type :=
@@ -152,14 +157,12 @@ project Flyology is
          Socket_Test_Hook_Switch := "-DFLYOLOGY_SOCKET_TEST_HOOKS=1";
    end case;
 
-   for Languages use ("Ada", "C");
-
    for Library_Name use "Flyology";
 
    case Flyology_Config.Alire_Host_OS is
       when "linux" =>
          for Source_Dirs use
-           ("src/", "src/native/", "src/platform/linux/", "config/",
+           ("src/", "src/native/", "src/platform/linux/", "config/", Atomic_Store_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
@@ -168,7 +171,7 @@ project Flyology is
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when "macos" =>
          for Source_Dirs use
-           ("src/", "src/native/", "src/platform/darwin/", "config/",
+           ("src/", "src/native/", "src/platform/darwin/", "config/", Atomic_Store_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
@@ -177,7 +180,7 @@ project Flyology is
             File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
       when others =>
          for Source_Dirs use
-           ("src/", "src/native/", "config/",
+           ("src/", "src/native/", "config/", Atomic_Store_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,

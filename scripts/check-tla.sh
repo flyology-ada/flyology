@@ -389,10 +389,8 @@ else
   alire=$("$project_root/scripts/find-alr.sh")
 fi
 
-cd "$project_root"
-"$alire" exec -- gprbuild \
-  -P flyology_allocators/tests/allocator_tests.gpr \
-  -p allocator_refinement.adb >/dev/null
+"$project_root/scripts/build-tla-allocator-refinement.sh" \
+  "$alire" >/dev/null
 
 compare_refinement()
 {

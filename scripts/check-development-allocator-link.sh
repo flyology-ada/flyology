@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  printf '%s\n' "usage: check-development-allocator-link.sh BINARY" >&2
+if [ "$#" -ne 2 ]; then
+  printf '%s\n' "usage: check-development-allocator-link.sh BINARY COMPILER_FAMILY" >&2
   exit 2
 fi
 
@@ -10,6 +10,12 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 workspace="$project_root/tests/development"
 lock_file="$workspace/alire/alire.lock"
 binary=$1
+compiler_family=$2
+
+if [ ! -f "$binary" ]; then
+  printf '%s\n' "behavioral link binary not found: $binary" >&2
+  exit 1
+fi
 
 if grep -F '[[pins]]' "$project_root/alire.toml" >/dev/null; then
   printf '%s\n' "publishable root manifest contains a development pin" >&2
@@ -43,16 +49,44 @@ if [ "$resolved_allocator" != "$project_root/flyology_allocators" ]; then
 fi
 
 allocator_archive="$resolved_allocator/lib/libflyology_allocators.a"
-"$resolved_allocator/scripts/check-atomic-store-c-boundary.sh" "$allocator_archive"
+"$resolved_allocator/scripts/check-atomic-store-c-boundary.sh" \
+  "$allocator_archive" "$compiler_family"
 
 symbols=$(nm -g "$binary")
-if ! printf '%s\n' "$symbols" | awk '
-  /_?flyology_allocators_atomic_store_release_u32$/ && $(NF - 1) != "U" { found = 1 }
-  END { exit found ? 0 : 1 }
-'; then
-  printf '%s\n' "behavioral link did not include the local allocator release-store leaf" >&2
-  exit 1
-fi
+case "$compiler_family" in
+  gnat-13-14)
+    for required_symbol in \
+      flyology_atomic_store_release_u32 \
+      flyology_atomic_store_release_u64 \
+      flyology_allocators_atomic_store_release_u32
+    do
+      if ! printf '%s\n' "$symbols" | awk -v wanted="$required_symbol" '
+        {
+          name=$NF
+          sub(/^_/, "", name)
+          if (name == wanted && $(NF - 1) != "U") found = 1
+        }
+        END { exit found ? 0 : 1 }
+      '; then
+        printf '%s\n' \
+          "GNAT 13-14 behavioral link omitted release-store leaf: $required_symbol" >&2
+        exit 1
+      fi
+    done
+    ;;
+  gnat-15-plus)
+    if printf '%s\n' "$symbols" | \
+      grep -E '_?flyology(_allocators)?_atomic_store_release_' >/dev/null
+    then
+      printf '%s\n' "GNAT 15+ behavioral link retains a GNAT 13-14 release-store leaf" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    printf '%s\n' "unknown compiler family: $compiler_family" >&2
+    exit 2
+    ;;
+esac
 
 undefined=$(nm -u "$binary" | awk '{
   name=$NF
