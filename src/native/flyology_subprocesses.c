@@ -6,7 +6,7 @@
  * Subprocess ABI leaves only.
  *
  * posix_spawn file-action and attribute objects, waitid's siginfo_t payload,
- * signal-number macros, wait-status macros, pipe2 flags, variadic fcntl
+ * signal-number and errno macros, wait-status macros, pipe2 flags, variadic fcntl
  * duplication, bootstrap file actions, SIGPIPE configuration, and SIGPIPE
  * masking are C-only or host-header-selected interfaces. This file exposes those
  * mechanisms through fixed signatures. Ada owns socket-pair creation,
@@ -294,6 +294,7 @@ int flyology_subprocess_signal_terminate(void) { return SIGTERM; }
 int flyology_subprocess_signal_kill(void) { return SIGKILL; }
 int flyology_subprocess_errno_interrupted(void) { return EINTR; }
 int flyology_subprocess_errno_would_block(void) { return EAGAIN; }
+int flyology_subprocess_errno_broken_pipe(void) { return EPIPE; }
 int flyology_subprocess_errno_no_such_process(void) { return ESRCH; }
 int flyology_subprocess_errno_permission(void) { return EPERM; }
 

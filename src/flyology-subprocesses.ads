@@ -366,6 +366,24 @@ private
       Reaper     : Reaper_Access := null;
    end record;
 
+   --  Internal write seam used by the Capture child package. Reader_Closed
+   --  reports EPIPE separately; every other low-level failure retains the
+   --  public Write_Standard_Input exception contract.
+   --  @exclude
+   --  @param Child Running subprocess whose standard input is written
+   --  @param Item Bytes to write
+   --  @param Last Index of the last byte written, or before Item'First when none
+   --  @param Reader_Closed Whether the child closed its input before this write
+   --  @param Timeout Maximum wait for writable readiness
+   --  @param Token Optional cancellation token
+   procedure Try_Write_Standard_Input
+     (Child         : in out Process;
+      Item          : Ada.Streams.Stream_Element_Array;
+      Last          : out Ada.Streams.Stream_Element_Offset;
+      Reader_Closed : out Boolean;
+      Timeout       : Duration := Flyology.IO.Infinite;
+      Token         : access Flyology.Cancellation.Token := null);
+
    --  Internal launch seam used by the Bootstrap child package. Bootstrap
    --  descriptors are either four distinct values above fd 4 or all invalid.
    --  @exclude

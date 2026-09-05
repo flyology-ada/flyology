@@ -17,7 +17,9 @@ package Flyology.Subprocesses.Capture is
 
    --  Run Item with optional stdin bytes and bounded output retention. The
    --  child stdin, stdout, and stderr pipes are progressed together; large
-   --  input therefore cannot deadlock against simultaneous child output.
+   --  input therefore cannot deadlock against simultaneous child output. If
+   --  the child closes stdin before consuming the complete payload, Run ends
+   --  the input phase and continues collecting output and exit status.
    --  @param Item Typed command to spawn
    --  @param Standard_Input Complete stdin payload; EOF follows the payload
    --  @param Maximum_Output Maximum retained stdout bytes

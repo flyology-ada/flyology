@@ -217,6 +217,7 @@ package body Flyology.Subprocesses.Capture is
                   Buffer          :
                     Ada.Streams.Stream_Element_Array (1 .. Ada.Streams.Stream_Element_Offset (Length));
                   Last            : Ada.Streams.Stream_Element_Offset;
+                  Input_Closed    : Boolean;
                begin
                   for Index in Buffer'Range loop
                      Buffer (Index) :=
@@ -224,10 +225,14 @@ package body Flyology.Subprocesses.Capture is
                          (Character'Pos
                             (Standard_Input (Standard_Input'First + Input_Offset + Natural (Index) - 1)));
                   end loop;
-                  Write_Standard_Input (Child, Buffer, Last, Timeout => 0.0);
-                  Input_Offset := Input_Offset + Natural (Last - Buffer'First + 1);
-                  if Input_Offset = Standard_Input'Length then
+                  Try_Write_Standard_Input (Child, Buffer, Last, Input_Closed, Timeout => 0.0);
+                  if Input_Closed then
                      Close_Standard_Input (Child);
+                  else
+                     Input_Offset := Input_Offset + Natural (Last - Buffer'First + 1);
+                     if Input_Offset = Standard_Input'Length then
+                        Close_Standard_Input (Child);
+                     end if;
                   end if;
                exception
                   when Flyology.IO.Timeout_Error =>
