@@ -305,6 +305,30 @@ begin
    end;
    Hooks.Reset;
 
+   --  An initial pause can be caused by a condition unrelated to the process
+   --  profile. A profile change that is stable throughout recovery belongs to
+   --  the post-warmup baseline and must not keep the initial pause rejected.
+   Hooks.Reject_Read (1);
+   Hooks.Change_Process_Profile_From_Read (2, Process_Profile_Sustained);
+   declare
+      Result : Measurement;
+      Report : Environment_Report;
+   begin
+      Benchmark (Config (Pause, Fallback_Observe), Result);
+      Report := Environment (Result);
+      Check
+        (Report.Condition_Pauses = 1
+         and then not Report.Condition_Budget_Expired
+         and then not Report.Condition_Fallback_Used,
+         "pre-warmup process profile prevented recovery from an unrelated condition");
+      Check
+        (Report.Initial_Process_Profile = Process_Profile_Default
+         and then Report.Final_Process_Profile = Process_Profile_Sustained
+         and then Report.Process_Profile_Changes = 1,
+         "stable recovery profile was not retained as the post-warmup baseline");
+   end;
+   Hooks.Reset;
+
    if Internal_Probes.Operating_System = Internal_Probes.Darwin then
       --  Intermediate sub-second windows reuse the macOS coarse profile
       --  cache, while the terminal close obtains a fresh value. This keeps

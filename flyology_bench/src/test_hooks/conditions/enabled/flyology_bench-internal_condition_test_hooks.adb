@@ -11,6 +11,8 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
    Rejected_Profile_Reads : Rejection_Map := [others => False];
    Read_Delays_MS         : Delay_Map := [others => 0];
    Reject_From            : Natural := 0;
+   Process_Profile_From   : Natural := 0;
+   Changed_Process_Profile : Process_Performance_Profile := Process_Profile_Default;
    Throttle_From          : Natural := 0;
    Reads                  : Natural := 0;
    Profile_Reads          : Natural := 0;
@@ -33,6 +35,8 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       Rejected_Profile_Reads := [others => False];
       Read_Delays_MS := [others => 0];
       Reject_From := 0;
+      Process_Profile_From := 0;
+      Changed_Process_Profile := Process_Profile_Default;
       Throttle_From := 0;
       Reads := 0;
       Profile_Reads := 0;
@@ -70,6 +74,16 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       end if;
       Rejected_Profile_Reads (Index) := True;
    end Reject_Profile_Read;
+
+   procedure Change_Process_Profile_From_Read
+     (Index : Positive; Profile : Process_Performance_Profile) is
+   begin
+      if Index > Maximum_Reads then
+         raise Constraint_Error with "condition hook process-profile index exceeds its fixed capacity";
+      end if;
+      Process_Profile_From := Index;
+      Changed_Process_Profile := Profile;
+   end Change_Process_Profile_From_Read;
 
    procedure Begin_Throttle_Event (Index : Positive) is
    begin
@@ -196,7 +210,10 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
          Low_Power_Mode              => Low_Power_Mode_Disabled,
          Process_Profile_Avail       => Condition_Available,
          Process_Profile_Detector    => Darwin_Process_Info,
-         Process_Profile             => Process_Profile_Default,
+         Process_Profile             =>
+           (if Process_Profile_From /= 0 and then Reads >= Process_Profile_From
+            then Changed_Process_Profile
+            else Process_Profile_Default),
          Thermal_Availability        => Condition_Available,
          Thermal_Detector            => Darwin_Process_Info,
          Thermal_State               =>

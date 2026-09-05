@@ -1737,9 +1737,6 @@ package body Flyology_Bench is
       Read_Conditions (Watch, Current, Force_Profile => True);
       Watch.Condition_Last := Current;
       Record_Condition_Snapshot (Watch, Current, Initial => True);
-      if Current.Process_Profile_Avail = Condition_Available then
-         Watch.Process_Baseline := Current.Process_Profile;
-      end if;
       case Condition_Mode_Action
              (Mode (Config.Operating_Conditions),
               Conditions_Unacceptable
