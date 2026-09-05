@@ -23,6 +23,7 @@ if ! command -v gnatdoc >/dev/null 2>&1; then
 fi
 
 cd "$project_root"
+"$project_root/scripts/prepare-atomic-store-config.sh" "$alr" >/dev/null
 "$alr" build --stop-after=generation
 node "$website_kit/scripts/render-gnatdoc-theme.mjs" \
   "$project_root/docs/gnatdoc-theme.json" \

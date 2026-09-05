@@ -147,7 +147,7 @@ esac
 alr=${ALR:-$("$project_root/scripts/find-alr.sh")}
 compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
 compiler="$compiler_prefix/bin/gcc"
-compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$alr")
+compiler_release=$("$project_root/scripts/prepare-atomic-store-config.sh" "$alr")
 gprbuild_prefix=$("$project_root/scripts/gprbuild-prefix.sh" "$alr")
 gprconfig="$gprbuild_prefix/bin/gprconfig"
 

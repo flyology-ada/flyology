@@ -347,7 +347,7 @@ case "$sanitizer" in
     ;;
 esac
 
-compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$alr")
+compiler_release=$("$project_root/scripts/prepare-atomic-store-config.sh" "$alr")
 runtime_warnings_source=
 runtime_warnings_name=runtime-warnings.adc
 case "$compiler_release" in

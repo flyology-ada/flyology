@@ -5,6 +5,7 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 development_alr="$project_root/scripts/alr-development.sh"
 
 if [ "${FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE:-0}" != 1 ]; then
+  "$project_root/scripts/prepare-atomic-store-config.sh" >/dev/null
   FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE=1
   export FLYOLOGY_COMMIT_SEAM_IN_DEVELOPMENT_WORKSPACE
   exec "$development_alr" exec -- "$0"

@@ -33,6 +33,7 @@ run_gnatprove()
 }
 
 cd "$project_root"
+"$project_root/scripts/prepare-atomic-store-config.sh" "$alr" >/dev/null
 "$alr" build --stop-after=generation
 
 cd "$project_root/proof"

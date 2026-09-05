@@ -63,8 +63,10 @@ fiber-aware behavior without becoming a crate dependency.
 
 ## Bare-board and cross builds
 
-The project file has no generated configuration and selects no operating-system
-source directory. It can be built directly by a cross `gprbuild`:
+The project does not import Alire-generated configuration or select an
+operating-system source directory. Its maintained build scripts record the
+exact compiler family's private atomic-store implementation before invoking a
+direct cross `gprbuild`:
 
 ```sh
 FLYOLOGY_ALLOCATORS_TARGET=arm-eabi \
@@ -92,8 +94,9 @@ implement this exception-reporting API and are outside the supported runtime
 profile.
 
 Native verification is `./scripts/test.sh`. It builds the standalone project,
-runs all four allocators including a timed-contention case, and rejects any
-reference to a `Flyology` runtime symbol in the resulting archive.
+runs all four allocators including a timed-contention case, checks the selected
+release-store boundary and publication behavior, and rejects any reference to
+a `Flyology` runtime symbol in the resulting archive.
 
 ## Hosted benchmarks
 
