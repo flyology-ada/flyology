@@ -10,6 +10,7 @@ with System.Flyology.Pool_Config;
 with System.Flyology.Scheduling_Policy;
 with System.Flyology.Time_ABI;
 with System.Storage_Elements;
+with System.Tasking;
 
 package body System.Flyology.Scheduler is
    package C renames Interfaces.C;
@@ -418,6 +419,7 @@ package body System.Flyology.Scheduler is
    function Address_To_Fiber is new Ada.Unchecked_Conversion (System.Address, Fiber_Access);
    function Group_To_Address is new Ada.Unchecked_Conversion (Loop_Group_Access, System.Address);
    function Address_To_Group is new Ada.Unchecked_Conversion (System.Address, Loop_Group_Access);
+   function Address_To_Task_Id is new Ada.Unchecked_Conversion (System.Address, System.Tasking.Task_Id);
    function Async_File_Token (Node : System.Address) return System.Address
    is (Node + SSE.Storage_Offset (1));
    function Async_File_Node_Address (Token : System.Address) return System.Address
@@ -2662,6 +2664,23 @@ package body System.Flyology.Scheduler is
        then Thread_Group.Current_Fiber.T
        else System.Null_Address);
 
+   --  Result of a direct fiber suspension point whose caller is inside a
+   --  protected action. The public wrappers turn it into Program_Error with
+   --  GNARL's "potentially blocking operation" wording.
+   Blocked_In_Protected_Action : constant C.int := -2;
+
+   --  GNARL's Lock and Unlock maintain this counter for a lightweight task
+   --  because the patched System.Tasking.Detect_Blocking reports true for
+   --  it. Only the task itself changes the counter, and it cannot run
+   --  concurrently with a scheduler entry made on its own stack, so the
+   --  unlocked read cannot race. The protected object's pthread mutex is
+   --  held by the fiber's current event-loop thread for the whole action: a
+   --  suspension here would park that thread's group behind the mutex, and
+   --  a migration would later release the mutex from a thread that does not
+   --  own it.
+   function In_Protected_Action (Item : not null Fiber_Access) return Boolean
+   is (Address_To_Task_Id (Item.T).Common.Protected_Action_Nesting > 0);
+
    function Task_Thread (T : System.Address) return OSI.Thread_Id is
       Item   : Fiber_Access;
       Result : OSI.Thread_Id;
@@ -3420,11 +3439,21 @@ package body System.Flyology.Scheduler is
       Target_Member_Count : Natural := 0;
       Reservation_Matches : Boolean := False;
    begin
-      if Current = System.Null_Address or else not Scheduling.Valid_Group (Group) then
+      if Current = System.Null_Address then
          return -1;
       end if;
 
+      --  Refuse before any other outcome, including the same-group no-op:
+      --  migration is a potentially blocking operation whatever Group
+      --  names, so the refusal must not depend on the current placement.
       Source := Thread_Group;
+      if In_Protected_Action (Source.Current_Fiber) then
+         return Blocked_In_Protected_Action;
+      end if;
+
+      if not Scheduling.Valid_Group (Group) then
+         return -1;
+      end if;
       if Source.Id = Group then
          return 0;
       end if;
@@ -3709,6 +3738,14 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
 
+      --  A readiness wait parks the fiber while the protected object's mutex
+      --  stays held by this event-loop thread, so a same-group peer that
+      --  contends for it would park the only thread able to resume the
+      --  holder.
+      if In_Protected_Action (Group.Current_Fiber) then
+         return Blocked_In_Protected_Action;
+      end if;
+
       if Timeout_Nanoseconds < 0 then
          Timeout := No_Deadline;
       else
@@ -3752,6 +3789,11 @@ package body System.Flyology.Scheduler is
         or else Task_Lock = System.Null_Address
       then
          return -1;
+      elsif In_Protected_Action (Group.Current_Fiber) then
+         --  A completion wait parks the fiber while the protected object's
+         --  mutex stays held by this event-loop thread. Refusing before any
+         --  submission also keeps the borrowed buffer out of the kernel.
+         return Blocked_In_Protected_Action;
       elsif For_Send_ZC and then not Pollers.Supports_Send_ZC (Group.Scheduler_Poller) then
          Transferred.all := 0;
          Error_Code.all := 0;

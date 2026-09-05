@@ -86,6 +86,13 @@ package System.Flyology.Scheduler is
    function Current_Processor return Interfaces.C.int;
    pragma Export (C, Current_Processor, "flyology_runtime_current_processor");
 
+   --  Move the calling fiber to Group at this safe point. Return 0 on
+   --  success, -1 when the caller is native, Group is invalid, the fiber is
+   --  pinned or owns active asynchronous files, or a dedicated Group is not
+   --  reserved for it, and -2 when the caller is inside a protected action.
+   --  The -2 refusal precedes every other outcome, including the same-group
+   --  no-op, because the protected object's pthread mutex belongs to the
+   --  current event-loop thread and cannot follow the task.
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "flyology_runtime_migrate");
 
@@ -157,7 +164,11 @@ package System.Flyology.Scheduler is
 
    --  Register Count descriptor/interest pairs. Interrupt_Wait is 1 when the
    --  set combines a primary descriptor with lifecycle wake descriptors; it
-   --  affects observability only, not readiness selection.
+   --  affects observability only, not readiness selection. Return the
+   --  one-based index of the request that became ready, 0 on timeout, -1
+   --  when the caller is not a running fiber or the set cannot be
+   --  registered, and -2 when the caller is inside a protected action; the
+   --  fiber is then never parked.
    function Wait_IO_Many
      (Requests            : System.Address;
       Count               : Interfaces.C.unsigned;
@@ -185,6 +196,12 @@ package System.Flyology.Scheduler is
      (Node : System.Address; Node_Size : Interfaces.C.size_t) return Interfaces.C.int;
    pragma Export (C, Cancel_Async_File, "flyology_runtime_cancel_async_file");
 
+   --  Perform one completion-driven positional operation for the calling
+   --  fiber, or a socket SEND_ZC when For_Write is 2. Return 0 after
+   --  completion, 1 when SEND_ZC is unsupported and the caller must fall
+   --  back, -1 on invalid input or a submission failure, and -2 when the
+   --  caller is inside a protected action; the fiber is then never parked
+   --  and Buffer is never submitted.
    function File_IO
      (Descriptor  : Interfaces.C.int;
       Buffer      : System.Address;

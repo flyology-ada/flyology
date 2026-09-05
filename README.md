@@ -336,7 +336,11 @@ authority. Custom authentication schemes remain available through
 Migration returns on the destination pthread without changing Ada task
 identity, its stack, locals, exception state, master, or rendezvous semantics.
 The source scheduler performs the actual handoff only after the fiber has fully
-switched away, so two loops can never restore one context concurrently.
+switched away, so two loops can never restore one context concurrently. A
+protected object's lock belongs to the source pthread and cannot follow the
+task, so `Migrate` inside a protected action is refused: a lightweight caller
+raises `Program_Error` before any movement, whatever group it names, and the
+normal unwinding releases the lock on the thread that holds it.
 
 Ada task identity is not OS-thread identity. Lightweight tasks in one group share
 that group's pthread and therefore also share C `pthread_key` values, signal
@@ -518,7 +522,13 @@ This is fixed-priority cooperative scheduling, not a hard-real-time claim:
   execution group. Native tasks keep stock GNAT behavior, where the same
   construct is an undetected bounded error and a peer simply waits on the
   lock; configure `pragma Detect_Blocking` for a partition that wants the
-  check on native tasks as well.
+  check on native tasks as well. The same detection covers Flyology's own
+  lightweight suspension points that bypass GNARL's check sites: a
+  `Flyology.IO` readiness wait, and therefore every socket, completion-set,
+  and subprocess wait built on it, and a synchronous `Flyology.IO.Files`
+  read or write raise `Program_Error` before suspending a lightweight task
+  inside a protected action, while the zero-timeout immediate poll does not
+  suspend and is not refused.
 
 Applications needing OS `SCHED_FIFO`/`SCHED_RR`, physical affinity, a
 preemption bound, or certified ceiling behavior should keep those tasks native
@@ -662,12 +672,14 @@ It deliberately does not interrupt arbitrary Ada instructions; code that never
 calls a runtime suspension or checkpoint remains cooperative and can still own
 the loop until it returns.
 
-`delay 0.0`, `Flyology.Fairness.Yield_Now`, and `Checkpoint` are potentially
-blocking operations and must never be called inside a protected action. GNAT
-diagnoses a literal `delay` statement in a protected body, but a call to
-`Yield_Now` or `Checkpoint` is not syntactically visible to that check. On a
+`delay 0.0`, `Flyology.Fairness.Yield_Now`, `Checkpoint`, and
+`Flyology.Execution_Groups.Migrate` are potentially blocking operations and
+must never be called inside a protected action. GNAT diagnoses a literal
+`delay` statement in a protected body, but a call to `Yield_Now`,
+`Checkpoint`, or `Migrate` is not syntactically visible to that check. On a
 lightweight task the yield itself raises `Program_Error`, so `Yield_Now` fails
-on every call and `Checkpoint` fails on the call where its quantum expires.
+on every call, `Checkpoint` fails on the call where its quantum expires, and
+`Migrate` fails before moving the task.
 
 ## Concurrency primitives
 
