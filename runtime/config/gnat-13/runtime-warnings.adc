@@ -1,13 +1,20 @@
 --  Flyology uses language-defined Pre and Post aspects, not the historical
---  GNAT Precondition and Postcondition pragmas whose checks frontend inlining
---  can discard. GCC 13 diagnoses the aspects even with backend inlining,
---  where their checks remain effective. Upstream commit 3754477 fixes only
---  that spurious warning condition:
---  https://gcc.gnu.org/git/?p=gcc.git&a=commitdiff&h=3754477
+--  GNAT Precondition and Postcondition pragmas. GCC 13 documents those as
+--  distinct, while Inline_Always requires every direct call to be inlined:
+--  https://gcc.gnu.org/onlinedocs/gcc-13.4.0/gnat_rm/Aspect-Inline_005fAlways.html
+--  https://gcc.gnu.org/onlinedocs/gcc-13.4.0/gnat_rm/Pragma-Precondition.html
+--  https://gcc.gnu.org/onlinedocs/gcc-13.4.0/gnat_rm/Pragma-Postcondition.html
 --
---  This suppression does not make obsolete frontend inlining (-gnatN) safe.
---  Delete it when GCC 13 support is dropped or Flyology requires a GNAT 13
---  release containing the upstream fix.
+--  GCC 13.2 through 13.4 emit this diagnostic without distinguishing obsolete
+--  frontend inlining from backend inlining, where the checks remain effective
+--  as the contract assertion regression verifies. GCC 14 and later contain
+--  upstream commit 3754477bb08f12a7866d9f422fad85bac79f2579, which adds the
+--  missing Back_End_Inlining condition:
+--  https://github.com/gcc-mirror/gcc/commit/3754477bb08f12a7866d9f422fad85bac79f2579
+--
+--  This exact GCC 13 suppression hides a false diagnostic, not contract
+--  enforcement. It does not make obsolete frontend inlining (-gnatN) safe.
+--  Delete it when GCC 13 support is dropped.
 pragma Warnings
   (GNAT,
    Off,
