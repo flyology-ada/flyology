@@ -436,6 +436,23 @@ case "$platform:$compiler_release" in
     ;;
 esac
 
+# System.Tasking.Attribute_Array uses Atomic_Address in GNAT 13 and
+# System.Address in GNAT 14 through 16. Keep this exact list synchronized with
+# the supported host/compiler matrix above so an unknown layout fails closed.
+case "$compiler_release" in
+  13.2.2)
+    task_attribute_compat_family=gnat-13
+    ;;
+  14.1.3|14.2.1|15.1.2|15.3.1|16.1.0|16.2.0)
+    task_attribute_compat_family=gnat-14-16
+    ;;
+  *)
+    printf '%s\n' \
+      "no task-attribute ABI adapter for GNAT $compiler_release" >&2
+    exit 1
+    ;;
+esac
+
 compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
 compiler="$compiler_prefix/bin/gcc"
 patch_root="$project_root/runtime/patches/$patch_family"
@@ -488,6 +505,8 @@ chmod -R u+w "$generated_include" "$generated_lib"
 cp "$project_root"/runtime/ada/s-*.ad? "$generated_include/"
 cp "$project_root"/runtime/platform/"$platform"/s-*.ad? "$generated_include/"
 cp "$project_root/runtime/compat/$compat_family/s-fltiab.ads" \
+  "$generated_include/"
+cp "$project_root/runtime/compat/$task_attribute_compat_family/s-ftatab.adb" \
   "$generated_include/"
 cp "$project_root/runtime/config/$execution_default/s-fldeex.ads" \
   "$generated_include/"
@@ -575,6 +594,7 @@ compile_runtime_ada \
   "$generated_include/s-flplco.ads" \
   "$generated_include/s-flyolo.adb" \
   "$generated_include/s-ftrepo.adb" \
+  "$generated_include/s-ftatab.adb" \
   "$generated_include/s-fltare.adb" \
   "$generated_include/s-flstpo.adb" \
   "$generated_include/s-flycon.adb" \
@@ -596,7 +616,8 @@ if [ "$compat_family" = gnat-legacy ]; then
 fi
 
 cp \
-  s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-ftrepo.ali s-fltare.ali s-flstpo.ali s-flycon.ali \
+  s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-ftrepo.ali s-ftatab.ali \
+  s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
   s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
   s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-taskin.ali s-tassta.ali \
@@ -613,6 +634,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-flplco.o \
   s-flyolo.o \
   s-ftrepo.o \
+  s-ftatab.o \
   s-fltare.o \
   s-flstpo.o \
   s-flycon.o \

@@ -254,6 +254,43 @@ export FLYOLOGY_BUFFER_TEST_HOOKS
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 "$project_root/scripts/test-gnat13-runtime-warnings.sh" --prepared-runtime
 
+task_attribute_compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$base_alr")
+task_attribute_krunched_name=$(
+  "$task_attribute_compiler_prefix/bin/gnatkr" system-flyology-task_attribute_abi.ads
+)
+if [ "$task_attribute_krunched_name" != s-ftatab.ads ]; then
+  printf '%s\n' \
+    "compiler krunches System.Flyology.Task_Attribute_ABI as $task_attribute_krunched_name" >&2
+  exit 1
+fi
+task_attribute_compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$base_alr")
+# Mirror prepare-rts.sh's fail-closed task-attribute representation selection.
+case "$task_attribute_compiler_release" in
+  13.2.2)
+    task_attribute_compat_family=gnat-13
+    ;;
+  14.1.3|14.2.1|15.1.2|15.3.1|16.1.0|16.2.0)
+    task_attribute_compat_family=gnat-14-16
+    ;;
+  *)
+    printf '%s\n' \
+      "test has no task-attribute ABI expectation for GNAT $task_attribute_compiler_release" >&2
+    exit 1
+    ;;
+esac
+if ! cmp -s \
+  "$project_root/runtime/compat/$task_attribute_compat_family/s-ftatab.adb" \
+  "$project_root/build/rts/adainclude/s-ftatab.adb"
+then
+  printf '%s\n' \
+    "prepared runtime selected the wrong task-attribute ABI adapter" >&2
+  exit 1
+fi
+if ! ar -t "$project_root/build/rts/adalib/libgnarl.a" | grep -Fx s-ftatab.o >/dev/null; then
+  printf '%s\n' "prepared runtime omitted the task-attribute ABI adapter" >&2
+  exit 1
+fi
+
 if [ "$(uname -s)" = Linux ]; then
   runtime_archive="$project_root/build/rts/adalib/libgnarl.a"
   poller_object_dir="$project_root/build/tests/poller-policy-symbols"
