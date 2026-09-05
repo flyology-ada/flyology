@@ -1,0 +1,15 @@
+--  Flyology uses language-defined Pre and Post aspects, not the historical
+--  GNAT Precondition and Postcondition pragmas whose checks frontend inlining
+--  can discard. GCC 13 diagnoses the aspects even with backend inlining,
+--  where their checks remain effective. Upstream commit 3754477 fixes only
+--  that spurious warning condition:
+--  https://gcc.gnu.org/git/?p=gcc.git&a=commitdiff&h=3754477
+--
+--  This suppression does not make obsolete frontend inlining (-gnatN) safe.
+--  Delete it when GCC 13 support is dropped or Flyology requires a GNAT 13
+--  release containing the upstream fix.
+pragma Warnings
+  (GNAT,
+   Off,
+   "aspect * not enforced on inlined subprogram *",
+   Reason => "Spurious GCC 13 warning fixed upstream by commit 3754477");

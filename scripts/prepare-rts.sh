@@ -348,6 +348,13 @@ case "$sanitizer" in
 esac
 
 compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$alr")
+runtime_warnings_source=
+runtime_warnings_name=runtime-warnings.adc
+case "$compiler_release" in
+  13.2.2)
+    runtime_warnings_source="$project_root/runtime/config/gnat-13/$runtime_warnings_name"
+    ;;
+esac
 
 case "$(uname -s)" in
   Darwin)
@@ -497,6 +504,20 @@ cp "$project_root/runtime/config/faults/$fault_config"/s-flyfau.ad? \
   "$generated_include/"
 cp "$project_root/runtime/config/sanitizers/$sanitizer_config"/s-flyasa.ad? \
   "$generated_include/"
+runtime_warnings=
+if [ -n "$runtime_warnings_source" ]; then
+  cp "$runtime_warnings_source" "$generated_include/$runtime_warnings_name"
+  runtime_warnings="$generated_include/$runtime_warnings_name"
+fi
+
+compile_runtime_ada () {
+  if [ -n "$runtime_warnings" ]; then
+    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+      "-gnatec=$runtime_warnings" -gnateb "$@"
+  else
+    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata "$@"
+  fi
+}
 
 #  git apply resolves --directory relative to the repository worktree even
 #  when an absolute path is supplied. Anchor it here so callers may invoke
@@ -542,11 +563,11 @@ cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
   -o "$build_root/obj/heap_trampoline.o"
 cd "$build_root/obj"
 if [ "$platform" = linux ]; then
-  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+  compile_runtime_ada \
     -I "$generated_include" \
     "$generated_include/s-fllimo.ads"
 fi
-"$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+compile_runtime_ada \
   -I "$generated_include" \
   "$generated_include/s-fltiab.ads" \
   "$generated_include/s-fldeex.ads" \
@@ -569,7 +590,7 @@ fi
   "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
 if [ "$compat_family" = gnat-legacy ]; then
-  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+  compile_runtime_ada \
     -I "$generated_include" \
     "$generated_include/a-sytaco.adb"
 fi

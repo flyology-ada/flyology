@@ -185,7 +185,9 @@ assert_archive_excludes \
 FLYOLOGY_BUFFER_TEST_HOOKS=true
 export FLYOLOGY_BUFFER_TEST_HOOKS
 
+"$project_root/scripts/test-gnat13-runtime-warnings.sh" --compiler-only
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+"$project_root/scripts/test-gnat13-runtime-warnings.sh" --prepared-runtime
 
 if [ "$(uname -s)" = Linux ]; then
   runtime_archive="$project_root/build/rts/adalib/libgnarl.a"
