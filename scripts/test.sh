@@ -424,6 +424,7 @@ process_generation_protocol_smoke
 process_generation_transport_smoke
 process_generation_coordinator_smoke
 process_lifecycle_smoke
+protected_action_blocking_smoke
 ready_queue_smoke
 runtime_smoke
 semantic_parity_smoke
@@ -723,10 +724,14 @@ for test_main in $ordinary_mains; do
   esac
   case "$test_main" in
     channel_reentrancy_child)
-      for model in lightweight native; do
-        "$project_root/scripts/expect-blocked.sh" 1 \
-          "$current_test_bin/$test_main" "$model"
-      done
+      #  A native task self-deadlocks on the object's own mutex, so the child
+      #  must still be blocked at that boundary. A lightweight task would
+      #  deadlock its whole execution group, so the runtime detects the
+      #  bounded error instead and the child asserts Program_Error itself.
+      "$project_root/scripts/expect-blocked.sh" 1 \
+        "$current_test_bin/$test_main" native
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$current_test_bin/$test_main" lightweight
       ;;
     dns_smoke)
       "$project_root/scripts/run-with-timeout.sh" 20 \

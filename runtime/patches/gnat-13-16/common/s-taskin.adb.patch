@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-taskin.adb
++++ b/s-taskin.adb
+@@ -33,0 +34,1 @@
++with System.Flyology.Scheduler;
+@@ -50,3 +51,26 @@
+   begin
+-      return GL_Detect_Blocking = 1;
++      --  A lightweight task suspends its fiber while the protected object's
++      --  pthread mutex stays held by the event-loop thread. A same-group peer
++      --  that then contends for that mutex parks the only thread that could
++      --  resume the holder, so the RM 9.5.1(8-18) bounded error becomes a
++      --  permanent deadlock of the whole execution group instead of the
++      --  bounded wait a native task observes.
++      --
++      --  RM 9.5.1 allows an implementation to detect a potentially
++      --  blocking operation in a protected action and raise Program_Error.
++      --  Flyology takes that outcome unconditionally in the lightweight lane,
++      --  which makes every existing GNARL check site apply to fibers and
++      --  makes Lock and Unlock maintain Owner and Protected_Action_Nesting
++      --  for them.
++      --
++      --  Current_Task is a lock-free self-observation of the running fiber.
++      --  It reports a null address on the environment task, on every native
++      --  task, on event-loop threads outside a fiber, and before the
++      --  scheduler is initialized, so a partition that creates no lightweight
++      --  task keeps exactly the binder-selected behaviour. The value it
++      --  reports identifies the fiber, not the event-loop thread the fiber
++      --  currently runs on, and a fiber is neither released nor reused while
++      --  it executes, so Lock and Unlock of one protected action always agree
++      --  on whether the caller is lightweight.
++
++      return GL_Detect_Blocking = 1
++        or else System.Flyology.Scheduler.Current_Task /= System.Null_Address;
+   end Detect_Blocking;

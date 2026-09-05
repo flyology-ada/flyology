@@ -57,6 +57,25 @@ completed its dependent-task master but before user termination handlers run.
 It attaches the storage before activation and detaches it during ATCB reap; no
 ATCB field, global result registry, or post-allocation registration is added.
 
+The common blocking-detection patch makes `System.Tasking.Detect_Blocking`
+report true whenever the calling task is a running lightweight task, in
+addition to the binder flag that `pragma Detect_Blocking` sets. A lightweight
+task that reaches a suspension point inside a protected action keeps the
+object's pthread mutex held on its event-loop thread, so a same-group peer that
+contends for it parks the only thread that could resume the holder. RM 9.5.1
+permits an implementation to detect that bounded error, and the patch takes
+that outcome for fibers so every existing GNARL check site applies to them.
+The self-observation it calls reports a null address on the environment task,
+on native tasks, and before the scheduler is initialized, so a partition that
+creates no lightweight task keeps the binder-selected behaviour.
+
+The patched region of `s-taskin.adb` is byte-identical in the eight Alire
+toolchains this repository installs, which are the Darwin builds of every
+release the family advertises, including `gnat_flyology_native`
+16.2.0-patchset.1.1.0. On Linux the patch is exercised rather than compared:
+`prepare-rts.sh` fails closed when a hunk does not apply, so a successful
+`alr build` establishes that the release still carries the expected source.
+
 When a future GNAT release changes the affected GNARL sources, add a new
 versioned family rather than weakening patch validation. A family may span
 multiple majors only while the same patch is built and behaviorally tested on

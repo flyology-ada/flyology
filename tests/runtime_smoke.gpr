@@ -117,6 +117,7 @@ project Runtime_Smoke is
       "process_generation_agent_v2.adb",
       "process_generation_coordinator_smoke.adb",
       "process_lifecycle_smoke.adb",
+      "protected_action_blocking_smoke.adb",
       "ready_queue_smoke.adb",
       "reap_finalize_race_smoke.adb",
       "runtime_smoke.adb",

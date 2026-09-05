@@ -456,6 +456,7 @@ if [ "$platform" = darwin ]; then
   fi
 fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
+blocking_detection_patch="$patch_root/common/s-taskin.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
 case "$compiler_release" in
   13.2.2|14.1.3|14.2.1)
@@ -512,6 +513,9 @@ fi
 git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
   --directory="$generated_include" \
   "$task_state_patch"
+git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
+  --directory="$generated_include" \
+  "$blocking_detection_patch"
 if [ "$compat_family" = gnat-legacy ]; then
   git apply --recount --unidiff-zero --ignore-space-change --unsafe-paths \
     --directory="$generated_include" \
@@ -562,6 +566,7 @@ fi
   "$generated_include/s-fszcpo.adb" \
   "$generated_include/s-flysch.adb" \
   "$generated_include/s-taprop.adb" \
+  "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
 if [ "$compat_family" = gnat-legacy ]; then
   "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
@@ -573,7 +578,7 @@ cp \
   s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-ftrepo.ali s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
   s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
-  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-tassta.ali \
+  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-taskin.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$compat_family" = gnat-legacy ]; then
   cp a-sytaco.ali "$generated_lib/"
@@ -599,6 +604,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-fszcpo.o \
   s-flysch.o \
   s-taprop.o \
+  s-taskin.o \
   s-tassta.o \
   context_switch.o \
   platform.o \
