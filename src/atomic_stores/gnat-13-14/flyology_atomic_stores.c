@@ -1,11 +1,12 @@
 /*
  * Release-store compiler-intrinsic leaves only.
  *
- * GNAT 13 documents GCC's generic __atomic_store_n builtin but does not lower
- * an Ada Import (Intrinsic) of it. Ada frontend support arrived in GCC 14 as
- * "ada: Add __atomic_store_n binding to System.Atomic_Primitives", upstream
- * commit 4784601d726e5b70b6c4e050c77749706536ccf3. These fixed-width C leaves
- * keep the memory order compile-time constant and contain no retry or policy.
+ * GNAT 13 does not lower an Ada Import (Intrinsic) of GCC's generic
+ * __atomic_store_n builtin. Although its System.Atomic_Primitives binding was
+ * added during GCC 14 development, the supported stock GNAT 14 toolchains do
+ * not provide the usable binding. These fixed-width C leaves retain the
+ * workaround through GNAT 14, keep the memory order compile-time constant,
+ * and contain no retry or policy.
  *
  * https://gcc.gnu.org/pipermail/gcc-cvs/2024-January/396280.html
  */

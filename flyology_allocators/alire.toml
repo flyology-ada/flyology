@@ -17,5 +17,9 @@ gnat = ">=13 & <17"
 "*" = { Compile_Checks = "warnings" }
 
 [[actions]]
+type = "pre-build"
+command = ["./scripts/configure-atomic-store-family.sh"]
+
+[[actions]]
 type = "test"
 command = ["./scripts/test.sh"]

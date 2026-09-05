@@ -10,6 +10,8 @@ CROSS_GPRBUILD=${FLYOLOGY_ALLOCATORS_GPRBUILD:-gprbuild}
 export FLYOLOGY_ALLOCATORS_OBJECT_DIR
 export FLYOLOGY_ALLOCATORS_LIBRARY_DIR
 
+"$CRATE_ROOT/scripts/configure-atomic-store-family.sh"
+
 set -- -p -P "$CRATE_ROOT/flyology_allocators.gpr"
 if [ -n "${FLYOLOGY_ALLOCATORS_TARGET:-}" ]; then
    set -- "$@" "--target=$FLYOLOGY_ALLOCATORS_TARGET"

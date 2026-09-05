@@ -5,11 +5,27 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 development_alr="$project_root/scripts/alr-development.sh"
 base_alr=${FLYOLOGY_BASE_ALR:-$("$project_root/scripts/find-alr.sh")}
 
+"$project_root/scripts/prepare-atomic-store-config.sh" "$base_alr" >/dev/null
+
 if [ "${FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE:-0}" != 1 ]; then
   FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE=1
   export FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE
   exec "$development_alr" exec -- "$0"
 fi
+
+compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$development_alr")
+case "$compiler_release" in
+  13.2.2|14.1.3|14.2.1)
+    atomic_store_family=gnat-13-14
+    ;;
+  15.1.2|15.3.1|16.1.0|16.2.0)
+    atomic_store_family=gnat-15-plus
+    ;;
+  *)
+    printf '%s\n' "unsupported atomic-store compiler release: $compiler_release" >&2
+    exit 1
+    ;;
+esac
 
 test_subdir=behavioral
 connection_test_subdir=behavioral-connection-hooks
@@ -70,6 +86,7 @@ cd "$project_root"
 "$project_root/scripts/test-ci-triggers.sh"
 "$project_root/scripts/test-run-with-timeout.sh"
 "$project_root/scripts/test-compiler-identities.sh"
+"$project_root/scripts/test-atomic-store-entrypoints.sh"
 "$project_root/scripts/test-gnatdoc-log.sh"
 run_independent_alire_workspace \
   "$project_root/flyology_cachelines/scripts/test.sh"
@@ -174,11 +191,13 @@ export FLYOLOGY_CHANNEL_TEST_HOOKS
 FLYOLOGY_BUFFER_TEST_HOOKS=false
 export FLYOLOGY_BUFFER_TEST_HOOKS
 "$development_alr" build
+"$project_root/scripts/check-atomic-store-selection.sh" \
+  "$compiler_release" "$atomic_store_family"
 "$project_root/scripts/check-buffer-domain-commit-seam.sh"
 "$project_root/scripts/check-shared-memory-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
 "$project_root/scripts/check-atomic-store-c-boundary.sh" \
-  "$project_root/lib/libFlyology.a"
+  "$project_root/lib/libFlyology.a" "$atomic_store_family"
 assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
 assert_archive_includes \
@@ -188,7 +207,7 @@ assert_archive_includes \
 mkdir -p "$project_root/build/tests"
 cc -std=c11 -Wall -Wextra -Werror -pthread \
   "$project_root/tests/probes/atomic_store_abi_probe.c" \
-  "$project_root/src/native/flyology_atomic_stores.c" \
+  "$project_root/src/atomic_stores/gnat-13-14/flyology_atomic_stores.c" \
   -o "$project_root/build/tests/atomic_store_abi_probe"
 "$project_root/scripts/run-with-timeout.sh" 10 \
   "$project_root/build/tests/atomic_store_abi_probe"
@@ -410,6 +429,7 @@ file_watches_recovery_smoke
 file_watches_smoke
 files_smoke
 flyology-counter_policy_smoke
+flyology-atomic_store_publication_smoke
 flyology-file_transfer_policy-smoke
 flyology-socket_policy-smoke
 flyology-tls_openssl_policy-smoke
@@ -652,7 +672,7 @@ process_generation_agent_v1
 process_generation_agent_v2"
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
 "$project_root/scripts/check-development-allocator-link.sh" \
-  "$test_bin/data_structures_smoke"
+  "$test_bin/data_structures_smoke" "$atomic_store_family"
 
 #  The website's process-upgrade example is the source of truth for its
 #  coordinator block. Extract it without rewriting, compose a temporary mini

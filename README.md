@@ -3182,12 +3182,13 @@ clauses for Darwin `aiocb` and Linux `io_uring`/native-AIO UAPI records, own the
 mapped rings and control blocks, submit operations, and drain completions.
 
 The shared Linux rings require acquire/release ordering against the kernel.
-Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 does
-not expose the corresponding store operation, so the narrow C ABI shim calls
-the compiler's `__atomic_store_n` intrinsic; no worker runtime is involved.
-The Ada binding and lowering arrived in GCC 14 in upstream commit
-`4784601d726e5b70b6c4e050c77749706536ccf3`, “ada: Add __atomic_store_n
-binding to System.Atomic_Primitives.”
+Flyology uses GNAT's `System.Atomic_Primitives` for atomic loads. GNAT 13 and
+the supported stock GNAT 14 toolchains do not provide the usable corresponding
+store operation, so their narrow C ABI shim calls the compiler's
+`__atomic_store_n` intrinsic; no worker runtime is involved. GNAT 15 and later
+use the Ada binding directly. That binding was added during GCC 14 development
+in upstream commit `4784601d726e5b70b6c4e050c77749706536ccf3`, “ada: Add
+__atomic_store_n binding to System.Atomic_Primitives.”
 
 The OpenSSL adapter adds a C ABI table for dynamically resolved OpenSSL 3
 functions. Ada owns session lifetime, readiness retry, timeout, cancellation,
@@ -3438,13 +3439,14 @@ rather than hidden behind a claim of universal portability.
 - [`runtime/native`](runtime/native): ABI-specific context-switch assembly and
   narrow C bridges for Linux syscall numbers and `epoll` record translation,
   thread placement, fork detection, virtual-memory operations, test fault
-  hooks, and the GNAT 13 atomic-store compatibility shim.
+  hooks, and compiler intrinsics unavailable from Ada.
 - [`runtime/compat`](runtime/compat): version-selected bindings for runtime ABI
   differences such as the GNAT 16 `timespec` move.
 - [`runtime/patches`](runtime/patches): versioned Darwin/Linux GNARL
   task-primitives integration and its tested-release manifest.
-- [`src`](src): public task-aware I/O packages and the optional dynamic TLS
-  provider bridge.
+- [`src`](src): public task-aware I/O packages, the optional dynamic TLS
+  provider bridge, and compiler-selected atomic-store implementations whose C
+  compatibility leaves are retained only for stock GNAT 13 and 14.
 - [`flyology_cachelines`](flyology_cachelines): standalone cache-line-aware
   storage and host cache-query crate, with its own tests and benchmarks.
 - [`flyology_numa`](flyology_numa): standalone memory-node reporting,

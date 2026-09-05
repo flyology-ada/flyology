@@ -55,6 +55,7 @@ project Runtime_Smoke is
       "file_watches_smoke.adb",
       "files_smoke.adb",
       "flyology-counter_policy_smoke.adb",
+      "flyology-atomic_store_publication_smoke.adb",
       "flyology-file_transfer_policy-smoke.adb",
       "flyology-socket_policy-smoke.adb",
       "flyology-tls_openssl_policy-smoke.adb",
