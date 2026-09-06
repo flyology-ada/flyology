@@ -529,15 +529,6 @@ if [ -n "$runtime_warnings_source" ]; then
   runtime_warnings="$generated_include/$runtime_warnings_name"
 fi
 
-compile_runtime_ada () {
-  if [ -n "$runtime_warnings" ]; then
-    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
-      "-gnatec=$runtime_warnings" -gnateb "$@"
-  else
-    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata "$@"
-  fi
-}
-
 apply_runtime_patch () {
   selected_patch=$1
 
@@ -636,12 +627,31 @@ cc -O2 $fault_cflags $io_uring_test_cflags \
 cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
   -o "$build_root/obj/heap_trampoline.o"
 cd "$build_root/obj"
+
+compile_flyology_runtime_ada () {
+  if [ -n "$runtime_warnings" ]; then
+    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+      "-gnatec=$runtime_warnings" -gnateb "$@"
+  else
+    "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata "$@"
+  fi
+}
+
+compile_upstream_runtime_ada () {
+  if [ -n "$runtime_warnings" ]; then
+    "$compiler" -c -gnatpg -gnatyM110 -gnat2022 -O2 -fPIC \
+      "-gnatec=$runtime_warnings" -gnateb "$@"
+  else
+    "$compiler" -c -gnatpg -gnatyM110 -gnat2022 -O2 -fPIC "$@"
+  fi
+}
+
 if [ "$platform" = linux ]; then
-  compile_runtime_ada \
+  compile_flyology_runtime_ada \
     -I "$generated_include" \
     "$generated_include/s-fllimo.ads"
 fi
-compile_runtime_ada \
+compile_flyology_runtime_ada \
   -I "$generated_include" \
   "$generated_include/s-fltiab.ads" \
   "$generated_include/s-fldeex.ads" \
@@ -660,12 +670,14 @@ compile_runtime_ada \
   "$generated_include/s-flypol.adb" \
   "$generated_include/s-flscpo.adb" \
   "$generated_include/s-fszcpo.adb" \
-  "$generated_include/s-flysch.adb" \
+  "$generated_include/s-flysch.adb"
+compile_upstream_runtime_ada \
+  -I "$generated_include" \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
 if [ "$compat_family" = gnat-legacy ]; then
-  compile_runtime_ada \
+  compile_upstream_runtime_ada \
     -I "$generated_include" \
     "$generated_include/a-sytaco.adb"
 fi
