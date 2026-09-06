@@ -29,6 +29,16 @@ void flyology_test_sparse_stack_write(size_t distance) {
 #error "stack-guard probe requires a supported Flyology context architecture"
 #endif
 
+/* stack_t has no Ada binding in this test. Return one observation only; Ada
+   owns the scenario assertions and all runtime stack policy. */
+int flyology_test_alt_stack_is_installed(void) {
+    stack_t stack;
+
+    if (sigaltstack(NULL, &stack) != 0) return -1;
+    return stack.ss_sp != NULL && stack.ss_size != 0 &&
+           (stack.ss_flags & SS_DISABLE) == 0;
+}
+
 int flyology_test_run_stack_guard_child(const char *program) {
     char *const arguments[] = {(char *)program, (char *)"violate", NULL};
     pid_t child;

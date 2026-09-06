@@ -11,7 +11,11 @@ procedure Lifecycle_Churn_Smoke is
    use type Flyology.Observability.Task_Instance_Id;
    use type System.Address;
 
-   Churn_Count : constant := 1_000;
+   Churn_Count           : constant := 1_000;
+   --  This test exercises deeper GNARL finalization paths, not the minimum
+   --  stack contract. Keep 64 KiB as the representative small-stack class;
+   --  Stack_Size_Parity_Smoke retains the separate 16 KiB coverage.
+   Lifecycle_Stack_Bytes : constant := 64 * 1_024;
    type Boolean_Array is array (Positive range <>) of Boolean;
 
    protected State is
@@ -62,7 +66,8 @@ procedure Lifecycle_Churn_Smoke is
       is (Finalize_Count);
    end State;
 
-   type Finalization_Probe is new Ada.Finalization.Limited_Controlled with null record;
+   type Finalization_Probe is new Ada.Finalization.Limited_Controlled
+   with null record;
 
    overriding
    procedure Finalize (Item : in out Finalization_Probe) is
@@ -73,7 +78,7 @@ procedure Lifecycle_Churn_Smoke is
 
    task type Churn_Task (Index : Positive) is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Storage_Size (16 * 1_024);
+      pragma Storage_Size (Lifecycle_Stack_Bytes);
    end Churn_Task;
 
    task body Churn_Task is
@@ -85,17 +90,24 @@ procedure Lifecycle_Churn_Smoke is
 
    type Churn_Access is access Churn_Task;
    type Churn_Array is array (Positive range <>) of Churn_Access;
-   procedure Free_Churn is new Ada.Unchecked_Deallocation (Churn_Task, Churn_Access);
+   procedure Free_Churn is new
+     Ada.Unchecked_Deallocation (Churn_Task, Churn_Access);
 
    procedure Wait_For_Empty_Pool is
       Pool : Flyology.Observability.Stack_Pool_Snapshot;
    begin
       for Attempt in 1 .. 1_000 loop
          Pool := Flyology.Observability.Stack_Pool;
-         exit when Pool.Live_Stacks = 0 and then Pool.Active_Arenas = 0 and then Pool.Reserved_Bytes = 0;
+         exit when
+           Pool.Live_Stacks = 0
+           and then Pool.Active_Arenas = 0
+           and then Pool.Reserved_Bytes = 0;
          delay 0.000_1;
       end loop;
-      if Pool.Live_Stacks /= 0 or else Pool.Active_Arenas /= 0 or else Pool.Reserved_Bytes /= 0 then
+      if Pool.Live_Stacks /= 0
+        or else Pool.Active_Arenas /= 0
+        or else Pool.Reserved_Bytes /= 0
+      then
          raise Program_Error with "churn retained fiber stack state";
       end if;
    end Wait_For_Empty_Pool;
@@ -130,7 +142,7 @@ procedure Lifecycle_Churn_Smoke is
 
    task type Exceptional_Task is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Storage_Size (16 * 1_024);
+      pragma Storage_Size (Lifecycle_Stack_Bytes);
    end Exceptional_Task;
 
    task body Exceptional_Task is
@@ -141,7 +153,8 @@ procedure Lifecycle_Churn_Smoke is
    end Exceptional_Task;
 
    type Exceptional_Access is access Exceptional_Task;
-   procedure Free_Exceptional is new Ada.Unchecked_Deallocation (Exceptional_Task, Exceptional_Access);
+   procedure Free_Exceptional is new
+     Ada.Unchecked_Deallocation (Exceptional_Task, Exceptional_Access);
 
    procedure Check_Unhandled_Exception is
       Item : Exceptional_Access := new Exceptional_Task;
@@ -156,7 +169,7 @@ procedure Lifecycle_Churn_Smoke is
 
    task type Abort_Task is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Storage_Size (16 * 1_024);
+      pragma Storage_Size (Lifecycle_Stack_Bytes);
    end Abort_Task;
 
    task body Abort_Task is
@@ -168,7 +181,8 @@ procedure Lifecycle_Churn_Smoke is
    end Abort_Task;
 
    type Abort_Access is access Abort_Task;
-   procedure Free_Abort is new Ada.Unchecked_Deallocation (Abort_Task, Abort_Access);
+   procedure Free_Abort is new
+     Ada.Unchecked_Deallocation (Abort_Task, Abort_Access);
 
    procedure Check_Abort is
       Item : Abort_Access := new Abort_Task;
@@ -185,7 +199,7 @@ procedure Lifecycle_Churn_Smoke is
 
    task type Invalid_Group_Task with CPU => 128 is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Storage_Size (16 * 1_024);
+      pragma Storage_Size (Lifecycle_Stack_Bytes);
    end Invalid_Group_Task;
 
    task body Invalid_Group_Task is
@@ -215,7 +229,7 @@ procedure Lifecycle_Churn_Smoke is
 
    task type Address_Task is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Storage_Size (16 * 1_024);
+      pragma Storage_Size (Lifecycle_Stack_Bytes);
    end Address_Task;
 
    task body Address_Task is
@@ -224,11 +238,13 @@ procedure Lifecycle_Churn_Smoke is
    end Address_Task;
 
    type Address_Access is access Address_Task;
-   procedure Free_Address is new Ada.Unchecked_Deallocation (Address_Task, Address_Access);
+   procedure Free_Address is new
+     Ada.Unchecked_Deallocation (Address_Task, Address_Access);
 
    procedure Check_Task_Address_Reuse is
       Previous          : System.Address := System.Null_Address;
-      Previous_Instance : Observation.Task_Instance_Id := Observation.No_Task_Instance;
+      Previous_Instance : Observation.Task_Instance_Id :=
+        Observation.No_Task_Instance;
       Items             : Observation.Task_Snapshot_Array (1 .. 1);
       Count             : Natural;
       Total             : Observation.Counter;
@@ -243,16 +259,21 @@ procedure Lifecycle_Churn_Smoke is
             while not Item.all'Terminated loop
                delay 0.000_1;
             end loop;
-            if not Observation.Snapshot_Tasks (0, Items, Count, Total) or else Count /= 1 or else Total /= 1
+            if not Observation.Snapshot_Tasks (0, Items, Count, Total)
+              or else Count /= 1
+              or else Total /= 1
             then
-               raise Program_Error with "finished task was not observable before deallocation";
+               raise Program_Error
+                 with "finished task was not observable before deallocation";
             end if;
             Current_Instance := Items (1).Instance;
             if Current_Instance = Observation.No_Task_Instance then
                raise Program_Error with "task snapshot identity was zero";
             end if;
-            if Current = Previous and then Current_Instance = Previous_Instance then
-               raise Program_Error with "task snapshot identity was reused with task address";
+            if Current = Previous and then Current_Instance = Previous_Instance
+            then
+               raise Program_Error
+                 with "task snapshot identity was reused with task address";
             end if;
             Free_Address (Item);
             Reused := Reused or else Current = Previous;
