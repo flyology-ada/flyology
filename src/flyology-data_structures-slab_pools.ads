@@ -267,6 +267,11 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
    pragma Inline (Try_Allocate, Release, Read, Replace);
 
 private
+   --  Validate that every slot is free without changing stored or local state.
+   --  @param Item Exclusively synchronized slab view
+   --  @exclude
+   procedure Validate_Empty (Item : View);
+
    type View is limited record
       Core                      : Layouts.Local_View;
       Capacity_Value            : Interfaces.Unsigned_32 := 0;

@@ -1,3 +1,4 @@
+with Flyology.Adaptive_Pool_Test_Hooks;
 with Flyology.Connection_Test_Hooks;
 with Flyology.Buffer_Test_Hooks;
 with Flyology.Channel_Test_Hooks;
@@ -15,6 +16,9 @@ procedure Flyology.Test_Hook_Elision_Probe is
    Observed : Boolean := False
    with Volatile;
 begin
+   if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
+      Flyology.Adaptive_Pool_Test_Hooks.Reset;
+   end if;
    if Flyology.Buffer_Test_Hooks.Enabled then
       Flyology.Buffer_Test_Hooks.Arm_Next_Acquisition_Near_Exhaustion;
    end if;

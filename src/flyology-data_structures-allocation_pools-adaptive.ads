@@ -188,9 +188,8 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive with Preelaborate is
 
    --  Destroy every empty chunk, return its allocation to Arena, invalidate
    --  the outer pool, and detach Item. All views and handles must be
-   --  quiescent.
-   --  If a later chunk is live, earlier empty chunks may already have been
-   --  reclaimed when Program_Error is raised; the remaining pool stays ready.
+   --  quiescent. Every chunk is validated before any reclamation, so a live
+   --  slot raises Program_Error without changing stored pool or chunk state.
    --  @param Item Exclusively synchronized pool view
    --  @param Arena Matching exclusively synchronized backing arena view
    --  @exception Program_Error A chunk still contains a live slot

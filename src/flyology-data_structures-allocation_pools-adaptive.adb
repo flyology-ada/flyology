@@ -1,11 +1,14 @@
+with Flyology.Adaptive_Pool_Test_Hooks;
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Regions;
+with Flyology.Data_Structures.Slab_Pools.Validation;
 with Flyology.Data_Structures.Storage;
 
 package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    package Atomic renames Flyology.Data_Structures.Atomics;
    package Bytes renames Flyology.Data_Structures.Storage;
    package Regions renames Flyology.Data_Structures.Regions;
+   package Chunk_Validation is new Chunk_Slabs.Validation;
 
    use type Arena_Provider.Allocation_Handle;
    use type Chunk_Slabs.Allocation_Result;
@@ -459,6 +462,9 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
             raise Layout_Error with "new adaptive-pool chunk did not provide its first slot";
          end if;
          Set_Entry_State (Item, Empty_Index, Live_State);
+         if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
+            Flyology.Adaptive_Pool_Test_Hooks.Record_Chunk_State (Empty_Index, Live => True);
+         end if;
       exception
          when others =>
             begin
@@ -542,11 +548,12 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
          Validate_Table (Item, Arena);
          for Index in 1 .. Maximum_Chunks loop
             if Entry_State (Item, Index) = Live_State then
+               Chunk_Validation.Validate_Empty (Item.Chunks (Index).Slab);
+            end if;
+         end loop;
+         for Index in 1 .. Maximum_Chunks loop
+            if Entry_State (Item, Index) = Live_State then
                Allocation := Entry_Allocation (Item, Index);
-               --  Chunk_Slabs.Destroy validates every slot before it publishes
-               --  destroyed state, so a live slot still leaves this chunk
-               --  intact. Any later failure has already reclaimed a chunk the
-               --  table still lists, so it must poison the pool.
                Mutated := True;
                Chunk_Slabs.Destroy (Item.Chunks (Index).Slab);
                Regions.Detach (Item.Chunks (Index).Region);
@@ -554,13 +561,13 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
                Arena_Provider.Release (Arena, Allocation);
                Set_Entry_Allocation (Item, Index, Arena_Provider.Null_Allocation);
                Set_Entry_State (Item, Index, Empty_State);
+               if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
+                  Flyology.Adaptive_Pool_Test_Hooks.Record_Chunk_State (Index, Live => False);
+               end if;
             end if;
          end loop;
          Layouts.Mark_Destroyed (Item.Core);
       exception
-         when Program_Error =>
-            Release_Guard (Item);
-            raise;
          when others =>
             begin
                if Mutated then

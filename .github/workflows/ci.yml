@@ -121,7 +121,7 @@ jobs:
   hook-elision:
     name: Test-hook elision / ${{ matrix.os }} / GNAT 16.1.0
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -149,7 +149,7 @@ jobs:
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Check every test-hook selection and optimization mode
-        timeout-minutes: 25
+        timeout-minutes: 50
         run: ./scripts/check-test-hook-elision.sh
 
   proof:
@@ -237,5 +237,5 @@ jobs:
             printf 'FLYOLOGY_TLA_TLC_JAR=%s\n' "$FLYOLOGY_TLA_TLC_JAR"
             printf 'FLYOLOGY_TLAPM=%s\n' "$FLYOLOGY_TLAPM"
           } >> "$GITHUB_ENV"
-      - name: Check TLA+ models and replay the completion-finalization trace
+      - name: Check TLA+ models and replay implementation traces
         run: ./scripts/check-tla.sh

@@ -22,7 +22,7 @@ cleanup () {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-hook_names='dns tls connection worker_pool task_lifecycle subprocess structured_server file_watch wall_clock buffer channel'
+hook_names='dns tls connection worker_pool task_lifecycle subprocess structured_server file_watch wall_clock buffer channel adaptive_pool'
 
 case $(uname -s) in
   Darwin) platform_source_dir="$project_root/src/platform/darwin" ;;
@@ -46,6 +46,7 @@ hook_external () {
     wall_clock) printf '%s\n' FLYOLOGY_WALL_CLOCK_TEST_HOOKS ;;
     buffer) printf '%s\n' FLYOLOGY_BUFFER_TEST_HOOKS ;;
     channel) printf '%s\n' FLYOLOGY_CHANNEL_TEST_HOOKS ;;
+    adaptive_pool) printf '%s\n' FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS ;;
   esac
 }
 
@@ -62,6 +63,7 @@ hook_symbol () {
     wall_clock) printf '%s\n' flyology__wall_clock_testing__note_sample ;;
     buffer) printf '%s\n' flyology__buffer_test_hooks__arm_next_acquisition_near_exhaustion ;;
     channel) printf '%s\n' flyology__channel_test_hooks__before_send_barrier ;;
+    adaptive_pool) printf '%s\n' flyology__adaptive_pool_test_hooks__reset ;;
   esac
 }
 
@@ -210,6 +212,7 @@ check_production_archive () {
     -XFLYOLOGY_WALL_CLOCK_TEST_HOOKS=false \
     -XFLYOLOGY_BUFFER_TEST_HOOKS=false \
     -XFLYOLOGY_CHANNEL_TEST_HOOKS=false \
+    -XFLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=false \
     -cargs:Ada "$@"
   build_log="$temp_root/production-$mode.log"
   if ! gprbuild "$@" >"$build_log" 2>&1; then
@@ -224,12 +227,12 @@ check_production_archive () {
   fi
   symbols=$(undefined_symbols "$archive")
   if printf '%s\n' "$symbols" | grep -E \
-    'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+    'flyology_disabled_hook_must_be_elided|flyology__(adaptive_pool_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
     >/dev/null
   then
     printf '%s\n' "production hook reference survived in $mode" >&2
     printf '%s\n' "$symbols" | grep -E \
-      'flyology_disabled_hook_must_be_elided|flyology__(buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+      'flyology_disabled_hook_must_be_elided|flyology__(adaptive_pool_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
       >&2 || true
     exit 1
   fi
@@ -240,9 +243,9 @@ if git -C "$project_root" grep -n -E '^#(if|else|end if)' -- '*.adb' '*.ads' >/d
   exit 1
 fi
 
-printf '%s\n' 'test-hook-elision: all 2048 project selections and strict -O0 probe combinations'
+printf '%s\n' 'test-hook-elision: all 4096 project selections and strict -O0 probe combinations'
 combination=0
-while [ "$combination" -lt 2048 ]; do
+while [ "$combination" -lt 4096 ]; do
   check_project_selection "$combination"
   compile_probe "$combination" O0-strict \
     -O0 -fno-inline -fno-inline-functions -fno-tree-dce -fno-dce
