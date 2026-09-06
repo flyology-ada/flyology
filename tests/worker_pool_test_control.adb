@@ -41,6 +41,24 @@ package body Worker_Pool_Test_Control is
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_consume_fail_once";
    procedure C_Arm_Native_Executor_Completion_Wake
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_completion_wake_once";
+   procedure C_Arm_Native_Executor_Dispatch_Barrier
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_dispatch_barrier_arm";
+   function C_Native_Executor_Dispatch_Barrier_Reached return Interfaces.C.int
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_worker_native_executor_dispatch_barrier_reached";
+   procedure C_Release_Native_Executor_Dispatch_Barrier
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_worker_native_executor_dispatch_barrier_release";
+   procedure C_Arm_Native_Executor_Idle_Barrier
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_idle_barrier_arm";
+   function C_Native_Executor_Idle_Barrier_Reached return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_idle_barrier_reached";
+   procedure C_Release_Native_Executor_Idle_Barrier
+   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_idle_barrier_release";
    procedure C_Arm_Token_Cleanup_Barrier
    with Import, Convention => C, External_Name => "flyology_test_worker_token_cleanup_barrier_arm";
    function C_Token_Cleanup_Barrier_Reached return Interfaces.C.int
@@ -130,6 +148,48 @@ package body Worker_Pool_Test_Control is
    begin
       C_Arm_Native_Executor_Completion_Wake;
    end Arm_Native_Executor_Completion_Wake;
+
+   procedure Arm_Native_Executor_Dispatch_Barrier is
+   begin
+      C_Arm_Native_Executor_Dispatch_Barrier;
+   end Arm_Native_Executor_Dispatch_Barrier;
+
+   procedure Wait_Native_Executor_Dispatch_Barrier is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while C_Native_Executor_Dispatch_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error with "native executor dispatch barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Native_Executor_Dispatch_Barrier;
+
+   procedure Release_Native_Executor_Dispatch_Barrier is
+   begin
+      C_Release_Native_Executor_Dispatch_Barrier;
+   end Release_Native_Executor_Dispatch_Barrier;
+
+   procedure Arm_Native_Executor_Idle_Barrier is
+   begin
+      C_Arm_Native_Executor_Idle_Barrier;
+   end Arm_Native_Executor_Idle_Barrier;
+
+   procedure Wait_Native_Executor_Idle_Barrier is
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while C_Native_Executor_Idle_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error with "native executor idle barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Native_Executor_Idle_Barrier;
+
+   procedure Release_Native_Executor_Idle_Barrier is
+   begin
+      C_Release_Native_Executor_Idle_Barrier;
+   end Release_Native_Executor_Idle_Barrier;
 
    procedure Arm_Token_Cleanup_Barrier is
    begin
