@@ -160,6 +160,7 @@ project Runtime_Smoke is
       "task_result_attach_abort_smoke.adb",
       "task_result_abandon_smoke.adb",
       "task_result_publication_smoke.adb",
+      "task_cpu_inheritance_smoke.adb",
       "stall_watchdog_native_smoke.adb",
       "stall_watchdog_smoke.adb",
       "structured_server_smoke.adb",

@@ -552,6 +552,7 @@ task_scopes_smoke
 task_results_smoke
 task_result_attach_abort_smoke
 task_result_abandon_smoke
+task_cpu_inheritance_smoke
 stall_watchdog_native_smoke
 stall_watchdog_smoke
 structured_server_smoke
