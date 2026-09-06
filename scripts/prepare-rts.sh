@@ -537,12 +537,21 @@ cc -O2 $fault_cflags $io_uring_test_cflags \
 cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
   -o "$build_root/obj/heap_trampoline.o"
 cd "$build_root/obj"
+
+compile_flyology_runtime_ada () {
+  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata "$@"
+}
+
+compile_upstream_runtime_ada () {
+  "$compiler" -c -gnatpg -gnatyM110 -gnat2022 -O2 -fPIC "$@"
+}
+
 if [ "$platform" = linux ]; then
-  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+  compile_flyology_runtime_ada \
     -I "$generated_include" \
     "$generated_include/s-fllimo.ads"
 fi
-"$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+compile_flyology_runtime_ada \
   -I "$generated_include" \
   "$generated_include/s-fltiab.ads" \
   "$generated_include/s-fldeex.ads" \
@@ -560,11 +569,13 @@ fi
   "$generated_include/s-flypol.adb" \
   "$generated_include/s-flscpo.adb" \
   "$generated_include/s-fszcpo.adb" \
-  "$generated_include/s-flysch.adb" \
+  "$generated_include/s-flysch.adb"
+compile_upstream_runtime_ada \
+  -I "$generated_include" \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-tassta.adb"
 if [ "$compat_family" = gnat-legacy ]; then
-  "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
+  compile_upstream_runtime_ada \
     -I "$generated_include" \
     "$generated_include/a-sytaco.adb"
 fi

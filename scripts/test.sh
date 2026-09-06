@@ -534,7 +534,8 @@ loop_thread_project_placement_smoke
 $fault_mains"
 if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
-linux_poller_fairness_smoke"
+linux_poller_fairness_smoke
+native_cpu_activation_failure_smoke"
 fi
 
 #  Compile each hook configuration into its own object directory. The hook
@@ -610,7 +611,15 @@ native_mains="default_policy_smoke
 $ordinary_unhooked_mains
 process_generation_agent_v1
 process_generation_agent_v2"
+if [ "$(uname -s)" = Linux ]; then
+  native_mains="$native_mains
+native_cpu_activation_failure_smoke"
+fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/tests/run-native-cpu-activation-failure.sh" \
+    "$test_bin/native_cpu_activation_failure_smoke"
+fi
 
 #  The website's process-upgrade example is the source of truth for its
 #  coordinator block. Extract it without rewriting, compose a temporary mini
