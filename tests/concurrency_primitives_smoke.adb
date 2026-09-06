@@ -538,6 +538,147 @@ procedure Concurrency_Primitives_Smoke is
       pragma Assert (Failed);
    end Exercise_Native_Executor_Activation_Failure;
 
+   procedure Exercise_Native_Executor_Dispatch_Rollback is
+      Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
+      Handle   : Native_Executors.Operation_Handle (Item'Access);
+      Accepted : Boolean := False;
+      Result   : Integer;
+      Snapshot : Native_Executors.Executor_Statistics;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Worker_Pool_Test_Control.Arm_Native_Executor_Idle_Barrier;
+      Native_Executors.Start (Item);
+      Worker_Pool_Test_Control.Wait_Native_Executor_Idle_Barrier;
+      begin
+         Native_Executors.Submit (Item, 8, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (not Accepted);
+         Snapshot := Native_Executors.Statistics (Item);
+         pragma Assert (Snapshot.Accepted_Submissions = 0);
+         pragma Assert (Snapshot.Rejected_Submissions = 1);
+         pragma Assert (Snapshot.Outstanding_Operations = 0);
+         pragma Assert (Snapshot.Queued_Operations = 0);
+         pragma Assert (Snapshot.Running_Operations = 0);
+         pragma Assert (Snapshot.Peak_Outstanding = 0);
+      exception
+         when others =>
+            Worker_Pool_Test_Control.Release_Native_Executor_Idle_Barrier;
+            raise;
+      end;
+      Worker_Pool_Test_Control.Release_Native_Executor_Idle_Barrier;
+
+      for Attempt in 1 .. 100 loop
+         Native_Executors.Submit (Item, 8, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         exit when Accepted;
+         delay 0.001;
+      end loop;
+      pragma Assert (Accepted);
+      Native_Executors.Await (Item, Handle, Result);
+      pragma Assert (Result = 16);
+      pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Dispatch_Rollback;
+
+   procedure Exercise_Native_Executor_Shutdown_During_Dispatch is
+      Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
+      Handle   : Native_Executors.Operation_Handle (Item'Access);
+      Accepted : Boolean := False;
+      Result   : Integer;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Worker_Pool_Test_Control.Arm_Native_Executor_Idle_Barrier;
+      Native_Executors.Start (Item);
+      Worker_Pool_Test_Control.Wait_Native_Executor_Idle_Barrier;
+      Worker_Pool_Test_Control.Arm_Native_Executor_Dispatch_Barrier;
+      Worker_Pool_Test_Control.Arm_Shutdown_Barrier;
+      declare
+         task Submitter is
+            pragma Task_Info (Flyology.Native_Task);
+            entry Go;
+         end Submitter;
+
+         task body Submitter is
+         begin
+            accept Go;
+            Native_Executors.Submit (Item, 8, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         end Submitter;
+
+         task Stopper is
+            pragma Task_Info (Flyology.Native_Task);
+            entry Go;
+         end Stopper;
+
+         task body Stopper is
+         begin
+            accept Go;
+            Native_Executors.Shutdown (Item);
+         end Stopper;
+      begin
+         Submitter.Go;
+         Worker_Pool_Test_Control.Wait_Native_Executor_Dispatch_Barrier;
+         Stopper.Go;
+         Worker_Pool_Test_Control.Wait_Shutdown_Barrier;
+         abort Stopper;
+         Worker_Pool_Test_Control.Release_Native_Executor_Idle_Barrier;
+         Worker_Pool_Test_Control.Release_Native_Executor_Dispatch_Barrier;
+         Worker_Pool_Test_Control.Release_Shutdown_Barrier;
+      exception
+         when others =>
+            Worker_Pool_Test_Control.Release_Native_Executor_Idle_Barrier;
+            Worker_Pool_Test_Control.Release_Native_Executor_Dispatch_Barrier;
+            Worker_Pool_Test_Control.Release_Shutdown_Barrier;
+            raise;
+      end;
+      pragma Assert (Accepted);
+      Native_Executors.Shutdown (Item);
+      begin
+         Native_Executors.Await (Item, Handle, Result);
+         pragma Assert (False);
+      exception
+         when Flyology.Cancellation.Operation_Cancelled =>
+            null;
+      end;
+      Worker_Pool_Test_Control.Reset;
+   end Exercise_Native_Executor_Shutdown_During_Dispatch;
+
+   procedure Exercise_Native_Executor_Parallel_Dispatch is
+      Item       : aliased Native_Executors.Executor (Workers => 2, Capacity => 2);
+      First      : Native_Executors.Operation_Handle (Item'Access);
+      Second     : Native_Executors.Operation_Handle (Item'Access);
+      Accepted   : Boolean;
+      Both_Active : Boolean := False;
+      Result     : Integer;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Active_Native_Work.Reset;
+      Native_Executors.Start (Item);
+      Native_Executors.Submit (Item, 99, null, Ada.Real_Time.Time_Last, First, Accepted);
+      pragma Assert (Accepted);
+      Native_Executors.Submit (Item, 99, null, Ada.Real_Time.Time_Last, Second, Accepted);
+      pragma Assert (Accepted);
+      for Attempt in 1 .. 1_000 loop
+         Both_Active := Native_Executors.Statistics (Item).Running_Operations = 2;
+         exit when Both_Active;
+         delay 0.001;
+      end loop;
+      pragma Assert (Both_Active);
+      Native_Executors.Shutdown (Item);
+      begin
+         Native_Executors.Await (Item, First, Result);
+         pragma Assert (False);
+      exception
+         when Flyology.Cancellation.Operation_Cancelled =>
+            null;
+      end;
+      begin
+         Native_Executors.Await (Item, Second, Result);
+         pragma Assert (False);
+      exception
+         when Flyology.Cancellation.Operation_Cancelled =>
+            null;
+      end;
+   end Exercise_Native_Executor_Parallel_Dispatch;
+
    procedure Exercise_Native_Executor_Shutdown_Failure is
       Item     : aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
       Handle   : Native_Executors.Operation_Handle (Item'Access);
@@ -1140,6 +1281,9 @@ begin
    Exercise_Channel;
    Exercise_Native_Executor_Result_Copy_Failure;
    Exercise_Native_Executor_Activation_Failure;
+   Exercise_Native_Executor_Dispatch_Rollback;
+   Exercise_Native_Executor_Shutdown_During_Dispatch;
+   Exercise_Native_Executor_Parallel_Dispatch;
    Exercise_Native_Executor_Abandon_Failure;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;

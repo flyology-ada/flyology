@@ -516,6 +516,8 @@ lifecycle_smoke
 lifecycle_churn_smoke
 loop_thread_placement_smoke
 memory_regions_smoke
+native_executor_library_finalize_smoke
+native_executor_local_finalize_smoke
 observability_native_smoke
 observability_smoke
 observability_utilization_smoke
@@ -878,7 +880,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 60 \
         "$current_test_bin/$test_main"
       ;;
-    process_lifecycle_smoke|process_exit_live_task_smoke)
+    process_lifecycle_smoke|process_exit_live_task_smoke|native_executor_library_finalize_smoke|native_executor_local_finalize_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
