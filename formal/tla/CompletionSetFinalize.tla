@@ -6,6 +6,7 @@ CONSTANTS DrainMode,
           CleanupCloseMode,
           CleanupDispatchMode,
           CleanupHandoffMode,
+          DriverRaiseMode,
           InitialOtherReported
 
 ASSUME DrainMode \in {"UserGate", "TargetGate"}
@@ -13,6 +14,7 @@ ASSUME DriverCloseMode \in {"Blocking", "Deferred"}
 ASSUME CleanupCloseMode \in {"Blocking", "Deferred"}
 ASSUME CleanupDispatchMode \in {"Atomic", "Split"}
 ASSUME CleanupHandoffMode \in {"Atomic", "Split"}
+ASSUME DriverRaiseMode \in {"Escape", "Terminalize"}
 ASSUME InitialOtherReported \in BOOLEAN
 
 VARIABLES targetState,
@@ -28,6 +30,12 @@ VARIABLES targetState,
           closePending,
           driverReturned,
           driverPhase,
+          raiseRootState,
+          raiseRootSource,
+          raiseRootHasChild,
+          driverRaised,
+          terminalFailureCount,
+          raisePhase,
           harnessPhase,
           lastAction
 
@@ -45,11 +53,36 @@ vars ==
       closePending,
       driverReturned,
       driverPhase,
+      raiseRootState,
+      raiseRootSource,
+      raiseRootHasChild,
+      driverRaised,
+      terminalFailureCount,
+      raisePhase,
       harnessPhase,
       lastAction>>
 
 driverVars ==
-    <<driverState, peerRegistered, closeRequired, closePending, driverReturned, driverPhase>>
+    <<driverState,
+      peerRegistered,
+      closeRequired,
+      closePending,
+      driverReturned,
+      driverPhase,
+      raiseRootState,
+      raiseRootSource,
+      raiseRootHasChild,
+      driverRaised,
+      terminalFailureCount,
+      raisePhase>>
+
+driverRaiseVars ==
+    <<raiseRootState,
+      raiseRootSource,
+      raiseRootHasChild,
+      driverRaised,
+      terminalFailureCount,
+      raisePhase>>
 
 TypeOK ==
     /\ targetState \in {"Pending", "Terminal", "Idle"}
@@ -76,7 +109,13 @@ TypeOK ==
           "HandoffPublished",
           "HandoffAborted",
           "Done"}
-    /\ harnessPhase \in {"Ready", "Finalized", "Finished", "Consumed", "Done"}
+    /\ raiseRootState \in {"Pending", "Terminal"}
+    /\ raiseRootSource \in {"Immediate", "None"}
+    /\ raiseRootHasChild \in BOOLEAN
+    /\ driverRaised \in BOOLEAN
+    /\ terminalFailureCount \in 0..1
+    /\ raisePhase \in {"Ready", "Raised", "Done"}
+    /\ harnessPhase \in {"Ready", "Finalized", "Finished", "Consumed", "Disposed", "Done"}
     /\ lastAction \in
          {"Init",
           "BeginFinalize",
@@ -95,6 +134,7 @@ TypeOK ==
           "AbortCleanupDispatch",
           "CompleteCleanupHandoff",
           "AbortCleanupHandoff",
+          "DriverRaises",
           "DriverFinish",
           "DriverConsume",
           "DriverFinalize"}
@@ -113,6 +153,12 @@ Init ==
     /\ closePending = FALSE
     /\ driverReturned = FALSE
     /\ driverPhase = "Ready"
+    /\ raiseRootState = "Pending"
+    /\ raiseRootSource = "Immediate"
+    /\ raiseRootHasChild = FALSE
+    /\ driverRaised = FALSE
+    /\ terminalFailureCount = 0
+    /\ raisePhase = "Ready"
     /\ harnessPhase = "Ready"
     /\ lastAction = "Init"
 
@@ -232,6 +278,7 @@ FailUpgradeDriver ==
            phase,
            peerRegistered,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 DrainPeer ==
     /\ driverPhase \in {"Returned", "CleanupRequested"}
@@ -253,6 +300,7 @@ DrainPeer ==
            closeRequired,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 SplitCleanupHandoff ==
     /\ ~peerRegistered
@@ -293,6 +341,7 @@ FinishFailedUpgrade ==
            peerRegistered,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 ConsumeFailedUpgrade ==
     /\ driverPhase \in {"Returned", "PeerDrained"}
@@ -316,6 +365,7 @@ ConsumeFailedUpgrade ==
            peerRegistered,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 FinalizeFailedUpgrade ==
     /\ driverPhase \in {"Returned", "PeerDrained"}
@@ -339,6 +389,7 @@ FinalizeFailedUpgrade ==
            peerRegistered,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 CompleteCleanupDispatch ==
     /\ driverPhase = "DispatchPending"
@@ -363,6 +414,7 @@ CompleteCleanupDispatch ==
            peerRegistered,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 AbortCleanupDispatch ==
     /\ driverPhase = "DispatchPending"
@@ -386,6 +438,7 @@ AbortCleanupDispatch ==
            closePending,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 CompleteCleanupHandoff ==
     /\ driverPhase = "HandoffPublished"
@@ -409,6 +462,7 @@ CompleteCleanupHandoff ==
            peerRegistered,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 AbortCleanupHandoff ==
     /\ driverPhase = "HandoffPublished"
@@ -432,6 +486,38 @@ AbortCleanupHandoff ==
            closePending,
            driverReturned,
            harnessPhase>>
+    /\ UNCHANGED driverRaiseVars
+
+DriverRaiseEffect ==
+    /\ raisePhase = "Ready"
+    /\ raiseRootState = "Pending"
+    /\ raiseRootSource = "Immediate"
+    /\ ~raiseRootHasChild
+    /\ raiseRootState' = IF DriverRaiseMode = "Terminalize" THEN "Terminal" ELSE "Pending"
+    /\ raiseRootSource' = "None"
+    /\ raiseRootHasChild' = FALSE
+    /\ driverRaised' = TRUE
+    /\ terminalFailureCount' = IF DriverRaiseMode = "Terminalize" THEN 1 ELSE 0
+    /\ raisePhase' = IF DriverRaiseMode = "Terminalize" THEN "Done" ELSE "Raised"
+    /\ lastAction' = "DriverRaises"
+
+DriverRaises ==
+    /\ DriverRaiseEffect
+    /\ UNCHANGED
+         <<targetState,
+           targetReported,
+           otherState,
+           otherReported,
+           savedOtherReported,
+           cancellationRequested,
+           phase,
+           driverState,
+           peerRegistered,
+           closeRequired,
+           closePending,
+           driverReturned,
+           driverPhase,
+           harnessPhase>>
 
 Next ==
     \/ BeginFinalize
@@ -449,6 +535,7 @@ Next ==
     \/ AbortCleanupDispatch
     \/ CompleteCleanupHandoff
     \/ AbortCleanupHandoff
+    \/ DriverRaises
 
 Fairness ==
     /\ WF_vars(BeginFinalize)
@@ -466,6 +553,7 @@ Fairness ==
     /\ WF_vars(AbortCleanupDispatch)
     /\ WF_vars(CompleteCleanupHandoff)
     /\ WF_vars(AbortCleanupHandoff)
+    /\ WF_vars(DriverRaises)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -518,6 +606,21 @@ DriverCleanupIsOrdered ==
         /\ ~closePending
         /\ driverReturned
 
+DriverRaiseHasProgress ==
+    driverRaised =>
+        \/ raiseRootState = "Terminal"
+        \/ raiseRootSource /= "None"
+        \/ raiseRootHasChild
+
+DriverRaiseTerminalExactlyOnce ==
+    /\ (terminalFailureCount = 1) = (raiseRootState = "Terminal")
+    /\ (raisePhase = "Done" =>
+           /\ driverRaised
+           /\ raiseRootState = "Terminal"
+           /\ raiseRootSource = "None"
+           /\ ~raiseRootHasChild
+           /\ terminalFailureCount = 1)
+
 FinalizeCompletes == <>(phase = "Done")
 
 DriverFailureCompletes == <>(driverPhase = "Done")
@@ -525,6 +628,8 @@ DriverFailureCompletes == <>(driverPhase = "Done")
 DisposeBeforePeerCompletes == []((driverPhase = "CleanupRequested") => <>(driverPhase = "Done"))
 
 PeerBeforeDisposeCompletes == []((driverPhase = "PeerDrained") => <>(driverPhase = "Done"))
+
+DriverRaiseCompletes == <>(raisePhase = "Done")
 
 \* The conformance trace treats finalization as one public transition while
 \* the detailed Spec above checks its internal wait/restore/poll protocol.
@@ -546,6 +651,7 @@ FinalizeAtomically ==
            closePending,
            driverReturned,
            driverPhase>>
+    /\ UNCHANGED driverRaiseVars
 
 DriverFinishAtomically ==
     /\ phase = "Done"
@@ -567,6 +673,7 @@ DriverFinishAtomically ==
            savedOtherReported,
            cancellationRequested,
            phase>>
+    /\ UNCHANGED driverRaiseVars
 
 DriverConsumeAtomically ==
     /\ phase = "Done"
@@ -587,6 +694,7 @@ DriverConsumeAtomically ==
            savedOtherReported,
            cancellationRequested,
            phase>>
+    /\ UNCHANGED driverRaiseVars
 
 DriverFinalizeAtomically ==
     /\ phase = "Done"
@@ -597,7 +705,7 @@ DriverFinalizeAtomically ==
     /\ closePending' = FALSE
     /\ driverReturned' = TRUE
     /\ driverPhase' = "Done"
-    /\ harnessPhase' = "Done"
+    /\ harnessPhase' = "Disposed"
     /\ lastAction' = "DriverFinalize"
     /\ UNCHANGED
          <<targetState,
@@ -607,16 +715,38 @@ DriverFinalizeAtomically ==
            savedOtherReported,
            cancellationRequested,
            phase>>
+    /\ UNCHANGED driverRaiseVars
+
+DriverRaisesAtomically ==
+    /\ harnessPhase = "Disposed"
+    /\ DriverRaiseEffect
+    /\ harnessPhase' = "Done"
+    /\ UNCHANGED
+         <<targetState,
+           targetReported,
+           otherState,
+           otherReported,
+           savedOtherReported,
+           cancellationRequested,
+           phase,
+           driverState,
+           peerRegistered,
+           closeRequired,
+           closePending,
+           driverReturned,
+           driverPhase>>
 
 HarnessNext ==
     \/ FinalizeAtomically
     \/ DriverFinishAtomically
     \/ DriverConsumeAtomically
     \/ DriverFinalizeAtomically
+    \/ DriverRaisesAtomically
 
 HarnessSpec == Init /\ [][HarnessNext]_vars
 
-HarnessInputType == [event : {"Finalize", "DriverFinish", "DriverConsume", "DriverFinalize"}]
+HarnessInputType ==
+    [event : {"Finalize", "DriverFinish", "DriverConsume", "DriverFinalize", "DriverRaises"}]
 
 HarnessOutcomeType ==
     [returned : BOOLEAN,
@@ -628,7 +758,11 @@ HarnessOutcomeType ==
      closedAtConsume : BOOLEAN,
      closedAtFinalize : BOOLEAN,
      failureRetained : BOOLEAN,
-     resultDiscarded : BOOLEAN]
+     resultDiscarded : BOOLEAN,
+     driverRaiseCaught : BOOLEAN,
+     oneTerminalFailure : BOOLEAN,
+     raiseSourceCleared : BOOLEAN,
+     raiseChildCleared : BOOLEAN]
 
 WitnessIncomplete == harnessPhase /= "Done"
 
@@ -638,6 +772,7 @@ Alias == [
         CASE lastAction = "DriverFinish" -> "driver-finish"
           [] lastAction = "DriverConsume" -> "driver-consume"
           [] lastAction = "DriverFinalize" -> "driver-finalize"
+          [] lastAction = "DriverRaises" -> "driver-raise"
           [] OTHER -> "finalize",
     input |-> [event |-> lastAction],
     outcome |-> [
@@ -662,9 +797,18 @@ Alias == [
             lastAction = "DriverConsume" /\ driverPhase = "Done" /\ ~closeRequired,
         closedAtFinalize |->
             lastAction = "DriverFinalize" /\ driverPhase = "Done" /\ ~closeRequired,
-        failureRetained |-> lastAction = "DriverFinish" /\ driverPhase = "Done",
+        failureRetained |->
+            (lastAction = "DriverFinish" /\ driverPhase = "Done")
+            \/ (lastAction = "DriverRaises" /\ terminalFailureCount = 1),
         resultDiscarded |->
-            lastAction \in {"DriverConsume", "DriverFinalize"} /\ driverPhase = "Done"
+            lastAction \in {"DriverConsume", "DriverFinalize"} /\ driverPhase = "Done",
+        driverRaiseCaught |-> lastAction = "DriverRaises" /\ raisePhase = "Done",
+        oneTerminalFailure |->
+            lastAction = "DriverRaises" /\ terminalFailureCount = 1,
+        raiseSourceCleared |->
+            lastAction = "DriverRaises" /\ raiseRootSource = "None",
+        raiseChildCleared |->
+            lastAction = "DriverRaises" /\ ~raiseRootHasChild
     ],
     state |-> [
         targetState |-> targetState,
@@ -680,6 +824,12 @@ Alias == [
         closePending |-> closePending,
         driverReturned |-> driverReturned,
         driverPhase |-> driverPhase,
+        raiseRootState |-> raiseRootState,
+        raiseRootSource |-> raiseRootSource,
+        raiseRootHasChild |-> raiseRootHasChild,
+        driverRaised |-> driverRaised,
+        terminalFailureCount |-> terminalFailureCount,
+        raisePhase |-> raisePhase,
         harnessPhase |-> harnessPhase,
         lastAction |-> lastAction
     ],

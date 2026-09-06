@@ -208,6 +208,21 @@ expect_temporal_counterexample \
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_broken.cfg \
   FinalizeCompletes completion-finalize-broken
+expect_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_driver_raise_broken.cfg \
+  DriverRaiseHasProgress completion-driver-raise-broken
+if ! grep -Fq 'raiseRootState = "Pending"' \
+  "$run_root/completion-driver-raise-broken.log" \
+  || ! grep -Fq 'raiseRootSource = "None"' \
+  "$run_root/completion-driver-raise-broken.log" \
+  || ! grep -Fq 'driverRaised = TRUE' \
+  "$run_root/completion-driver-raise-broken.log"
+then
+  cat "$run_root/completion-driver-raise-broken.log" >&2
+  printf '%s\n' \
+    'broken driver-raise transition did not expose a source-less pending root' >&2
+  exit 1
+fi
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
   DriverFailureCompletes completion-finalize-blocking-close
@@ -315,7 +330,7 @@ finalize_status=$?
 set -e
 if [ "$finalize_status" -ne 12 ] \
   || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$finalize_log" \
-  || ! grep -Fq '5 states generated, 5 distinct states found' "$finalize_log"
+  || ! grep -Fq '6 states generated, 6 distinct states found' "$finalize_log"
 then
   cat "$finalize_log" >&2
   printf '%s\n' \
@@ -340,6 +355,11 @@ fi
 if ! grep -Eq '^<DriverFinalizeAtomically .*: [1-9]' "$finalize_log"; then
   cat "$finalize_log" >&2
   printf '%s\n' 'completion-finalization witness did not cover DriverFinalizeAtomically' >&2
+  exit 1
+fi
+if ! grep -Eq '^<DriverRaisesAtomically .*: [1-9]' "$finalize_log"; then
+  cat "$finalize_log" >&2
+  printf '%s\n' 'completion-finalization witness did not cover DriverRaisesAtomically' >&2
   exit 1
 fi
 if grep -q '^Warning:' "$finalize_log"; then
@@ -463,8 +483,8 @@ cmp \
   "$run_root/operations-finalize-stdout.json"
 grep -Fq '"verdict":"conformant"' \
   "$run_root/operations-finalize-result.json"
-grep -Fq '"compared_steps":4' \
+grep -Fq '"compared_steps":5' \
   "$run_root/operations-finalize-result.json"
-printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          4 transitions'
+printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          5 transitions'
 
 printf '%s\n' "Flyology TLA+ model checks passed"

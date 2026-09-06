@@ -1966,6 +1966,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Send_Child;
          Continue_With (Item.State.Send_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_UDP_Send;
 
       procedure Start_UDP_Receive is
@@ -1981,6 +1987,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Receive_Child;
          Continue_With (Item.State.Receive_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_UDP_Receive;
 
       procedure Start_TCP_Connect is
@@ -2001,6 +2013,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Connect_Child;
          Continue_With (Item.State.Connect_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_TCP_Connect;
 
       procedure Start_TCP_Send is
@@ -2020,6 +2038,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Send_All_Child;
          Continue_With (Item.State.Send_All_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_TCP_Send;
 
       procedure Start_TCP_Length is
@@ -2034,6 +2058,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Receive_Exactly_Child;
          Continue_With (Item.State.Receive_Exactly_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_TCP_Length;
 
       procedure Start_TCP_Message is
@@ -2049,6 +2079,12 @@ package body Flyology.IO.DNS is
             Child_Interrupts (Item));
          Item.State.Child := Receive_Exactly_Child;
          Continue_With (Item.State.Receive_Exactly_Operation);
+      exception
+         when Flyology.Operations.Capacity_Error =>
+            if Event = Flyology.Operations.Start_Operation then
+               raise;
+            end if;
+            Fail (Resolution_Failure);
       end Start_TCP_Message;
 
       procedure Store_Aliases (Parsed : Parse_Result) is
@@ -2217,7 +2253,7 @@ package body Flyology.IO.DNS is
             Item.State.Query_Data (1 .. Stream'Length) := Stream;
             Left :=
               DNS_Policy.Attempt_Window
-                (Per_Attempt      => Item.State.Configuration.Per_Attempt,
+                (Per_Attempt       => Item.State.Configuration.Per_Attempt,
                  Overall_Remaining => Time_Left (Item.State.Family_Deadline),
                  Infinite          => Item.State.Family_Deadline = Ada.Real_Time.Time_Last);
             Item.State.Attempt_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Left);
