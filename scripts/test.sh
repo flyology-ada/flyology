@@ -43,6 +43,7 @@ wall_clock_test_subdir=behavioral-wall-clock-hooks
 socket_test_subdir=behavioral-socket-hooks
 subprocess_test_subdir=behavioral-subprocess-hooks
 file_watch_test_subdir=behavioral-file-watch-hooks
+destroy_contention_test_subdir=behavioral-destroy-contention-hooks
 test_bin="$project_root/tests/bin/$test_subdir"
 connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
 worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
@@ -52,6 +53,7 @@ wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
 socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
 subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
 file_watch_test_bin="$project_root/tests/bin/$file_watch_test_subdir"
+destroy_contention_test_bin="$project_root/tests/bin/$destroy_contention_test_subdir"
 test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
 FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
 export FLYOLOGY_TEST_TEMP_ROOT
@@ -624,6 +626,8 @@ subprocess_smoke'
 
 file_watch_hook_mains=file_watches_recovery_smoke
 
+destroy_contention_hook_mains=data_structures_destroy_contention_smoke
+
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
@@ -663,6 +667,7 @@ unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
 unset FLYOLOGY_SOCKET_TEST_HOOKS || :
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
 unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS || :
 compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
@@ -710,6 +715,12 @@ FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
 export FLYOLOGY_FILE_WATCH_TEST_HOOKS
 compile_test_mains "$file_watch_test_subdir" "$file_watch_hook_mains"
 unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
+
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=true
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+compile_test_mains \
+  "$destroy_contention_test_subdir" "$destroy_contention_hook_mains"
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
@@ -807,9 +818,17 @@ link_test_mains \
   "$file_watch_hook_mains"
 unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
 
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=true
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+link_test_mains \
+  "$destroy_contention_test_subdir" "$project_root/build/rts" \
+  "$destroy_contention_hook_mains"
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+
 "$test_bin/default_policy_smoke" native
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 "$socket_test_bin/socket_preparation_smoke"
+"$destroy_contention_test_bin/data_structures_destroy_contention_smoke"
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"

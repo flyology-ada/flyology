@@ -1,5 +1,6 @@
 with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Storage;
+with Flyology.Dynamic_Destroy_Test_Hooks;
 with System.Storage_Elements;
 
 package body Flyology.Data_Structures.Dynamic.Vectors is
@@ -720,8 +721,9 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    end Clear;
 
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View) is
-      Current : Arena_Provider.Allocation_Handle;
-      Mutated : Boolean := False;
+      Current             : Arena_Provider.Allocation_Handle;
+      Injected_Contention : Boolean;
+      Mutated             : Boolean := False;
    begin
       Acquire (Item);
       begin
@@ -729,6 +731,12 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          Cleanup_Retired (Item, Arena, Mutated);
          Current := Read_Handle (Item.Current_Address);
          if Current /= Arena_Provider.Null_Allocation then
+            if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
+               Flyology.Dynamic_Destroy_Test_Hooks.Consume_Current_Release_Contention (Injected_Contention);
+               if Injected_Contention then
+                  raise Busy_Error with "injected dynamic-vector arena contention";
+               end if;
+            end if;
             Arena_Provider.Release (Arena, Current);
             Mutated := True;
             Write_Handle (Item.Current_Address, Arena_Provider.Null_Allocation);
@@ -738,6 +746,9 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
          end if;
          Layouts.Mark_Destroyed (Item.Core);
       exception
+         when Busy_Error =>
+            Release_Guard (Item);
+            raise;
          when others =>
             Finish_Failure (Item, Mutated);
             raise;

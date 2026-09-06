@@ -190,8 +190,13 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive with Preelaborate is
    --  the outer pool, and detach Item. All views and handles must be
    --  quiescent. Every chunk is validated before any reclamation, so a live
    --  slot raises Program_Error without changing stored pool or chunk state.
+   --  Arena contention raises Busy_Error without poisoning the pool. Chunks
+   --  reclaimed earlier in the same call remain coherent empty entries; the
+   --  contended chunk remains live and names its allocation, so the caller
+   --  may retry.
    --  @param Item Exclusively synchronized pool view
-   --  @param Arena Matching exclusively synchronized backing arena view
+   --  @param Arena Matching attached backing arena view
+   --  @exception Busy_Error Arena metadata is currently owned
    --  @exception Program_Error A chunk still contains a live slot
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 

@@ -3,6 +3,7 @@ with Flyology.Connection_Test_Hooks;
 with Flyology.Buffer_Test_Hooks;
 with Flyology.Channel_Test_Hooks;
 with Flyology.DNS_Test_Observations;
+with Flyology.Dynamic_Destroy_Test_Hooks;
 with Flyology.File_Watch_Test_Hooks;
 with Flyology.Structured_Server_Test_Hooks;
 with Flyology.Subprocess_Test_Hooks;
@@ -27,6 +28,9 @@ begin
    end if;
    if Flyology.DNS_Test_Observations.Enabled then
       Flyology.DNS_Test_Observations.Reset;
+   end if;
+   if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
+      Flyology.Dynamic_Destroy_Test_Hooks.Reset;
    end if;
    if Flyology.TLS_Test_Hooks.Enabled then
       Flyology.TLS_Test_Hooks.Reset;

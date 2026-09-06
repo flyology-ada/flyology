@@ -183,9 +183,12 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
    procedure Clear (Item : in out View; Arena : Arena_Provider.View);
 
    --  Release current and deferred tables, destroy the quiescent header, and
-   --  detach Item.
+   --  detach Item. Arena contention raises Busy_Error before an allocation
+   --  that could not be reclaimed is forgotten; the ready map remains
+   --  retryable.
    --  @param Item Exclusively synchronized map view
    --  @param Arena Matching attached arena view
+   --  @exception Busy_Error Arena metadata is currently owned
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 
 private
