@@ -15,6 +15,8 @@ Safety ==
     /\ DriverDispatchStateRetainsObligation
     /\ DriverHandoffStateIsOwned
     /\ DriverCleanupIsOrdered
+    /\ DriverRaiseHasProgress
+    /\ DriverRaiseTerminalExactlyOnce
 
 THEOREM InitImpliesSafety ==
     /\ InitialOtherReported \in BOOLEAN
@@ -22,6 +24,7 @@ THEOREM InitImpliesSafety ==
     /\ CleanupCloseMode \in {"Blocking", "Deferred"}
     /\ CleanupDispatchMode \in {"Atomic", "Split"}
     /\ CleanupHandoffMode \in {"Atomic", "Split"}
+    /\ DriverRaiseMode = "Terminalize"
     => (Init => Safety)
 <1>. QED BY DEF Init, Safety, TypeOK,
                 ReportedOnlyTerminal, SavedReportOnlyTerminal,
@@ -30,9 +33,11 @@ THEOREM InitImpliesSafety ==
                 DriverDisposeBeforePeerReturns,
                 DriverDispatchStateRetainsObligation,
                 DriverHandoffStateIsOwned,
-                DriverCleanupIsOrdered
+                DriverCleanupIsOrdered,
+                DriverRaiseHasProgress,
+                DriverRaiseTerminalExactlyOnce
 
-THEOREM NextPreservesSafety == Safety /\ Next => Safety'
+THEOREM NextPreservesSafety == DriverRaiseMode = "Terminalize" /\ Safety /\ Next => Safety'
 <1>. QED BY DEF Safety, TypeOK,
                 ReportedOnlyTerminal, SavedReportOnlyTerminal,
                 FinalStateReleased,
@@ -46,11 +51,14 @@ THEOREM NextPreservesSafety == Safety /\ Next => Safety'
                 AbortCleanupDispatch, CompleteCleanupHandoff,
                 AbortCleanupHandoff, SplitCleanupDispatch,
                 SplitCleanupHandoff,
-                CleanupPhase, driverVars,
+                CleanupPhase, DriverRaises, DriverRaiseEffect,
+                driverVars, driverRaiseVars,
                 DriverReturnIsTerminal,
                 DriverDisposeBeforePeerReturns,
                 DriverDispatchStateRetainsObligation,
                 DriverHandoffStateIsOwned,
-                DriverCleanupIsOrdered
+                DriverCleanupIsOrdered,
+                DriverRaiseHasProgress,
+                DriverRaiseTerminalExactlyOnce
 
 =============================================================================

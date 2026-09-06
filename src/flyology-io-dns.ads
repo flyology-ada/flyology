@@ -144,8 +144,11 @@ package Flyology.IO.DNS is
    --  wake source is passed through every pending socket child. Configuration
    --  is copied synchronously and need not outlive the returned operation. An
    --  already-requested Token or expired Deadline completes without a socket.
-   --  Starting a network query needs one additional hidden set slot; failure
-   --  to reserve it transactionally rolls back the root operation.
+   --  Starting a network query needs one additional hidden set slot. Failure
+   --  to reserve a child during initial Start transactionally rolls back the
+   --  root operation. Exhaustion when a later driver transition starts a child
+   --  terminalizes the root as Failed, closes temporary sockets, and is
+   --  reported by Finish as Resolution_Failed.
    --  @param Set Completion set that owns the root and hidden child slots
    --  @param Name Host name, numeric address, or localhost copied at start
    --  @param Configuration Preloaded resolver configuration copied at start
@@ -153,8 +156,8 @@ package Flyology.IO.DNS is
    --  @param Deadline Absolute monotonic deadline
    --  @param Token Optional cancellation source that outlives the operation
    --  @return Started limited resolve operation
-   --  @exception Capacity_Error The root or first hidden child cannot reserve
-   --     a completion-set slot
+   --  @exception Capacity_Error The root or a hidden child started during
+   --     initial Start cannot reserve a completion-set slot
    function Resolve
      (Set           : not null access Flyology.Operations.Completion_Set'Class;
       Name          : String;
@@ -165,16 +168,18 @@ package Flyology.IO.DNS is
 
    --  Start or restart scoped resolution in an established operation object.
    --  This form lets a parent provider compose DNS through Continue_After.
-   --  A first-child Capacity_Error leaves Operation fresh and releases every
-   --  token borrow and socket resource.
+   --  A Capacity_Error from child admission during initial Start leaves
+   --  Operation fresh and releases every token borrow and socket resource.
+   --  Exhaustion when a later driver transition starts a child terminalizes
+   --  Operation as Failed and is reported by Finish as Resolution_Failed.
    --  @param Name Host name, numeric address, or localhost copied at start
    --  @param Configuration Preloaded resolver configuration copied at start
    --  @param Family Requested result family
    --  @param Deadline Absolute monotonic deadline
    --  @param Token Optional cancellation source that outlives the operation
    --  @param Operation Fresh, released, or consumed resolve operation
-   --  @exception Capacity_Error The root or first hidden child cannot reserve
-   --     a completion-set slot
+   --  @exception Capacity_Error The root or a hidden child started during
+   --     initial Start cannot reserve a completion-set slot
    procedure Resolve
      (Name          : String;
       Configuration : not null access constant Resolver_Configuration;
@@ -189,7 +194,11 @@ package Flyology.IO.DNS is
    --  Start scoped resolution through explicit numeric DNS endpoints without
    --  search-domain expansion. Endpoints and retry policy are copied at start.
    --  An already-requested Token or expired Deadline completes without a
-   --  socket. A network query requires one hidden completion-set slot.
+   --  socket. A network query requires one hidden completion-set slot. Failure
+   --  to reserve a child during initial Start transactionally rolls back the
+   --  root operation. Exhaustion when a later driver transition starts a child
+   --  terminalizes the root as Failed, closes temporary sockets, and is
+   --  reported by Finish as Resolution_Failed.
    --  @param Set Completion set that owns the root and hidden child slots
    --  @param Name Host name, numeric address, or localhost copied at start
    --  @param Name_Servers Numeric UDP/TCP DNS endpoints copied at start
@@ -199,8 +208,8 @@ package Flyology.IO.DNS is
    --  @param Retry_Interval Maximum seconds allocated per attempt
    --  @param Token Optional cancellation source that outlives the operation
    --  @return Started limited resolve operation
-   --  @exception Capacity_Error The root or first hidden child cannot reserve
-   --     a completion-set slot
+   --  @exception Capacity_Error The root or a hidden child started during
+   --     initial Start cannot reserve a completion-set slot
    function Resolve_Using
      (Set            : not null access Flyology.Operations.Completion_Set'Class;
       Name           : String;
@@ -212,8 +221,10 @@ package Flyology.IO.DNS is
       Token          : access Flyology.Cancellation.Token := null) return Resolve_Operation;
 
    --  Start or restart explicit-server scoped resolution in an established
-   --  operation object. A first-child Capacity_Error rolls back every resource
-   --  and leaves Operation fresh.
+   --  operation object. A Capacity_Error from child admission during initial
+   --  Start rolls back every resource and leaves Operation fresh. Exhaustion
+   --  when a later driver transition starts a child terminalizes Operation as
+   --  Failed and is reported by Finish as Resolution_Failed.
    --  @param Name Host name, numeric address, or localhost copied at start
    --  @param Name_Servers Numeric UDP/TCP DNS endpoints copied at start
    --  @param Family Requested result family
@@ -222,8 +233,8 @@ package Flyology.IO.DNS is
    --  @param Retry_Interval Maximum seconds allocated per attempt
    --  @param Token Optional cancellation source that outlives the operation
    --  @param Operation Fresh, released, or consumed resolve operation
-   --  @exception Capacity_Error The root or first hidden child cannot reserve
-   --     a completion-set slot
+   --  @exception Capacity_Error The root or a hidden child started during
+   --     initial Start cannot reserve a completion-set slot
    procedure Resolve_Using
      (Name           : String;
       Name_Servers   : Name_Server_Array;

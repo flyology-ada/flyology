@@ -93,6 +93,7 @@ because both trace producers emitted nothing.
 | `AbortCleanupDispatch` | the broken split consumption being interrupted after slot release but before close publication |
 | `CompleteCleanupHandoff` | the abort-deferred guard claiming and completing a published close with no peer left |
 | `AbortCleanupHandoff` | the broken split handoff being interrupted after publication but before its first drain claim |
+| `DriverRaises` | a driver transition losing its immediate source before hidden-child admission raises, either stranding the root or terminalizing it once |
 
 The model action names are intentionally close to the Ada operations so that a
 code review can compare the transition order directly rather than accepting a
@@ -187,20 +188,25 @@ counterexample: the nested family remains open and the synchronous outer run
 cannot complete.
 
 `CompletionSetFinalize` isolates the scope-exit drain for one pending target
-and one unrelated terminal slot, and also models one failed TLS-upgrade driver
-with an operation registered in another completion set. The safe configuration
-gives finalization a private target-state predicate and defers failed-upgrade
-connection cleanup until typed `Finish`, generic `Consume`, or controlled
-finalization. Consumption, cleanup dispatch, handoff publication, and local
-obligation retirement complete inside one abort-deferred boundary. Broken
-variants expose the two interruption windows on either side of publication.
+and one unrelated terminal slot, models one failed TLS-upgrade driver with an
+operation registered in another completion set, and models a generic driver
+raise after its immediate source is cleared and before a hidden child is
+attached. The safe configuration gives finalization a private target-state
+predicate, defers failed-upgrade connection cleanup until typed `Finish`,
+generic `Consume`, or controlled finalization, and converts the driver raise
+into exactly one terminal failure. Consumption, cleanup dispatch, handoff
+publication, and local obligation retirement complete inside one
+abort-deferred boundary. Broken variants expose the two interruption windows
+on either side of publication.
 Weak fairness includes descriptor dispatch, peer draining after the driver
 returns, and each final cleanup path.
-TLC checks that both workflows reach `Done`, release no pending target, preserve
-the unrelated slot's initial reported state, return when disposal precedes peer
-drain, and complete close only after the peer registration withdraws.
+TLC checks that all three workflows reach `Done`, release no pending target,
+preserve the unrelated slot's initial reported state, return when disposal
+precedes peer drain, complete close only after the peer registration withdraws,
+and leave the raised driver with a terminal root, no source or child, and one
+failure publication.
 
-Five broken configurations are required to fail. The first routes the finalizer
+Six broken configurations are required to fail. The first routes the finalizer
 through the user-visible `Wait_Some` gate and produces the issue #130 lasso:
 `EarlyGateReturn` marks the unrelated slot reported, `RestoreReported` makes it
 unreported again, and the cycle repeats without entering `DispatchTarget`. The
@@ -213,15 +219,18 @@ release from cleanup dispatch; abort leaves the unpublished operation-side
 obligation in `DispatchAborted`. The fifth splits deferred-close publication
 from its first drain claim and local obligation retirement; abort after
 publication leaves the connection in `HandoffAborted` when no peer remains to
-complete the close.
+complete the close. The sixth lets a generic driver raise after its immediate
+source is cleared; the root remains pending with neither source nor child and
+violates `DriverRaiseHasProgress`.
 
-The model still keeps source kind, propagation-guard state, and child capacity
+The model still keeps propagation-guard state and general child capacity
 outside its state vector. Those remain extension points for analysis of other
-abort-deferred drive sections (#136) and failed hidden-child admission (#180).
+abort-deferred drive sections (#136); issue #180 is represented by the generic
+driver-raise source and child state.
 
 The maintained gate also regenerates the typed Ada model twice, byte-compares
 both results with the checked-in files, regenerates and validates the bounded
-five-state witness trace, and builds the isolated test crate in
+six-state witness trace, and builds the isolated test crate in
 [`tests/operations_finalize_conformance`](../../tests/operations_finalize_conformance).
 Its adapter records cancellation and exactly one `Source_Ready` drive from the
 delayed provider before accepting the target as drained. It then confirms that
@@ -231,8 +240,10 @@ ordering independently. Typed `Finish`, generic `Consume`, and reverse-order
 controlled finalization transfer close ownership and return before the peer is
 cancelled. The last withdrawal then completes the close and releases the
 admission permit. Typed `Finish` retains the TLS failure; the other paths
-discard it. The replay runs under a 20-second external timeout and must report
-four conformant modeled transitions.
+discard it. A fifth transition reproduces later hidden-child exhaustion through
+scoped DNS and checks the terminal failure, retained exception, and source/child
+post-state. The replay runs under a 20-second external timeout and must report
+five conformant modeled transitions.
 TLAPS separately proves both stated safety obligations; replay is not
 represented as proof.
 
@@ -322,6 +333,10 @@ The models intentionally omit or coarsen the following details:
   one-step harness trace projects the detailed drain as the public scope-exit
   transition and additionally requires the peer to remain publishable, which
   checks preservation of its user-visible reported state.
+- The driver-raise lane fixes one pending root with an immediate source, no
+  attached child, and a one-bit terminal-failure count. It abstracts the exact
+  provider and exception type; the Ada replay supplies the DNS capacity
+  scenario and checks the concrete retained outcome.
 - Desired nested children are an application-owned set equal to the modeled
   family slots. A new owner generation receives a new family controller and
   must readmit every desired slot before publishing readiness. The model does

@@ -457,6 +457,7 @@ data_structures_concurrency_smoke
 data_structures_smoke
 datagram_io_smoke
 descriptor_ownership_smoke
+dns_child_capacity_smoke
 dns_smoke
 dns_parser_smoke
 dns_parser_matrix
@@ -841,7 +842,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 20 \
         "$current_test_bin/$test_main" lightweight
       ;;
-    dns_smoke)
+    dns_child_capacity_smoke|dns_smoke)
       "$project_root/scripts/run-with-timeout.sh" 20 \
         "$current_test_bin/$test_main"
       ;;

@@ -2186,7 +2186,10 @@ token contributes its readable wake descriptor to every child, while explicit
 abandonment cancel and drain the child, close temporary sockets, and release
 the token descriptor before publishing the root outcome. Typed `Finish` then
 returns at most sixteen addresses or raises the same DNS/I/O exception class as
-the synchronous resolver.
+the synchronous resolver. Failure to reserve a hidden child during the initial
+`Start_Operation` rolls back initiation with `Capacity_Error`; exhaustion when
+a later driver transition starts a child instead publishes `Failed`, closes its
+temporary sockets, and is retained by `Finish` as `Resolution_Failed`.
 
 Each attempt sends a nonblocking UDP query to one configured server and parks
 the calling task on the socket, deadline, and optional cancellation descriptors
