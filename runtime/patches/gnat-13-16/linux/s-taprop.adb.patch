@@ -342,6 +342,9 @@
        Param.sched_priority := Prio_To_Linux_Prio (Prio);
  
        if Dispatching_Policy = 'R'
+@@ -806,1 +1036,2 @@
+       if Use_Alternate_Stack
++        and then not Is_Lightweight_Task (Self_ID)
 @@ -824,7 +1054,8 @@
     -- Is_Valid_Task --
     -------------------
@@ -366,7 +369,7 @@
 +         Result :=
 +           Lightweight_Create
 +             (To_Address (T),
-+              C.size_t (Stack_Size + Alternate_Stack_Size),
++              C.size_t (Stack_Size),
 +              C.int (Priority),
 +              Wrapper,
 +              (if C.int (T.Common.Base_CPU) = 0

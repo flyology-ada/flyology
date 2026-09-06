@@ -29,6 +29,50 @@ void flyology_test_sparse_stack_write(size_t distance) {
 #error "stack-guard probe requires a supported Flyology context architecture"
 #endif
 
+/* Keep stack_t and the wait-status macros at this test-only C boundary. Ada
+   owns the scenario assertions and all runtime stack policy. */
+int flyology_test_alt_stack_is_installed(void) {
+    stack_t stack;
+
+    if (sigaltstack(NULL, &stack) != 0) return -1;
+    return stack.ss_sp != NULL && stack.ss_size != 0 &&
+           (stack.ss_flags & SS_DISABLE) == 0;
+}
+
+/* A lightweight overflow must be isolated because the regression terminates
+   the process before Ada can report a failed assertion or exception. */
+int flyology_test_run_stack_overflow_child(const char *program,
+                                            const char *scenario) {
+    char *const arguments[] = {(char *)program, (char *)scenario, NULL};
+    pid_t child;
+    int status;
+
+    if (program == NULL || scenario == NULL || posix_spawn(
+            &child, program, NULL, NULL, arguments, environ) != 0) {
+        return -1;
+    }
+
+    for (int attempt = 0; attempt < 5000; ++attempt) {
+        pid_t result = waitpid(child, &status, WNOHANG);
+
+        if (result == child) {
+            if (WIFEXITED(status)) return WEXITSTATUS(status);
+            if (WIFSIGNALED(status)) {
+                fprintf(stderr, "stack-overflow child %s received signal %d\n",
+                        scenario, WTERMSIG(status));
+                return -2;
+            }
+            return -1;
+        }
+        if (result < 0 && errno != EINTR) return -1;
+        usleep(1000);
+    }
+
+    (void)kill(child, SIGKILL);
+    (void)waitpid(child, &status, 0);
+    return -3;
+}
+
 int flyology_test_run_stack_guard_child(const char *program) {
     char *const arguments[] = {(char *)program, (char *)"violate", NULL};
     pid_t child;

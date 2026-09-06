@@ -374,6 +374,11 @@
 +      end if;
 +
        Param.sched_priority := To_Target_Priority (Prio);
+@@ -638,1 +874,3 @@
+-      if Use_Alternate_Stack then
++      if Use_Alternate_Stack
++        and then not Is_Lightweight_Task (Self_ID)
++      then
 @@ -654,7 +890,8 @@
 -   function Is_Valid_Task return Boolean renames Specific.Is_Valid_Task;
 +   function Is_Valid_Task return Boolean is
@@ -390,7 +395,7 @@
 +         Result :=
 +           Lightweight_Create
 +             (To_Address (T),
-+              Interfaces.C.size_t (Stack_Size + Alternate_Stack_Size),
++              Interfaces.C.size_t (Stack_Size),
 +              Interfaces.C.int (Priority),
 +              Wrapper,
 +              (if Interfaces.C.int (T.Common.Base_CPU) = 0
