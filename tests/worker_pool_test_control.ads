@@ -26,6 +26,18 @@ package Worker_Pool_Test_Control is
 
    procedure Arm_Native_Executor_Completion_Wake;
 
+   procedure Arm_Native_Executor_Dispatch_Barrier;
+
+   procedure Wait_Native_Executor_Dispatch_Barrier;
+
+   procedure Release_Native_Executor_Dispatch_Barrier;
+
+   procedure Arm_Native_Executor_Idle_Barrier;
+
+   procedure Wait_Native_Executor_Idle_Barrier;
+
+   procedure Release_Native_Executor_Idle_Barrier;
+
    procedure Arm_Token_Cleanup_Barrier;
 
    procedure Wait_Token_Cleanup_Barrier;

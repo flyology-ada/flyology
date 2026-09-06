@@ -42,18 +42,40 @@ package body Flyology.Native_Executors is
 
    protected body Shared_State is
       procedure Submit
-        (Input          : Input_Type;
-         Token          : Token_Access;
-         Deadline       : Ada.Real_Time.Time;
-         Slot           : out Positive;
-         Generation     : out Generation_Number;
-         Replaced_Token : out Token_Access;
-         Accepted       : out Boolean)
+        (Input            : Input_Type;
+         Token            : Token_Access;
+         Deadline         : Ada.Real_Time.Time;
+         Slot             : out Positive;
+         Generation       : out Generation_Number;
+         Prior_Generation : out Generation_Number;
+         Prior_Peak       : out Natural;
+         Replaced_Token   : out Token_Access;
+         Dispatch_Worker  : out Natural;
+         Accepted         : out Boolean)
       is
-         Found : Natural := 0;
+         Found       : Natural := 0;
+         Idle_Worker : Natural := 0;
+         Has_Drainer : Boolean := False;
       begin
+         Prior_Generation := 0;
+         Prior_Peak := Counters.Peak_Outstanding;
          Replaced_Token := null;
-         if Stopping then
+         Dispatch_Worker := 0;
+         if Stopping or else Pending_Dispatch_Slot /= 0 then
+            Counters.Rejected_Submissions := Counters.Rejected_Submissions + 1;
+            Slot := 1;
+            Generation := 0;
+            Accepted := False;
+            return;
+         end if;
+         for Index in Worker_States'Range loop
+            if Worker_States (Index) = Worker_Active then
+               Has_Drainer := True;
+            elsif Worker_States (Index) = Worker_Idle and then Idle_Worker = 0 then
+               Idle_Worker := Index;
+            end if;
+         end loop;
+         if not Has_Drainer and then Idle_Worker = 0 then
             Counters.Rejected_Submissions := Counters.Rejected_Submissions + 1;
             Slot := 1;
             Generation := 0;
@@ -74,6 +96,7 @@ package body Flyology.Native_Executors is
             return;
          end if;
          Slot := Found;
+         Prior_Generation := Generations (Slot);
          Generations (Slot) := Flyology.Counter_Policy.Nonzero_Successor (Generations (Slot));
          Generation := Generations (Slot);
          Inputs (Slot) := Input;
@@ -94,14 +117,76 @@ package body Flyology.Native_Executors is
          Counters.Queued_Operations := Counters.Queued_Operations + 1;
          Counters.Peak_Outstanding :=
            Natural'Max (Counters.Peak_Outstanding, Counters.Outstanding_Operations);
+         if Idle_Worker /= 0 then
+            Dispatch_Worker := Idle_Worker;
+            Worker_States (Dispatch_Worker) := Worker_Dispatching;
+            Pending_Dispatch_Slot := Slot;
+            Pending_Dispatch_Worker := Dispatch_Worker;
+         end if;
          Accepted := True;
       end Submit;
 
-      entry Next (Slot : out Positive; Stop : out Boolean) when Queue_Count > 0 or else Stopping is
+      procedure Rollback_Dispatch
+        (Slot             : Positive;
+         Generation       : Generation_Number;
+         Prior_Generation : Generation_Number;
+         Prior_Peak       : Natural;
+         Worker           : Positive;
+         Replaced_Token   : Token_Access;
+         Rolled_Back      : out Boolean)
+      is
+         Last : Positive;
+      begin
+         Rolled_Back := False;
+         if Worker_States (Worker) /= Worker_Dispatching
+           or else Generations (Slot) /= Generation
+           or else Pending_Dispatch_Slot /= Slot
+           or else Pending_Dispatch_Worker /= Worker
+         then
+            return;
+         end if;
+         if Stopping then
+            Pending_Dispatch_Slot := 0;
+            Pending_Dispatch_Worker := 0;
+            return;
+         elsif Status (Slot) /= Queued or else Queue_Count = 0 then
+            raise Program_Error with "native executor dispatch rollback lost queued operation";
+         end if;
+         Last := (if Tail = 1 then Capacity else Tail - 1);
+         if Queue (Last) /= Slot then
+            raise Program_Error with "native executor dispatch rollback lost FIFO ownership";
+         end if;
+         Tail := Last;
+         Queue (Last) := 0;
+         Queue_Count := Queue_Count - 1;
+         Tokens (Slot) := Replaced_Token;
+         Generations (Slot) := Prior_Generation;
+         Status (Slot) := Free;
+         Worker_States (Worker) := Worker_Idle;
+         Pending_Dispatch_Slot := 0;
+         Pending_Dispatch_Worker := 0;
+         Counters.Accepted_Submissions := Counters.Accepted_Submissions - 1;
+         Counters.Rejected_Submissions := Counters.Rejected_Submissions + 1;
+         Counters.Outstanding_Operations := Counters.Outstanding_Operations - 1;
+         Counters.Queued_Operations := Counters.Queued_Operations - 1;
+         Counters.Peak_Outstanding := Prior_Peak;
+         Rolled_Back := True;
+      end Rollback_Dispatch;
+
+      procedure Try_Next (Worker : Positive; Slot : out Positive; Stop, Available : out Boolean) is
       begin
          if Stopping then
             Slot := 1;
             Stop := True;
+            Available := False;
+            return;
+         elsif Queue_Count = 0
+           or else (Pending_Dispatch_Slot /= 0 and then Queue (Head) = Pending_Dispatch_Slot)
+         then
+            Worker_States (Worker) := Worker_Idle;
+            Slot := 1;
+            Stop := False;
+            Available := False;
             return;
          end if;
          Slot := Queue (Head);
@@ -110,8 +195,24 @@ package body Flyology.Native_Executors is
          Status (Slot) := Running;
          Counters.Queued_Operations := Counters.Queued_Operations - 1;
          Counters.Running_Operations := Counters.Running_Operations + 1;
+         Worker_States (Worker) := Worker_Active;
          Stop := False;
-      end Next;
+         Available := True;
+      end Try_Next;
+
+      procedure Worker_Started (Worker : Positive) is
+      begin
+         Worker_States (Worker) := Worker_Active;
+      end Worker_Started;
+
+      procedure Dispatch_Accepted (Worker : Positive) is
+      begin
+         if Worker_States (Worker) = Worker_Dispatching and then Pending_Dispatch_Worker = Worker then
+            Worker_States (Worker) := Worker_Active;
+            Pending_Dispatch_Slot := 0;
+            Pending_Dispatch_Worker := 0;
+         end if;
+      end Dispatch_Accepted;
 
       procedure Operation_Data
         (Slot : Positive; Input : out Input_Type; Token : out Token_Access; Deadline : out Ada.Real_Time.Time)
@@ -303,6 +404,11 @@ package body Flyology.Native_Executors is
          Queue_Count := 0;
       end Begin_Shutdown;
 
+      entry Await_Dispatch_Resolution when Pending_Dispatch_Slot = 0 is
+      begin
+         null;
+      end Await_Dispatch_Resolution;
+
       procedure Signal_Shutdown_Completion (Slot : Positive) is
       begin
          if Status (Slot) = Completed and then Wake_Armed (Slot) and then not Wake_Pending (Slot) then
@@ -324,15 +430,27 @@ package body Flyology.Native_Executors is
          Expected_Workers_Set := True;
       end Set_Expected_Workers;
 
-      procedure Worker_Stopped is
+      function Needs_Stop (Worker : Positive) return Boolean
+      is (Worker_States (Worker) in Worker_Idle | Worker_Dispatching);
+
+      procedure Worker_Stopped (Worker : Positive; Selected_Terminate : Boolean) is
       begin
-         Stopped_Workers := Stopped_Workers + 1;
+         if Worker_States (Worker) /= Worker_Terminated then
+            Worker_States (Worker) := Worker_Terminated;
+            Stopped_Workers := Stopped_Workers + 1;
+            if Selected_Terminate then
+               Master_Terminations := Master_Terminations + 1;
+            end if;
+         end if;
       end Worker_Stopped;
 
       entry Await_Stopped when Expected_Workers_Set and then Stopped_Workers = Expected_Workers is
       begin
          null;
       end Await_Stopped;
+
+      function Master_Owns_Worker_Storage return Boolean
+      is (Expected_Workers_Set and then Master_Terminations = Expected_Workers);
 
       procedure Take_Token (Slot : Positive; Owner : not null access Token_Owner) is
       begin
@@ -372,8 +490,29 @@ package body Flyology.Native_Executors is
       pragma Unreferenced (Activation_Checked);
 
       package Conversions is new System.Address_To_Access_Conversions (Shared_State);
-      State_Ptr : Conversions.Object_Pointer;
-      Stopped   : Boolean := False;
+      State_Ptr    : Conversions.Object_Pointer;
+      Worker_Index : Positive := 1;
+      Stopped      : Boolean := False;
+
+      type Completion_Guard is new Ada.Finalization.Limited_Controlled with record
+         Armed              : Boolean := False;
+         Selected_Terminate : Boolean := True;
+      end record;
+
+      overriding
+      procedure Finalize (Guard : in out Completion_Guard);
+
+      overriding
+      procedure Finalize (Guard : in out Completion_Guard) is
+      begin
+         if Guard.Armed then
+            State_Ptr.Worker_Stopped (Worker_Index, Guard.Selected_Terminate);
+            Guard.Armed := False;
+         end if;
+      end Finalize;
+
+      Completion : Completion_Guard;
+      pragma Unreferenced (Completion);
    begin
       --  No worker touches the shared state before Start hands it the
       --  executor. If activation of a sibling fails, the allocator raises and
@@ -383,8 +522,11 @@ package body Flyology.Native_Executors is
       --  cannot be selected while the executor is usable, because Start runs
       --  inside that same still-incomplete master.
       select
-         accept Start (State : System.Address) do
+         accept Start (State : System.Address; Index : Positive) do
             State_Ptr := Conversions.To_Pointer (State);
+            Worker_Index := Index;
+            State_Ptr.Worker_Started (Worker_Index);
+            Completion.Armed := True;
          end Start;
       or
          accept Stop;
@@ -395,42 +537,57 @@ package body Flyology.Native_Executors is
       begin
          while not Stopped loop
             declare
-               Slot     : Positive;
-               Input    : Input_Type;
-               Token    : Token_Access;
-               Deadline : Ada.Real_Time.Time;
-               Stop     : Boolean;
-               Result   : Result_Type;
+               Slot      : Positive;
+               Input     : Input_Type;
+               Token     : Token_Access;
+               Deadline  : Ada.Real_Time.Time;
+               Stop      : Boolean;
+               Result    : Result_Type;
+               Available : Boolean;
             begin
-               State_Ptr.Next (Slot, Stop);
+               State_Ptr.Try_Next (Worker_Index, Slot, Stop, Available);
                exit when Stop;
-               begin
-                  State_Ptr.Operation_Data (Slot, Input, Token, Deadline);
-                  if Token /= null and then Token.Requested then
-                     raise Flyology.Cancellation.Operation_Cancelled;
-                  elsif Deadline /= Ada.Real_Time.Time_Last and then Ada.Real_Time.Clock >= Deadline then
-                     raise Flyology.IO.Timeout_Error with "native executor operation deadline expired";
+               if Available then
+                  begin
+                     State_Ptr.Operation_Data (Slot, Input, Token, Deadline);
+                     if Token /= null and then Token.Requested then
+                        raise Flyology.Cancellation.Operation_Cancelled;
+                     elsif Deadline /= Ada.Real_Time.Time_Last and then Ada.Real_Time.Clock >= Deadline then
+                        raise Flyology.IO.Timeout_Error with "native executor operation deadline expired";
+                     end if;
+                     Execute (Input, Token, Deadline, Result);
+                     State_Ptr.Complete (Slot, Result);
+                  exception
+                     when Error : others =>
+                        begin
+                           State_Ptr.Fail (Slot, Error);
+                        exception
+                           when others =>
+                              null;
+                        end;
+                  end;
+               else
+                  if Test_Hooks.Enabled then
+                     Test_Hooks.Native_Executor_Idle_Barrier;
                   end if;
-                  Execute (Input, Token, Deadline, Result);
-                  State_Ptr.Complete (Slot, Result);
-               exception
-                  when Error : others =>
-                     begin
-                        State_Ptr.Fail (Slot, Error);
-                     exception
-                        when others =>
-                           null;
-                     end;
-               end;
+                  select
+                     accept Dispatch do
+                        State_Ptr.Dispatch_Accepted (Worker_Index);
+                     end Dispatch;
+                  or
+                     accept Stop;
+                     Stopped := True;
+                  or
+                     terminate;
+                  end select;
+               end if;
             end;
          end loop;
       exception
          when others =>
             null;
       end;
-      if not Stopped then
-         State_Ptr.Worker_Stopped;
-      end if;
+      Completion.Selected_Terminate := False;
    end Worker;
 
    overriding
@@ -446,8 +603,8 @@ package body Flyology.Native_Executors is
       elsif not Item.Started then
          Item.Pool := new Worker_Array (1 .. Item.Workers);
          Item.Started := True;
-         for Worker of Item.Pool.all loop
-            Worker.Start (Item.State'Address);
+         for Index in Item.Pool'Range loop
+            Item.Pool (Index).Start (Item.State'Address, Index);
             Item.Activated_Workers := Item.Activated_Workers + 1;
          end loop;
       end if;
@@ -488,6 +645,7 @@ package body Flyology.Native_Executors is
          if Cleanup_Done then
             return;
          end if;
+         Item.State.Await_Dispatch_Resolution;
          for Index in 1 .. Item.Capacity loop
             begin
                Item.State.Signal_Shutdown_Completion (Index);
@@ -501,13 +659,25 @@ package body Flyology.Native_Executors is
                Request_Cancellation (Index);
             end loop;
             if Item.Pool /= null then
+               for Index in 1 .. Item.Activated_Workers loop
+                  if Item.State.Needs_Stop (Index) and then not Item.Pool (Index)'Terminated then
+                     begin
+                        Item.Pool (Index).Stop;
+                     exception
+                        when Tasking_Error =>
+                           null;
+                     end;
+                  end if;
+               end loop;
                for Index in Item.Activated_Workers + 1 .. Item.Workers loop
-                  begin
-                     Item.Pool (Index).Stop;
-                  exception
-                     when Tasking_Error =>
-                        null;
-                  end;
+                  if not Item.Pool (Index)'Terminated then
+                     begin
+                        Item.Pool (Index).Stop;
+                     exception
+                        when Tasking_Error =>
+                           null;
+                     end;
+                  end if;
                end loop;
             end if;
             begin
@@ -519,7 +689,7 @@ package body Flyology.Native_Executors is
                   Record_Failure (Error);
             end;
             if Workers_Joined then
-               if Item.Pool /= null then
+               if Item.Pool /= null and then not Item.State.Master_Owns_Worker_Storage then
                   begin
                      Free (Item.Pool);
                   exception
@@ -610,11 +780,89 @@ package body Flyology.Native_Executors is
       Handle   : in out Operation_Handle;
       Accepted : out Boolean)
    is
-      Slot           : Positive;
-      Generation     : Generation_Number;
-      Token_Value    : Token_Access := null;
-      Replaced_Token : Token_Access := null;
+      Slot             : Positive := 1;
+      Generation       : Generation_Number := 0;
+      Prior_Generation : Generation_Number := 0;
+      Prior_Peak       : Natural := 0;
+      Token_Value      : Token_Access := null;
+      Replaced_Token   : Token_Access := null;
+      Dispatch_Worker  : Natural := 0;
+      Dispatched       : Boolean := False;
+      Rolled_Back      : Boolean := False;
+      Resolution_Done  : Boolean := False;
+
+      procedure Resolve_Dispatch is
+      begin
+         if Resolution_Done then
+            return;
+         end if;
+         if Accepted and then Dispatch_Worker /= 0 then
+            begin
+               select
+                  Item.Pool (Dispatch_Worker).Dispatch;
+                  Dispatched := True;
+               else
+                  null;
+               end select;
+            exception
+               when Tasking_Error =>
+                  null;
+            end;
+            if not Dispatched then
+               Item.State.Rollback_Dispatch
+                 (Slot,
+                  Generation,
+                  Prior_Generation,
+                  Prior_Peak,
+                  Dispatch_Worker,
+                  Replaced_Token,
+                  Rolled_Back);
+               if Rolled_Back then
+                  Accepted := False;
+                  Generation := 0;
+                  Replaced_Token := null;
+               end if;
+            end if;
+         end if;
+         if Replaced_Token /= null then
+            Free_Token (Replaced_Token);
+         end if;
+         if not Accepted and then Token_Value /= null then
+            Free_Token (Token_Value);
+         end if;
+         Resolution_Done := True;
+      end Resolve_Dispatch;
+
+      type Resolution_Guard is new Ada.Finalization.Limited_Controlled with record
+         Armed : Boolean := False;
+      end record;
+
+      overriding
+      procedure Finalize (Guard : in out Resolution_Guard);
+
+      overriding
+      procedure Finalize (Guard : in out Resolution_Guard) is
+      begin
+         if not Guard.Armed then
+            return;
+         end if;
+         begin
+            Resolve_Dispatch;
+            if Accepted and then not Handle.Guard.Active then
+               Item.State.Abandon (Slot, Generation);
+               Accepted := False;
+            end if;
+         exception
+            when others =>
+               null;
+         end;
+         Guard.Armed := False;
+      end Finalize;
+
+      Resolution : Resolution_Guard;
+      pragma Unreferenced (Resolution);
    begin
+      Accepted := False;
       if not Item.Started then
          raise Program_Error with "native executor has not been started";
       elsif Handle.Owner.all'Address /= Item'Address then
@@ -623,26 +871,30 @@ package body Flyology.Native_Executors is
          raise Invalid_Handle with "cannot submit through an active native operation handle";
       end if;
       Token_Value := new Flyology.Cancellation.Token;
+      Resolution.Armed := True;
       if Token /= null and then Token.Requested then
          Token_Value.Request;
       end if;
-      begin
-         Item.State.Submit (Input, Token_Value, Deadline, Slot, Generation, Replaced_Token, Accepted);
-      exception
-         when others =>
-            Free_Token (Token_Value);
-            raise;
-      end;
-      if Replaced_Token /= null then
-         Free_Token (Replaced_Token);
+      Item.State.Submit
+        (Input,
+         Token_Value,
+         Deadline,
+         Slot,
+         Generation,
+         Prior_Generation,
+         Prior_Peak,
+         Replaced_Token,
+         Dispatch_Worker,
+         Accepted);
+      if Test_Hooks.Enabled and then Accepted and then Dispatch_Worker /= 0 then
+         Test_Hooks.Native_Executor_Dispatch_Barrier;
       end if;
-      if not Accepted then
-         Free_Token (Token_Value);
-      end if;
+      Resolve_Dispatch;
       Handle.Guard.State := Handle.Owner.State'Unchecked_Access;
       Handle.Guard.Slot := Slot;
       Handle.Guard.Generation := Generation;
       Handle.Guard.Active := Accepted;
+      Resolution.Armed := False;
    end Submit;
 
    procedure Await
