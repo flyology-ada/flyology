@@ -22,12 +22,15 @@ procedure Poller_Registration_Conformance is
 
    Backlog_Count : constant Positive := 64;
 
+   --  Strict duplicate validation retains names from every simultaneously open object.  The
+   --  deepest checked-in step state needs root (23) + step (40) + expected (12) + state (207)
+   --  = 282 decoded name bytes.
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
      (Maximum_File_Bytes   => 1_000_000,
       Maximum_Steps        => 8,
       Maximum_JSON_Depth   => 32,
       Maximum_Object_Names => 256,
-      Maximum_Name_Bytes   => 256,
+      Maximum_Name_Bytes   => 282,
       Maximum_String_Bytes => 4_096,
       Maximum_Value_Bytes  => 32_768);
 
