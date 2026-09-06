@@ -41,7 +41,9 @@ package System.Flyology.Faults is
       Poller_File_Drain_Pause,
       File_Uring_Synchronous_Eventfd,
       Create_Lifecycle_Window,
-      Automatic_Placement_Window);
+      Automatic_Placement_Window,
+      Poller_Translation_Pause,
+      Descriptor_Cancel_Budget_Pause);
 
    for Fault_Point use
      (Fiber_Allocation               => 1,
@@ -79,7 +81,9 @@ package System.Flyology.Faults is
       Poller_File_Drain_Pause        => 33,
       File_Uring_Synchronous_Eventfd => 34,
       Create_Lifecycle_Window        => 36,
-      Automatic_Placement_Window     => 37);
+      Automatic_Placement_Window     => 37,
+      Poller_Translation_Pause       => 38,
+      Descriptor_Cancel_Budget_Pause => 39);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
@@ -104,4 +108,19 @@ package System.Flyology.Faults is
 
    procedure Release_Create_Registration;
    pragma Inline_Always (Release_Create_Registration);
+
+   procedure Pause_Poller_Translation;
+   pragma Import (C, Pause_Poller_Translation, "flyology_disabled_hook_must_be_elided");
+
+   procedure Pause_Descriptor_Cancel_Budget;
+   pragma Import (C, Pause_Descriptor_Cancel_Budget, "flyology_disabled_hook_must_be_elided");
+
+   procedure Note_Poller_Cancel;
+   pragma Import (C, Note_Poller_Cancel, "flyology_disabled_hook_must_be_elided");
+
+   procedure Note_Descriptor_Cancel_Queued;
+   pragma Import (C, Note_Descriptor_Cancel_Queued, "flyology_disabled_hook_must_be_elided");
+
+   procedure Note_Descriptor_Cancel_Processed;
+   pragma Import (C, Note_Descriptor_Cancel_Processed, "flyology_disabled_hook_must_be_elided");
 end System.Flyology.Faults;

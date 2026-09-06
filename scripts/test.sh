@@ -645,6 +645,7 @@ loop_thread_project_placement_smoke
 $fault_mains"
 if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
+linux_abort_readiness_waiter_smoke
 linux_poller_fairness_smoke"
 fi
 
@@ -1002,6 +1003,7 @@ FLYOLOGY_TEST_FAULTS=1 \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 if [ "$(uname -s)" = Linux ]; then
   fault_mains="$fault_mains
+linux_abort_readiness_waiter_smoke
 linux_poller_fairness_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
@@ -1059,10 +1061,13 @@ if [ "$(uname -s)" = Linux ]; then
     file-backend-cancel
 fi
 
-#  Exercise the Linux batch boundary with a queued file completion, socket
-#  readiness, and a cross-thread eventfd wake in every iteration. The same
-#  deterministic test runs against io_uring and the forced native-AIO lane.
+#  Pin Linux descriptor-event translation while a native abort targets another
+#  waiter, then exercise the batch boundary with a queued file completion,
+#  socket readiness, and a cross-thread eventfd wake. Both deterministic cases
+#  run against io_uring and the forced native-AIO lane.
 if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    "$test_bin/linux_abort_readiness_waiter_smoke"
   "$project_root/scripts/run-with-timeout.sh" 60 \
     "$test_bin/linux_poller_fairness_smoke"
 fi

@@ -1,0 +1,20 @@
+name = "poller_registration_conformance"
+description = "TLA+ conformance replay for Linux poller cancellation ownership"
+version = "0.1.0-dev"
+
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "tla", "conformance", "test"]
+project-files = ["poller_registration_conformance.gpr"]
+executables = ["poller-registration-conformance"]
+
+[build-switches]
+"*" = { Compile_Checks = "warnings" }
+
+[[depends-on]]
+flyology = "~0.2.0"
+
+[[depends-on]]
+flyology_tla = "~0.1.0-dev"
