@@ -35,6 +35,20 @@
 +           or else
 +             (not Is_Lightweight
 +              and then CPU > Integer (System.Multiprocessors.Number_Of_CPUs)))
+@@ -532,4 +561,13 @@
++         --  A lightweight creator's Base_CPU is an execution group, not a
++         --  processor. Do not inherit it across either execution lane: zero
++         --  leaves a native child unpinned and selects automatic placement
++         --  for a lightweight child in the task-primitive bridge.
++
+          Base_CPU :=
+            (if CPU = Unspecified_CPU
+-            then Self_ID.Common.Base_CPU
++            then
++              (if System.Flyology.Scheduler.Current_Task /= System.Null_Address
++               then System.Multiprocessors.Not_A_Specific_CPU
++               else Self_ID.Common.Base_CPU)
+             else System.Multiprocessors.CPU_Range (CPU));
 @@ -557,7 +592,17 @@
        begin
           T := New_ATCB (Num_Entries);
