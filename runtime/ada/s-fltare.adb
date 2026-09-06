@@ -2,6 +2,7 @@ with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
 with System.Atomic_Primitives;
+with System.Flyology.Task_Attribute_ABI;
 with System.Flyology.Task_Result_Policy;
 with System.OS_Interface;
 with System.Tasking.Task_Attributes;
@@ -46,6 +47,7 @@ package body System.Flyology.Task_Results is
 
    package Policy renames System.Flyology.Task_Result_Policy;
    package Atomics renames System.Atomic_Primitives;
+   package Task_Attribute_ABI renames System.Flyology.Task_Attribute_ABI;
    package Task_Attributes renames System.Tasking.Task_Attributes;
    package OSI renames System.OS_Interface;
 
@@ -217,7 +219,7 @@ package body System.Flyology.Task_Results is
       if T = null then
          return null;
       end if;
-      return Owned_Addresses.To_Pointer (T.Attributes (Result_Attribute_Index));
+      return Owned_Addresses.To_Pointer (Task_Attribute_ABI.Load (T, Result_Attribute_Index));
    end Owned;
 
    function Retain (Value : Owned_Access) return Boolean is
@@ -302,8 +304,8 @@ package body System.Flyology.Task_Results is
    begin
       pragma Assert (T /= null);
       pragma Assert (Storage /= System.Null_Address);
-      pragma Assert (T.Attributes (Result_Attribute_Index) = System.Null_Address);
-      T.Attributes (Result_Attribute_Index) := Storage;
+      pragma Assert (Task_Attribute_ABI.Is_Null (T, Result_Attribute_Index));
+      Task_Attribute_ABI.Store (T, Result_Attribute_Index, Storage);
    end Attach_Task_Result;
 
    procedure Release_Task_Result (Storage : System.Address) is
@@ -316,8 +318,8 @@ package body System.Flyology.Task_Results is
       Storage : System.Address;
    begin
       pragma Assert (T /= null);
-      Storage := T.Attributes (Result_Attribute_Index);
-      T.Attributes (Result_Attribute_Index) := System.Null_Address;
+      Storage := Task_Attribute_ABI.Load (T, Result_Attribute_Index);
+      Task_Attribute_ABI.Store (T, Result_Attribute_Index, System.Null_Address);
       return Storage;
    end Detach_Task_Result;
 
