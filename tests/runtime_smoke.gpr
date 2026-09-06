@@ -145,6 +145,8 @@ project Runtime_Smoke is
       "shared_memory_child.adb",
       "stack_guard_smoke.adb",
       "stack_guard_violation_child.adb",
+      "stack_overflow_child.adb",
+      "stack_overflow_smoke.adb",
       "stack_size_parity_smoke.adb",
       "stack_size_limits_child.adb",
       "stack_size_limits_smoke.adb",

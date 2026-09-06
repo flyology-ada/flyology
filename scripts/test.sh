@@ -539,6 +539,8 @@ shared_memory_smoke
 shared_memory_child
 stack_guard_violation_child
 stack_guard_smoke
+stack_overflow_child
+stack_overflow_smoke
 stack_pool_smoke
 stack_size_limits_child
 stack_size_limits_smoke

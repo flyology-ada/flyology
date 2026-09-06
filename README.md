@@ -577,9 +577,9 @@ lanes:
 - Alternate signal stacks are owned by OS threads. Native tasks retain GNARL's
   per-pthread stack, while each event-loop pthread installs one permanent stack
   shared by its fibers. `Task_Wrapper` therefore does not reserve GNARL's 32 KiB
-  alternate-stack local inside every lightweight task stack. Stack sizing still
-  retains GNARL's conservative alternate-stack allowance; removing the local
-  changes touched pages, not the requested task's established headroom.
+  alternate-stack local inside every lightweight task stack. The lightweight
+  creation path passes the requested task storage unchanged to the guarded-stack
+  allocator; only native stack sizing retains GNARL's alternate-stack allowance.
 - Lightweight stacks are mapped in arenas of at most 64 slots, targeting 4 MiB
   before the final guard. Each usable stack is preceded by an inaccessible guard
   of at least 64 KiB, rounded to the host page size. Adjacent stacks share that
