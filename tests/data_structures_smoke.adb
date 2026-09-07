@@ -1802,6 +1802,128 @@ begin
    end;
 
    declare
+      Raising_Observer_Error : exception;
+      Observer_Trigger       : constant Interfaces.Unsigned_64 :=
+        16#BAD0_B5E4#;
+
+      function Observe_Raising_U64
+        (Item : U64_Elements.Representation.Const_Ref)
+         return Interfaces.Unsigned_64
+      is
+         Result : constant Interfaces.Unsigned_64 :=
+           U64_Elements.Representation.Load_U64 (Item, 0);
+      begin
+         if Interfaces."=" (Result, Observer_Trigger) then
+            raise Raising_Observer_Error with "deliberate observer failure";
+         end if;
+         return Result;
+      end Observe_Raising_U64;
+
+      package Raising_U64_Element is new
+        DS.Storage_Types.Elements
+          (Representation     => U64_Elements.Representation,
+           Source_Type        => Interfaces.Unsigned_64,
+           Observed_Type      => Interfaces.Unsigned_64,
+           Create_Value       => U64_Elements.Create,
+           Observe_Value      => Observe_Raising_U64,
+           Direct_Constructor => U64_Elements.Set'Access);
+      package Raising_Maps is new
+        DS.Hash_Maps
+          (Key     => U64_Elements.Element,
+           Element => Raising_U64_Element);
+
+      use type Raising_Maps.Put_Result;
+
+      First, Second, Third : Raising_Maps.View;
+      Outcome              : Raising_Maps.Put_Result;
+      Home                 : Interfaces.Unsigned_64;
+      Failed               : Boolean := False;
+   begin
+      Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
+      Raising_Maps.Attach (Second, Region_B, Scratch_Map_Location, 4);
+      Raising_Maps.Put (First, 1, 42, Outcome);
+      Assert
+        (Outcome = Raising_Maps.Inserted,
+         "raising-observer map setup insert failed");
+      Raising_Maps.Put (First, 2, Observer_Trigger, Outcome);
+      Assert
+        (Outcome = Raising_Maps.Inserted,
+         "raising-observer map trigger insert failed");
+
+      begin
+         Raising_Maps.Get (First, 2, U64_Value, Flag);
+      exception
+         when Raising_Observer_Error =>
+            Failed := True;
+      end;
+      Assert (Failed, "hash-map observer failure did not propagate");
+      Assert
+        (not Raising_Maps.Is_Poisoned (First),
+         "hash-map observer failure poisoned the map");
+
+      Raising_Maps.Get (Second, 1, U64_Value, Flag);
+      Assert
+        (Flag and then U64_Value = 42,
+         "hash map was unusable after observer failure");
+      Raising_Maps.Put (Second, 3, 84, Outcome);
+      Assert
+        (Outcome = Raising_Maps.Inserted,
+         "hash-map put failed after observer failure");
+      Raising_Maps.Attach (Third, Region_A, Scratch_Map_Location, 4);
+
+      Failed := False;
+      begin
+         Raising_Maps.Get (Third, 2, U64_Value, 0.0, Flag);
+      exception
+         when Raising_Observer_Error =>
+            Failed := True;
+      end;
+      Assert (Failed, "timed hash-map observer failure did not propagate");
+      Assert
+        (not Raising_Maps.Is_Poisoned (Third),
+         "timed hash-map observer failure poisoned the map");
+      Raising_Maps.Get (First, 3, U64_Value, Flag);
+      Assert
+        (Flag and then U64_Value = 84,
+         "hash map was unusable after timed observer failure");
+
+      Raising_Maps.Detach (Third);
+      Raising_Maps.Detach (Second);
+      Raising_Maps.Destroy (First);
+
+      Home := Test_Hash (Encode (1)) and 3;
+      Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
+      Write_U32
+        (Base_B, Map_Entry_Offset_At (Scratch_Map_Location, Home, 0), 9);
+      Failed := False;
+      begin
+         Raising_Maps.Get (First, 1, U64_Value, Flag);
+      exception
+         when DS.Layout_Error =>
+            Failed := True;
+      end;
+      Assert
+        (Failed and then Raising_Maps.Is_Poisoned (First),
+         "hash-map Get did not poison a corrupt entry state");
+
+      Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
+      Write_U32
+        (Base_B, Map_Entry_Offset_At (Scratch_Map_Location, Home, 0), 9);
+      Failed := False;
+      begin
+         Raising_Maps.Get (First, 1, U64_Value, 0.0, Flag);
+      exception
+         when DS.Layout_Error =>
+            Failed := True;
+      end;
+      Assert
+        (Failed and then Raising_Maps.Is_Poisoned (First),
+         "timed hash-map Get did not poison a corrupt entry state");
+      Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
+      Raising_Maps.Destroy (First);
+   end;
+
+   declare
       Scratch, Peer : Maps.View;
       Replacement   : Vectors.View;
       Home          : Interfaces.Unsigned_64;
