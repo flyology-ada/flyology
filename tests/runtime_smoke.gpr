@@ -46,6 +46,7 @@ project Runtime_Smoke is
       "create_finalize_race_smoke.adb",
       "datagram_io_smoke.adb",
       "data_structures_concurrency_smoke.adb",
+      "data_structures_destroy_contention_smoke.adb",
       "data_structures_smoke.adb",
       "flyology-data_structures-clock_policy-smoke.adb",
       "descriptor_ownership_smoke.adb",

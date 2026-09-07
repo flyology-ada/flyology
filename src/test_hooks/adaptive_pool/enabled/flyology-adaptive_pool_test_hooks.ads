@@ -14,6 +14,13 @@ is
    --  Clear the two-chunk conformance fixture's lifecycle observations.
    procedure Reset;
 
+   --  Make an adaptive chunk release report arena contention after the given
+   --  number of successful release attempts.
+   procedure Arm_Release_Contention (After_Releases : Natural := 0);
+
+   --  Consume one armed adaptive chunk-release contention.
+   procedure Consume_Release_Contention (Armed : out Boolean);
+
    --  Record one chunk lifecycle transition while the pool guard is owned.
    procedure Record_Chunk_State (Chunk : Positive; Live : Boolean);
 

@@ -1109,6 +1109,14 @@ Poisoning makes current and later views fail with `Poison_Error`, and exclusive
 stored mutation may have begun poisons the object rather than publishing
 possibly inconsistent bytes as ready.
 
+Arena contention during adaptive-pool or dynamic-leaf destruction is a
+retryable exception to that poisoning rule. A dynamic leaf may already have
+released and cleared its deferred allocation while its current allocation
+remains published. An adaptive pool may already have reclaimed earlier empty
+chunks while the contended chunk remains live and names its arena allocation.
+Both are coherent ready states: `Busy_Error` releases the leaf guard without
+poisoning, and a later `Destroy` can finish reclamation.
+
 Timed overloads are opt-in and leave the immediate fast path unchanged. Their
 nonnegative `Wait_Timeout` is at most 24 hours; zero permits one immediate
 attempt. The monotonic deadline begins with the first failed claim, not before

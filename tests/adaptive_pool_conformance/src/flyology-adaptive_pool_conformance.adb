@@ -30,7 +30,7 @@ procedure Flyology.Adaptive_Pool_Conformance is
         Maximum_Chunks  => 2);
 
    package SSE renames System.Storage_Elements;
-   --  Qualification geometry is the minimized issue-161 witness: two
+   --  Qualification geometry is the minimized issue-161/#162 witness: two
    --  two-slot chunks inside one caller-owned region, not a production limit.
    type Fixture_Storage is new SSE.Storage_Array (1 .. 262_144)
    with Alignment => 64;
@@ -42,7 +42,7 @@ procedure Flyology.Adaptive_Pool_Conformance is
    use type Pools.Allocation_Result;
    use type Pools.Handle;
 
-   --  These fail-closed test limits exceed the canonical four-step witness
+   --  These fail-closed test limits exceed the canonical six-step witness
    --  while remaining local to this conformance executable.
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
      (Maximum_File_Bytes   => 1_000_000,
@@ -77,6 +77,9 @@ procedure Flyology.Adaptive_Pool_Conformance is
          Result_Slot   => 0,
          Result_Stamp  => 0,
          Result_Epoch  => 0,
+         Pool_State    => Adaptive_Pool_Model.State_Pool_State_Ready,
+         Arena_Block1  => Adaptive_Pool_Model.State_Arena_Block1_Allocated,
+         Arena_Block2  => Adaptive_Pool_Model.State_Arena_Block2_Allocated,
          Last_Action   => Adaptive_Pool_Model.State_Last_Action_Init);
    end record;
 
@@ -200,6 +203,9 @@ procedure Flyology.Adaptive_Pool_Conformance is
          Result_Slot   => 0,
          Result_Stamp  => 0,
          Result_Epoch  => 0,
+         Pool_State    => Adaptive_Pool_Model.State_Pool_State_Ready,
+         Arena_Block1  => Adaptive_Pool_Model.State_Arena_Block1_Allocated,
+         Arena_Block2  => Adaptive_Pool_Model.State_Arena_Block2_Allocated,
          Last_Action   => Adaptive_Pool_Model.State_Last_Action_Init);
       Self.Ready := True;
       Observed := Self.Current;
@@ -248,6 +254,59 @@ procedure Flyology.Adaptive_Pool_Conformance is
       State := Self.Current;
    end Set_Allocation_Observation;
 
+   procedure Prepare_Contention_Fixture (Self : in out Adaptive_Adapter) is
+      Empty  : array (1 .. 3) of Pools.Handle;
+      Result : Pools.Allocation_Result;
+   begin
+      if Self.Later_Live then
+         Pools.Release (Self.Pool, Self.Arena, Self.Later);
+         Self.Later_Live := False;
+      end if;
+      if Self.First_Live then
+         Pools.Release (Self.Pool, Self.Arena, Self.First);
+         Self.First_Live := False;
+      end if;
+      if Self.Second_Live then
+         Pools.Release (Self.Pool, Self.Arena, Self.Second);
+         Self.Second_Live := False;
+      end if;
+      Pools.Destroy (Self.Pool, Self.Arena);
+      Arenas.Destroy (Self.Arena);
+      Regions.Detach (Self.Region);
+
+      Flyology.Adaptive_Pool_Test_Hooks.Reset;
+      Regions.Attach
+        (Self.Region,
+         Self.Storage'Address,
+         DS.Byte_Count (Self.Storage'Length));
+      Arenas.Initialize
+        (Self.Arena,
+         Self.Region,
+         64,
+         (Usable_Capacity => 32_768, Minimum_Block_Size => 64),
+         16#A162_A162_A162_A162#);
+      Pools.Initialize (Self.Pool, Self.Region, 196_608, Self.Arena);
+      for Index in Empty'Range loop
+         Pools.Try_Allocate
+           (Self.Pool,
+            Self.Arena,
+            Interfaces.Unsigned_64 (161 + Index),
+            Empty (Index),
+            Result);
+         if Result /= Pools.Allocated then
+            raise Program_Error
+              with "adaptive contention fixture allocation failed";
+         end if;
+      end loop;
+      for Handle of Empty loop
+         Pools.Release (Self.Pool, Self.Arena, Handle);
+      end loop;
+      Self.Stale := Pools.Null_Handle;
+      Self.Later := Pools.Null_Handle;
+      Self.First := Pools.Null_Handle;
+      Self.Second := Pools.Null_Handle;
+   end Prepare_Contention_Fixture;
+
    procedure Apply
      (Self         : in out Adaptive_Adapter;
       Index        : Positive;
@@ -262,7 +321,9 @@ procedure Flyology.Adaptive_Pool_Conformance is
       pragma Unreferenced (Index);
       Read_Value     : Interfaces.Unsigned_64;
       Destroy_Failed : Boolean := False;
+      Contended      : Boolean := False;
       Rejected       : Boolean := False;
+      Probe          : Pools.View;
    begin
       Observed :=
         (Status => Adaptive_Pool_Model.Outcome_Status_None,
@@ -381,6 +442,77 @@ procedure Flyology.Adaptive_Pool_Conformance is
            Adaptive_Pool_Model.State_Result_Epoch_Type (Self.Stale.Epoch);
          Self.Current.Last_Action :=
            Adaptive_Pool_Model.State_Last_Action_Validate_Old_Handle;
+         State := Self.Current;
+
+      elsif Action = "AdaptivePoolLifecycle!PrepareContention"
+        and then Role = "prepare-contention"
+        and then Input.Value = 0
+      then
+         Prepare_Contention_Fixture (Self);
+         Observed :=
+           (Status => Adaptive_Pool_Model.Outcome_Status_None,
+            Chunk  => 0,
+            Slot   => 0,
+            Stamp  => 0,
+            Epoch  => 0);
+         Self.Current :=
+           (Phase         => Adaptive_Pool_Model.State_Phase_Contention_Ready,
+            Entry1        => Entry_1_State,
+            Entry2        => Entry_2_State,
+            Owner11       => Adaptive_Pool_Model.State_Owner11_None,
+            Pool_Epoch    => 1,
+            Result_Status => Adaptive_Pool_Model.State_Result_Status_None,
+            Result_Chunk  => 0,
+            Result_Slot   => 0,
+            Result_Stamp  => 0,
+            Result_Epoch  => 0,
+            Pool_State    => Adaptive_Pool_Model.State_Pool_State_Ready,
+            Arena_Block1  => Adaptive_Pool_Model.State_Arena_Block1_Allocated,
+            Arena_Block2  => Adaptive_Pool_Model.State_Arena_Block2_Allocated,
+            Last_Action   =>
+              Adaptive_Pool_Model.State_Last_Action_Prepare_Contention);
+         State := Self.Current;
+
+      elsif Action = "AdaptivePoolLifecycle!DestroyContended"
+        and then Role = "destroy-contended"
+        and then Input.Value = 0
+      then
+         Flyology.Adaptive_Pool_Test_Hooks.Arm_Release_Contention
+           (After_Releases => 1);
+         begin
+            Pools.Destroy (Self.Pool, Self.Arena);
+         exception
+            when DS.Busy_Error =>
+               Contended := True;
+         end;
+         if not Contended then
+            Fail (Status, "destroy did not report injected arena contention");
+            return;
+         end if;
+         Pools.Attach (Probe, Self.Region, 196_608, Self.Arena);
+         Pools.Detach (Probe);
+         Observed :=
+           (Status => Adaptive_Pool_Model.Outcome_Status_Destroy_Contended,
+            Chunk  => 0,
+            Slot   => 0,
+            Stamp  => 0,
+            Epoch  => 0);
+         Self.Current.Phase := Adaptive_Pool_Model.State_Phase_Contention_Done;
+         Self.Current.Entry1 := Entry_1_State;
+         Self.Current.Entry2 := Entry_2_State;
+         Self.Current.Result_Status :=
+           Adaptive_Pool_Model.State_Result_Status_Destroy_Contended;
+         Self.Current.Result_Chunk := 0;
+         Self.Current.Result_Slot := 0;
+         Self.Current.Result_Stamp := 0;
+         Self.Current.Result_Epoch := 0;
+         Self.Current.Pool_State := Adaptive_Pool_Model.State_Pool_State_Ready;
+         Self.Current.Arena_Block1 :=
+           Adaptive_Pool_Model.State_Arena_Block1_Free;
+         Self.Current.Arena_Block2 :=
+           Adaptive_Pool_Model.State_Arena_Block2_Allocated;
+         Self.Current.Last_Action :=
+           Adaptive_Pool_Model.State_Last_Action_Destroy_Contended;
          State := Self.Current;
 
       else

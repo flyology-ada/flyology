@@ -292,14 +292,17 @@ expect_counterexample \
 expect_counterexample \
   AdaptivePoolLifecycle AdaptivePoolLifecycle_broken.cfg \
   NoStaleHandleAccepted adaptive-pool-lifecycle-broken
-for adaptive_tag in adaptive-pool-lifecycle adaptive-pool-lifecycle-broken
+expect_counterexample \
+  AdaptivePoolLifecycle AdaptivePoolLifecycle_contention_broken.cfg \
+  TransientContentionNeverPoisons adaptive-pool-lifecycle-contention-broken
+for adaptive_tag in adaptive-pool-lifecycle adaptive-pool-lifecycle-contention-broken
 do
-  if ! grep -Fq '5 states generated, 5 distinct states found' \
+  if ! grep -Fq '7 states generated, 7 distinct states found' \
     "$run_root/$adaptive_tag.log"
   then
     cat "$run_root/$adaptive_tag.log" >&2
     printf '%s\n' \
-      "$adaptive_tag did not explore the reviewed five-state graph" >&2
+      "$adaptive_tag did not explore the reviewed seven-state graph" >&2
     exit 1
   fi
   if grep -q '^Warning:' "$run_root/$adaptive_tag.log"; then
@@ -308,6 +311,20 @@ do
     exit 1
   fi
 done
+if ! grep -Fq '5 states generated, 5 distinct states found' \
+  "$run_root/adaptive-pool-lifecycle-broken.log"
+then
+  cat "$run_root/adaptive-pool-lifecycle-broken.log" >&2
+  printf '%s\n' \
+    'adaptive-pool stale-handle probe did not preserve its five-state counterexample' >&2
+  exit 1
+fi
+if grep -q '^Warning:' "$run_root/adaptive-pool-lifecycle-broken.log"; then
+  cat "$run_root/adaptive-pool-lifecycle-broken.log" >&2
+  printf '%s\n' \
+    'adaptive-pool stale-handle probe emitted a TLC warning' >&2
+  exit 1
+fi
 expect_temporal_counterexample \
   AllocatorAlgorithmsRefinement \
   AllocatorAlgorithms_refinement_buddy_no_retry.cfg \
@@ -455,13 +472,13 @@ adaptive_status=$?
 set -e
 if [ "$adaptive_status" -ne 12 ] \
   || ! grep -Fq 'Invariant WitnessPending is violated.' "$adaptive_log" \
-  || ! grep -Fq '5 states generated, 5 distinct states found' "$adaptive_log"
+  || ! grep -Fq '7 states generated, 7 distinct states found' "$adaptive_log"
 then
   cat "$adaptive_log" >&2
   printf '%s\n' 'adaptive-pool witness did not reach its exact terminal state' >&2
   exit 1
 fi
-for action in Destroy AllocateOne AllocateTwo ValidateOldHandle
+for action in Destroy AllocateOne AllocateTwo ValidateOldHandle PrepareContention DestroyContended
 do
   if ! grep -Eq "^<$action .*: [1-9]" "$adaptive_log"; then
     cat "$adaptive_log" >&2
@@ -670,8 +687,8 @@ cmp \
   "$run_root/adaptive-pool-stdout.json"
 grep -Fq '"verdict":"conformant"' \
   "$run_root/adaptive-pool-result.json"
-grep -Fq '"compared_steps":4' \
+grep -Fq '"compared_steps":6' \
   "$run_root/adaptive-pool-result.json"
-printf '%s\n' 'Ada/TLA+ match    AdaptivePoolLifecycle          4 transitions'
+printf '%s\n' 'Ada/TLA+ match    AdaptivePoolLifecycle          6 transitions'
 
 printf '%s\n' "Flyology TLA+ model checks passed"

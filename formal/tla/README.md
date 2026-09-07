@@ -47,10 +47,11 @@ observed handles, errors, chunk lifecycle hooks, and stale-handle validation.
 Expected model values never cross the generated adapter boundary.
 
 `AdaptivePoolLifecycleProof` is the mandatory TLAPS preservation proof for the
-two-pass policy. It proves initialization and action-by-action preservation of
-the model's type, failed-destroy atomicity, and stale-handle safety predicates.
-The finite TLC safe/broken checks and four-transition Ada replay remain
-separate required evidence.
+two-pass and contention-rejection policies. It proves initialization and
+action-by-action preservation of the model's type, failed-destroy atomicity,
+stale-handle safety, and retryable partial-reclamation predicates. The finite
+TLC safe/broken checks and six-transition Ada replay remain separate required
+evidence.
 
 ## Extraction map
 
@@ -91,6 +92,8 @@ separate required evidence.
 | `AdaptivePoolLifecycle.Destroy` | `Allocation_Pools.Adaptive.Destroy`: either reclaim during the scan or preflight every chunk before reclamation |
 | `AllocateOne` / `AllocateTwo` | adaptive table-order allocation into a live chunk, followed by creation in the first empty entry |
 | `ValidateOldHandle` | adaptive validation of the complete `(chunk, slot, stamp, epoch)` handle tuple |
+| `PrepareContention` | two empty live chunks whose arena blocks remain allocated after slot release |
+| `DestroyContended` | abort-atomic arena-block release and entry clearing for chunk 1, followed by contention while chunk 2 remains coherently live |
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
@@ -197,11 +200,21 @@ acceptance counterexample. The fixed configuration also checks that a failed
 destroy preserves the complete modeled pool state, including the free slot's
 owner and pool epoch.
 
+The same model then replaces that fixture with two empty live chunks and
+injects arena contention on the second block release. The safe configuration
+requires the first block and entry to be reclaimed together while the second
+entry continues to name its allocated block and the pool stays ready. The
+second broken configuration poisons that coherent partial result, producing
+the required transient-contention counterexample. The Ada replay exercises
+the same second-release boundary and confirms that a fresh attachment and a
+retry remain valid.
+
 `AdaptivePoolLifecycleProof` discharges two TLAPS obligations over this
-extracted state machine: the fixed policy initializes in a safe state, and
+extracted state machine: the fixed policies initialize in a safe state, and
 every named action preserves that safety conjunction. It does not prove the
-Ada implementation, executions outside the extraction, or unmodeled
-arena-release failures; TLC and replay retain their separate evidence roles.
+Ada implementation, executions outside the extraction, or arena-release
+failures other than the modeled transient contention; TLC and replay retain
+their separate evidence roles.
 
 `SupervisionLifecycle` composes a fixed two-node static topology with a nested
 bounded family owned by the dependent node. The safety configuration explores

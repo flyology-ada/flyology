@@ -150,9 +150,12 @@ package Flyology.Data_Structures.Dynamic.Byte_Strings with Preelaborate is
    procedure Clear (Item : in out View);
 
    --  Release current and deferred allocations, destroy the quiescent header,
-   --  and detach Item.
+   --  and detach Item. Arena contention raises Busy_Error before an allocation
+   --  that could not be reclaimed is forgotten; the ready string remains
+   --  retryable.
    --  @param Item Exclusively synchronized string view
    --  @param Arena Matching attached arena view
+   --  @exception Busy_Error Arena metadata is currently owned
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View);
 
 private

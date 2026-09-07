@@ -3,6 +3,7 @@ with Flyology.Data_Structures.Atomics;
 with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Slab_Pools.Validation;
 with Flyology.Data_Structures.Storage;
+with System.Soft_Links;
 
 package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    package Atomic renames Flyology.Data_Structures.Atomics;
@@ -539,8 +540,9 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    end Release;
 
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View) is
-      Allocation : Arena_Provider.Allocation_Handle;
-      Mutated    : Boolean := False;
+      Allocation          : Arena_Provider.Allocation_Handle;
+      Injected_Contention : Boolean;
+      Mutated             : Boolean := False;
    begin
       Require_Arena (Item, Arena);
       Acquire (Item);
@@ -554,20 +556,41 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
          for Index in 1 .. Maximum_Chunks loop
             if Entry_State (Item, Index) = Live_State then
                Allocation := Entry_Allocation (Item, Index);
-               Mutated := True;
-               Chunk_Slabs.Destroy (Item.Chunks (Index).Slab);
-               Regions.Detach (Item.Chunks (Index).Region);
-               Item.Chunks (Index).Allocation := Arena_Provider.Null_Allocation;
-               Arena_Provider.Release (Arena, Allocation);
-               Set_Entry_Allocation (Item, Index, Arena_Provider.Null_Allocation);
-               Set_Entry_State (Item, Index, Empty_State);
                if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
-                  Flyology.Adaptive_Pool_Test_Hooks.Record_Chunk_State (Index, Live => False);
+                  Flyology.Adaptive_Pool_Test_Hooks.Consume_Release_Contention (Injected_Contention);
+                  if Injected_Contention then
+                     raise Busy_Error with "injected adaptive-pool arena contention";
+                  end if;
                end if;
+
+               --  Releasing the arena block and forgetting its persisted
+               --  handle form one ownership transition. A later chunk may
+               --  still contend, but every earlier entry remains coherent.
+               System.Soft_Links.Abort_Defer.all;
+               begin
+                  Arena_Provider.Release (Arena, Allocation);
+                  Mutated := True;
+                  Chunk_Slabs.Detach (Item.Chunks (Index).Slab);
+                  Regions.Detach (Item.Chunks (Index).Region);
+                  Item.Chunks (Index).Allocation := Arena_Provider.Null_Allocation;
+                  Set_Entry_Allocation (Item, Index, Arena_Provider.Null_Allocation);
+                  Set_Entry_State (Item, Index, Empty_State);
+                  if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
+                     Flyology.Adaptive_Pool_Test_Hooks.Record_Chunk_State (Index, Live => False);
+                  end if;
+               exception
+                  when others =>
+                     System.Soft_Links.Abort_Undefer.all;
+                     raise;
+               end;
+               System.Soft_Links.Abort_Undefer.all;
             end if;
          end loop;
          Layouts.Mark_Destroyed (Item.Core);
       exception
+         when Busy_Error =>
+            Release_Guard (Item);
+            raise;
          when others =>
             begin
                if Mutated then

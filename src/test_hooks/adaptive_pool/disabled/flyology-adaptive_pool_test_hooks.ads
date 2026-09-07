@@ -13,6 +13,10 @@ is
 
    procedure Reset
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_adaptive_pool_reset";
+   procedure Arm_Release_Contention (After_Releases : Natural := 0)
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_adaptive_pool_arm_release";
+   procedure Consume_Release_Contention (Armed : out Boolean)
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_adaptive_pool_consume_release";
    procedure Record_Chunk_State (Chunk : Positive; Live : Boolean)
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_adaptive_pool_record";
    function Chunk_Is_Live (Chunk : Positive) return Boolean

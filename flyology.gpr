@@ -12,12 +12,16 @@ project Flyology is
      external ("FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS", "false");
    Adaptive_Pool_Test_Hook_Source_Dir :=
      "src/test_hooks/adaptive_pool/disabled/";
+   Dynamic_Destroy_Test_Hook_Source_Dir :=
+     "src/test_hooks/dynamic_destroy/disabled/";
    case Adaptive_Pool_Test_Hooks is
       when "false" =>
          null;
       when "true" =>
          Adaptive_Pool_Test_Hook_Source_Dir :=
            "src/test_hooks/adaptive_pool/enabled/";
+         Dynamic_Destroy_Test_Hook_Source_Dir :=
+           "src/test_hooks/dynamic_destroy/enabled/";
    end case;
 
    type Buffer_Test_Hooks_Type is ("false", "true");
@@ -177,6 +181,7 @@ project Flyology is
          for Source_Dirs use
            ("src/", "src/native/", "src/platform/linux/", "config/",
             Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
@@ -187,6 +192,7 @@ project Flyology is
          for Source_Dirs use
            ("src/", "src/native/", "src/platform/darwin/", "config/",
             Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
@@ -197,6 +203,7 @@ project Flyology is
          for Source_Dirs use
            ("src/", "src/native/", "config/",
             Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
             Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
             TLS_Test_Hook_Source_Dir,
             Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
