@@ -602,8 +602,11 @@ package body Flyology.Data_Structures.Hash_Maps is
          end if;
          Release (Item);
       exception
-         when others =>
+         when Layout_Error =>
             Layouts.Poison (Item.Core);
+            raise;
+         when others =>
+            Release (Item);
             raise;
       end;
    end Get;
@@ -631,8 +634,11 @@ package body Flyology.Data_Structures.Hash_Maps is
          end if;
          Release (Item);
       exception
-         when others =>
+         when Layout_Error =>
             Layouts.Poison (Item.Core);
+            raise;
+         when others =>
+            Release (Item);
             raise;
       end;
    end Get;
