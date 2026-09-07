@@ -89,9 +89,9 @@ package Flyology.Native_Executors is
    --  Stop admission, request cancellation for every outstanding operation,
    --  and join all native workers. Shutdown is terminal and idempotent; Start
    --  raises Program_Error afterward. Execute must observe its executor-owned
-   --  token or deadline for this call to remain bounded. Call Shutdown before
-   --  leaving an Ada task master that contains a started executor; controlled
-   --  finalization performs the same operation only as a fallback.
+   --  token or deadline for this call to remain bounded. Explicit Shutdown
+   --  reports cleanup errors before scope exit; controlled finalization
+   --  performs the same cleanup when a started executor leaves its task master.
    --  If cancellation wake signaling fails, terminal cancellation remains
    --  recorded; cleanup completes before Shutdown propagates Program_Error.
    --  @param Item Application-owned executor
@@ -99,9 +99,10 @@ package Flyology.Native_Executors is
    --  be signaled
    procedure Shutdown (Item : in out Executor);
 
-   --  Submit without waiting. Accepted is false when bounded storage is full
-   --  or shutdown has begun; Handle then remains inactive and reusable. The
-   --  executor samples Token at submission and gives Execute an executor-owned
+   --  Submit without waiting. Accepted is false when bounded storage is full,
+   --  shutdown has begun, or an idle worker has not yet reached its dispatch
+   --  rendezvous; Handle then remains inactive and reusable. The executor
+   --  samples Token at submission and gives Execute an executor-owned
    --  cancellation token; it never retains the caller's token. Deadline is an
    --  absolute monotonic deadline passed to Execute. A worker converts a token
    --  already requested before dispatch to Operation_Cancelled and an already
@@ -202,19 +203,34 @@ private
    type Natural_Array is array (Positive range <>) of Natural;
    type Boolean_Array is array (Positive range <>) of Boolean;
    type Status_Array is array (Positive range <>) of Slot_Status;
+   type Worker_Status is (Worker_Starting, Worker_Idle, Worker_Dispatching, Worker_Active, Worker_Terminated);
+   type Worker_Status_Array is array (Positive range <>) of Worker_Status;
    type Exception_Id_Array is array (Positive range <>) of Ada.Exceptions.Exception_Id;
    type Message_Array is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
 
-   protected type Shared_State (Capacity : Positive) is
+   protected type Shared_State (Capacity, Workers : Positive) is
       procedure Submit
-        (Input          : Input_Type;
-         Token          : Token_Access;
-         Deadline       : Ada.Real_Time.Time;
-         Slot           : out Positive;
-         Generation     : out Generation_Number;
-         Replaced_Token : out Token_Access;
-         Accepted       : out Boolean);
-      entry Next (Slot : out Positive; Stop : out Boolean);
+        (Input            : Input_Type;
+         Token            : Token_Access;
+         Deadline         : Ada.Real_Time.Time;
+         Slot             : out Positive;
+         Generation       : out Generation_Number;
+         Prior_Generation : out Generation_Number;
+         Prior_Peak       : out Natural;
+         Replaced_Token   : out Token_Access;
+         Dispatch_Worker  : out Natural;
+         Accepted         : out Boolean);
+      procedure Rollback_Dispatch
+        (Slot             : Positive;
+         Generation       : Generation_Number;
+         Prior_Generation : Generation_Number;
+         Prior_Peak       : Natural;
+         Worker           : Positive;
+         Replaced_Token   : Token_Access;
+         Rolled_Back      : out Boolean);
+      procedure Try_Next (Worker : Positive; Slot : out Positive; Stop, Available : out Boolean);
+      procedure Worker_Started (Worker : Positive);
+      procedure Dispatch_Accepted (Worker : Positive);
       procedure Operation_Data
         (Slot     : Positive;
          Input    : out Input_Type;
@@ -237,39 +253,46 @@ private
       procedure Abandon (Slot : Positive; Generation : Generation_Number);
       --  Elect one cleanup owner; later callers wait for Complete_Shutdown.
       procedure Begin_Shutdown (Owner : out Boolean);
+      entry Await_Dispatch_Resolution;
       procedure Signal_Shutdown_Completion (Slot : Positive);
       procedure Request_Cancellation (Slot : Positive);
       procedure Set_Expected_Workers (Count : Natural);
-      procedure Worker_Stopped;
+      function Needs_Stop (Worker : Positive) return Boolean;
+      procedure Worker_Stopped (Worker : Positive; Selected_Terminate : Boolean);
       entry Await_Stopped;
+      function Master_Owns_Worker_Storage return Boolean;
       procedure Take_Token (Slot : Positive; Owner : not null access Token_Owner);
       procedure Complete_Shutdown;
       entry Await_Shutdown;
       function Shutdown_Started return Boolean;
       function Statistics return Executor_Statistics;
    private
-      Inputs               : Input_Array (1 .. Capacity);
-      Results              : Result_Array (1 .. Capacity);
-      Tokens               : Token_Array (1 .. Capacity) := (others => null);
-      Deadlines            : Time_Array (1 .. Capacity) := (others => Ada.Real_Time.Time_Last);
-      Generations          : Generation_Array (1 .. Capacity) := (others => 0);
-      Status               : Status_Array (1 .. Capacity) := (others => Free);
-      Detached             : Boolean_Array (1 .. Capacity) := (others => False);
-      Error_Ids            : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
-      Messages             : Message_Array (1 .. Capacity);
-      Wakes                : Wake_Array (1 .. Capacity);
-      Wake_Armed           : Boolean_Array (1 .. Capacity) := (others => False);
-      Wake_Pending         : Boolean_Array (1 .. Capacity) := (others => False);
-      Queue                : Natural_Array (1 .. Capacity) := (others => 0);
-      Head                 : Positive := 1;
-      Tail                 : Positive := 1;
-      Queue_Count          : Natural := 0;
-      Stopping             : Boolean := False;
-      Stopped_Workers      : Natural := 0;
-      Expected_Workers     : Natural := 0;
-      Expected_Workers_Set : Boolean := False;
-      Shutdown_Complete    : Boolean := False;
-      Counters             : Executor_Statistics;
+      Inputs                  : Input_Array (1 .. Capacity);
+      Results                 : Result_Array (1 .. Capacity);
+      Tokens                  : Token_Array (1 .. Capacity) := (others => null);
+      Deadlines               : Time_Array (1 .. Capacity) := (others => Ada.Real_Time.Time_Last);
+      Generations             : Generation_Array (1 .. Capacity) := (others => 0);
+      Status                  : Status_Array (1 .. Capacity) := (others => Free);
+      Detached                : Boolean_Array (1 .. Capacity) := (others => False);
+      Error_Ids               : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
+      Messages                : Message_Array (1 .. Capacity);
+      Wakes                   : Wake_Array (1 .. Capacity);
+      Wake_Armed              : Boolean_Array (1 .. Capacity) := (others => False);
+      Wake_Pending            : Boolean_Array (1 .. Capacity) := (others => False);
+      Queue                   : Natural_Array (1 .. Capacity) := (others => 0);
+      Head                    : Positive := 1;
+      Tail                    : Positive := 1;
+      Queue_Count             : Natural := 0;
+      Pending_Dispatch_Slot   : Natural := 0;
+      Pending_Dispatch_Worker : Natural := 0;
+      Worker_States           : Worker_Status_Array (1 .. Workers) := (others => Worker_Starting);
+      Stopping                : Boolean := False;
+      Stopped_Workers         : Natural := 0;
+      Master_Terminations     : Natural := 0;
+      Expected_Workers        : Natural := 0;
+      Expected_Workers_Set    : Boolean := False;
+      Shutdown_Complete       : Boolean := False;
+      Counters                : Executor_Statistics;
    end Shared_State;
 
    type Shared_State_Access is access all Shared_State;
@@ -291,7 +314,8 @@ private
 
    task type Worker is
       pragma Task_Info (Flyology.Native_Task);
-      entry Start (State : System.Address);
+      entry Start (State : System.Address; Index : Positive);
+      entry Dispatch;
       entry Stop;
    end Worker;
    type Worker_Array is array (Positive range <>) of Worker;
@@ -301,7 +325,7 @@ private
      (Workers  : Positive;
       Capacity : Positive)
    is limited new Ada.Finalization.Limited_Controlled with record
-      State             : aliased Shared_State (Capacity);
+      State             : aliased Shared_State (Capacity, Workers);
       Pool              : Worker_Array_Access;
       Started           : Boolean := False;
       Activated_Workers : Natural := 0;
