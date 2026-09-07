@@ -368,6 +368,7 @@ package body Flyology.Supervision.Static is
          Before := Snapshots (Child).State;
          Snapshots (Child).State := Starting;
          Snapshots (Child).Ready := False;
+         Ready_Since (Child) := Ada.Real_Time.Time_First;
          Snapshots (Child).Live := True;
          Snapshots (Child).Backoff := Ada.Real_Time.Time_Span_Zero;
          Snapshots (Child).Termination := Empty_Summary (No_Termination);
@@ -671,6 +672,7 @@ package body Flyology.Supervision.Static is
             return;
          end if;
 
+         Subtree_Ready_Since := Ada.Real_Time.Time_First;
          Compute_Affected (Trigger, Child_Specs (Trigger).Impact, Recovery_Affected);
          if Retrying then
             for Child in Child_Kind loop
@@ -1536,6 +1538,10 @@ package body Flyology.Supervision.Static is
                   end if;
                   Item.State.Publish_Termination
                     (Managed_Child, Value, Result_Value.Termination, Cascade, Finished_At);
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
+                  end if;
                end;
             exception
                when Occurrence : others =>
@@ -1566,6 +1572,10 @@ package body Flyology.Supervision.Static is
                             else Unhandled_Exception)),
                         Cascade,
                         Failed_At);
+                     if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                        Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                          (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
+                     end if;
                   end;
             end Run_Generation;
 
@@ -1586,6 +1596,10 @@ package body Flyology.Supervision.Static is
             while Activated and then not Item.State.Manager_Should_Exit loop
                Item.State.Try_Start (Managed_Child, Ada.Real_Time.Clock, Started, Value, Spec, Incident);
                if Started then
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Starting);
+                  end if;
                   Run_Generation (Value, Spec, Incident);
                else
                   delay 0.001;

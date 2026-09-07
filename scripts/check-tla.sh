@@ -157,6 +157,9 @@ expect_safe \
 expect_safe \
   SupervisionLifecycle SupervisionLifecycle_liveness.cfg supervision-live
 expect_safe \
+  SupervisionLifecycle SupervisionLifecycle_restart_window.cfg \
+  supervision-restart-window
+expect_safe \
   CompletionSetFinalize CompletionSetFinalize.cfg completion-finalize-safe
 expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_buddy.cfg allocator-buddy
@@ -204,6 +207,9 @@ expect_counterexample \
 expect_counterexample \
   SupervisionLifecycle SupervisionLifecycle_readmission.cfg \
   OwnerReadinessFollowsReadmission supervision-readmission
+expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_restart_window_stale.cfg \
+  RestartAttemptsStayBounded supervision-restart-window-stale
 expect_temporal_counterexample \
   SupervisionLifecycle SupervisionLifecycle_no_forward.cfg \
   CooperativeShutdownCompletes supervision-no-forward
@@ -528,6 +534,78 @@ cmp \
   "$project_root/tests/adaptive_pool_conformance/traces/adaptive_pool_lifecycle.trace.json" \
   "$adaptive_trace"
 
+restart_raw="$run_root/supervision-restart-window-raw.json"
+restart_log="$run_root/supervision-restart-window-witness.log"
+restart_meta="$run_root/supervision-restart-window-witness-states"
+restart_config="$project_root/tests/SupervisionLifecycle_restart_window_trace.cfg"
+set +e
+"$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+  -workers 1 -coverage 1 -noGenerateSpecTE -metadir "$restart_meta" \
+  -config "$restart_config" \
+  -dumpTrace json "$restart_raw" SupervisionRestartWindow.tla \
+  >"$restart_log" 2>&1
+restart_status=$?
+set -e
+if [ "$restart_status" -ne 12 ] \
+  || ! grep -Fq 'Invariant RestartWindowWitnessPending is violated.' "$restart_log" \
+  || ! grep -Fq '10 states generated, 10 distinct states found' "$restart_log"
+then
+  cat "$restart_log" >&2
+  printf '%s\n' \
+    'supervision restart-window witness did not reach its exact exhausted state' >&2
+  exit 1
+fi
+for action in MarkRestartReady AdvanceRestartTime RestartFailure StartRestartGeneration
+do
+  if ! grep -Eq "^<$action .*: [1-9]" "$restart_log"; then
+    cat "$restart_log" >&2
+    printf '%s\n' "supervision restart-window witness did not cover $action" >&2
+    exit 1
+  fi
+done
+if grep -q '^Warning:' "$restart_log"; then
+  cat "$restart_log" >&2
+  printf '%s\n' 'supervision restart-window witness emitted a TLC warning' >&2
+  exit 1
+fi
+
+restart_generated_one="$run_root/restart-generated-one"
+restart_generated_two="$run_root/restart-generated-two"
+"$tla_cli" ada generate \
+  "$model_root/SupervisionRestartWindow.tla" \
+  --config "$restart_config" \
+  --package Supervision_Restart_Window_Model --output "$restart_generated_one" \
+  --type-invariant RestartWindowHarnessTypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+"$tla_cli" ada generate \
+  "$model_root/SupervisionRestartWindow.tla" \
+  --config "$restart_config" \
+  --package Supervision_Restart_Window_Model --output "$restart_generated_two" \
+  --type-invariant RestartWindowHarnessTypeOK \
+  --input-type HarnessInputType --outcome-type HarnessOutcomeType
+for generated_file in \
+  supervision_restart_window_model.ads \
+  supervision_restart_window_model.adb \
+  supervision_restart_window_model.inference.json
+do
+  cmp "$restart_generated_one/$generated_file" \
+    "$restart_generated_two/$generated_file"
+  cmp \
+    "$project_root/tests/supervision_lifecycle_conformance/generated/$generated_file" \
+    "$restart_generated_one/$generated_file"
+done
+
+restart_trace="$run_root/supervision-restart-window.trace.json"
+"$tla_cli" trace normalize \
+  "$restart_raw" "$restart_trace" \
+  "$model_root/SupervisionRestartWindow.tla" \
+  --config "$restart_config" \
+  --toolchain tla2tools-1.8.0+b123b22 16 24
+"$tla_cli" trace validate "$restart_trace" 16 24
+cmp \
+  "$project_root/tests/supervision_lifecycle_conformance/traces/supervision-restart-window.trace.json" \
+  "$restart_trace"
+
 if [ -n "${ALR:-}" ]; then
   alire=$ALR
 else
@@ -690,5 +768,62 @@ grep -Fq '"verdict":"conformant"' \
 grep -Fq '"compared_steps":6' \
   "$run_root/adaptive-pool-result.json"
 printf '%s\n' 'Ada/TLA+ match    AdaptivePoolLifecycle          6 transitions'
+
+restart_conformance_source="$project_root/tests/supervision_lifecycle_conformance"
+restart_conformance_root="$run_root/supervision-lifecycle-conformance"
+mkdir -p \
+  "$restart_conformance_root/src" \
+  "$restart_conformance_root/generated" \
+  "$restart_conformance_root/traces"
+cp \
+  "$restart_conformance_source/alire.toml" \
+  "$restart_conformance_source/supervision_lifecycle_conformance.gpr" \
+  "$restart_conformance_source/supervision_lifecycle_conformance_flyology.gpr" \
+  "$restart_conformance_root/"
+cp "$restart_conformance_source/src/"* \
+  "$restart_conformance_root/src/"
+cp \
+  "$project_root/tests/flyology-task_lifecycle_testing.ads" \
+  "$project_root/tests/flyology-task_lifecycle_testing.adb" \
+  "$restart_conformance_root/src/"
+cp "$restart_conformance_source/generated/"* \
+  "$restart_conformance_root/generated/"
+cp "$restart_conformance_source/traces/"* \
+  "$restart_conformance_root/traces/"
+cd "$restart_conformance_root"
+restart_pin_flyology_log="$run_root/supervision-restart-pin-flyology.log"
+if ! "$alire" -n with flyology --use "$project_root" \
+  >"$restart_pin_flyology_log" 2>&1
+then
+  cat "$restart_pin_flyology_log" >&2
+  exit 1
+fi
+restart_pin_harness_log="$run_root/supervision-restart-pin-harness.log"
+if ! "$alire" -n with flyology_tla --use "$harness_root" \
+  >"$restart_pin_harness_log" 2>&1
+then
+  cat "$restart_pin_harness_log" >&2
+  exit 1
+fi
+restart_conformance_build_log="$run_root/supervision-restart-build.log"
+if ! FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true "$alire" exec -- gprbuild \
+  -P supervision_lifecycle_conformance.gpr -f -p -q -j0 \
+  >"$restart_conformance_build_log" 2>&1
+then
+  cat "$restart_conformance_build_log" >&2
+  exit 1
+fi
+"$project_root/scripts/run-with-timeout.sh" 20 \
+  ./bin/supervision-lifecycle-conformance --format json \
+  --result-json "$run_root/supervision-restart-result.json" \
+  "$restart_trace" >"$run_root/supervision-restart-stdout.json"
+cmp \
+  "$run_root/supervision-restart-result.json" \
+  "$run_root/supervision-restart-stdout.json"
+grep -Fq '"verdict":"conformant"' \
+  "$run_root/supervision-restart-result.json"
+grep -Fq '"compared_steps":9' \
+  "$run_root/supervision-restart-result.json"
+printf '%s\n' 'Ada/TLA+ match    SupervisionRestartWindow      9 transitions'
 
 printf '%s\n' "Flyology TLA+ model checks passed"

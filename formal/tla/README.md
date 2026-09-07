@@ -102,6 +102,7 @@ evidence.
 | `OpenNestedFamily` / `CloseNestedFamily` | one-shot `Families.Run_Nested` controller owned by one outer generation |
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
+| `MarkRestartReady` / `AdvanceRestartTime` / `RestartFailure` / `StartRestartGeneration` | static and family restart-window projection from `Ready_Since` and `Stability_Reset` boundaries to admissibility counters |
 | `CompletionSetFinalize.BeginFinalize` | `Operations.Finalize` requesting cancellation while the model records the peer's initial reported state as a ghost baseline |
 | `EarlyGateReturn` | `Wait_Some` publishing an unrelated terminal, unreported slot before polling descriptors |
 | `RestoreReported` | the finalizer restoring every non-target slot's saved reported flag after `Wait_Some` |
@@ -237,6 +238,13 @@ escalation, publish owner readiness before desired-child readmission, and omit
 forwarding the parent stop request. The last defect is a temporal
 counterexample: the nested family remains open and the synchronous outer run
 cannot complete.
+
+`SupervisionLifecycle` also instantiates a bounded `SupervisionRestartWindow`
+projection to validate the readiness-timestamp reset boundary around static and
+family restart windows. A dedicated safe/broken restart-window pair confirms
+that stale readiness does not carry over across replacement starts, and
+`check-tla.sh` validates a full nine-transition witness plus implementation
+conformance for the same lane.
 
 `CompletionSetFinalize` isolates the scope-exit drain for one pending target
 and one unrelated terminal slot, models one failed TLS-upgrade driver with an

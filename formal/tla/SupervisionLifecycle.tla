@@ -15,14 +15,18 @@ LifecyclePolicy selects the current implementation or one deliberately broken
 boundary.  Broken variants admit a controller-stale command, construct a
 replacement before the old generation joins, mint a new incident while
 propagating nested escalation, publish an owner before desired-child
-readmission, or omit nested parent-stop forwarding.  The checked
-configurations require a concrete counterexample for each removed guarantee.
+readmission, omit nested parent-stop forwarding, or retain readiness from the
+previous generation across replacement start.  The checked configurations
+require a concrete counterexample for each removed guarantee.
 
-Time, exception payloads, event-ring storage, and retry-window arithmetic are
-abstracted at their proved policy boundary.  MaxAttempts represents the
-combined burst/total/deadline admission result: an admitted attempt increments
-once, while exhaustion makes the node terminal without constructing another
-generation.
+Exception payloads and event-ring storage are abstracted at their proved
+policy boundary.  The full topology still uses MaxAttempts for the combined
+burst/total/deadline admission result.  A separate restart-window lane retains
+bounded logical time, readiness timestamps, and attempt counters for the
+static child, static subtree, and family slot so the stability-reset ownership
+boundary is checked directly.  SupervisionRestartWindow is the generator-facing
+projection of that same state and is instantiated below rather than maintained
+as a second policy model.
 ***************************************************************************)
 
 CONSTANTS Children, Prerequisite, Owner, FamilySlots,
@@ -41,7 +45,8 @@ ASSUME /\ Children = {Prerequisite, Owner}
             {"current", "stale-authority-broken",
              "restart-before-join-broken", "no-parent-forwarding-broken",
              "nested-incident-mint-broken",
-             "owner-ready-before-readmission-broken"}
+             "owner-ready-before-readmission-broken",
+             "restart-window-stale-broken"}
 
 NoChild == "no-child"
 NoImpact == "no-impact"
@@ -82,7 +87,41 @@ VARIABLES mode, shutdown, terminal, result,
           slotGeneration, slotJoinedGeneration,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
-          ownerPublishedWithoutReplay, nestedIncidentMinted
+          ownerPublishedWithoutReplay, nestedIncidentMinted,
+          restartPhase, restartNow,
+          restartStaticReadySince, restartSubtreeReadySince,
+          restartFamilyReadySince,
+          restartStaticUsed, restartSubtreeUsed, restartFamilyUsed,
+          restartStaticStarts, restartFamilyStarts,
+          restartExhausted, restartLastAction
+
+lifecycleVars == <<mode, shutdown, terminal, result,
+          childState, childLive, childReady, childStop, childStuck,
+          generation, joinedGeneration,
+          affected, trigger, recoveryImpact, incidentId, incidentAttempt,
+          incidentActive, childIncident, childAttempt,
+          lastStopRank, lastStartRank,
+          familyOpen, familyController, retiredControllers,
+          familyIncarnation, familyShutdown, familyTerminal,
+          slotState, slotLive, slotReady, slotStop, slotRecover,
+          slotGeneration, slotJoinedGeneration,
+          nestedEscalation, nestedIncident, nestedAttempt,
+          staleCommandAccepted, replacementBeforeJoin,
+          ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+(***************************************************************************
+The restart projection is excluded from lifecycleVars so its actions can
+change only that state.  Keep a parent-local tuple for the other actions:
+TLC cannot evaluate the anonymous instance's substituted restartVars inside
+UNCHANGED while checking the full lifecycle specification.
+***************************************************************************)
+
+parentRestartVars == <<restartPhase, restartNow,
+          restartStaticReadySince, restartSubtreeReadySince,
+          restartFamilyReadySince,
+          restartStaticUsed, restartSubtreeUsed, restartFamilyUsed,
+          restartStaticStarts, restartFamilyStarts,
+          restartExhausted, restartLastAction>>
 
 vars == <<mode, shutdown, terminal, result,
           childState, childLive, childReady, childStop, childStuck,
@@ -96,7 +135,43 @@ vars == <<mode, shutdown, terminal, result,
           slotGeneration, slotJoinedGeneration,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
-          ownerPublishedWithoutReplay, nestedIncidentMinted>>
+          ownerPublishedWithoutReplay, nestedIncidentMinted,
+          restartPhase, restartNow,
+          restartStaticReadySince, restartSubtreeReadySince,
+          restartFamilyReadySince,
+          restartStaticUsed, restartSubtreeUsed, restartFamilyUsed,
+          restartStaticStarts, restartFamilyStarts,
+          restartExhausted, restartLastAction>>
+
+restartState ==
+  [phase |-> restartPhase,
+   now |-> restartNow,
+   staticReadySince |-> restartStaticReadySince,
+   subtreeReadySince |-> restartSubtreeReadySince,
+   familyReadySince |-> restartFamilyReadySince,
+   staticUsed |-> restartStaticUsed,
+   subtreeUsed |-> restartSubtreeUsed,
+   familyUsed |-> restartFamilyUsed,
+   staticStarts |-> restartStaticStarts,
+   familyStarts |-> restartFamilyStarts,
+   exhausted |-> restartExhausted,
+   lastAction |-> restartLastAction]
+
+INSTANCE SupervisionRestartWindow
+  WITH MaxAttempts <- MaxAttempts,
+       LifecyclePolicy <- LifecyclePolicy,
+       phase <- restartPhase,
+       now <- restartNow,
+       staticReadySince <- restartStaticReadySince,
+       subtreeReadySince <- restartSubtreeReadySince,
+       familyReadySince <- restartFamilyReadySince,
+       staticUsed <- restartStaticUsed,
+       subtreeUsed <- restartSubtreeUsed,
+       familyUsed <- restartFamilyUsed,
+       staticStarts <- restartStaticStarts,
+       familyStarts <- restartFamilyStarts,
+       exhausted <- restartExhausted,
+       lastAction <- restartLastAction
 
 ExactOuterAuthority(c, controller, gen) ==
   /\ c \in Children
@@ -174,6 +249,7 @@ Init ==
   /\ replacementBeforeJoin = FALSE
   /\ ownerPublishedWithoutReplay = FALSE
   /\ nestedIncidentMinted = FALSE
+  /\ RestartWindowInit
 
 Configure ==
   /\ mode = "unconfigured"
@@ -1047,6 +1123,10 @@ FinishRun ==
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
+ParentRestartWindowNext == RestartWindowNext /\ UNCHANGED lifecycleVars
+
+ParentRestartWindowSpec == Init /\ [][ParentRestartWindowNext]_vars
+
 StartupAndServiceActions ==
   Configure
   \/ \E c \in Children : StartInitial(c) \/ MarkOuterReady(c)
@@ -1086,8 +1166,9 @@ OuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 Next ==
-  StartupAndServiceActions \/ FailureAndCommandActions
-    \/ FamilyDrainActions \/ OuterProgressActions
+  (StartupAndServiceActions \/ FailureAndCommandActions
+    \/ FamilyDrainActions \/ OuterProgressActions)
+  /\ UNCHANGED parentRestartVars
 
 Spec == Init /\ [][Next]_vars
 
@@ -1100,13 +1181,14 @@ eventually let synchronous Run return, while a stuck child has no such claim.
 ***************************************************************************)
 
 ShutdownProgress ==
-  (\E c \in Children :
-     IssueOuterStop(c) \/ TerminateOuter(c) \/ JoinOuter(c))
-  \/ ForwardParentStop
-  \/ (\E slot \in FamilySlots :
-       CancelFamilyPending(slot) \/ StopFamilySlot(slot)
-         \/ TerminateFamilySlot(slot) \/ JoinFamilySlot(slot))
-  \/ CloseNestedFamily \/ FinishRun
+  ((\E c \in Children :
+      IssueOuterStop(c) \/ TerminateOuter(c) \/ JoinOuter(c))
+   \/ ForwardParentStop
+   \/ (\E slot \in FamilySlots :
+        CancelFamilyPending(slot) \/ StopFamilySlot(slot)
+          \/ TerminateFamilySlot(slot) \/ JoinFamilySlot(slot))
+   \/ CloseNestedFamily \/ FinishRun)
+  /\ UNCHANGED parentRestartVars
 
 CooperativeOuterProgressActions ==
   RequestShutdown
@@ -1117,8 +1199,9 @@ CooperativeOuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 CooperativeNext ==
-  StartupAndServiceActions \/ FailureAndCommandActions
-    \/ FamilyDrainActions \/ CooperativeOuterProgressActions
+  (StartupAndServiceActions \/ FailureAndCommandActions
+    \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
+  /\ UNCHANGED parentRestartVars
 
 CooperativeSpec ==
   Init /\ [][CooperativeNext]_vars /\ WF_vars(ShutdownProgress)
@@ -1168,6 +1251,7 @@ TypeOK ==
   /\ replacementBeforeJoin \in BOOLEAN
   /\ ownerPublishedWithoutReplay \in BOOLEAN
   /\ nestedIncidentMinted \in BOOLEAN
+  /\ RestartWindowTypeOK
 
 ReadyImpliesLive ==
   /\ \A c \in Children : childReady[c] => childLive[c]
