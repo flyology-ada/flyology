@@ -1,12 +1,15 @@
 ------------------- MODULE PollerRegistrationOwnership -------------------
 EXTENDS Naturals
 
-CONSTANTS CancelMode, DeliveryMode, AfterDelivery, SelectedSource
+CONSTANTS CancelMode, DeliveryMode, AfterDelivery, SelectedSource,
+          Scenario, ArmPolicy
 
 ASSUME CancelMode \in {"Direct", "Deferred"}
 ASSUME DeliveryMode \in {"Unowned", "CancellationOwned"}
 ASSUME AfterDelivery \in {"Reregister", "Reap"}
 ASSUME SelectedSource \in {"Readiness", "Timer"}
+ASSUME Scenario \in {"CancellationOwnership", "DescriptorReuse"}
+ASSUME ArmPolicy \in {"AlwaysRearm", "RegisteredLinkCache"}
 
 VARIABLES phase,
           groupLockHeld,
@@ -23,17 +26,26 @@ VARIABLES phase,
           progressWake,
           staleCancellation,
           targetReleased,
+          descriptorGeneration,
+          oldLinkRegistered,
+          kernelGeneration,
+          replacementWaiting,
+          replacementReady,
+          replacementRunnable,
           lastAction
 
 vars ==
     <<phase, groupLockHeld, loopWriter, foreignWriter, pendingCancels,
       targetCancelQueued, targetWaiting, targetRunnable, targetLive,
       waitGeneration, cancelGeneration, deliverySource, progressWake,
-      staleCancellation, targetReleased, lastAction>>
+      staleCancellation, targetReleased, descriptorGeneration,
+      oldLinkRegistered, kernelGeneration, replacementWaiting,
+      replacementReady, replacementRunnable, lastAction>>
 
 TypeOK ==
     /\ phase \in {"Idle", "Translating", "BudgetDrained", "Delivered",
-                  "Reused", "Reaped", "Done"}
+                  "Reused", "Reaped", "OldWait", "DescriptorReused",
+                  "ReplacementWaiting", "Done"}
     /\ groupLockHeld \in BOOLEAN
     /\ loopWriter \in BOOLEAN
     /\ foreignWriter \in BOOLEAN
@@ -48,10 +60,17 @@ TypeOK ==
     /\ progressWake \in BOOLEAN
     /\ staleCancellation \in BOOLEAN
     /\ targetReleased \in BOOLEAN
+    /\ descriptorGeneration \in 0..2
+    /\ oldLinkRegistered \in BOOLEAN
+    /\ kernelGeneration \in 0..2
+    /\ replacementWaiting \in BOOLEAN
+    /\ replacementReady \in BOOLEAN
+    /\ replacementRunnable \in BOOLEAN
     /\ lastAction \in
          {"Init", "BeginWaitBatch", "ForeignWake", "DrainBudget",
           "DeliverTarget", "ReregisterTarget", "ReapTarget",
-          "DrainRemaining"}
+          "DrainRemaining", "BeginOldWait", "CloseAndReuse",
+          "BeginReplacementWait", "PublishReplacementReadiness"}
 
 Init ==
     /\ phase = "Idle"
@@ -69,11 +88,18 @@ Init ==
     /\ progressWake = FALSE
     /\ staleCancellation = FALSE
     /\ targetReleased = FALSE
+    /\ descriptorGeneration = 0
+    /\ oldLinkRegistered = FALSE
+    /\ kernelGeneration = 0
+    /\ replacementWaiting = FALSE
+    /\ replacementReady = FALSE
+    /\ replacementRunnable = FALSE
     /\ lastAction = "Init"
 
 \* The target is selected for descriptor readiness or has an expired timer
 \* while the loop translates an epoll batch without the scheduler group lock.
 BeginWaitBatch ==
+    /\ Scenario = "CancellationOwnership"
     /\ phase = "Idle"
     /\ phase' = "Translating"
     /\ groupLockHeld' = FALSE
@@ -91,6 +117,9 @@ BeginWaitBatch ==
     /\ staleCancellation' = FALSE
     /\ targetReleased' = FALSE
     /\ lastAction' = "BeginWaitBatch"
+    /\ UNCHANGED <<descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
 
 \* A native thread wakes 65 waiters with the selected target queued last.
 ForeignWake ==
@@ -114,6 +143,9 @@ ForeignWake ==
     /\ staleCancellation' = FALSE
     /\ targetReleased' = (CancelMode = "Direct")
     /\ lastAction' = "ForeignWake"
+    /\ UNCHANGED <<descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
 
 \* The bounded drain consumes 64 earlier entries and leaves the target queued.
 DrainBudget ==
@@ -137,6 +169,9 @@ DrainBudget ==
     /\ staleCancellation' = FALSE
     /\ targetReleased' = FALSE
     /\ lastAction' = "DrainBudget"
+    /\ UNCHANGED <<descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
 
 \* Unsafe delivery wakes the still-queued target. The repaired behavior treats
 \* selected readiness or timer expiry as cancellation-owned and consumes the
@@ -160,6 +195,9 @@ DeliverTarget ==
     /\ staleCancellation' = FALSE
     /\ targetReleased' = (DeliveryMode = "CancellationOwned")
     /\ lastAction' = "DeliverTarget"
+    /\ UNCHANGED <<descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
 
 ReregisterTarget ==
     /\ phase = "Delivered"
@@ -174,7 +212,9 @@ ReregisterTarget ==
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
                    targetCancelQueued, targetLive, cancelGeneration,
                    deliverySource, progressWake, staleCancellation,
-                   targetReleased>>
+                   targetReleased, descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting, replacementReady,
+                   replacementRunnable>>
 
 ReapTarget ==
     /\ phase = "Delivered"
@@ -188,7 +228,9 @@ ReapTarget ==
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
                    targetCancelQueued, targetWaiting, waitGeneration,
                    cancelGeneration, deliverySource, progressWake,
-                   staleCancellation, targetReleased>>
+                   staleCancellation, targetReleased, descriptorGeneration,
+                   oldLinkRegistered, kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
 
 DrainRemaining ==
     /\ phase = "Reused"
@@ -204,7 +246,86 @@ DrainRemaining ==
     /\ targetReleased' = TRUE
     /\ lastAction' = "DrainRemaining"
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, targetLive,
-                   waitGeneration, cancelGeneration, deliverySource>>
+                   waitGeneration, cancelGeneration, deliverySource,
+                   descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration, replacementWaiting,
+                   replacementReady, replacementRunnable>>
+
+\* The old raw wait publishes both a scheduler delivery link and a kernel
+\* registration for descriptor generation 1.
+BeginOldWait ==
+    /\ Scenario = "DescriptorReuse"
+    /\ phase = "Idle"
+    /\ phase' = "OldWait"
+    /\ descriptorGeneration' = 1
+    /\ oldLinkRegistered' = TRUE
+    /\ kernelGeneration' = 1
+    /\ replacementWaiting' = FALSE
+    /\ replacementReady' = FALSE
+    /\ replacementRunnable' = FALSE
+    /\ lastAction' = "BeginOldWait"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter,
+                   pendingCancels, targetCancelQueued, targetWaiting,
+                   targetRunnable, targetLive, waitGeneration,
+                   cancelGeneration, deliverySource, progressWake,
+                   staleCancellation, targetReleased>>
+
+\* Closing generation 1 removes its kernel registration. Numeric descriptor
+\* reuse creates generation 2 while the old scheduler link remains registered.
+CloseAndReuse ==
+    /\ phase = "OldWait"
+    /\ descriptorGeneration = 1
+    /\ oldLinkRegistered
+    /\ kernelGeneration = 1
+    /\ phase' = "DescriptorReused"
+    /\ descriptorGeneration' = 2
+    /\ kernelGeneration' = 0
+    /\ lastAction' = "CloseAndReuse"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter,
+                   pendingCancels, targetCancelQueued, targetWaiting,
+                   targetRunnable, targetLive, waitGeneration,
+                   cancelGeneration, deliverySource, progressWake,
+                   staleCancellation, targetReleased, oldLinkRegistered,
+                   replacementWaiting, replacementReady,
+                   replacementRunnable>>
+
+\* The broken policy mistakes the old scheduler link for a live generation-2
+\* kernel registration. The repaired policy always submits the idempotent arm.
+BeginReplacementWait ==
+    /\ phase = "DescriptorReused"
+    /\ descriptorGeneration = 2
+    /\ oldLinkRegistered
+    /\ kernelGeneration = 0
+    /\ phase' = "ReplacementWaiting"
+    /\ kernelGeneration' =
+         IF ArmPolicy = "AlwaysRearm" THEN descriptorGeneration ELSE 0
+    /\ replacementWaiting' = TRUE
+    /\ replacementReady' = FALSE
+    /\ replacementRunnable' = FALSE
+    /\ lastAction' = "BeginReplacementWait"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter,
+                   pendingCancels, targetCancelQueued, targetWaiting,
+                   targetRunnable, targetLive, waitGeneration,
+                   cancelGeneration, deliverySource, progressWake,
+                   staleCancellation, targetReleased,
+                   descriptorGeneration, oldLinkRegistered>>
+
+PublishReplacementReadiness ==
+    /\ phase = "ReplacementWaiting"
+    /\ replacementWaiting
+    /\ ~replacementReady
+    /\ phase' = "Done"
+    /\ replacementWaiting' = (kernelGeneration /= descriptorGeneration)
+    /\ replacementReady' = TRUE
+    /\ replacementRunnable' = (kernelGeneration = descriptorGeneration)
+    /\ lastAction' = "PublishReplacementReadiness"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter,
+                   pendingCancels, targetCancelQueued, targetWaiting,
+                   targetRunnable, targetLive, waitGeneration,
+                   cancelGeneration, deliverySource, progressWake,
+                   staleCancellation, targetReleased,
+                   descriptorGeneration, oldLinkRegistered,
+                   kernelGeneration>>
 
 Next ==
     \/ BeginWaitBatch
@@ -214,6 +335,10 @@ Next ==
     \/ ReregisterTarget
     \/ ReapTarget
     \/ DrainRemaining
+    \/ BeginOldWait
+    \/ CloseAndReuse
+    \/ BeginReplacementWait
+    \/ PublishReplacementReadiness
 
 Spec == Init /\ [][Next]_vars
 
@@ -224,16 +349,28 @@ QueuedCancellationMatchesWaitGeneration ==
 QueuedCancellationOwnsTarget == targetCancelQueued => ~targetRunnable
 PendingCancellationHasWake == (pendingCancels > 0) => progressWake
 NoStaleCancellation == ~staleCancellation
+CurrentReplacementWaitIsArmed ==
+    (phase = "ReplacementWaiting" /\ replacementWaiting)
+      => kernelGeneration = descriptorGeneration
+ReplacementReadinessDelivered == replacementReady => replacementRunnable
 
 HarnessInputType ==
-    [command : {"BeginWaitBatch", "ForeignWake", "DrainBudget", "DeliverTarget"}]
+    [command : {"BeginWaitBatch", "ForeignWake", "DrainBudget", "DeliverTarget",
+                "BeginOldWait", "CloseAndReuse", "BeginReplacementWait",
+                "PublishReplacementReadiness"}]
 
 HarnessOutcomeType ==
     [pending : 0..65,
      queued : BOOLEAN,
      foreignMutation : BOOLEAN,
      targetRunnable : BOOLEAN,
-     targetReleased : BOOLEAN]
+     targetReleased : BOOLEAN,
+     descriptorGeneration : 0..2,
+     oldLinkRegistered : BOOLEAN,
+     kernelGeneration : 0..2,
+     replacementWaiting : BOOLEAN,
+     replacementReady : BOOLEAN,
+     replacementRunnable : BOOLEAN]
 
 WitnessIncomplete == phase /= "Done"
 
@@ -246,7 +383,13 @@ Alias == [
        queued |-> targetCancelQueued,
        foreignMutation |-> foreignWriter,
        targetRunnable |-> targetRunnable,
-       targetReleased |-> targetReleased],
+       targetReleased |-> targetReleased,
+       descriptorGeneration |-> descriptorGeneration,
+       oldLinkRegistered |-> oldLinkRegistered,
+       kernelGeneration |-> kernelGeneration,
+       replacementWaiting |-> replacementWaiting,
+       replacementReady |-> replacementReady,
+       replacementRunnable |-> replacementRunnable],
     state |->
       [phase |-> phase,
        groupLockHeld |-> groupLockHeld,
@@ -263,6 +406,12 @@ Alias == [
        progressWake |-> progressWake,
        staleCancellation |-> staleCancellation,
        targetReleased |-> targetReleased,
+       descriptorGeneration |-> descriptorGeneration,
+       oldLinkRegistered |-> oldLinkRegistered,
+       kernelGeneration |-> kernelGeneration,
+       replacementWaiting |-> replacementWaiting,
+       replacementReady |-> replacementReady,
+       replacementRunnable |-> replacementRunnable,
        lastAction |-> lastAction],
     model_source |-> lastAction
 ]
