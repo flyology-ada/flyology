@@ -9,6 +9,7 @@ with Flyology.IO.Sockets;
 with Flyology_TLA.Command_Line;
 with Flyology_TLA.Replay;
 with Flyology_TLA.Traces;
+with Interfaces.C;
 with Poller_Registration_Ownership_Model;
 
 procedure Poller_Registration_Conformance is
@@ -18,19 +19,20 @@ procedure Poller_Registration_Conformance is
    use Ada.Strings.Unbounded;
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Interfaces.C.int;
    use type Model.Input_Command_Type;
 
    Backlog_Count : constant Positive := 64;
 
    --  Strict duplicate validation retains names from every simultaneously open object.  The
-   --  deepest checked-in step state needs root (23) + step (40) + expected (12) + state (207)
-   --  = 282 decoded name bytes.
+   --  deepest checked-in step state needs root (23) + step (40) + expected (12) + state (313)
+   --  = 388 decoded name bytes.
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
      (Maximum_File_Bytes   => 1_000_000,
       Maximum_Steps        => 8,
       Maximum_JSON_Depth   => 32,
       Maximum_Object_Names => 256,
-      Maximum_Name_Bytes   => 282,
+      Maximum_Name_Bytes   => 388,
       Maximum_String_Bytes => 4_096,
       Maximum_Value_Bytes  => 32_768);
 
@@ -38,13 +40,18 @@ procedure Poller_Registration_Conformance is
       procedure Reset;
       procedure Note_First_Return;
       procedure Note_Second_Return;
+      procedure Note_Replacement_Return (Ready : Boolean);
       procedure Stop_Runner;
       function First_Returned return Boolean;
       function Second_Returned return Boolean;
+      function Replacement_Returned return Boolean;
+      function Replacement_Was_Ready return Boolean;
       function Runner_Stopped return Boolean;
    private
       First_Done  : Boolean := False;
       Second_Done : Boolean := False;
+      Reuse_Done  : Boolean := False;
+      Reuse_Ready : Boolean := False;
       Stop        : Boolean := False;
    end Observation;
 
@@ -53,6 +60,8 @@ procedure Poller_Registration_Conformance is
       begin
          First_Done := False;
          Second_Done := False;
+         Reuse_Done := False;
+         Reuse_Ready := False;
          Stop := False;
       end Reset;
 
@@ -66,6 +75,12 @@ procedure Poller_Registration_Conformance is
          Second_Done := True;
       end Note_Second_Return;
 
+      procedure Note_Replacement_Return (Ready : Boolean) is
+      begin
+         Reuse_Done := True;
+         Reuse_Ready := Ready;
+      end Note_Replacement_Return;
+
       procedure Stop_Runner is
       begin
          Stop := True;
@@ -76,6 +91,12 @@ procedure Poller_Registration_Conformance is
 
       function Second_Returned return Boolean
       is (Second_Done);
+
+      function Replacement_Returned return Boolean
+      is (Reuse_Done);
+
+      function Replacement_Was_Ready return Boolean
+      is (Reuse_Ready);
 
       function Runner_Stopped return Boolean
       is (Stop);
@@ -117,6 +138,20 @@ procedure Poller_Registration_Conformance is
 
    type Target_Waiter_Access is access Target_Waiter;
 
+   task type Replacement_Waiter (Descriptor : Flyology.IO.Descriptor) is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      pragma Priority (25);
+   end Replacement_Waiter;
+
+   task body Replacement_Waiter is
+      Ready : Boolean;
+   begin
+      Ready := Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Timeout => 3.0);
+      Observation.Note_Replacement_Return (Ready);
+   end Replacement_Waiter;
+
+   type Replacement_Waiter_Access is access Replacement_Waiter;
+
    task type Runner is
       pragma Task_Info (Flyology.Lightweight_Task);
       pragma Priority (1);
@@ -134,34 +169,47 @@ procedure Poller_Registration_Conformance is
    subtype Backlog_Sockets is Socket_Array (1 .. Backlog_Count);
 
    function Initial_State return Model.State_Type
-   is (Phase                => Model.State_Phase_Idle,
-       Group_Lock_Held      => True,
-       Loop_Writer          => False,
-       Foreign_Writer       => False,
-       Pending_Cancels      => 0,
-       Target_Cancel_Queued => False,
-       Target_Waiting       => False,
-       Target_Runnable      => False,
-       Target_Live          => True,
-       Wait_Generation      => 0,
-       Cancel_Generation    => 0,
-       Delivery_Source      => Model.State_Delivery_Source_None,
-       Progress_Wake        => False,
-       Stale_Cancellation   => False,
-       Target_Released      => False,
-       Last_Action          => Model.State_Last_Action_Init);
+   is (Phase                  => Model.State_Phase_Idle,
+       Group_Lock_Held        => True,
+       Loop_Writer            => False,
+       Foreign_Writer         => False,
+       Pending_Cancels        => 0,
+       Target_Cancel_Queued   => False,
+       Target_Waiting         => False,
+       Target_Runnable        => False,
+       Target_Live            => True,
+       Wait_Generation        => 0,
+       Cancel_Generation      => 0,
+       Delivery_Source        => Model.State_Delivery_Source_None,
+       Progress_Wake          => False,
+       Stale_Cancellation     => False,
+       Target_Released        => False,
+       Descriptor_Generation => 0,
+       Old_Link_Registered    => False,
+       Kernel_Generation      => 0,
+       Replacement_Waiting    => False,
+       Replacement_Ready      => False,
+       Replacement_Runnable   => False,
+       Last_Action            => Model.State_Last_Action_Init);
 
    type Registration_Adapter is new Model.Adapter with record
-      Current      : Model.State_Type := Initial_State;
-      Victims      : Backlog_Sockets;
-      Victim_Peers : Backlog_Sockets;
-      Target       : Sockets.Socket_Type;
-      Target_Peer  : Sockets.Socket_Type;
-      Second       : Sockets.Socket_Type;
-      Second_Peer  : Sockets.Socket_Type;
-      Waiters      : Backlog_Waiters := [others => null];
-      Target_Task  : Target_Waiter_Access := null;
-      Loop_Runner  : Runner_Access := null;
+      Current          : Model.State_Type := Initial_State;
+      Victims          : Backlog_Sockets;
+      Victim_Peers     : Backlog_Sockets;
+      Target           : Sockets.Socket_Type;
+      Target_Peer      : Sockets.Socket_Type;
+      Second           : Sockets.Socket_Type;
+      Second_Peer      : Sockets.Socket_Type;
+      Reuse_Old        : Sockets.Socket_Type;
+      Reuse_Peer       : Sockets.Socket_Type;
+      Replacement      : Sockets.Socket_Type;
+      Replacement_Peer : Sockets.Socket_Type;
+      Reuse_Descriptor : Flyology.IO.Descriptor := -1;
+      Waiters          : Backlog_Waiters := [others => null];
+      Target_Task      : Target_Waiter_Access := null;
+      Reuse_Old_Task   : Backlog_Waiter_Access := null;
+      Replacement_Task : Replacement_Waiter_Access := null;
+      Loop_Runner      : Runner_Access := null;
    end record;
 
    overriding
@@ -202,6 +250,12 @@ procedure Poller_Registration_Conformance is
       if Self.Target_Task /= null and then not Self.Target_Task'Terminated then
          abort Self.Target_Task.all;
       end if;
+      if Self.Reuse_Old_Task /= null and then not Self.Reuse_Old_Task'Terminated then
+         abort Self.Reuse_Old_Task.all;
+      end if;
+      if Self.Replacement_Task /= null and then not Self.Replacement_Task'Terminated then
+         abort Self.Replacement_Task.all;
+      end if;
       for Item of Self.Waiters loop
          if Item /= null and then not Item'Terminated then
             abort Item.all;
@@ -211,6 +265,8 @@ procedure Poller_Registration_Conformance is
       loop
          exit when
            (Self.Target_Task = null or else Self.Target_Task'Terminated)
+           and then (Self.Reuse_Old_Task = null or else Self.Reuse_Old_Task'Terminated)
+           and then (Self.Replacement_Task = null or else Self.Replacement_Task'Terminated)
            and then (Self.Loop_Runner = null or else Self.Loop_Runner'Terminated);
          exit when Ada.Real_Time.Clock >= Limit;
          delay 0.001;
@@ -235,6 +291,18 @@ procedure Poller_Registration_Conformance is
       if Sockets.Is_Open (Self.Second_Peer) then
          Sockets.Close_Socket (Self.Second_Peer);
       end if;
+      if Sockets.Is_Open (Self.Reuse_Old) then
+         Sockets.Close_Socket (Self.Reuse_Old);
+      end if;
+      if Sockets.Is_Open (Self.Reuse_Peer) then
+         Sockets.Close_Socket (Self.Reuse_Peer);
+      end if;
+      if Sockets.Is_Open (Self.Replacement) then
+         Sockets.Close_Socket (Self.Replacement);
+      end if;
+      if Sockets.Is_Open (Self.Replacement_Peer) then
+         Sockets.Close_Socket (Self.Replacement_Peer);
+      end if;
       Fault_Control.Reset;
    end Cleanup;
 
@@ -243,7 +311,11 @@ procedure Poller_Registration_Conformance is
       Observed : out Model.State_Type;
       Status   : out Flyology_TLA.Replay.Adapter_Outcome) is
    begin
-      if Self.Target_Task /= null or else Self.Loop_Runner /= null then
+      if Self.Target_Task /= null
+        or else Self.Reuse_Old_Task /= null
+        or else Self.Replacement_Task /= null
+        or else Self.Loop_Runner /= null
+      then
          Cleanup (Self);
       end if;
       Self.Current := Initial_State;
@@ -264,6 +336,15 @@ procedure Poller_Registration_Conformance is
    is
       function All_Registered return Boolean
       is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= Backlog_Count + 1);
+
+      function Old_Wait_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= 1);
+
+      function Replacement_Wait_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= 2);
+
+      function Replacement_Returned return Boolean
+      is (Observation.Replacement_Returned);
 
       function Translation_Parked return Boolean
       is (Fault_Control.Poller_Translation_Parked);
@@ -297,7 +378,14 @@ procedure Poller_Registration_Conformance is
             Queued           => Self.Current.Target_Cancel_Queued,
             Foreign_Mutation => Self.Current.Foreign_Writer,
             Target_Runnable  => Self.Current.Target_Runnable,
-            Target_Released  => Self.Current.Target_Released);
+            Target_Released  => Self.Current.Target_Released,
+            Descriptor_Generation =>
+              Model.Outcome_Descriptor_Generation_Type (Self.Current.Descriptor_Generation),
+            Old_Link_Registered => Self.Current.Old_Link_Registered,
+            Kernel_Generation => Model.Outcome_Kernel_Generation_Type (Self.Current.Kernel_Generation),
+            Replacement_Waiting => Self.Current.Replacement_Waiting,
+            Replacement_Ready => Self.Current.Replacement_Ready,
+            Replacement_Runnable => Self.Current.Replacement_Runnable);
       end Set_Outcome;
 
       procedure Fail (Detail : String) is
@@ -360,6 +448,12 @@ procedure Poller_Registration_Conformance is
                Progress_Wake        => False,
                Stale_Cancellation   => False,
                Target_Released      => False,
+               Descriptor_Generation => 0,
+               Old_Link_Registered    => False,
+               Kernel_Generation      => 0,
+               Replacement_Waiting    => False,
+               Replacement_Ready      => False,
+               Replacement_Runnable   => False,
                Last_Action          => Model.State_Last_Action_Begin_Wait_Batch);
 
          when Model.Input_Command_Foreign_Wake     =>
@@ -422,6 +516,80 @@ procedure Poller_Registration_Conformance is
                Fail ("runtime violated cancellation ownership after the bounded drain");
                return;
             end if;
+
+         when Model.Input_Command_Begin_Old_Wait =>
+            if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginOldWait" then
+               Fail ("unexpected BeginOldWait step");
+               return;
+            end if;
+            Observation.Reset;
+            Fault_Control.Reset;
+            Sockets.Create_Socket_Pair (Self.Reuse_Old, Self.Reuse_Peer);
+            Self.Reuse_Descriptor := Sockets.Native_Descriptor (Self.Reuse_Old);
+            Self.Reuse_Old_Task := new Backlog_Waiter (Self.Reuse_Descriptor);
+            Await (Old_Wait_Registered'Access, "old descriptor wait did not reach the poller");
+            Self.Current.Phase := Model.State_Phase_Old_Wait;
+            Self.Current.Descriptor_Generation := 1;
+            Self.Current.Old_Link_Registered := True;
+            Self.Current.Kernel_Generation := 1;
+            Self.Current.Last_Action := Model.State_Last_Action_Begin_Old_Wait;
+
+         when Model.Input_Command_Close_And_Reuse =>
+            if Index /= 2 or else Action /= "PollerRegistrationOwnership!CloseAndReuse" then
+               Fail ("unexpected CloseAndReuse step");
+               return;
+            end if;
+            Sockets.Close_Socket (Self.Reuse_Old);
+            Sockets.Close_Socket (Self.Reuse_Peer);
+            Sockets.Create_Socket_Pair (Self.Replacement, Self.Replacement_Peer);
+            if Sockets.Native_Descriptor (Self.Replacement) /= Self.Reuse_Descriptor then
+               Fail ("closed descriptor number was not reused");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Descriptor_Reused;
+            Self.Current.Descriptor_Generation := 2;
+            Self.Current.Kernel_Generation := 0;
+            Self.Current.Last_Action := Model.State_Last_Action_Close_And_Reuse;
+
+         when Model.Input_Command_Begin_Replacement_Wait =>
+            if Index /= 3 or else Action /= "PollerRegistrationOwnership!BeginReplacementWait" then
+               Fail ("unexpected BeginReplacementWait step");
+               return;
+            end if;
+            Self.Replacement_Task :=
+              new Replacement_Waiter (Sockets.Native_Descriptor (Self.Replacement));
+            Await
+              (Replacement_Wait_Registered'Access,
+               "replacement descriptor wait did not rearm the poller");
+            Self.Current.Phase := Model.State_Phase_Replacement_Waiting;
+            Self.Current.Kernel_Generation := 2;
+            Self.Current.Replacement_Waiting := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Begin_Replacement_Wait;
+
+         when Model.Input_Command_Publish_Replacement_Readiness =>
+            if Index /= 4
+              or else Action /= "PollerRegistrationOwnership!PublishReplacementReadiness"
+            then
+               Fail ("unexpected PublishReplacementReadiness step");
+               return;
+            end if;
+            Sockets.Send_Socket (Self.Replacement_Peer, Payload, Last);
+            if Last /= Payload'Last then
+               Fail ("replacement readiness signal was short");
+               return;
+            end if;
+            Await
+              (Replacement_Returned'Access,
+               "replacement descriptor wait did not return");
+            if not Observation.Replacement_Was_Ready then
+               Fail ("replacement descriptor wait missed readiness");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Done;
+            Self.Current.Replacement_Waiting := False;
+            Self.Current.Replacement_Ready := True;
+            Self.Current.Replacement_Runnable := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Publish_Replacement_Readiness;
       end case;
 
       Set_Outcome;
@@ -438,7 +606,13 @@ procedure Poller_Registration_Conformance is
             Queued           => False,
             Foreign_Mutation => True,
             Target_Runnable  => False,
-            Target_Released  => False);
+            Target_Released  => False,
+            Descriptor_Generation => 0,
+            Old_Link_Registered => False,
+            Kernel_Generation => 0,
+            Replacement_Waiting => False,
+            Replacement_Ready => False,
+            Replacement_Runnable => False);
          State := Self.Current;
          Status :=
            (Succeeded => False, Detail => To_Unbounded_String (Ada.Exceptions.Exception_Information (Error)));

@@ -3720,22 +3720,19 @@ package body System.Flyology.Scheduler is
             Request            : constant Runtime_Wait_Request := Request_At (Index);
             Interest           : constant Pollers.Interest :=
               (if Request.For_Write = 0 then Pollers.Readable else Pollers.Writable);
-            Needs_Kernel_Watch : Boolean;
+            Needs_Kernel_Watch : Boolean := True;
          begin
             if Request.Descriptor < 0 or else Request.For_Write not in 0 | 1 then
                return False;
             end if;
-            Needs_Kernel_Watch := not IO_Interest_Registered_Locked (Group, Request.Descriptor, Interest);
-            if Needs_Kernel_Watch then
-               for Planned in 1 .. Kernel_Watch_Count loop
-                  if Kernel_Watches (Planned).Descriptor = Request.Descriptor
-                    and then Kernel_Watches (Planned).Condition = Interest
-                  then
-                     Needs_Kernel_Watch := False;
-                     exit;
-                  end if;
-               end loop;
-            end if;
+            for Planned in 1 .. Kernel_Watch_Count loop
+               if Kernel_Watches (Planned).Descriptor = Request.Descriptor
+                 and then Kernel_Watches (Planned).Condition = Interest
+               then
+                  Needs_Kernel_Watch := False;
+                  exit;
+               end if;
+            end loop;
             if Needs_Kernel_Watch then
                Kernel_Watch_Count := Kernel_Watch_Count + 1;
                Kernel_Watches (Kernel_Watch_Count) :=
@@ -3915,9 +3912,7 @@ package body System.Flyology.Scheduler is
       if Cancel_FD >= 0 then
          Item.Active_IO_Links := Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
          Item.Active_IO_Link_Count := 1;
-         if not IO_Interest_Registered_Locked (Group, Cancel_FD, Pollers.Readable)
-           and then not Pollers.Watch (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable)
-         then
+         if not Pollers.Watch (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable) then
             Item.File_Wait := False;
             Item.File_Cancel_Descriptor := -1;
             Item.Active_IO_Links := null;
