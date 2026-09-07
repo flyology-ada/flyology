@@ -603,7 +603,7 @@ package body Flyology.Data_Structures.Hash_Maps is
          Release (Item);
       exception
          when others =>
-            Layouts.Poison (Item.Core);
+            Release (Item);
             raise;
       end;
    end Get;
@@ -632,7 +632,7 @@ package body Flyology.Data_Structures.Hash_Maps is
          Release (Item);
       exception
          when others =>
-            Layouts.Poison (Item.Core);
+            Release (Item);
             raise;
       end;
    end Get;
