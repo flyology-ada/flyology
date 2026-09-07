@@ -110,6 +110,7 @@ project Runtime_Smoke is
       "loop_thread_placement_smoke.adb",
       "loop_thread_project_placement_smoke.adb",
       "memory_regions_smoke.adb",
+      "native_cpu_activation_failure_smoke.adb",
       "native_executor_library_finalize_smoke.adb",
       "native_executor_local_finalize_smoke.adb",
       "observability_native_smoke.adb",
@@ -197,4 +198,9 @@ project Runtime_Smoke is
    package Binder is
       for Switches ("Ada") use ("-Es");
    end Binder;
+
+   package Linker is
+      for Switches ("native_cpu_activation_failure_smoke.adb") use
+        ("-Wl,--wrap=pthread_create");
+   end Linker;
 end Runtime_Smoke;

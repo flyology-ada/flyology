@@ -651,7 +651,8 @@ loop_thread_project_placement_smoke
 $fault_mains"
 if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
-linux_poller_fairness_smoke"
+linux_poller_fairness_smoke
+native_cpu_activation_failure_smoke"
 fi
 
 #  Compile each hook configuration into its own object directory. The hook
@@ -734,7 +735,15 @@ native_mains="default_policy_smoke
 $ordinary_unhooked_mains
 process_generation_agent_v1
 process_generation_agent_v2"
+if [ "$(uname -s)" = Linux ]; then
+  native_mains="$native_mains
+native_cpu_activation_failure_smoke"
+fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/native_cpu_activation_failure_smoke"
+fi
 "$project_root/scripts/check-development-allocator-link.sh" \
   "$test_bin/data_structures_smoke" "$atomic_store_family"
 
