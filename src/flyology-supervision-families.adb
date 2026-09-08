@@ -2272,10 +2272,18 @@ package body Flyology.Supervision.Families is
                Signals          : aliased Monitor_Signal_Guard (Item);
             begin
                Item.State.Publish_Starting (Managed_Slot, Current, Incident, Signals'Access, Started);
+               if Started then
+                  Value := Current;
+               end if;
                Flush_Monitor_Signals (Signals);
                if Started and then Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                   Flyology.Task_Lifecycle_Test_Hooks.Barrier
                     (Flyology.Task_Lifecycle_Test_Hooks.Family_Generation_Starting);
+                  if Current_Generation (Current) > Generation'First
+                    and then Flyology.Task_Lifecycle_Test_Hooks.Consume_Family_Manager_Failure
+                  then
+                     raise Program_Error with "forced family manager failure";
+                  end if;
                end if;
                Restart := False;
                Backoff := Ada.Real_Time.Time_Span_Zero;
@@ -2414,6 +2422,12 @@ package body Flyology.Supervision.Families is
                   then
                      Generation_Value.Termination.Kind := Supervisor_Shutdown;
                   end if;
+               exception
+                  when Occurrence : others =>
+                     Generation_Value :=
+                       (Termination    => Failure_Summary (Occurrence),
+                        Reported_Ready => Is_Ready (Control),
+                        Incident       => Recovery_Incident (Control));
                end;
                declare
                   Finished_At : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
@@ -2477,7 +2491,6 @@ package body Flyology.Supervision.Families is
                      loop
                         Run_Generation (Candidate, Incident, Started, Restart, Backoff, Next, Recovery);
                         exit when not Started;
-                        Value := Candidate;
                         exit when not Restart;
                         declare
                            Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;

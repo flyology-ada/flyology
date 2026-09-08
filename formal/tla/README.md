@@ -99,7 +99,9 @@ evidence.
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
 | `TerminateRecoverableIsolateDuringBackoff` / `TerminateExhaustedIsolateDuringBackoff` / `TerminateNonIsolateDuringBackoff` | static `Publish_Termination` merging a recoverable isolated child into the exact accumulated recovery set while advancing an exact or stale pending incident, preserving a newer nested context, or opening a fresh incident; exhausted isolate recovery preserves the active context, and other impacts immediately escalate with the manager-normalized terminating context |
 | family `Reserve` / `Commit` / `Rollback` actions | the protected family admission transaction with an exact controller/generation handle |
-| `FailFamilySlot` / `RestartFamilySlot` | family termination classification, join, backoff, and replacement generation |
+| `FailFamilySlot` / `RestartFamilySlot` | family termination classification, join, backoff, successful replacement publication, and assignment of the manager's current generation handle before it runs |
+| `CancelFamilyPending` | shutdown rejection of a pending replacement without advancing its published generation or the manager's current handle |
+| `FailFamilyManager` | family manager exception publication and slot release, guarded by the manager's current generation handle |
 | `OpenNestedFamily` / `CloseNestedFamily` | one-shot `Families.Run_Nested` controller owned by one outer generation |
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
@@ -232,15 +234,18 @@ may finish. A separate weak-fairness configuration checks that a requested
 shutdown eventually finishes when children cooperate. There is deliberately
 no liveness claim for a child that does not terminate.
 
-Six broken supervision configurations are required to fail. They respectively
+Seven broken supervision configurations are required to fail. They respectively
 remove controller identity from command validation, permit a replacement after
 termination but before join, drop an unaffected child that terminates during
-recovery backoff, mint a new incident while propagating a nested escalation,
+recovery backoff, retain the previous family-manager generation handle while a
+replacement runs, mint a new incident while propagating a nested escalation,
 publish owner readiness before desired-child readmission, and omit forwarding
 the parent stop request. The backoff configuration violates the requirement
 that every terminated child remain in the pending recovery set or cause a
-terminal escalation. The final defect is a temporal counterexample: the nested
-family remains open and the synchronous outer run cannot complete.
+terminal escalation. The stale-manager configuration shows the failed manager
+leaving its replacement slot live. The final defect is a temporal
+counterexample: the nested family remains open and the synchronous outer run
+cannot complete.
 
 `SupervisionLifecycle` also instantiates a bounded `SupervisionRestartWindow`
 projection to validate the readiness-timestamp reset boundary around static and
