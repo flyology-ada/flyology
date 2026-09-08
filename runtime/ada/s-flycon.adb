@@ -28,7 +28,8 @@ package body System.Flyology.Contexts is
    PROT_READ                 : constant := 1;
    PROT_WRITE                : constant := 2;
    Arena_Slot_Limit          : constant := 64;
-   Maximum_Arena_Bytes       : constant C.size_t := 4 * 1_024 * 1_024;
+   Arena_Class_Bucket_Count  : constant := 64;
+   Target_Arena_Bytes        : constant C.size_t := 4 * 1_024 * 1_024;
    Minimum_Stack_Guard_Bytes : constant C.size_t := 64 * 1_024;
 
    function Map_Anonymous return C.int;
@@ -91,23 +92,41 @@ package body System.Flyology.Contexts is
    type Slot_Use_Array is array (Natural range 0 .. Arena_Slot_Limit - 1) of Boolean;
    type Stack_Arena;
    type Stack_Arena_Access is access all Stack_Arena;
+   type Arena_Class;
+   type Arena_Class_Access is access all Arena_Class;
+
+   subtype Arena_Class_Bucket is Natural range 0 .. Arena_Class_Bucket_Count - 1;
+   type Arena_Class_Bucket_Array is array (Arena_Class_Bucket) of Arena_Class_Access;
+
+   type Arena_Class is record
+      Usable_Size     : C.size_t := 0;
+      Guard_Size      : C.size_t := 0;
+      Stride          : C.size_t := 0;
+      Capacity        : Natural := 0;
+      Arena_Count     : Natural := 0;
+      Nonfull_Arenas  : Stack_Arena_Access := null;
+      Bucket          : Arena_Class_Bucket := 0;
+      Bucket_Previous : Arena_Class_Access := null;
+      Bucket_Next     : Arena_Class_Access := null;
+   end record;
+
    type Stack_Arena is record
-      Mapping      : System.Address := System.Null_Address;
-      Mapping_Size : C.size_t := 0;
-      Usable_Size  : C.size_t := 0;
-      Guard_Size   : C.size_t := 0;
-      Stride       : C.size_t := 0;
-      Capacity     : Natural := 0;
-      Used_Count   : Natural := 0;
-      Used         : Slot_Use_Array := (others => False);
-      Next         : Stack_Arena_Access := null;
+      Mapping          : System.Address := System.Null_Address;
+      Mapping_Size     : C.size_t := 0;
+      Class            : Arena_Class_Access := null;
+      Used_Count       : Natural := 0;
+      Used             : Slot_Use_Array := (others => False);
+      Nonfull_Previous : Stack_Arena_Access := null;
+      Nonfull_Next     : Stack_Arena_Access := null;
+      Is_Nonfull       : Boolean := False;
    end record;
 
    function To_Arena is new Ada.Unchecked_Conversion (System.Address, Stack_Arena_Access);
    function To_Address is new Ada.Unchecked_Conversion (Stack_Arena_Access, System.Address);
    procedure Free_Arena is new Ada.Unchecked_Deallocation (Stack_Arena, Stack_Arena_Access);
+   procedure Free_Class is new Ada.Unchecked_Deallocation (Arena_Class, Arena_Class_Access);
 
-   Arenas            : Stack_Arena_Access := null;
+   Arena_Classes     : Arena_Class_Bucket_Array := (others => null);
    Active_Arenas     : C.unsigned_long_long := 0;
    Live_Stacks       : C.unsigned_long_long := 0;
    Live_Usable_Bytes : C.unsigned_long_long := 0;
@@ -119,6 +138,13 @@ package body System.Flyology.Contexts is
 
    procedure Lock_Pool;
    procedure Unlock_Pool;
+   function Arena_Capacity (Stride : C.size_t) return Natural;
+   function Class_Bucket_For (Usable_Size, Page_Size : C.size_t) return Arena_Class_Bucket;
+   function Find_Class (Usable_Size, Guard_Size, Page_Size : C.size_t) return Arena_Class_Access;
+   procedure Link_Class (Item : not null Arena_Class_Access);
+   procedure Unlink_Class (Item : not null Arena_Class_Access);
+   procedure Link_Nonfull (Item : not null Stack_Arena_Access);
+   procedure Unlink_Nonfull (Item : not null Stack_Arena_Access);
    function Acquire_Stack
      (Usable_Size : C.size_t; Stack : out System.Address; Arena : out Stack_Arena_Access; Slot : out Natural)
       return Boolean;
@@ -192,6 +218,99 @@ package body System.Flyology.Contexts is
       end if;
    end Unlock_Pool;
 
+   --  Arena classes and non-full links are process-wide metadata. Every
+   --  helper below is called only while the stack-pool mutex is held.
+
+   function Arena_Capacity (Stride : C.size_t) return Natural is
+      Whole_Slots : C.size_t;
+   begin
+      if Stride >= Target_Arena_Bytes then
+         return 1;
+      end if;
+
+      --  Round the target up instead of down. The class therefore maps at
+      --  least the target when a second slot fits, while the slot limit keeps
+      --  the free-slot bitmap and allocation scan bounded.
+      Whole_Slots := Target_Arena_Bytes / Stride;
+      if Target_Arena_Bytes mod Stride /= 0 then
+         Whole_Slots := Whole_Slots + 1;
+      end if;
+      return Natural'Min (Arena_Slot_Limit, Natural (Whole_Slots));
+   end Arena_Capacity;
+
+   function Class_Bucket_For (Usable_Size, Page_Size : C.size_t) return Arena_Class_Bucket
+   is (Arena_Class_Bucket ((Usable_Size / Page_Size) mod C.size_t (Arena_Class_Bucket_Count)));
+
+   function Find_Class (Usable_Size, Guard_Size, Page_Size : C.size_t) return Arena_Class_Access is
+      Item : Arena_Class_Access := Arena_Classes (Class_Bucket_For (Usable_Size, Page_Size));
+   begin
+      while Item /= null loop
+         if Item.Usable_Size = Usable_Size and then Item.Guard_Size = Guard_Size then
+            return Item;
+         end if;
+         Item := Item.Bucket_Next;
+      end loop;
+      return null;
+   end Find_Class;
+
+   procedure Link_Class (Item : not null Arena_Class_Access) is
+   begin
+      Item.Bucket_Previous := null;
+      Item.Bucket_Next := Arena_Classes (Item.Bucket);
+      if Item.Bucket_Next /= null then
+         Item.Bucket_Next.Bucket_Previous := Item;
+      end if;
+      Arena_Classes (Item.Bucket) := Item;
+   end Link_Class;
+
+   procedure Unlink_Class (Item : not null Arena_Class_Access) is
+   begin
+      if Item.Bucket_Previous = null then
+         Arena_Classes (Item.Bucket) := Item.Bucket_Next;
+      else
+         Item.Bucket_Previous.Bucket_Next := Item.Bucket_Next;
+      end if;
+      if Item.Bucket_Next /= null then
+         Item.Bucket_Next.Bucket_Previous := Item.Bucket_Previous;
+      end if;
+      Item.Bucket_Previous := null;
+      Item.Bucket_Next := null;
+   end Unlink_Class;
+
+   procedure Link_Nonfull (Item : not null Stack_Arena_Access) is
+      Class : constant Arena_Class_Access := Item.Class;
+   begin
+      if Class = null or else Item.Is_Nonfull or else Item.Used_Count >= Class.Capacity then
+         raise Program_Error with "Flyology invalid non-full arena insertion";
+      end if;
+      Item.Nonfull_Previous := null;
+      Item.Nonfull_Next := Class.Nonfull_Arenas;
+      if Item.Nonfull_Next /= null then
+         Item.Nonfull_Next.Nonfull_Previous := Item;
+      end if;
+      Class.Nonfull_Arenas := Item;
+      Item.Is_Nonfull := True;
+   end Link_Nonfull;
+
+   procedure Unlink_Nonfull (Item : not null Stack_Arena_Access) is
+      Class : constant Arena_Class_Access := Item.Class;
+   begin
+      if Class = null or else not Item.Is_Nonfull then
+         raise Program_Error with "Flyology invalid non-full arena removal";
+      end if;
+      if Item.Nonfull_Previous = null then
+         Class.Nonfull_Arenas := Item.Nonfull_Next;
+      else
+         Item.Nonfull_Previous.Nonfull_Next := Item.Nonfull_Next;
+      end if;
+      if Item.Nonfull_Next /= null then
+         Item.Nonfull_Next.Nonfull_Previous := Item.Nonfull_Previous;
+      end if;
+      Item.Nonfull_Previous := null;
+      Item.Nonfull_Next := null;
+      Item.Is_Nonfull := False;
+   end Unlink_Nonfull;
+
    function Round_Up (Value, Alignment : C.size_t) return C.size_t
    is ((Value + Alignment - 1) / Alignment * Alignment);
 
@@ -202,13 +321,15 @@ package body System.Flyology.Contexts is
      (Usable_Size : C.size_t; Stack : out System.Address; Arena : out Stack_Arena_Access; Slot : out Natural)
       return Boolean
    is
-      Page_Size  : constant C.size_t := C.size_t (Get_Page_Size);
-      Guard_Size : constant C.size_t := Guard_Bytes (Page_Size);
-      Item       : Stack_Arena_Access;
-      Capacity   : Natural;
-      Result     : C.int;
-      Stride     : constant C.size_t := Usable_Size + Guard_Size;
-      Locked     : Boolean := False;
+      Page_Size     : constant C.size_t := C.size_t (Get_Page_Size);
+      Guard_Size    : constant C.size_t := Guard_Bytes (Page_Size);
+      Stride        : constant C.size_t := Usable_Size + Guard_Size;
+      Class         : Arena_Class_Access;
+      Created_Class : Arena_Class_Access := null;
+      Item          : Stack_Arena_Access;
+      Capacity      : Natural;
+      Result        : C.int;
+      Locked        : Boolean := False;
    begin
       Stack := System.Null_Address;
       Arena := null;
@@ -226,56 +347,71 @@ package body System.Flyology.Contexts is
       Lock_Pool;
       Locked := True;
 
-      Item := Arenas;
-      while Item /= null loop
-         if Item.Usable_Size = Usable_Size
-           and then Item.Guard_Size = Guard_Size
-           and then Item.Used_Count < Item.Capacity
-         then
-            for Index in 0 .. Item.Capacity - 1 loop
-               if not Item.Used (Index) then
-                  Stack :=
-                    Item.Mapping + SSE.Storage_Offset (Item.Guard_Size + C.size_t (Index) * Item.Stride);
-                  Result :=
-                    (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
-                     then -1
-                     else Mprotect (Stack, Usable_Size, PROT_READ + PROT_WRITE));
-                  if Result /= 0 then
-                     Unlock_Pool;
-                     Locked := False;
-                     return False;
-                  end if;
-                  Item.Used (Index) := True;
-                  Item.Used_Count := Item.Used_Count + 1;
-                  Live_Stacks := Live_Stacks + 1;
-                  Live_Usable_Bytes := Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
-                  Shared_Stacks := Shared_Stacks + 1;
-                  Arena := Item;
-                  Slot := Index;
+      Class := Find_Class (Usable_Size, Guard_Size, Page_Size);
+      Item := (if Class = null then null else Class.Nonfull_Arenas);
+      if Item /= null then
+         for Index in 0 .. Class.Capacity - 1 loop
+            if not Item.Used (Index) then
+               Stack :=
+                 Item.Mapping + SSE.Storage_Offset (Class.Guard_Size + C.size_t (Index) * Class.Stride);
+               Result :=
+                 (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
+                  then -1
+                  else Mprotect (Stack, Usable_Size, PROT_READ + PROT_WRITE));
+               if Result /= 0 then
                   Unlock_Pool;
                   Locked := False;
-                  return True;
+                  return False;
                end if;
-            end loop;
-            Unlock_Pool;
-            Locked := False;
-            raise Program_Error with "Flyology stack arena has no advertised free slot";
-         end if;
-         Item := Item.Next;
-      end loop;
+               Item.Used (Index) := True;
+               Item.Used_Count := Item.Used_Count + 1;
+               if Item.Used_Count = Class.Capacity then
+                  Unlink_Nonfull (Item);
+               end if;
+               Live_Stacks := Live_Stacks + 1;
+               Live_Usable_Bytes := Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
+               Shared_Stacks := Shared_Stacks + 1;
+               Arena := Item;
+               Slot := Index;
+               Unlock_Pool;
+               Locked := False;
+               return True;
+            end if;
+         end loop;
+         Unlock_Pool;
+         Locked := False;
+         raise Program_Error with "Flyology stack arena has no advertised free slot";
+      end if;
 
-      Capacity :=
-        (if Stride >= Maximum_Arena_Bytes
-         then 1
-         else Natural'Min (Arena_Slot_Limit, Natural (Maximum_Arena_Bytes / Stride)));
-      Item := new Stack_Arena;
-      Item.Usable_Size := Usable_Size;
-      Item.Guard_Size := Guard_Size;
-      Item.Stride := Stride;
-      Item.Capacity := Capacity;
+      if Class = null then
+         Capacity := Arena_Capacity (Stride);
+         Class := new Arena_Class;
+         Created_Class := Class;
+         Class.Usable_Size := Usable_Size;
+         Class.Guard_Size := Guard_Size;
+         Class.Stride := Stride;
+         Class.Capacity := Capacity;
+         Class.Bucket := Class_Bucket_For (Usable_Size, Page_Size);
+      else
+         Capacity := Class.Capacity;
+      end if;
+
+      begin
+         Item := new Stack_Arena;
+      exception
+         when others =>
+            if Created_Class /= null then
+               Free_Class (Created_Class);
+            end if;
+            raise;
+      end;
+      Item.Class := Class;
       Item.Mapping_Size := C.size_t (Capacity) * Stride + Guard_Size;
       if Faults.Enabled and then Faults.Fail (Faults.Stack_Mapping) then
          Free_Arena (Item);
+         if Created_Class /= null then
+            Free_Class (Created_Class);
+         end if;
          Unlock_Pool;
          Locked := False;
          return False;
@@ -284,6 +420,9 @@ package body System.Flyology.Contexts is
         Mmap (System.Null_Address, Item.Mapping_Size, PROT_NONE, MAP_PRIVATE + Map_Anonymous, -1, 0);
       if Item.Mapping = Failed_Mapping then
          Free_Arena (Item);
+         if Created_Class /= null then
+            Free_Class (Created_Class);
+         end if;
          Unlock_Pool;
          Locked := False;
          return False;
@@ -297,6 +436,9 @@ package body System.Flyology.Contexts is
       if Result /= 0 then
          Result := Munmap (Item.Mapping, Item.Mapping_Size);
          Free_Arena (Item);
+         if Created_Class /= null then
+            Free_Class (Created_Class);
+         end if;
          Unlock_Pool;
          Locked := False;
          if Result /= 0 then
@@ -307,8 +449,14 @@ package body System.Flyology.Contexts is
 
       Item.Used (0) := True;
       Item.Used_Count := 1;
-      Item.Next := Arenas;
-      Arenas := Item;
+      Class.Arena_Count := Class.Arena_Count + 1;
+      if Created_Class /= null then
+         Link_Class (Class);
+         Created_Class := null;
+      end if;
+      if Capacity > 1 then
+         Link_Nonfull (Item);
+      end if;
       Active_Arenas := Active_Arenas + 1;
       Live_Stacks := Live_Stacks + 1;
       Live_Usable_Bytes := Live_Usable_Bytes + C.unsigned_long_long (Usable_Size);
@@ -331,21 +479,23 @@ package body System.Flyology.Contexts is
    end Acquire_Stack;
 
    procedure Release_Stack (Arena : not null Stack_Arena_Access; Slot : Natural; Stack : System.Address) is
-      Position : Stack_Arena_Access;
-      Previous : Stack_Arena_Access := null;
-      Victim   : Stack_Arena_Access := Arena;
-      Result   : C.int;
-      Expected : System.Address;
-      Locked   : Boolean := False;
+      Class        : constant Arena_Class_Access := Arena.Class;
+      Victim       : Stack_Arena_Access := Arena;
+      Victim_Class : Arena_Class_Access := null;
+      Result       : C.int;
+      Expected     : System.Address;
+      Was_Full     : Boolean;
+      Discarded    : Boolean := False;
+      Locked       : Boolean := False;
    begin
       Lock_Pool;
       Locked := True;
-      if Slot >= Arena.Capacity or else not Arena.Used (Slot) then
+      if Class = null or else Slot >= Class.Capacity or else not Arena.Used (Slot) then
          Unlock_Pool;
          Locked := False;
          raise Program_Error with "Flyology invalid stack-pool release";
       end if;
-      Expected := Arena.Mapping + SSE.Storage_Offset (Arena.Guard_Size + C.size_t (Slot) * Arena.Stride);
+      Expected := Arena.Mapping + SSE.Storage_Offset (Class.Guard_Size + C.size_t (Slot) * Class.Stride);
       if Stack /= Expected then
          Unlock_Pool;
          Locked := False;
@@ -358,48 +508,58 @@ package body System.Flyology.Contexts is
       Result :=
         (if Faults.Enabled and then Faults.Fail (Faults.Stack_Protection)
          then -1
-         else Mprotect (Stack, Arena.Usable_Size, PROT_NONE));
+         else Mprotect (Stack, Class.Usable_Size, PROT_NONE));
       if Result /= 0 then
          Unlock_Pool;
          Locked := False;
          raise Program_Error with "Flyology stack-pool protection failed";
       end if;
       if not (Faults.Enabled and then Faults.Fail (Faults.Stack_Discard))
-        and then Discard_Pages (Stack, Arena.Usable_Size) = 0
+        and then Discard_Pages (Stack, Class.Usable_Size) = 0
       then
-         Discarded_Stacks := Discarded_Stacks + 1;
+         Discarded := True;
       end if;
 
-      Arena.Used (Slot) := False;
-      Arena.Used_Count := Arena.Used_Count - 1;
-      Live_Stacks := Live_Stacks - 1;
-      Live_Usable_Bytes := Live_Usable_Bytes - C.unsigned_long_long (Arena.Usable_Size);
-      if Arena.Used_Count = 0 then
-         Position := Arenas;
-         while Position /= null and then Position /= Arena loop
-            Previous := Position;
-            Position := Position.Next;
-         end loop;
-         if Position = null then
-            Unlock_Pool;
-            Locked := False;
-            raise Program_Error with "Flyology lost an empty stack arena";
-         end if;
+      Was_Full := Arena.Used_Count = Class.Capacity;
+      if Arena.Used_Count = 1 then
          Result := Munmap (Arena.Mapping, Arena.Mapping_Size);
          if Result /= 0 then
             Unlock_Pool;
             Locked := False;
             raise Program_Error with "Flyology stack-arena release failed";
          end if;
-         if Previous = null then
-            Arenas := Arena.Next;
-         else
-            Previous.Next := Arena.Next;
+         if Arena.Is_Nonfull then
+            Unlink_Nonfull (Arena);
+         end if;
+      end if;
+
+      Arena.Used (Slot) := False;
+      Arena.Used_Count := Arena.Used_Count - 1;
+      Live_Stacks := Live_Stacks - 1;
+      Live_Usable_Bytes := Live_Usable_Bytes - C.unsigned_long_long (Class.Usable_Size);
+      if Discarded then
+         Discarded_Stacks := Discarded_Stacks + 1;
+      end if;
+      if Arena.Used_Count = 0 then
+         Class.Arena_Count := Class.Arena_Count - 1;
+         if Class.Arena_Count = 0 then
+            if Class.Nonfull_Arenas /= null then
+               Unlock_Pool;
+               Locked := False;
+               raise Program_Error with "Flyology empty stack class retained an arena";
+            end if;
+            Unlink_Class (Class);
+            Victim_Class := Class;
          end if;
          Active_Arenas := Active_Arenas - 1;
          Reserved_Bytes := Reserved_Bytes - C.unsigned_long_long (Arena.Mapping_Size);
          Arena_Unmappings := Arena_Unmappings + 1;
          Free_Arena (Victim);
+         if Victim_Class /= null then
+            Free_Class (Victim_Class);
+         end if;
+      elsif Was_Full then
+         Link_Nonfull (Arena);
       end if;
       Unlock_Pool;
       Locked := False;
