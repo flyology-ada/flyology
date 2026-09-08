@@ -515,11 +515,12 @@ package body Flyology.Supervision.Static is
       end Request_Intervention;
 
       procedure Classify_Restart
-        (Child    : Child_Kind;
-         Incident : Incident_Context;
-         Now      : Ada.Real_Time.Time;
-         Admitted : out Boolean;
-         Backoff  : out Ada.Real_Time.Time_Span)
+        (Child           : Child_Kind;
+         Incident        : Incident_Context;
+         Now             : Ada.Real_Time.Time;
+         Minimum_Backoff : Ada.Real_Time.Time_Span;
+         Admitted        : out Boolean;
+         Backoff         : out Ada.Real_Time.Time_Span)
       is
          Limits          : constant Recovery_Limits := Child_Specs (Child).Recovery;
          Next_Attempt    : Natural;
@@ -604,6 +605,9 @@ package body Flyology.Supervision.Static is
          if Subtree_Backoff > Backoff then
             Backoff := Subtree_Backoff;
          end if;
+         if Minimum_Backoff > Backoff then
+            Backoff := Minimum_Backoff;
+         end if;
 
          Elapsed := Now - Incident_Since (Child);
          Subtree_Elapsed := Now - Subtree_Incident_Since;
@@ -659,13 +663,19 @@ package body Flyology.Supervision.Static is
          Incident    : Incident_Context;
          Now         : Ada.Real_Time.Time)
       is
-         Admitted : Boolean;
-         Backoff  : Ada.Real_Time.Time_Span;
-         Previous : constant Boolean_Array := Recovery_Affected;
-         Retrying : constant Boolean := Phase = Recovery_Starting;
+         Admitted        : Boolean;
+         Backoff         : Ada.Real_Time.Time_Span;
+         Previous        : constant Boolean_Array := Recovery_Affected;
+         Retrying        : constant Boolean := Phase in Recovery_Backing_Off | Recovery_Starting;
+         Previous_Due    : constant Ada.Real_Time.Time := Recovery_Due;
+         Merging_Backoff : constant Boolean := Phase = Recovery_Backing_Off;
+         Minimum_Backoff : constant Ada.Real_Time.Time_Span :=
+           (if Merging_Backoff and then Previous_Due > Now
+            then Previous_Due - Now
+            else Ada.Real_Time.Time_Span_Zero);
       begin
          Active_Incident := Incident;
-         Classify_Restart (Trigger, Incident, Now, Admitted, Backoff);
+         Classify_Restart (Trigger, Incident, Now, Minimum_Backoff, Admitted, Backoff);
          if not Admitted then
             Snapshots (Trigger).Termination.Kind := Policy_Exhaustion;
             Begin_Terminal_Stop (Recovery_Exhausted, Trigger, Snapshots (Trigger).Termination);
@@ -681,6 +691,9 @@ package body Flyology.Supervision.Static is
          end if;
          Recovery_Trigger := Trigger;
          Record_Restart (Trigger, Incident, Now, Backoff);
+         --  One start gate serves the merged set.  Classify_Restart includes
+         --  the retained delay in every deadline check before charging the
+         --  new attempt.
          Recovery_Due := Restart_Due (Trigger);
          Recovery_Stop_Position := 0;
          Recovery_Start_Position := 0;
@@ -720,6 +733,31 @@ package body Flyology.Supervision.Static is
             end if;
          end Advance_Repeated_Attempt;
 
+         procedure Advance_Merged_Attempt (Context : in out Incident_Context; Exhausted : out Boolean) is
+            Current_Id      : Incident_Id;
+            Current_Attempt : Incident_Attempt;
+         begin
+            Exhausted := False;
+            if Active (Active_Incident) and then Active (Context) then
+               Current_Id := Flyology.Supervision.Incident (Active_Incident);
+               Current_Attempt := Attempt (Active_Incident);
+               if Flyology.Supervision.Incident (Context) < Current_Id
+                 or else (Flyology.Supervision.Incident (Context) = Current_Id
+                          and then Attempt (Context) <= Current_Attempt)
+               then
+                  begin
+                     Context := Next_Attempt (Active_Incident);
+                  exception
+                     when Program_Error =>
+                        Context := Active_Incident;
+                        Exhausted := True;
+                  end;
+                  return;
+               end if;
+            end if;
+            Advance_Repeated_Attempt (Context, Exhausted);
+         end Advance_Merged_Attempt;
+
          Attempts_Exhausted : Boolean;
       begin
          if not Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
@@ -748,6 +786,22 @@ package body Flyology.Supervision.Static is
             else
                Active_Incident := Incident;
                Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            end if;
+         elsif Phase = Recovery_Backing_Off then
+            if Child_Specs (Child).Impact /= Isolate_Child
+              or else not Policy.Should_Restart (Child_Specs (Child).Restart, Termination.Kind)
+            then
+               Active_Incident := Incident;
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            else
+               Advance_Merged_Attempt (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Retry_Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               else
+                  Begin_Recovery (Child, Snapshots (Child).Termination, Retry_Incident, Now);
+               end if;
             end if;
          elsif Phase = Starting_Children then
             Active_Incident := Incident;

@@ -10,6 +10,7 @@ with System.Multiprocessors;
 
 procedure Flyology.Supervision.Static_Smoke is
    use type Ada.Real_Time.Time;
+   use type Ada.Real_Time.Time_Span;
    use type Ada.Task_Identification.Task_Id;
    use type Flyology.Execution_Model;
    use type Flyology.Supervision.Generation;
@@ -469,6 +470,256 @@ procedure Flyology.Supervision.Static_Smoke is
         Cohort_Member       => Whole_Cohort,
         Run_One_Generation  => Run_Dependency_Generation);
 
+   type Backoff_Kind is (Backoff_First, Backoff_Second, Backoff_Cohort);
+   type Backoff_Count_Array is array (Backoff_Kind) of Natural;
+   type Backoff_Flag_Array is array (Backoff_Kind) of Boolean;
+
+   protected type Backoff_State is
+      procedure Begin_Generation (Child : Backoff_Kind);
+      procedure Request_Failure (Child : Backoff_Kind);
+      procedure Take_Failure (Child : Backoff_Kind; Requested : out Boolean);
+      function Starts (Child : Backoff_Kind) return Natural;
+   private
+      Start_Count : Backoff_Count_Array := (others => 0);
+      Failures    : Backoff_Flag_Array := (others => False);
+   end Backoff_State;
+
+   protected body Backoff_State is
+      procedure Begin_Generation (Child : Backoff_Kind) is
+      begin
+         Start_Count (Child) := Start_Count (Child) + 1;
+      end Begin_Generation;
+
+      procedure Request_Failure (Child : Backoff_Kind) is
+      begin
+         Failures (Child) := True;
+      end Request_Failure;
+
+      procedure Take_Failure (Child : Backoff_Kind; Requested : out Boolean) is
+      begin
+         Requested := Failures (Child);
+         Failures (Child) := False;
+      end Take_Failure;
+
+      function Starts (Child : Backoff_Kind) return Natural
+      is (Start_Count (Child));
+   end Backoff_State;
+
+   type Backoff_Context is limited record
+      State : Backoff_State;
+   end record;
+
+   procedure Execute_Backoff
+     (Context : in out Backoff_Context;
+      Control : not null access Flyology.Supervision.Generation_Control;
+      Child   : Backoff_Kind)
+   is
+      Fail : Boolean;
+   begin
+      Context.State.Begin_Generation (Child);
+      Flyology.Supervision.Mark_Ready (Control.all);
+      loop
+         Context.State.Take_Failure (Child, Fail);
+         if Fail then
+            raise Test_Failure with "backoff overlap failure";
+         elsif Flyology.Supervision.Stopping (Control.all).Requested then
+            raise Flyology.Cancellation.Operation_Cancelled;
+         end if;
+         delay 0.001;
+      end loop;
+   end Execute_Backoff;
+
+   procedure Execute_Backoff_First
+     (Context : in out Backoff_Context;
+      Control : not null access Flyology.Supervision.Generation_Control) is
+   begin
+      Execute_Backoff (Context, Control, Backoff_First);
+   end Execute_Backoff_First;
+
+   procedure Execute_Backoff_Second
+     (Context : in out Backoff_Context;
+      Control : not null access Flyology.Supervision.Generation_Control) is
+   begin
+      Execute_Backoff (Context, Control, Backoff_Second);
+   end Execute_Backoff_Second;
+
+   procedure Execute_Backoff_Cohort
+     (Context : in out Backoff_Context;
+      Control : not null access Flyology.Supervision.Generation_Control) is
+   begin
+      Execute_Backoff (Context, Control, Backoff_Cohort);
+   end Execute_Backoff_Cohort;
+
+   package Backoff_First_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Backoff_Context,
+        Execute             => Execute_Backoff_First,
+        Task_Model          => Flyology.Native_Task);
+   package Backoff_Second_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Backoff_Context,
+        Execute             => Execute_Backoff_Second,
+        Task_Model          => Flyology.Native_Task);
+   package Backoff_Cohort_Child is new
+     Flyology.Supervision.Children
+       (Application_Context => Backoff_Context,
+        Execute             => Execute_Backoff_Cohort,
+        Task_Model          => Flyology.Native_Task);
+
+   Backoff_First_Recovery : constant Flyology.Supervision.Recovery_Limits :=
+     (Burst_Attempts    => 3,
+      Window            => Ada.Real_Time.Seconds (1),
+      Total_Attempts    => 3,
+      Initial_Backoff   => Ada.Real_Time.Seconds (1),
+      Maximum_Backoff   => Ada.Real_Time.Seconds (1),
+      Stability_Reset   => Ada.Real_Time.Seconds (1),
+      Recovery_Deadline => Ada.Real_Time.Seconds (3));
+
+   Backoff_Second_Recovery : constant Flyology.Supervision.Recovery_Limits :=
+     (Burst_Attempts    => 3,
+      Window            => Ada.Real_Time.Seconds (1),
+      Total_Attempts    => 3,
+      Initial_Backoff   => Ada.Real_Time.Milliseconds (10),
+      Maximum_Backoff   => Ada.Real_Time.Milliseconds (10),
+      Stability_Reset   => Ada.Real_Time.Seconds (1),
+      Recovery_Deadline => Ada.Real_Time.Seconds (3));
+
+   function Backoff_Id
+     (Child : Backoff_Kind) return Flyology.Supervision.Child_Id
+   is (Flyology.Supervision.Child_Id
+         (Backoff_Kind'Pos (Child) + 9_100_000_000));
+
+   function Backoff_Specification
+     (Child : Backoff_Kind) return Flyology.Supervision.Child_Specification is
+   begin
+      return
+        (Restart           => Flyology.Supervision.On_Failure,
+         Impact            => Flyology.Supervision.Isolate_Child,
+         Recovery          =>
+           (if Child = Backoff_First
+            then Backoff_First_Recovery
+            else Backoff_Second_Recovery),
+         Stopping          => Flyology.Supervision.Default_Stop_Policy,
+         Readiness_Timeout => Ada.Real_Time.Seconds (1),
+         Restart_Safe      => True,
+         Task_Model        => Flyology.Native_Task,
+         Has_Group         => False,
+         Group             => 0);
+   end Backoff_Specification;
+
+   function No_Backoff_Relationship (Left, Right : Backoff_Kind) return Boolean
+   is
+      pragma Unreferenced (Left, Right);
+   begin
+      return False;
+   end No_Backoff_Relationship;
+
+   procedure Run_Backoff_Generation
+     (Context : aliased in out Backoff_Context;
+      Child   : Backoff_Kind;
+      Control : aliased in out Flyology.Supervision.Generation_Control;
+      Result  : out Flyology.Supervision.Generation_Result) is
+   begin
+      case Child is
+         when Backoff_First  =>
+            Backoff_First_Child.Run (Context, Control, Result);
+
+         when Backoff_Second =>
+            Backoff_Second_Child.Run (Context, Control, Result);
+
+         when Backoff_Cohort =>
+            Backoff_Cohort_Child.Run (Context, Control, Result);
+      end case;
+   end Run_Backoff_Generation;
+
+   package Backoff_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Backoff_Kind,
+        Application_Context => Backoff_Context,
+        Logical_Id          => Backoff_Id,
+        Specification       => Backoff_Specification,
+        Depends_On          => No_Backoff_Relationship,
+        Cohort_Member       => No_Backoff_Relationship,
+        Run_One_Generation  => Run_Backoff_Generation,
+        Subtree_Recovery    => Backoff_Second_Recovery);
+
+   function Backoff_Escalating_Specification
+     (Child : Backoff_Kind) return Flyology.Supervision.Child_Specification
+   is
+      Result : Flyology.Supervision.Child_Specification :=
+        Backoff_Specification (Child);
+   begin
+      if Child = Backoff_Second then
+         Result.Impact := Flyology.Supervision.Restart_Dependents;
+      end if;
+      return Result;
+   end Backoff_Escalating_Specification;
+
+   package Backoff_Escalating_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Backoff_Kind,
+        Application_Context => Backoff_Context,
+        Logical_Id          => Backoff_Id,
+        Specification       => Backoff_Escalating_Specification,
+        Depends_On          => No_Backoff_Relationship,
+        Cohort_Member       => No_Backoff_Relationship,
+        Run_One_Generation  => Run_Backoff_Generation,
+        Subtree_Recovery    => Backoff_Second_Recovery);
+
+   function Backoff_Incident_Specification
+     (Child : Backoff_Kind) return Flyology.Supervision.Child_Specification
+   is
+      Result : Flyology.Supervision.Child_Specification :=
+        Backoff_Specification (Child);
+   begin
+      if Child = Backoff_Cohort then
+         Result.Impact := Flyology.Supervision.Restart_Cohort;
+      end if;
+      return Result;
+   end Backoff_Incident_Specification;
+
+   function Whole_Backoff_Cohort
+     (Trigger, Member : Backoff_Kind) return Boolean
+   is
+      pragma Unreferenced (Trigger, Member);
+   begin
+      return True;
+   end Whole_Backoff_Cohort;
+
+   package Backoff_Incident_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Backoff_Kind,
+        Application_Context => Backoff_Context,
+        Logical_Id          => Backoff_Id,
+        Specification       => Backoff_Incident_Specification,
+        Depends_On          => No_Backoff_Relationship,
+        Cohort_Member       => Whole_Backoff_Cohort,
+        Run_One_Generation  => Run_Backoff_Generation,
+        Subtree_Recovery    => Backoff_Second_Recovery);
+
+   function Backoff_Deadline_Specification
+     (Child : Backoff_Kind) return Flyology.Supervision.Child_Specification
+   is
+      Result : Flyology.Supervision.Child_Specification :=
+        Backoff_Specification (Child);
+   begin
+      if Child = Backoff_Second then
+         Result.Recovery.Recovery_Deadline := Ada.Real_Time.Milliseconds (100);
+      end if;
+      return Result;
+   end Backoff_Deadline_Specification;
+
+   package Backoff_Deadline_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Backoff_Kind,
+        Application_Context => Backoff_Context,
+        Logical_Id          => Backoff_Id,
+        Specification       => Backoff_Deadline_Specification,
+        Depends_On          => No_Backoff_Relationship,
+        Cohort_Member       => No_Backoff_Relationship,
+        Run_One_Generation  => Run_Backoff_Generation,
+        Subtree_Recovery    => Backoff_Second_Recovery);
+
    type Edge_Mode is (Readiness_Case, Stuck_Case);
    type Edge_Context (Mode : Edge_Mode) is limited null record;
 
@@ -758,6 +1009,97 @@ begin
    end;
 
    declare
+      Context : aliased Backoff_Context;
+      Item    : aliased Backoff_Escalating_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Backoff_Escalating_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+
+      Deadline         : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events           : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor           : Flyology.Supervision.Event_Sequence := 0;
+      Count            : Natural;
+      Dropped          : Flyology.Supervision.Event_Sequence;
+      Pending_Incident : Flyology.Supervision.Incident_Id :=
+        Flyology.Supervision.Incident_Id'First;
+      Saw_Pending      : Boolean := False;
+   begin
+      Owner.Start;
+      loop
+         exit when
+           Backoff_Escalating_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Escalating_Supervisors.Current
+                      (Item, Backoff_Second)
+                      .Ready
+           and then Backoff_Escalating_Supervisors.Current
+                      (Item, Backoff_Cohort)
+                      .Ready;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Escalating_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "backoff escalation supervisor did not complete startup";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Context.State.Request_Failure (Backoff_First);
+      loop
+         exit when
+           Backoff_Escalating_Supervisors.Current (Item, Backoff_First).State
+           = Flyology.Supervision.Backing_Off;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Escalating_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "first child did not enter escalation-test backoff";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Flyology.Task_Lifecycle_Testing.Reset;
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Context.State.Request_Failure (Backoff_Second);
+      Flyology.Task_Lifecycle_Testing.Wait_Reached
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Owner.Join;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Failure_Escalated);
+      pragma Assert (Result.Child = Backoff_Id (Backoff_Second));
+      pragma Assert (Flyology.Supervision.Active (Result.Incident));
+      Backoff_Escalating_Supervisors.Read_Events
+        (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Kind = Flyology.Supervision.Restart_Admitted
+           and then Events (Index).Child = Backoff_Id (Backoff_First)
+         then
+            Pending_Incident :=
+              Flyology.Supervision.Incident (Events (Index).Incident);
+            Saw_Pending := True;
+         end if;
+      end loop;
+      pragma Assert (Saw_Pending);
+      pragma
+        Assert
+          (Flyology.Supervision.Incident (Result.Incident)
+             /= Pending_Incident);
+   end;
+
+   declare
       Context : aliased Restart_Context;
       Item    : aliased Restart_Supervisors.Supervisor;
       Result  : Flyology.Supervision.Supervisor_Result;
@@ -947,6 +1289,391 @@ begin
       pragma Assert (Restart_Supervisors.Current (Item, Service).State = Flyology.Supervision.Joined);
       pragma Assert (not Saw_Direct_Start);
       pragma Assert (Saw_Restarting);
+   end;
+
+   declare
+      Context : aliased Backoff_Context;
+      Item    : aliased Backoff_Incident_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Backoff_Incident_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+
+      Deadline         : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (8);
+      Events           : Flyology.Supervision.Supervisor_Event_Array (1 .. 64);
+      Cursor           : Flyology.Supervision.Event_Sequence := 0;
+      Count            : Natural;
+      Dropped          : Flyology.Supervision.Event_Sequence;
+      Prior_Incident   : Flyology.Supervision.Incident_Id :=
+        Flyology.Supervision.Incident_Id'First;
+      Cohort_Admission : Boolean := False;
+      First_Admission  : Boolean := False;
+      Second_Admission : Boolean := False;
+   begin
+      Owner.Start;
+      loop
+         exit when
+           Backoff_Incident_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Second)
+                      .Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Cohort)
+                      .Ready;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Incident_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "incident overlap supervisor did not complete startup";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Context.State.Request_Failure (Backoff_Cohort);
+      loop
+         exit when
+           Backoff_Incident_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Second)
+                      .Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Cohort)
+                      .Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_First)
+                      .Generation
+                    = 2
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Second)
+                      .Generation
+                    = 2
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Cohort)
+                      .Generation
+                    = 2;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Incident_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "cohort recovery did not publish replacement generation";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Context.State.Request_Failure (Backoff_First);
+      loop
+         exit when
+           Backoff_Incident_Supervisors.Current (Item, Backoff_First).State
+           = Flyology.Supervision.Backing_Off;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Incident_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "current incident did not enter recovery backoff";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Flyology.Task_Lifecycle_Testing.Reset;
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Context.State.Request_Failure (Backoff_Second);
+      Flyology.Task_Lifecycle_Testing.Wait_Reached
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      pragma
+        Assert
+          (Backoff_Incident_Supervisors.Current (Item, Backoff_First).State
+             = Flyology.Supervision.Backing_Off);
+      pragma
+        Assert
+          (Backoff_Incident_Supervisors.Current (Item, Backoff_Second).State
+             = Flyology.Supervision.Backing_Off);
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+
+      loop
+         exit when
+           Backoff_Incident_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Second)
+                      .Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Cohort)
+                      .Ready
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_First)
+                      .Generation
+                    = 3
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Second)
+                      .Generation
+                    = 3
+           and then Backoff_Incident_Supervisors.Current (Item, Backoff_Cohort)
+                      .Generation
+                    = 2;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Incident_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "stale incident overlap did not restart both children";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Backoff_Incident_Supervisors.Read_Events
+        (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Kind = Flyology.Supervision.Restart_Admitted then
+            if Events (Index).Child = Backoff_Id (Backoff_Cohort) then
+               Cohort_Admission := True;
+               Prior_Incident :=
+                 Flyology.Supervision.Incident (Events (Index).Incident);
+               pragma
+                 Assert
+                   (Flyology.Supervision.Attempt (Events (Index).Incident)
+                      = 1);
+            elsif Events (Index).Child = Backoff_Id (Backoff_First) then
+               First_Admission := True;
+               pragma
+                 Assert
+                   (Flyology.Supervision.Incident (Events (Index).Incident)
+                      = Prior_Incident);
+               pragma
+                 Assert
+                   (Flyology.Supervision.Attempt (Events (Index).Incident)
+                      = 2);
+            elsif Events (Index).Child = Backoff_Id (Backoff_Second) then
+               Second_Admission := True;
+               pragma
+                 Assert
+                   (Flyology.Supervision.Incident (Events (Index).Incident)
+                      = Prior_Incident);
+               pragma
+                 Assert
+                   (Flyology.Supervision.Attempt (Events (Index).Incident)
+                      = 3);
+            end if;
+         end if;
+      end loop;
+      pragma
+        Assert
+          (Cohort_Admission
+             and then First_Admission
+             and then Second_Admission);
+      Backoff_Incident_Supervisors.Request_Shutdown (Item);
+      Owner.Join;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   end;
+
+   declare
+      Context : aliased Backoff_Context;
+      Item    : aliased Backoff_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Backoff_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+
+      Deadline          : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      Events            :
+        Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor            : Flyology.Supervision.Event_Sequence := 0;
+      Count             : Natural;
+      Dropped           : Flyology.Supervision.Event_Sequence;
+      First_Admission   : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      First_Restart     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Second_Terminated : Flyology.Supervision.Event_Sequence := 0;
+      First_Restarted   : Flyology.Supervision.Event_Sequence := 0;
+   begin
+      Owner.Start;
+      loop
+         exit when
+           Backoff_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Supervisors.Current (Item, Backoff_Second).Ready
+           and then Backoff_Supervisors.Current (Item, Backoff_Cohort).Ready;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "backoff overlap supervisor did not complete startup";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Context.State.Request_Failure (Backoff_First);
+      loop
+         exit when
+           Backoff_Supervisors.Current (Item, Backoff_First).State
+           = Flyology.Supervision.Backing_Off;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "first child did not enter recovery backoff";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Flyology.Task_Lifecycle_Testing.Reset;
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Context.State.Request_Failure (Backoff_Second);
+      Flyology.Task_Lifecycle_Testing.Wait_Reached
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      pragma
+        Assert
+          (Backoff_Supervisors.Current (Item, Backoff_First).State
+             = Flyology.Supervision.Backing_Off);
+      pragma
+        Assert
+          (Backoff_Supervisors.Current (Item, Backoff_Second).State
+             = Flyology.Supervision.Backing_Off);
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      loop
+         exit when
+           Backoff_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Supervisors.Current (Item, Backoff_Second).Ready
+           and then Backoff_Supervisors.Current (Item, Backoff_First)
+                      .Generation
+                    = 2
+           and then Backoff_Supervisors.Current (Item, Backoff_Second)
+                      .Generation
+                    = 2;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "backoff overlap did not restart both children";
+         end if;
+         delay 0.001;
+      end loop;
+
+      pragma Assert (Context.State.Starts (Backoff_First) = 2);
+      pragma Assert (Context.State.Starts (Backoff_Second) = 2);
+      Backoff_Supervisors.Read_Events (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Child = Backoff_Id (Backoff_First)
+           and then Events (Index).Kind = Flyology.Supervision.Restart_Admitted
+         then
+            First_Admission := Events (Index).Timestamp;
+            pragma
+              Assert
+                (Events (Index).Backoff
+                   = Backoff_First_Recovery.Initial_Backoff);
+         elsif Events (Index).Child = Backoff_Id (Backoff_Second)
+           and then Events (Index).Kind
+                    = Flyology.Supervision.Lifecycle_Changed
+           and then Events (Index).After = Flyology.Supervision.Terminated
+         then
+            Second_Terminated := Events (Index).Sequence;
+         elsif Events (Index).Child = Backoff_Id (Backoff_First)
+           and then Events (Index).Kind
+                    = Flyology.Supervision.Lifecycle_Changed
+           and then Events (Index).After = Flyology.Supervision.Restarting
+         then
+            First_Restart := Events (Index).Timestamp;
+            First_Restarted := Events (Index).Sequence;
+         end if;
+      end loop;
+      pragma Assert (First_Admission /= Ada.Real_Time.Time_First);
+      pragma Assert (First_Restart /= Ada.Real_Time.Time_First);
+      pragma Assert (Second_Terminated > 0);
+      pragma Assert (Second_Terminated < First_Restarted);
+      pragma
+        Assert
+          (First_Restart - First_Admission
+             >= Backoff_First_Recovery.Initial_Backoff);
+      Backoff_Supervisors.Request_Shutdown (Item);
+      Owner.Join;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+   end;
+
+   declare
+      Context : aliased Backoff_Context;
+      Item    : aliased Backoff_Deadline_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Backoff_Deadline_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   begin
+      Owner.Start;
+      loop
+         exit when
+           Backoff_Deadline_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Deadline_Supervisors.Current (Item, Backoff_Second)
+                      .Ready
+           and then Backoff_Deadline_Supervisors.Current (Item, Backoff_Cohort)
+                      .Ready;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Deadline_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "deadline overlap supervisor did not complete startup";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Context.State.Request_Failure (Backoff_First);
+      loop
+         exit when
+           Backoff_Deadline_Supervisors.Current (Item, Backoff_First).State
+           = Flyology.Supervision.Backing_Off;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Deadline_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error
+              with "first child did not enter deadline-test backoff";
+         end if;
+         delay 0.001;
+      end loop;
+
+      Flyology.Task_Lifecycle_Testing.Reset;
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Context.State.Request_Failure (Backoff_Second);
+      Flyology.Task_Lifecycle_Testing.Wait_Reached
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
+
+      select
+         Owner.Join;
+      or
+         delay 0.500;
+         Backoff_Deadline_Supervisors.Request_Shutdown (Item);
+         Owner.Join;
+         raise Program_Error
+           with "merged backoff bypassed child recovery deadline";
+      end select;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Recovery_Exhausted);
+      pragma Assert (Result.Child = Backoff_Id (Backoff_Second));
+      pragma
+        Assert
+          (Result.Termination.Kind = Flyology.Supervision.Policy_Exhaustion);
+      pragma Assert (Flyology.Supervision.Active (Result.Incident));
    end;
 
    declare
