@@ -36,5 +36,6 @@ package Flyology.Task_Lifecycle_Testing is
    procedure Force_Next_Prepared_Generation_Final;
    procedure Force_Next_Prepared_Monitor_Identity_Exhausted;
    procedure Interrupt_Next_Admission_Signal;
+   procedure Force_Next_Family_Manager_Failure;
 
 end Flyology.Task_Lifecycle_Testing;

@@ -50,5 +50,7 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    function Consume_Prepared_Monitor_Identity_Exhausted return Boolean;
    procedure Interrupt_Next_Admission_Signal;
    function Consume_Admission_Signal_Interrupted return Boolean;
+   procedure Force_Next_Family_Manager_Failure;
+   function Consume_Family_Manager_Failure return Boolean;
 
 end Flyology.Task_Lifecycle_Test_Hooks;

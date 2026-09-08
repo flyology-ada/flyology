@@ -17,7 +17,9 @@ replacement before the old generation joins, drop an unaffected child that
 terminates during recovery backoff, mint a new incident while propagating
 nested escalation, publish an owner before desired-child readmission, omit
 nested parent-stop forwarding, or retain readiness from the previous generation
-across replacement start.  The checked configurations require a concrete
+across replacement start.  The family-manager variant retains the previous
+generation handle while a replacement is running, so a manager failure cannot
+retire that replacement.  The checked configurations require a concrete
 counterexample for each removed guarantee.
 
 Exception payloads and event-ring storage are abstracted at their proved
@@ -48,6 +50,7 @@ ASSUME /\ Children = {Prerequisite, Owner}
              "nested-incident-mint-broken",
              "owner-ready-before-readmission-broken",
              "backoff-termination-drop-broken",
+             "stale-family-manager-handle-broken",
              "restart-window-stale-broken"}
 
 NoChild == "no-child"
@@ -86,7 +89,8 @@ VARIABLES mode, shutdown, terminal, result,
           familyOpen, familyController, retiredControllers,
           familyIncarnation, familyShutdown, familyTerminal,
           slotState, slotLive, slotReady, slotStop, slotRecover,
-          slotGeneration, slotJoinedGeneration,
+          slotGeneration, slotJoinedGeneration, familyManager,
+          familyManagerFailureDropped,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
           ownerPublishedWithoutReplay, nestedIncidentMinted,
@@ -106,7 +110,8 @@ lifecycleVars == <<mode, shutdown, terminal, result,
           familyOpen, familyController, retiredControllers,
           familyIncarnation, familyShutdown, familyTerminal,
           slotState, slotLive, slotReady, slotStop, slotRecover,
-          slotGeneration, slotJoinedGeneration,
+          slotGeneration, slotJoinedGeneration, familyManager,
+          familyManagerFailureDropped,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
           ownerPublishedWithoutReplay, nestedIncidentMinted>>
@@ -134,7 +139,8 @@ vars == <<mode, shutdown, terminal, result,
           familyOpen, familyController, retiredControllers,
           familyIncarnation, familyShutdown, familyTerminal,
           slotState, slotLive, slotReady, slotStop, slotRecover,
-          slotGeneration, slotJoinedGeneration,
+          slotGeneration, slotJoinedGeneration, familyManager,
+          familyManagerFailureDropped,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
           ownerPublishedWithoutReplay, nestedIncidentMinted,
@@ -245,6 +251,8 @@ Init ==
   /\ slotRecover = [slot \in FamilySlots |-> FALSE]
   /\ slotGeneration = [slot \in FamilySlots |-> 0]
   /\ slotJoinedGeneration = [slot \in FamilySlots |-> 0]
+  /\ familyManager = [slot \in FamilySlots |-> 0]
+  /\ familyManagerFailureDropped = FALSE
   /\ nestedEscalation = FALSE
   /\ nestedIncident = 0
   /\ nestedAttempt = 0
@@ -316,6 +324,8 @@ OpenNestedFamily ==
   /\ slotRecover' = [slot \in FamilySlots |-> FALSE]
   /\ slotGeneration' = [slot \in FamilySlots |-> 0]
   /\ slotJoinedGeneration' = [slot \in FamilySlots |-> 0]
+  /\ familyManager' = [slot \in FamilySlots |-> 0]
+  /\ familyManagerFailureDropped' = FALSE
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
@@ -390,6 +400,10 @@ TakeFamilyStart(slot) ==
   /\ slotState[slot] = "queued"
   /\ slotState' = [slotState EXCEPT ![slot] = "starting"]
   /\ slotLive' = [slotLive EXCEPT ![slot] = TRUE]
+  /\ familyManager' =
+       [familyManager EXCEPT
+          ![slot] = slotGeneration[slot]]
+  /\ UNCHANGED familyManagerFailureDropped
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
@@ -951,6 +965,9 @@ JoinFamilySlot(slot) ==
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
 RestartFamilySlot(slot) ==
+  \*  This action is the successful Publish_Starting cut.  A shutdown-rejected
+  \*  replacement is drained by CancelFamilyPending without advancing either
+  \*  the published generation or the manager's current handle.
   /\ FamilyAdmissionOpen
   /\ slotState[slot] = "backing-off"
   /\ slotGeneration[slot] < MaxGeneration
@@ -961,6 +978,13 @@ RestartFamilySlot(slot) ==
   /\ slotStop' = [slotStop EXCEPT ![slot] = FALSE]
   /\ slotRecover' = [slotRecover EXCEPT ![slot] = FALSE]
   /\ slotGeneration' = [slotGeneration EXCEPT ![slot] = @ + 1]
+  /\ familyManager' =
+       [familyManager EXCEPT
+          ![slot] =
+            IF LifecyclePolicy = "stale-family-manager-handle-broken"
+            THEN @
+            ELSE slotGeneration[slot] + 1]
+  /\ UNCHANGED familyManagerFailureDropped
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
@@ -993,6 +1017,44 @@ FailFamilySlot(slot) ==
                   familyIncarnation, familyShutdown, familyTerminal,
                   slotStop, slotGeneration, slotJoinedGeneration,
                   nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+FailFamilyManager(slot) ==
+  /\ mode = "running"
+  /\ FamilyAdmissionOpen
+  /\ slotState[slot] = "starting"
+  /\ slotLive[slot]
+  /\ slotGeneration[slot] > 1
+  /\ familyManagerFailureDropped' =
+       (familyManagerFailureDropped \/
+          familyManager[slot] # slotGeneration[slot])
+  /\ IF familyManager[slot] = slotGeneration[slot]
+       THEN /\ slotState' = [slotState EXCEPT ![slot] = "reapable"]
+            /\ slotLive' = [slotLive EXCEPT ![slot] = FALSE]
+            /\ slotReady' = [slotReady EXCEPT ![slot] = FALSE]
+            /\ slotStop' = [slotStop EXCEPT ![slot] = TRUE]
+            /\ slotRecover' = [slotRecover EXCEPT ![slot] = FALSE]
+            /\ familyTerminal' = TRUE
+            /\ familyShutdown' = TRUE
+            /\ nestedEscalation' = TRUE
+            /\ nestedIncident' =
+                 IF incidentActive THEN incidentId ELSE incidentId + 1
+            /\ nestedAttempt' =
+                 IF incidentActive THEN incidentAttempt ELSE 1
+       ELSE UNCHANGED <<slotState, slotLive, slotReady, slotStop,
+                        slotRecover, familyTerminal, familyShutdown,
+                        nestedEscalation, nestedIncident, nestedAttempt>>
+  /\ UNCHANGED familyManager
+  /\ UNCHANGED <<mode, shutdown, terminal, result,
+                  childState, childLive, childReady, childStop, childStuck,
+                  generation, joinedGeneration,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
+                  incidentAttempt, incidentActive, childIncident,
+                  childAttempt, lastStopRank, lastStartRank,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation,
+                  slotGeneration, slotJoinedGeneration,
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
@@ -1314,13 +1376,17 @@ StartupAndServiceActions ==
   Configure
   \/ \E c \in Children : StartInitial(c) \/ MarkOuterReady(c)
                                \/ PublishOuter(c)
-  \/ OpenNestedFamily
   \/ \E slot \in FamilySlots :
        ReserveFamily(slot) \/ CommitFamily(slot) \/ RollbackFamily(slot)
-         \/ TakeFamilyStart(slot) \/ MarkFamilyReady(slot)
+         \/ MarkFamilyReady(slot)
          \/ FailFamilySlot(slot) \/ EscalateFamilySlot(slot)
-         \/ RestartFamilySlot(slot)
   \/ FinishStartup
+
+FamilyManagerActions ==
+  OpenNestedFamily
+  \/ \E slot \in FamilySlots :
+       TakeFamilyStart(slot) \/ RestartFamilySlot(slot)
+         \/ FailFamilyManager(slot)
 
 FailureAndCommandActions ==
   \/ \E c \in Children, impact \in Impacts :
@@ -1354,8 +1420,10 @@ OuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 Next ==
-  (StartupAndServiceActions \/ FailureAndCommandActions
-    \/ FamilyDrainActions \/ OuterProgressActions)
+  (((StartupAndServiceActions \/ FailureAndCommandActions
+      \/ FamilyDrainActions \/ OuterProgressActions)
+       /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+    \/ FamilyManagerActions)
   /\ UNCHANGED parentRestartVars
 
 Spec == Init /\ [][Next]_vars
@@ -1376,6 +1444,7 @@ ShutdownProgress ==
         CancelFamilyPending(slot) \/ StopFamilySlot(slot)
           \/ TerminateFamilySlot(slot) \/ JoinFamilySlot(slot))
    \/ CloseNestedFamily \/ FinishRun)
+  /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>
   /\ UNCHANGED parentRestartVars
 
 CooperativeOuterProgressActions ==
@@ -1387,8 +1456,10 @@ CooperativeOuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 CooperativeNext ==
-  (StartupAndServiceActions \/ FailureAndCommandActions
-    \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
+  (((StartupAndServiceActions \/ FailureAndCommandActions
+      \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
+       /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+    \/ FamilyManagerActions)
   /\ UNCHANGED parentRestartVars
 
 CooperativeSpec ==
@@ -1433,6 +1504,8 @@ TypeOK ==
   /\ slotRecover \in [FamilySlots -> BOOLEAN]
   /\ slotGeneration \in [FamilySlots -> 0 .. MaxGeneration]
   /\ slotJoinedGeneration \in [FamilySlots -> 0 .. MaxGeneration]
+  /\ familyManager \in [FamilySlots -> 0 .. MaxGeneration]
+  /\ familyManagerFailureDropped \in BOOLEAN
   /\ nestedEscalation \in BOOLEAN
   /\ nestedIncident \in 0 .. (MaxGeneration + MaxAttempts + 1)
   /\ nestedAttempt \in 0 .. MaxAttempts
@@ -1469,6 +1542,12 @@ FamilyBackoffFollowsJoin ==
   \A slot \in FamilySlots :
     slotState[slot] = "backing-off" =>
       slotJoinedGeneration[slot] = slotGeneration[slot]
+
+FamilyManagerFailureReleasesSlot ==
+  ~familyManagerFailureDropped
+
+FamilyManagerTracksPublishedGeneration ==
+  \A slot \in FamilySlots : familyManager[slot] <= slotGeneration[slot]
 
 NoStaleCommandAccepted == ~staleCommandAccepted
 

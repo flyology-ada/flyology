@@ -8,14 +8,16 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
 
    type Boolean_Array is array (Barrier_Point) of Boolean with Atomic_Components;
 
-   Armed                      : Boolean_Array := (others => False);
-   Arrived                    : Boolean_Array := (others => False);
-   References                 : aliased Atomics.uint32 := 0;
-   Force_Prepared_Final       : Boolean := False
+   Armed                        : Boolean_Array := (others => False);
+   Arrived                      : Boolean_Array := (others => False);
+   References                   : aliased Atomics.uint32 := 0;
+   Force_Prepared_Final         : Boolean := False
    with Atomic;
-   Force_Prepared_Monitor_End : Boolean := False
+   Force_Prepared_Monitor_End   : Boolean := False
    with Atomic;
-   Interrupt_Admission_Signal : Boolean := False
+   Interrupt_Admission_Signal   : Boolean := False
+   with Atomic;
+   Force_Family_Manager_Failure : Boolean := False
    with Atomic;
 
    procedure Reset is
@@ -26,6 +28,7 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Force_Prepared_Final := False;
       Force_Prepared_Monitor_End := False;
       Interrupt_Admission_Signal := False;
+      Force_Family_Manager_Failure := False;
    end Reset;
 
    procedure Arm (Point : Barrier_Point) is
@@ -122,5 +125,17 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Interrupt_Admission_Signal := False;
       return Result;
    end Consume_Admission_Signal_Interrupted;
+
+   procedure Force_Next_Family_Manager_Failure is
+   begin
+      Force_Family_Manager_Failure := True;
+   end Force_Next_Family_Manager_Failure;
+
+   function Consume_Family_Manager_Failure return Boolean is
+      Result : constant Boolean := Force_Family_Manager_Failure;
+   begin
+      Force_Family_Manager_Failure := False;
+      return Result;
+   end Consume_Family_Manager_Failure;
 
 end Flyology.Task_Lifecycle_Test_Hooks;
