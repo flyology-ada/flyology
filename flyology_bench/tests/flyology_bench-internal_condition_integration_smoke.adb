@@ -178,6 +178,56 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
          Interference         => Test_Interference (Interference),
          Operating_Conditions => Policy (Policy_Mode, On_Pause_Timeout)));
 
+   procedure Check_Multi_Recollection (Schedule : Shootout_Schedule_Policy) is
+      Test_Config    : constant Configuration :=
+        (Config (Pause, Fallback_Observe) with delta Shootout_Scheduling => Schedule);
+      Observe_Config : constant Configuration :=
+        (Config (Observe) with delta Shootout_Scheduling => Schedule);
+      --  The baseline and recollection are sequential, so keep only one
+      --  full-capacity result live while Compare_Many uses its call frame.
+      Result         : Multi_Comparison;
+      Baseline_Calls : Natural;
+   begin
+      Hooks.Reset;
+      Calls := 0;
+      Multi_Benchmark (Observe_Config, Result);
+      Baseline_Calls := Calls;
+
+      Hooks.Reset;
+      Hooks.Reject_Read (6);
+      Calls := 0;
+      declare
+         First_Result   : Measurement;
+         Second_Result  : Measurement;
+         First_Report   : Environment_Report;
+         Second_Report  : Environment_Report;
+         Expected_Rerun : constant Natural := (if Schedule = Balanced_Rounds then 20 else 10);
+      begin
+         Multi_Benchmark (Test_Config, Result);
+         First_Result := Case_Measurement (Result, 1);
+         Second_Result := Case_Measurement (Result, 2);
+         First_Report := Environment (First_Result);
+         Second_Report := Environment (Second_Result);
+         Check
+           (Cases (Result) = 2
+            and then Samples (First_Result) = 10
+            and then Samples (Second_Result) = 10
+            and then Shootout_Schedule (Result) = Schedule,
+            "multi-way recollection changed retained cases, samples, or schedule");
+         Check
+           (First_Report.Condition_Pauses = 1
+            and then First_Report.Affected_Units = 10
+            and then First_Report.Recollected_Units = 10
+            and then Second_Report.Condition_Pauses = 1
+            and then Second_Report.Affected_Units = 10
+            and then Second_Report.Recollected_Units = 10,
+            "multi-way recollection report was not copied to every case");
+         Check
+           (Calls >= Baseline_Calls + Expected_Rerun,
+            "multi-way comparison reported recollection without rerunning its window");
+      end;
+   end Check_Multi_Recollection;
+
 begin
    Check (Hooks.Enabled, "condition integration smoke selected disabled hooks");
 
@@ -517,54 +567,7 @@ begin
    --  Multi-way comparison shares one condition watch across cases. Exercise
    --  both scheduling branches because they maintain separate rollback code.
    for Schedule in Shootout_Schedule_Policy loop
-      declare
-         Test_Config     : constant Configuration :=
-           (Config (Pause, Fallback_Observe) with delta Shootout_Scheduling => Schedule);
-         Observe_Config  : constant Configuration :=
-           (Config (Observe) with delta Shootout_Scheduling => Schedule);
-         Baseline_Result : Multi_Comparison;
-         Baseline_Calls  : Natural;
-      begin
-         Hooks.Reset;
-         Calls := 0;
-         Multi_Benchmark (Observe_Config, Baseline_Result);
-         Baseline_Calls := Calls;
-
-         Hooks.Reset;
-         Hooks.Reject_Read (6);
-         Calls := 0;
-         declare
-            Result         : Multi_Comparison;
-            First_Result   : Measurement;
-            Second_Result  : Measurement;
-            First_Report   : Environment_Report;
-            Second_Report  : Environment_Report;
-            Expected_Rerun : constant Natural := (if Schedule = Balanced_Rounds then 20 else 10);
-         begin
-            Multi_Benchmark (Test_Config, Result);
-            First_Result := Case_Measurement (Result, 1);
-            Second_Result := Case_Measurement (Result, 2);
-            First_Report := Environment (First_Result);
-            Second_Report := Environment (Second_Result);
-            Check
-              (Cases (Result) = 2
-               and then Samples (First_Result) = 10
-               and then Samples (Second_Result) = 10
-               and then Shootout_Schedule (Result) = Schedule,
-               "multi-way recollection changed retained cases, samples, or schedule");
-            Check
-              (First_Report.Condition_Pauses = 1
-               and then First_Report.Affected_Units = 10
-               and then First_Report.Recollected_Units = 10
-               and then Second_Report.Condition_Pauses = 1
-               and then Second_Report.Affected_Units = 10
-               and then Second_Report.Recollected_Units = 10,
-               "multi-way recollection report was not copied to every case");
-            Check
-              (Calls >= Baseline_Calls + Expected_Rerun,
-               "multi-way comparison reported recollection without rerunning its window");
-         end;
-      end;
+      Check_Multi_Recollection (Schedule);
    end loop;
 
    --  A calibration rejection must restart calibration after recovery. Two
