@@ -38,7 +38,6 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
 
    Empty_State    : constant Interfaces.Unsigned_32 := 0;
    Occupied_State : constant Interfaces.Unsigned_32 := 1;
-   Deleted_State  : constant Interfaces.Unsigned_32 := 2;
    Unlocked       : constant Interfaces.Unsigned_32 := 0;
    Locked         : constant Interfaces.Unsigned_32 := 1;
 
@@ -410,7 +409,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
             raise Layout_Error with "dynamic-map entry reserved field is corrupt";
          elsif State = Occupied_State then
             Occupied := Occupied + 1;
-         elsif State /= Empty_State and then State /= Deleted_State then
+         elsif State /= Empty_State then
             raise Layout_Error with "dynamic-map entry state is corrupt";
          end if;
       end loop;
@@ -670,11 +669,10 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Index      : out Interfaces.Unsigned_64;
       Insertion  : out Interfaces.Unsigned_64)
    is
-      Hash_Value    : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
-      Candidate     : Interfaces.Unsigned_64;
-      State         : Interfaces.Unsigned_32;
-      First_Deleted : Interfaces.Unsigned_64 := Interfaces.Unsigned_64'Last;
-      Slot          : System.Address;
+      Hash_Value : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
+      Candidate  : Interfaces.Unsigned_64;
+      State      : Interfaces.Unsigned_32;
+      Slot       : System.Address;
    begin
       for Probe in Interfaces.Unsigned_64 range 0 .. Interfaces.Unsigned_64 (Table.Capacity) - 1 loop
          Candidate := Policy.Masked_Index (Hash_Value + Probe, Policy.Positive_U32 (Table.Capacity));
@@ -685,20 +683,18 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
             Index := Candidate;
             Insertion := Candidate;
             return;
-         elsif State = Deleted_State and then First_Deleted = Interfaces.Unsigned_64'Last then
-            First_Deleted := Candidate;
          elsif State = Empty_State then
             Found := False;
             Index := 0;
-            Insertion := (if First_Deleted = Interfaces.Unsigned_64'Last then Candidate else First_Deleted);
+            Insertion := Candidate;
             return;
-         elsif State /= Occupied_State and then State /= Deleted_State then
+         elsif State /= Occupied_State then
             raise Layout_Error with "dynamic-map entry state is corrupt";
          end if;
       end loop;
       Found := False;
       Index := 0;
-      Insertion := First_Deleted;
+      Insertion := Interfaces.Unsigned_64'Last;
    end Find;
 
    procedure Initialize_Table (Item : View; Table : Table_View) is
@@ -950,6 +946,42 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Release_Guard (Item);
    end Get;
 
+   procedure Delete_Index (Item : View; Table : Table_View; Index : Interfaces.Unsigned_64) is
+      Hole, Candidate              : Interfaces.Unsigned_64;
+      State                        : Interfaces.Unsigned_32;
+      Stored_Hash, Home            : Interfaces.Unsigned_64;
+      Hole_Distance, Slot_Distance : Interfaces.Unsigned_64;
+      Hole_Slot, Candidate_Slot    : System.Address;
+   begin
+      Hole := Index;
+      Hole_Slot := Slot_Address (Item, Table, Hole);
+      Bytes.Write_U32 (Slot_Field (Item, Hole_Slot, Slot_State_Offset, 4), Empty_State);
+      for Probe in Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64 (Table.Capacity) - 1 loop
+         Candidate := Policy.Masked_Index (Index + Probe, Policy.Positive_U32 (Table.Capacity));
+         Candidate_Slot := Slot_Address (Item, Table, Candidate);
+         State := Bytes.Read_U32 (Slot_Field (Item, Candidate_Slot, Slot_State_Offset, 4));
+         if State = Empty_State then
+            return;
+         elsif State /= Occupied_State then
+            raise Layout_Error with "dynamic-map entry state is corrupt";
+         end if;
+         Stored_Hash := Bytes.Read_U64 (Slot_Field (Item, Candidate_Slot, Hash_Offset, 8));
+         Home := Policy.Masked_Index (Stored_Hash, Policy.Positive_U32 (Table.Capacity));
+         Hole_Distance := Policy.Masked_Index (Hole - Home, Policy.Positive_U32 (Table.Capacity));
+         Slot_Distance := Policy.Masked_Index (Candidate - Home, Policy.Positive_U32 (Table.Capacity));
+         --  Shift only when the hole lies earlier on Candidate's cyclic probe path.
+         if Hole_Distance < Slot_Distance then
+            Bytes.Write_U64 (Slot_Field (Item, Hole_Slot, Hash_Offset, 8), Stored_Hash);
+            Key.Copy (Key_Binding (Item, Candidate_Slot, False), Key_Binding (Item, Hole_Slot, True));
+            Element.Copy (Value_Binding (Item, Candidate_Slot, False), Value_Binding (Item, Hole_Slot, True));
+            Bytes.Write_U32 (Slot_Field (Item, Hole_Slot, Slot_State_Offset, 4), Occupied_State);
+            Bytes.Write_U32 (Slot_Field (Item, Candidate_Slot, Slot_State_Offset, 4), Empty_State);
+            Hole := Candidate;
+            Hole_Slot := Candidate_Slot;
+         end if;
+      end loop;
+   end Delete_Index;
+
    procedure Remove
      (Item : in out View; Arena : Arena_Provider.View; Key_Data : Key.Source; Removed : out Boolean)
    is
@@ -959,7 +991,6 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Table            : Table_View;
       Found            : Boolean;
       Index, Insertion : Interfaces.Unsigned_64;
-      Slot             : System.Address;
       Count            : Interfaces.Unsigned_64;
       Mutated          : Boolean := False;
    begin
@@ -977,9 +1008,8 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
                if Count = 0 then
                   raise Layout_Error with "dynamic-map occupied entry contradicts zero count";
                end if;
-               Slot := Slot_Address (Item, Table, Index);
                Mutated := True;
-               Bytes.Write_U32 (Slot_Field (Item, Slot, Slot_State_Offset, 4), Deleted_State);
+               Delete_Index (Item, Table, Index);
                Bytes.Write_U64 (Item.Count_Address, Count - 1);
                Removed := True;
             end if;
