@@ -1,4 +1,5 @@
 with Ada.Environment_Variables;
+with Ada.Exceptions;
 with Ada.Streams;
 with Ada.Text_IO;
 with Flyology.Data_Structures;
@@ -531,6 +532,423 @@ procedure Data_Structures_Smoke is
      (Location : DS.Region_Offset; Index : Interfaces.Unsigned_64; Relative : Natural) return C.size_t
    is (Raw_Offset (Location, 72 + Natural (Index) * 32 + Relative));
 
+   procedure Test_Hash_Map_Backward_Shift is
+      Capacity            : constant := 8;
+      Fixed_Location      : constant DS.Region_Offset := 64;
+      Arena_Location      : constant DS.Region_Offset := 64;
+      Dynamic_Location    : constant DS.Region_Offset := 64;
+      Arena_Configuration : constant Arenas.Configuration :=
+        (Usable_Capacity => 65_536, Minimum_Block_Size => 64);
+      Arena_Instance      : constant Interfaces.Unsigned_64 :=
+        16#BAAC_5A1F_7000_0001#;
+
+      type Key_List is array (Positive range <>) of Interfaces.Unsigned_64;
+
+      procedure Find_Collisions
+        (Home : Interfaces.Unsigned_64; Keys : out Key_List)
+      is
+         Candidate : Interfaces.Unsigned_64 := 1;
+         Next      : Positive := Keys'First;
+      begin
+         loop
+            if (Test_Hash (Encode (Candidate))
+                and Interfaces.Unsigned_64 (Capacity - 1))
+              = Home
+            then
+               Keys (Next) := Candidate;
+               exit when Next = Keys'Last;
+               Next := Next + 1;
+            end if;
+            Candidate := Candidate + 1;
+         end loop;
+      end Find_Collisions;
+
+      procedure Check_Fixed is
+         Storage        : aliased SSE.Storage_Array (1 .. 4_096) :=
+           [others => 0]
+         with Alignment => 64;
+         Region         : Regions.View;
+         Map, Peer      : Maps.View;
+         Cluster        : Key_List (1 .. 4);
+         Wrapped        : Key_List (1 .. 8);
+         Wrapped_Live   : array (Wrapped'Range) of Boolean :=
+           [others => False];
+         Outcome        : Maps.Put_Result;
+         Value          : Interfaces.Unsigned_64;
+         Found, Removed : Boolean;
+         Empty          : Interfaces.Unsigned_64 :=
+           Interfaces.Unsigned_64'Last;
+
+         function State
+           (Index : Interfaces.Unsigned_64) return Interfaces.Unsigned_32
+         is (Read_U32
+               (Storage'Address,
+                C.size_t (Fixed_Location)
+                + C.size_t (72 + Natural (Index) * 32)));
+
+         procedure Check_Wrapped_Cluster is
+         begin
+            for Index in Wrapped'Range loop
+               Maps.Get (Map, Wrapped (Index), Value, Found);
+               if Wrapped_Live (Index) then
+                  Assert
+                    (Found and then Value = Wrapped (Index) * 10,
+                     "fixed-map long wraparound cluster lost a survivor");
+               else
+                  Assert
+                    (not Found,
+                     "fixed-map long wraparound cluster reported a removed or missing key");
+               end if;
+            end loop;
+         end Check_Wrapped_Cluster;
+      begin
+         Find_Collisions (2, Cluster);
+         Find_Collisions (7, Wrapped);
+         Regions.Attach
+           (Region, Storage'Address, DS.Byte_Count (Storage'Length));
+         Maps.Initialize (Map, Region, Fixed_Location, Capacity);
+
+         for Index in 1 .. 3 loop
+            Maps.Put (Map, Cluster (Index), Cluster (Index) * 10, Outcome);
+            Assert
+              (Outcome = Maps.Inserted,
+               "fixed-map collision fixture insertion failed");
+         end loop;
+         Maps.Remove (Map, Cluster (2), Removed);
+         Assert (Removed, "fixed-map cluster-middle deletion failed");
+         Maps.Get (Map, Cluster (2), Value, Found);
+         Assert (not Found, "fixed-map deleted cluster key remained visible");
+         Maps.Get (Map, Cluster (3), Value, Found);
+         Assert
+           (Found and then Value = Cluster (3) * 10,
+            "fixed-map deletion broke a collision chain");
+         Maps.Put (Map, Cluster (4), 41, Outcome);
+         Assert
+           (Outcome = Maps.Inserted, "fixed-map replacement insertion failed");
+         Maps.Put (Map, Cluster (4), 42, Outcome);
+         Maps.Get (Map, Cluster (4), Value, Found);
+         Assert
+           (Outcome = Maps.Replaced and then Found and then Value = 42,
+            "fixed-map replacement after deletion failed");
+         Maps.Remove (Map, Cluster (1), Removed);
+         Maps.Remove (Map, Cluster (3), 0.0, Removed);
+         Maps.Remove (Map, Cluster (4), Removed);
+         Assert
+           (Maps.Length (Map) = 0,
+            "fixed-map cluster-boundary deletions retained entries");
+
+         for Index in 1 .. 7 loop
+            Maps.Put (Map, Wrapped (Index), Wrapped (Index) * 10, Outcome);
+            Assert
+              (Outcome = Maps.Inserted,
+               "fixed-map wraparound fixture insertion failed");
+            Wrapped_Live (Index) := True;
+         end loop;
+         Check_Wrapped_Cluster;
+         Maps.Remove (Map, Wrapped (1), Removed);
+         Assert (Removed, "fixed-map wraparound head deletion failed");
+         Wrapped_Live (1) := False;
+         Check_Wrapped_Cluster;
+         Maps.Remove (Map, Wrapped (4), Removed);
+         Assert (Removed, "fixed-map wraparound middle deletion failed");
+         Wrapped_Live (4) := False;
+         Check_Wrapped_Cluster;
+         Maps.Remove (Map, Wrapped (7), Removed);
+         Assert (Removed, "fixed-map wraparound tail deletion failed");
+         Wrapped_Live (7) := False;
+         Check_Wrapped_Cluster;
+         for Key in Interfaces.Unsigned_64 range 2_000_000 .. 2_000_127 loop
+            Maps.Put (Map, Key, Key + 1, Outcome);
+            Assert
+              (Outcome = Maps.Inserted, "fixed-map churn insertion failed");
+            Maps.Remove (Map, Key, Removed);
+            Assert (Removed, "fixed-map churn deletion failed");
+         end loop;
+         Assert
+           (Maps.Length (Map) = 4, "fixed-map churn changed live occupancy");
+         for Index in Interfaces.Unsigned_64 range 0 .. Capacity - 1 loop
+            Assert
+              (State (Index) /= 2, "fixed-map deletion retained a tombstone");
+            if State (Index) = 0 then
+               Empty := Index;
+            end if;
+         end loop;
+         declare
+            Snapshot : constant SSE.Storage_Array := Storage;
+         begin
+            Maps.Attach (Peer, Region, Fixed_Location, Capacity);
+            Maps.Detach (Peer);
+            Assert
+              (SSE."=" (Storage, Snapshot),
+               "fixed-map successful attachment changed persisted bytes");
+         end;
+
+         Assert
+           (Empty /= Interfaces.Unsigned_64'Last,
+            "fixed-map fixture has no empty slot");
+         Write_U32
+           (Storage'Address,
+            C.size_t (Fixed_Location) + C.size_t (72 + Natural (Empty) * 32),
+            2);
+         Found := False;
+         begin
+            Maps.Attach (Peer, Region, Fixed_Location, Capacity);
+         exception
+            when DS.Layout_Error =>
+               Found := True;
+         end;
+         Write_U32
+           (Storage'Address,
+            C.size_t (Fixed_Location) + C.size_t (72 + Natural (Empty) * 32),
+            0);
+         Assert (Found, "fixed-map attachment accepted a tombstone state");
+         Maps.Attach (Peer, Region, Fixed_Location, Capacity);
+         Maps.Detach (Peer);
+         Maps.Destroy (Map);
+         Regions.Detach (Region);
+      end Check_Fixed;
+
+      procedure Check_Dynamic is
+         Arena_Storage                             :
+           aliased SSE.Storage_Array (1 .. 131_072) := [others => 0]
+         with Alignment => 64;
+         Header_Storage                            :
+           aliased SSE.Storage_Array (1 .. 512) := [others => 0]
+         with Alignment => 64;
+         Arena_Region, Header_Region, Table_Region : Regions.View;
+         Arena                                     : Arenas.View;
+         Map, Peer                                 : Dynamic_Maps.View;
+         Cluster                                   : Key_List (1 .. 7);
+         Cluster_Live                              :
+           array (Cluster'Range) of Boolean := [others => False];
+         Outcome                                   : Dynamic_Maps.Put_Result;
+         Value                                     : Interfaces.Unsigned_64;
+         Found, Removed                            : Boolean;
+         Current_Capacity                          : Interfaces.Unsigned_64;
+         Current                                   : Arenas.Allocation_Handle;
+         State_Data                                :
+           Ada.Streams.Stream_Element_Array (1 .. 4);
+         Empty                                     : Interfaces.Unsigned_64 :=
+           Interfaces.Unsigned_64'Last;
+
+         function State
+           (Index : Interfaces.Unsigned_64) return Interfaces.Unsigned_32 is
+         begin
+            Arenas.Read
+              (Arena, Current, DS.Byte_Count (Index * 32), State_Data);
+            return Interfaces.Unsigned_32 (Decode (State_Data));
+         end State;
+
+         procedure Write_State
+           (Index : Interfaces.Unsigned_64; Value : Interfaces.Unsigned_32) is
+         begin
+            State_Data := Encode (Interfaces.Unsigned_64 (Value)) (1 .. 4);
+            Arenas.Write
+              (Arena, Current, DS.Byte_Count (Index * 32), State_Data);
+         end Write_State;
+
+         procedure Check_Long_Cluster is
+         begin
+            for Index in Cluster'Range loop
+               Dynamic_Maps.Get (Map, Arena, Cluster (Index), Value, Found);
+               if Cluster_Live (Index) then
+                  Assert
+                    (Found and then Value = Cluster (Index) * 10,
+                     "dynamic-map long wraparound cluster lost a survivor");
+               else
+                  Assert
+                    (not Found,
+                     "dynamic-map long wraparound cluster reported a removed or missing key");
+               end if;
+            end loop;
+         end Check_Long_Cluster;
+      begin
+         Find_Collisions (7, Cluster);
+         Regions.Attach
+           (Arena_Region,
+            Arena_Storage'Address,
+            DS.Byte_Count (Arena_Storage'Length));
+         Regions.Attach
+           (Header_Region,
+            Header_Storage'Address,
+            DS.Byte_Count (Header_Storage'Length));
+         Arenas.Initialize
+           (Arena,
+            Arena_Region,
+            Arena_Location,
+            Arena_Configuration,
+            Arena_Instance);
+         Dynamic_Maps.Initialize
+           (Map, Header_Region, Dynamic_Location, Arena, Capacity);
+
+         for Index in 1 .. 6 loop
+            Dynamic_Maps.Put
+              (Map, Arena, Cluster (Index), Cluster (Index) * 10, Outcome);
+            Assert
+              (Outcome = Dynamic_Maps.Put_Inserted,
+               "dynamic-map collision fixture insertion failed");
+            Cluster_Live (Index) := True;
+         end loop;
+         Check_Long_Cluster;
+         Assert
+           (Dynamic_Maps.Capacity (Map) = Natural (Capacity),
+            "dynamic-map collision fixture grew before deletion");
+         Dynamic_Maps.Remove (Map, Arena, Cluster (1), Removed);
+         Assert (Removed, "dynamic-map wraparound head deletion failed");
+         Cluster_Live (1) := False;
+         Check_Long_Cluster;
+         Dynamic_Maps.Remove (Map, Arena, Cluster (3), Removed);
+         Assert (Removed, "dynamic-map wraparound middle deletion failed");
+         Cluster_Live (3) := False;
+         Check_Long_Cluster;
+         Dynamic_Maps.Remove (Map, Arena, Cluster (6), Removed);
+         Assert (Removed, "dynamic-map wraparound tail deletion failed");
+         Cluster_Live (6) := False;
+         Check_Long_Cluster;
+         Dynamic_Maps.Put (Map, Arena, Cluster (7), Cluster (7) * 10, Outcome);
+         Assert
+           (Outcome = Dynamic_Maps.Put_Inserted,
+            "dynamic-map replacement insertion failed");
+         Cluster_Live (7) := True;
+         Dynamic_Maps.Put (Map, Arena, Cluster (7), 42, Outcome);
+         Dynamic_Maps.Get (Map, Arena, Cluster (7), Value, Found);
+         Assert
+           (Outcome = Dynamic_Maps.Put_Replaced
+            and then Found
+            and then Value = 42,
+            "dynamic-map replacement after deletion failed");
+
+         for Key in Interfaces.Unsigned_64 range 1_000_000 .. 1_000_008 loop
+            Dynamic_Maps.Put (Map, Arena, Key, Key + 1, Outcome);
+            Assert
+              (Outcome = Dynamic_Maps.Put_Inserted,
+               "dynamic-map growth fixture insertion failed");
+         end loop;
+         Assert
+           (Dynamic_Maps.Capacity (Map) >= 16,
+            "dynamic-map fixture did not grow");
+         for Key in Interfaces.Unsigned_64 range 1_000_000 .. 1_000_008 loop
+            if Key mod 2 = 0 then
+               Dynamic_Maps.Remove (Map, Arena, Key, Removed);
+               Assert (Removed, "dynamic-map post-growth deletion failed");
+            end if;
+         end loop;
+         Dynamic_Maps.Attach
+           (Peer, Header_Region, Dynamic_Location, Arena, Capacity);
+         Dynamic_Maps.Get (Peer, Arena, 1_000_001, Value, Found);
+         Assert
+           (Found and then Value = 1_000_002,
+            "dynamic-map attachment lost a grown entry");
+         Dynamic_Maps.Detach (Peer);
+         Assert
+           (Read_U64 (Header_Storage'Address, C.size_t (Dynamic_Location) + 88)
+            = 0
+            and then Read_U64
+                       (Header_Storage'Address,
+                        C.size_t (Dynamic_Location) + 96)
+                     = 0,
+            "dynamic-map growth did not reclaim its retired allocation");
+
+         Current_Capacity :=
+           Read_U64 (Header_Storage'Address, C.size_t (Dynamic_Location) + 64);
+         declare
+            Stable_Length : constant Natural := Dynamic_Maps.Length (Map);
+         begin
+            for Key in Interfaces.Unsigned_64 range 3_000_000 .. 3_000_255 loop
+               Dynamic_Maps.Put (Map, Arena, Key, Key + 1, Outcome);
+               Assert
+                 (Outcome = Dynamic_Maps.Put_Inserted,
+                  "dynamic-map churn insertion failed");
+               Dynamic_Maps.Remove (Map, Arena, Key, Removed);
+               Assert (Removed, "dynamic-map churn deletion failed");
+            end loop;
+            Assert
+              (Dynamic_Maps.Length (Map) = Stable_Length
+               and then Dynamic_Maps.Capacity (Map)
+                        = Natural (Current_Capacity),
+               "dynamic-map churn changed live occupancy or capacity");
+         end;
+         Current :=
+           (Token      =>
+              Read_U64
+                (Header_Storage'Address, C.size_t (Dynamic_Location) + 72),
+            Generation =>
+              Read_U64
+                (Header_Storage'Address, C.size_t (Dynamic_Location) + 80));
+         Arenas.Attach_Allocation (Table_Region, Arena, Current);
+         declare
+            Header_Snapshot : constant SSE.Storage_Array := Header_Storage;
+            Table_Snapshot  :
+              Ada.Streams.Stream_Element_Array
+                (1
+                 .. Ada.Streams.Stream_Element_Offset (Current_Capacity * 32));
+            Table_After     :
+              Ada.Streams.Stream_Element_Array (Table_Snapshot'Range);
+         begin
+            Arenas.Read (Arena, Current, 0, Table_Snapshot);
+            Dynamic_Maps.Attach
+              (Peer, Header_Region, Dynamic_Location, Arena, Capacity);
+            Dynamic_Maps.Detach (Peer);
+            Arenas.Read (Arena, Current, 0, Table_After);
+            Assert
+              (SSE."=" (Header_Storage, Header_Snapshot)
+               and then Table_After = Table_Snapshot,
+               "dynamic-map successful attachment changed persisted bytes");
+         end;
+         for Index in Interfaces.Unsigned_64 range 0 .. Current_Capacity - 1
+         loop
+            Assert
+              (State (Index) /= 2,
+               "dynamic-map deletion retained a tombstone");
+            if State (Index) = 0 then
+               Empty := Index;
+            end if;
+         end loop;
+         Assert
+           (Empty /= Interfaces.Unsigned_64'Last,
+            "dynamic-map fixture has no empty slot");
+         Write_State (Empty, 2);
+         Found := False;
+         begin
+            Dynamic_Maps.Attach
+              (Peer, Header_Region, Dynamic_Location, Arena, Capacity);
+         exception
+            when DS.Layout_Error =>
+               Found := True;
+         end;
+         Write_State (Empty, 0);
+         Assert (Found, "dynamic-map attachment accepted a tombstone state");
+         Dynamic_Maps.Attach
+           (Peer, Header_Region, Dynamic_Location, Arena, Capacity);
+         Dynamic_Maps.Detach (Peer);
+         Regions.Detach (Table_Region);
+         Dynamic_Maps.Destroy (Map, Arena);
+         Arenas.Destroy (Arena);
+         Regions.Detach (Header_Region);
+         Regions.Detach (Arena_Region);
+      end Check_Dynamic;
+
+      Fixed_Passed, Dynamic_Passed : Boolean := True;
+   begin
+      begin
+         Check_Fixed;
+      exception
+         when Error : Program_Error =>
+            Fixed_Passed := False;
+            Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Message (Error));
+      end;
+      begin
+         Check_Dynamic;
+      exception
+         when Error : Program_Error =>
+            Dynamic_Passed := False;
+            Ada.Text_IO.Put_Line (Ada.Exceptions.Exception_Message (Error));
+      end;
+      Assert (Fixed_Passed, "fixed hash-map backward-shift regression failed");
+      Assert
+        (Dynamic_Passed, "dynamic hash-map backward-shift regression failed");
+   end Test_Hash_Map_Backward_Shift;
+
    Temp_Root : constant String := Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp");
    Path      : constant C.char_array := C.To_C (Temp_Root & "/data-structures-smoke.map");
    Base_A    : aliased System.Address := System.Null_Address;
@@ -616,6 +1034,7 @@ procedure Data_Structures_Smoke is
 
 begin
    Test_Adaptive_Destroy_Atomicity;
+   Test_Hash_Map_Backward_Shift;
    Assert
      (Mapping_Create (Path, Mapping_Length, Base_A'Access, Base_B'Access, FD'Access) = 0,
       "failed to map one temporary file twice");
