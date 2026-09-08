@@ -51,7 +51,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
    --  Insertion outcome.
    --  @enum Inserted A previously absent key was inserted
    --  @enum Replaced An existing key's value was replaced
-   --  @enum Table_Full No empty or deleted slot was available
+   --  @enum Table_Full No empty slot was available
    type Put_Result is (Inserted, Replaced, Table_Full);
 
    --  Compute the complete map extent. Capacity must be a power of two.
@@ -189,7 +189,7 @@ package Flyology.Data_Structures.Hash_Maps with Preelaborate is
       Timeout  : Wait_Timeout;
       Found    : out Boolean);
 
-   --  Remove Key when present, retaining a tombstone for probe continuity.
+   --  Remove Key when present and close its linear-probe gap.
    --  @param Item Attached map view
    --  @param Key_Data Application key value
    --  @param Removed True only when an occupied entry was deleted

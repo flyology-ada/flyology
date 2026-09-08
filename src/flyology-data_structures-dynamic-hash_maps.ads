@@ -169,7 +169,7 @@ package Flyology.Data_Structures.Dynamic.Hash_Maps with Preelaborate is
       Value    : out Element.Observed;
       Found    : out Boolean);
 
-   --  Remove Key while retaining a tombstone for probe continuity.
+   --  Remove Key and close its linear-probe gap.
    --  @param Item Internally synchronized map view
    --  @param Arena Matching attached arena view
    --  @param Key_Data Application key value
