@@ -5,7 +5,11 @@ package Flyology.Task_Lifecycle_Testing is
 
    type Barrier_Point is
      (Static_Monitor_Registered,
+      Static_Generation_Starting,
+      Static_Generation_Terminated,
       Family_Monitor_Registered,
+      Family_Generation_Starting,
+      Family_Generation_Terminated,
       Family_Before_Take_Start,
       Prepared_Admission_Reserved,
       Prepared_Admission_Published,

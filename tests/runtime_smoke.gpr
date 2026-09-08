@@ -78,6 +78,7 @@ project Runtime_Smoke is
       "flyology-supervision-static_smoke.adb",
       "flyology-supervision-handle_smoke.adb",
       "flyology-supervision-families_smoke.adb",
+      "flyology-supervision-restart_window_smoke.adb",
       "prepared_admissions_smoke.adb",
       "prepared_admission_observation_smoke.adb",
       "prepared_admission_immediate_abort_smoke.adb",

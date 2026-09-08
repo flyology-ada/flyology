@@ -837,6 +837,7 @@ package body Flyology.Supervision.Families is
             Snapshots (Slot).State := Starting;
             Snapshots (Slot).Live := True;
             Snapshots (Slot).Ready := False;
+            Ready_Since (Slot) := Ada.Real_Time.Time_First;
             Snapshots (Slot).Termination := Empty_Summary (No_Termination);
             Record_Event
               (Slot, Lifecycle_Changed, Before, Starting, Ada.Real_Time.Clock, Incident => Incident);
@@ -2272,6 +2273,10 @@ package body Flyology.Supervision.Families is
             begin
                Item.State.Publish_Starting (Managed_Slot, Current, Incident, Signals'Access, Started);
                Flush_Monitor_Signals (Signals);
+               if Started and then Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                  Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                    (Flyology.Task_Lifecycle_Test_Hooks.Family_Generation_Starting);
+               end if;
                Restart := False;
                Backoff := Ada.Real_Time.Time_Span_Zero;
                Next := Current;
@@ -2435,6 +2440,10 @@ package body Flyology.Supervision.Families is
                      Recovery,
                      Signals'Access);
                   Flush_Monitor_Signals (Signals);
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Family_Generation_Terminated);
+                  end if;
                end;
             end Run_Generation;
 

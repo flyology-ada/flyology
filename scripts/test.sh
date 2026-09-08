@@ -487,6 +487,7 @@ flyology-structured_server_policy-smoke
 flyology-supervision-static_smoke
 flyology-supervision-handle_smoke
 flyology-supervision-families_smoke
+flyology-supervision-restart_window_smoke
 prepared_admissions_smoke
 prepared_admission_observation_smoke
 prepared_admission_immediate_abort_smoke
@@ -607,6 +608,7 @@ task_scope_faults_smoke'
 
 task_lifecycle_hook_mains='flyology-supervision-static_smoke
 flyology-supervision-families_smoke
+flyology-supervision-restart_window_smoke
 prepared_admission_observation_smoke
 prepared_admission_immediate_abort_smoke
 prepared_admission_abort_smoke
@@ -633,7 +635,7 @@ destroy_contention_hook_mains=data_structures_destroy_contention_smoke
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -850,7 +852,7 @@ for test_main in $ordinary_mains; do
     concurrency_primitives_smoke|task_scope_faults_smoke)
       current_test_bin=$worker_pool_test_bin
       ;;
-    flyology-supervision-static_smoke|flyology-supervision-families_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
+    flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
       current_test_bin=$task_lifecycle_test_bin
       ;;
     channel_operations_smoke)
