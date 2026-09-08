@@ -69,6 +69,14 @@ The self-observation it calls reports a null address on the environment task,
 on native tasks, and before the scheduler is initialized, so a partition that
 creates no lightweight task keeps the binder-selected behaviour.
 
+The common interrupt-service patch gives GNARL's `Interrupt_Manager` and
+per-signal `Server_Task` an explicit native designation. This keeps their
+thread-local signal-mask changes and blocking `sigwait` calls off shared event
+loops even when the prepared project default is lightweight. Darwin represents
+that designation as `System_Scope`, while Linux represents it with native
+thread attributes, so the shared GNARL patch obtains the value through the
+platform-specific private `System.Flyology` body rather than a common literal.
+
 The patched region of `s-taskin.adb` is byte-identical in the eight Alire
 toolchains this repository installs, which are the Darwin builds of every
 release the family advertises, including `gnat_flyology_native`
