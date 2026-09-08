@@ -54,11 +54,16 @@ assert_patched_core () {
       printf '%s\n' "$label generated s-tassta lacks task-result publication" >&2
       exit 1
     }
+  grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
+    "$rts_root/adainclude/s-interr.adb" >/dev/null || {
+      printf '%s\n' "$label generated s-interr lacks native interrupt services" >&2
+      exit 1
+    }
 
   mkdir "$check_root"
   (
     cd "$check_root"
-    ar -x "$archive" s-taprop.o s-tassta.o
+    ar -x "$archive" s-taprop.o s-interr.o s-tassta.o
   )
   assert_object_symbol \
     "$check_root/s-taprop.o" \
@@ -72,6 +77,10 @@ assert_patched_core () {
     "$check_root/s-tassta.o" \
     system__flyology__task_results__publish \
     "$label task-stages"
+  assert_object_symbol \
+    "$check_root/s-interr.o" \
+    system__flyology__native_designation \
+    "$label interrupt services"
 }
 
 mkdir -p "$pin_root"
