@@ -13,11 +13,12 @@ dependent-closure, and escalation decisions over that topology.
 
 LifecyclePolicy selects the current implementation or one deliberately broken
 boundary.  Broken variants admit a controller-stale command, construct a
-replacement before the old generation joins, mint a new incident while
-propagating nested escalation, publish an owner before desired-child
-readmission, omit nested parent-stop forwarding, or retain readiness from the
-previous generation across replacement start.  The checked configurations
-require a concrete counterexample for each removed guarantee.
+replacement before the old generation joins, drop an unaffected child that
+terminates during recovery backoff, mint a new incident while propagating
+nested escalation, publish an owner before desired-child readmission, omit
+nested parent-stop forwarding, or retain readiness from the previous generation
+across replacement start.  The checked configurations require a concrete
+counterexample for each removed guarantee.
 
 Exception payloads and event-ring storage are abstracted at their proved
 policy boundary.  The full topology still uses MaxAttempts for the combined
@@ -46,6 +47,7 @@ ASSUME /\ Children = {Prerequisite, Owner}
              "restart-before-join-broken", "no-parent-forwarding-broken",
              "nested-incident-mint-broken",
              "owner-ready-before-readmission-broken",
+             "backoff-termination-drop-broken",
              "restart-window-stale-broken"}
 
 NoChild == "no-child"
@@ -550,6 +552,39 @@ BeginTerminalFailure(c, impact) ==
   /\ lastStartRank' = 0
   /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
                   childIncident, childAttempt,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation, familyShutdown, familyTerminal,
+                  slotState, slotLive, slotReady, slotStop, slotRecover,
+                  slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+TerminateUnaffectedDuringBackoff(c, impact) ==
+  LET isolate == impact = "isolate"
+      drop == isolate /\ LifecyclePolicy = "backoff-termination-drop-broken"
+  IN
+  /\ mode = "recovery-backoff"
+  /\ c \in Children \ affected
+  /\ childState[c] = "running"
+  /\ (c # Owner \/ ~familyOpen)
+  /\ impact \in Impacts
+  /\ mode' = IF isolate THEN mode ELSE "terminal-stop"
+  /\ terminal' = IF isolate THEN terminal ELSE TRUE
+  /\ result' = IF isolate THEN result ELSE "failure-escalated"
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' =
+       IF isolate THEN IF drop THEN affected ELSE affected \cup {c}
+       ELSE Children
+  /\ trigger' = IF drop THEN trigger ELSE c
+  /\ recoveryImpact' = IF drop THEN recoveryImpact ELSE impact
+  /\ lastStopRank' = IF isolate THEN lastStopRank ELSE 3
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  incidentId, incidentAttempt, incidentActive,
+                  childIncident, childAttempt, lastStartRank,
                   familyOpen, familyController, retiredControllers,
                   familyIncarnation, familyShutdown, familyTerminal,
                   slotState, slotLive, slotReady, slotStop, slotRecover,
@@ -1142,6 +1177,7 @@ StartupAndServiceActions ==
 FailureAndCommandActions ==
   \/ \E c \in Children, impact \in Impacts :
        BeginRecoverableFailure(c, impact) \/ BeginTerminalFailure(c, impact)
+         \/ TerminateUnaffectedDuringBackoff(c, impact)
   \/ \E c \in Children, controller \in 0 .. MaxController,
         gen \in 0 .. MaxGeneration, impact \in Impacts \ {"escalate"} :
        ManualRestart(c, controller, gen, impact)
@@ -1295,7 +1331,14 @@ StartOrderIsTopological ==
 
 AffectedSetIsExact ==
   mode \in {"recovery-stop", "recovery-backoff", "recovery-start"} =>
-    affected = AffectedFor(trigger, recoveryImpact)
+    /\ AffectedFor(trigger, recoveryImpact) \subseteq affected
+    /\ \A c \in affected \ AffectedFor(trigger, recoveryImpact) :
+         \/ childState[c] \in {"terminated", "joined"}
+         \/ childIncident[c] = incidentId
+
+RecoveryBackoffKeepsTerminationsManaged ==
+  mode = "recovery-backoff" =>
+    \A c \in Children : childState[c] \in {"terminated", "joined"} => c \in affected
 
 AttemptIsBounded ==
   /\ incidentAttempt <= MaxAttempts

@@ -662,7 +662,7 @@ package body Flyology.Supervision.Static is
          Admitted : Boolean;
          Backoff  : Ada.Real_Time.Time_Span;
          Previous : constant Boolean_Array := Recovery_Affected;
-         Retrying : constant Boolean := Phase = Recovery_Starting;
+         Retrying : constant Boolean := Phase in Recovery_Backing_Off | Recovery_Starting;
       begin
          Active_Incident := Incident;
          Classify_Restart (Trigger, Incident, Now, Admitted, Backoff);
@@ -748,6 +748,22 @@ package body Flyology.Supervision.Static is
             else
                Active_Incident := Incident;
                Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            end if;
+         elsif Phase = Recovery_Backing_Off then
+            if Child_Specs (Child).Impact /= Isolate_Child
+              or else not Policy.Should_Restart (Child_Specs (Child).Restart, Termination.Kind)
+            then
+               Active_Incident := Incident;
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            else
+               Advance_Repeated_Attempt (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               else
+                  Begin_Recovery (Child, Snapshots (Child).Termination, Retry_Incident, Now);
+               end if;
             end if;
          elsif Phase = Starting_Children then
             Active_Incident := Incident;

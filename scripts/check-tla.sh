@@ -202,6 +202,9 @@ expect_counterexample \
   SupervisionLifecycle SupervisionLifecycle_overlap.cfg \
   ReplacementFollowsJoin supervision-overlap
 expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_backoff_termination_drop.cfg \
+  RecoveryBackoffKeepsTerminationsManaged supervision-backoff-termination-drop
+expect_counterexample \
   SupervisionLifecycle SupervisionLifecycle_incident.cfg \
   NestedEscalationPreservesIncident supervision-incident
 expect_counterexample \
