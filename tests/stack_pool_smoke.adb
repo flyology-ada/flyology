@@ -14,7 +14,7 @@ procedure Stack_Pool_Smoke is
    Small_Effective_Bytes : Observation.Counter := 0;
    Large_Effective_Bytes : Observation.Counter := 0;
    Arena_Slot_Limit      : constant Observation.Counter := 64;
-   Maximum_Arena_Bytes   : constant Observation.Counter := 4 * 1_024 * 1_024;
+   Target_Arena_Bytes    : constant Observation.Counter := 4 * 1_024 * 1_024;
    Minimum_Guard_Bytes   : constant Observation.Counter := 64 * 1_024;
 
    function Get_Page_Size return Interfaces.C.int;
@@ -26,10 +26,10 @@ procedure Stack_Pool_Smoke is
         (Minimum_Guard_Bytes + Page_Size - 1) / Page_Size * Page_Size;
       Stride     : constant Observation.Counter := Usable_Bytes + Guard_Size;
    begin
-      if Stride >= Maximum_Arena_Bytes then
+      if Stride >= Target_Arena_Bytes then
          return 1;
       end if;
-      return Observation.Counter'Min (Arena_Slot_Limit, Maximum_Arena_Bytes / Stride);
+      return Observation.Counter'Min (Arena_Slot_Limit, (Target_Arena_Bytes + Stride - 1) / Stride);
    end Arena_Capacity;
 
    function Arena_Count (Stack_Count, Usable_Bytes : Observation.Counter) return Observation.Counter is
@@ -327,7 +327,7 @@ procedure Stack_Pool_Smoke is
       end if;
    end Test_Partial_Churn;
 
-   procedure Test_Head_Arena_Cleanup is
+   procedure Test_Class_Cleanup is
       protected Control is
          procedure Arrived;
          procedure Finished (Head : Boolean);
@@ -452,9 +452,9 @@ procedure Stack_Pool_Smoke is
          Failed := True;
       end if;
 
-      --  The differently sized Head stack owns the newest list element.
-      --  Destroy it while the older arena remains live, exercising the
-      --  no-predecessor removal path rather than whole-pool cleanup.
+      --  Destroy one exact-size class while a different class remains live.
+      --  This exercises per-class arena and bucket cleanup independently of
+      --  whole-pool cleanup.
       Control.Release_Head;
       Control.Wait_Head_Finished;
       Free (Head_Worker);
@@ -471,12 +471,12 @@ procedure Stack_Pool_Smoke is
       Free (Older_Worker);
       Wait_Until_Empty;
       if Failed then
-         Print_Snapshot ("before head cleanup:", Before);
-         Print_Snapshot ("during head cleanup:", During);
-         Print_Snapshot ("after head cleanup:", After_Head);
-         raise Program_Error with "head stack-arena cleanup was inconsistent";
+         Print_Snapshot ("before class cleanup:", Before);
+         Print_Snapshot ("during class cleanup:", During);
+         Print_Snapshot ("after class cleanup:", After_Head);
+         raise Program_Error with "stack-arena class cleanup was inconsistent";
       end if;
-   end Test_Head_Arena_Cleanup;
+   end Test_Class_Cleanup;
 
    procedure Test_Mixed_Sizes is
       Count_Per_Size : constant := 40;
@@ -560,6 +560,105 @@ procedure Stack_Pool_Smoke is
       end if;
    end Test_Mixed_Sizes;
 
+   procedure Test_Default_Stack_Sharing is
+      Worker_Count : constant := 8;
+
+      protected Control is
+         procedure Arrived;
+         procedure Finished;
+         procedure Release;
+         entry Wait_All;
+         entry Wait_Finished;
+         entry Gate;
+      private
+         Arrivals : Natural := 0;
+         Finishes : Natural := 0;
+         Open     : Boolean := False;
+      end Control;
+
+      protected body Control is
+         procedure Arrived is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrived;
+
+         procedure Finished is
+         begin
+            Finishes := Finishes + 1;
+         end Finished;
+
+         procedure Release is
+         begin
+            Open := True;
+         end Release;
+
+         entry Wait_All when Arrivals = Worker_Count is
+         begin
+            null;
+         end Wait_All;
+
+         entry Wait_Finished when Finishes = Worker_Count is
+         begin
+            null;
+         end Wait_Finished;
+
+         entry Gate when Open is
+         begin
+            null;
+         end Gate;
+      end Control;
+
+      task type Worker is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Worker;
+
+      task body Worker is
+      begin
+         Control.Arrived;
+         Control.Gate;
+         Control.Finished;
+      end Worker;
+
+      type Worker_Access is access Worker;
+      procedure Free is new Ada.Unchecked_Deallocation (Worker, Worker_Access);
+
+      Workers         : array (1 .. Worker_Count) of Worker_Access := (others => null);
+      Before, During  : Observation.Stack_Pool_Snapshot;
+      Effective_Bytes : Observation.Counter;
+      Expected_Arenas : Observation.Counter;
+      Failed          : Boolean := False;
+   begin
+      Before := Observation.Stack_Pool;
+      for Index in Workers'Range loop
+         Workers (Index) := new Worker;
+      end loop;
+      Control.Wait_All;
+      During := Observation.Stack_Pool;
+      Effective_Bytes := (During.Live_Usable_Bytes - Before.Live_Usable_Bytes) / Worker_Count;
+      Expected_Arenas := Arena_Count (Worker_Count, Effective_Bytes);
+
+      if During.Live_Stacks /= Before.Live_Stacks + Worker_Count
+        or else Arena_Capacity (Effective_Bytes) <= 1
+        or else During.Active_Arenas /= Before.Active_Arenas + Expected_Arenas
+        or else During.Arena_Mappings /= Before.Arena_Mappings + Expected_Arenas
+        or else During.Shared_Stacks /= Before.Shared_Stacks + Worker_Count - Expected_Arenas
+      then
+         Failed := True;
+      end if;
+
+      Control.Release;
+      Control.Wait_Finished;
+      for Index in Workers'Range loop
+         Free (Workers (Index));
+      end loop;
+      Wait_Until_Empty;
+      if Failed then
+         Print_Snapshot ("before default-stack sharing:", Before);
+         Print_Snapshot ("during default-stack sharing:", During);
+         raise Program_Error with "default lightweight stacks did not share arenas";
+      end if;
+   end Test_Default_Stack_Sharing;
+
 begin
    if Observation.Stack_Pool
      /= Observation.Stack_Pool_Snapshot'
@@ -575,8 +674,9 @@ begin
       raise Program_Error with "native-default startup touched stack pool";
    end if;
 
+   Test_Default_Stack_Sharing;
    Test_Partial_Churn;
-   Test_Head_Arena_Cleanup;
+   Test_Class_Cleanup;
    Test_Mixed_Sizes;
    Wait_Until_Empty;
 end Stack_Pool_Smoke;

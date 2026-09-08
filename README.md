@@ -580,12 +580,15 @@ lanes:
   alternate-stack local inside every lightweight task stack. The lightweight
   creation path passes the requested task storage unchanged to the guarded-stack
   allocator; only native stack sizing retains GNARL's alternate-stack allowance.
-- Lightweight stacks are mapped in arenas of at most 64 slots, targeting 4 MiB
-  before the final guard. Each usable stack is preceded by an inaccessible guard
-  of at least 64 KiB, rounded to the host page size. Adjacent stacks share that
-  interior guard region. A released slot is protected before reuse and receives
-  best-effort page-discard advice; a completely empty arena is unmapped instead
-  of becoming an historical-peak cache.
+- Lightweight stacks are mapped in arenas of at most 64 slots, rounding the
+  4 MiB target up to a whole number of slots before the final guard. Exact
+  effective stack sizes have indexed classes and per-class non-full arena
+  lists, so allocation does not scan full arenas. Each usable stack is preceded
+  by an inaccessible guard of at least 64 KiB, rounded to the host page size.
+  Adjacent stacks share that interior guard region. A released slot is protected
+  before reuse and receives best-effort page-discard advice; a completely empty
+  arena is unlinked directly and unmapped instead of becoming an
+  historical-peak cache.
 - Synchronization between the lanes still passes through GNARL. A native task
   wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
   Linux.
@@ -4627,11 +4630,12 @@ would otherwise pay for thousands of pthreads and kernel scheduling events.
   which GNARL can translate a guard fault into Ada `Storage_Error`; this stack
   is thread state and is intentionally not stored in an individual fiber's
   task wrapper.
-- Stack arenas hold at most 64 slots and target at most 4 MiB before the final
-  guard page. Different effective stack sizes use different arenas. A global
-  stack-pool mutex serializes only task activation and final reap across groups;
-  scheduling, I/O, and context switches do not take it. Empty arenas are
-  unmapped, so a past burst does not leave an unbounded virtual-memory cache.
+- Stack arenas hold at most 64 slots and round the 4 MiB target up to a whole
+  number of slots before the final guard page. Different effective stack sizes
+  use indexed classes with direct non-full lists. A global stack-pool mutex
+  serializes only task activation and final reap across groups; scheduling,
+  I/O, and context switches do not take it. Empty arenas unlink and unmap
+  directly, so a past burst does not leave an unbounded virtual-memory cache.
 - ASan-aware builds require `detect_stack_use_after_return=0` for migratable
   tasks and `use_sigaltstack=0` so Flyology remains the sole owner of each loop
   pthread's alternate signal stack. LeakSanitizer root discovery for suspended
