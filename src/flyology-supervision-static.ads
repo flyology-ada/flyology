@@ -303,11 +303,12 @@ private
          Incident    : Incident_Context;
          Now         : Ada.Real_Time.Time);
       procedure Classify_Restart
-        (Child    : Child_Kind;
-         Incident : Incident_Context;
-         Now      : Ada.Real_Time.Time;
-         Admitted : out Boolean;
-         Backoff  : out Ada.Real_Time.Time_Span);
+        (Child           : Child_Kind;
+         Incident        : Incident_Context;
+         Now             : Ada.Real_Time.Time;
+         Minimum_Backoff : Ada.Real_Time.Time_Span;
+         Admitted        : out Boolean;
+         Backoff         : out Ada.Real_Time.Time_Span);
       procedure Record_Restart
         (Child    : Child_Kind;
          Incident : Incident_Context;

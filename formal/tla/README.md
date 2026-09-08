@@ -97,6 +97,7 @@ evidence.
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
+| `TerminateRecoverableIsolateDuringBackoff` / `TerminateExhaustedIsolateDuringBackoff` / `TerminateNonIsolateDuringBackoff` | static `Publish_Termination` merging a recoverable isolated child into the exact accumulated recovery set while advancing an exact or stale pending incident, preserving a newer nested context, or opening a fresh incident; exhausted isolate recovery preserves the active context, and other impacts immediately escalate with the manager-normalized terminating context |
 | family `Reserve` / `Commit` / `Rollback` actions | the protected family admission transaction with an exact controller/generation handle |
 | `FailFamilySlot` / `RestartFamilySlot` | family termination classification, join, backoff, and replacement generation |
 | `OpenNestedFamily` / `CloseNestedFamily` | one-shot `Families.Run_Nested` controller owned by one outer generation |
@@ -231,13 +232,15 @@ may finish. A separate weak-fairness configuration checks that a requested
 shutdown eventually finishes when children cooperate. There is deliberately
 no liveness claim for a child that does not terminate.
 
-Five broken supervision configurations are required to fail. They respectively
+Six broken supervision configurations are required to fail. They respectively
 remove controller identity from command validation, permit a replacement after
-termination but before join, mint a new incident while propagating a nested
-escalation, publish owner readiness before desired-child readmission, and omit
-forwarding the parent stop request. The last defect is a temporal
-counterexample: the nested family remains open and the synchronous outer run
-cannot complete.
+termination but before join, drop an unaffected child that terminates during
+recovery backoff, mint a new incident while propagating a nested escalation,
+publish owner readiness before desired-child readmission, and omit forwarding
+the parent stop request. The backoff configuration violates the requirement
+that every terminated child remain in the pending recovery set or cause a
+terminal escalation. The final defect is a temporal counterexample: the nested
+family remains open and the synchronous outer run cannot complete.
 
 `SupervisionLifecycle` also instantiates a bounded `SupervisionRestartWindow`
 projection to validate the readiness-timestamp reset boundary around static and

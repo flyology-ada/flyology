@@ -13,11 +13,12 @@ dependent-closure, and escalation decisions over that topology.
 
 LifecyclePolicy selects the current implementation or one deliberately broken
 boundary.  Broken variants admit a controller-stale command, construct a
-replacement before the old generation joins, mint a new incident while
-propagating nested escalation, publish an owner before desired-child
-readmission, omit nested parent-stop forwarding, or retain readiness from the
-previous generation across replacement start.  The checked configurations
-require a concrete counterexample for each removed guarantee.
+replacement before the old generation joins, drop an unaffected child that
+terminates during recovery backoff, mint a new incident while propagating
+nested escalation, publish an owner before desired-child readmission, omit
+nested parent-stop forwarding, or retain readiness from the previous generation
+across replacement start.  The checked configurations require a concrete
+counterexample for each removed guarantee.
 
 Exception payloads and event-ring storage are abstracted at their proved
 policy boundary.  The full topology still uses MaxAttempts for the combined
@@ -46,6 +47,7 @@ ASSUME /\ Children = {Prerequisite, Owner}
              "restart-before-join-broken", "no-parent-forwarding-broken",
              "nested-incident-mint-broken",
              "owner-ready-before-readmission-broken",
+             "backoff-termination-drop-broken",
              "restart-window-stale-broken"}
 
 NoChild == "no-child"
@@ -78,7 +80,7 @@ NextAttempt(active, attempt) == IF active THEN attempt + 1 ELSE 1
 VARIABLES mode, shutdown, terminal, result,
           childState, childLive, childReady, childStop, childStuck,
           generation, joinedGeneration,
-          affected, trigger, recoveryImpact, incidentId, incidentAttempt,
+          affected, recoveryExpected, trigger, recoveryImpact, incidentId, incidentAttempt,
           incidentActive, childIncident, childAttempt,
           lastStopRank, lastStartRank,
           familyOpen, familyController, retiredControllers,
@@ -98,7 +100,7 @@ VARIABLES mode, shutdown, terminal, result,
 lifecycleVars == <<mode, shutdown, terminal, result,
           childState, childLive, childReady, childStop, childStuck,
           generation, joinedGeneration,
-          affected, trigger, recoveryImpact, incidentId, incidentAttempt,
+          affected, recoveryExpected, trigger, recoveryImpact, incidentId, incidentAttempt,
           incidentActive, childIncident, childAttempt,
           lastStopRank, lastStartRank,
           familyOpen, familyController, retiredControllers,
@@ -126,7 +128,7 @@ parentRestartVars == <<restartPhase, restartNow,
 vars == <<mode, shutdown, terminal, result,
           childState, childLive, childReady, childStop, childStuck,
           generation, joinedGeneration,
-          affected, trigger, recoveryImpact, incidentId, incidentAttempt,
+          affected, recoveryExpected, trigger, recoveryImpact, incidentId, incidentAttempt,
           incidentActive, childIncident, childAttempt,
           lastStopRank, lastStartRank,
           familyOpen, familyController, retiredControllers,
@@ -220,6 +222,7 @@ Init ==
   /\ generation = [c \in Children |-> 0]
   /\ joinedGeneration = [c \in Children |-> 0]
   /\ affected = {}
+  /\ recoveryExpected = {}
   /\ trigger = NoChild
   /\ recoveryImpact = NoImpact
   /\ incidentId = 0
@@ -257,7 +260,7 @@ Configure ==
   /\ UNCHANGED <<shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -285,7 +288,7 @@ StartInitial(c) ==
   /\ childIncident' = [childIncident EXCEPT ![c] = 0]
   /\ childAttempt' = [childAttempt EXCEPT ![c] = 0]
   /\ UNCHANGED <<mode, shutdown, terminal, result, childStuck,
-                  joinedGeneration, affected, trigger, recoveryImpact,
+                  joinedGeneration, affected, recoveryExpected, trigger, recoveryImpact,
                   incidentId, incidentAttempt, incidentActive,
                   lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -316,7 +319,7 @@ OpenNestedFamily ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   retiredControllers, nestedEscalation,
@@ -337,7 +340,7 @@ ReserveFamily(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -354,7 +357,7 @@ CommitFamily(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -371,7 +374,7 @@ RollbackFamily(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -390,7 +393,7 @@ TakeFamilyStart(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -410,7 +413,7 @@ MarkFamilyReady(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -435,7 +438,7 @@ MarkOuterReady(c) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childLive, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -454,7 +457,7 @@ PublishOuter(c) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -472,7 +475,7 @@ FinishStartup ==
   /\ UNCHANGED <<shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -500,6 +503,7 @@ BeginRecoverableFailure(c, impact) ==
   /\ CanRecover(c, impact)
   /\ mode' = "recovery-stop"
   /\ affected' = AffectedFor(c, impact)
+  /\ recoveryExpected' = AffectedFor(c, impact)
   /\ trigger' = c
   /\ recoveryImpact' = impact
   /\ childState' = [childState EXCEPT ![c] = "terminated"]
@@ -536,6 +540,7 @@ BeginTerminalFailure(c, impact) ==
        ELSE IF impact = "escalate" THEN "failure-escalated"
        ELSE "recovery-exhausted"
   /\ affected' = Children
+  /\ recoveryExpected' = Children
   /\ trigger' = c
   /\ recoveryImpact' = impact
   /\ childState' = [childState EXCEPT ![c] = "terminated"]
@@ -558,6 +563,180 @@ BeginTerminalFailure(c, impact) ==
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
+(***************************************************************************
+An unaffected running child may carry no incident, the exact pending attempt,
+an older attempt from a previous multi-child recovery, or a genuinely newer
+nested incident.  A fresh child opens a new incident; an exact or stale child
+advances the pending attempt; a newer context is preserved.  Recoverable
+isolated failures join the accumulated start set.  Exhausted isolated failures
+preserve the active incident and terminate recovery.  Every non-isolated
+failure escalates immediately with the terminating child's context.  The
+broken policy exposes only the original isolated-child drop.
+***************************************************************************)
+UnaffectedBackoffFailure(c) ==
+  /\ mode = "recovery-backoff"
+  /\ c \in Children \ affected
+  /\ childState[c] = "running"
+  /\ (c # Owner \/ ~familyOpen)
+
+BackoffHasContext(c) == childIncident[c] # 0
+
+BackoffUsesCurrent(c) ==
+  /\ BackoffHasContext(c)
+  /\ (childIncident[c] < incidentId
+        \/ (childIncident[c] = incidentId
+              /\ childAttempt[c] <= incidentAttempt))
+
+BackoffNextIncident(c) ==
+  IF BackoffUsesCurrent(c) THEN incidentId
+  ELSE IF ~BackoffHasContext(c) THEN incidentId + 1
+  ELSE childIncident[c]
+
+BackoffNextAttempt(c) ==
+  IF BackoffUsesCurrent(c) THEN incidentAttempt + 1
+  ELSE IF ~BackoffHasContext(c) THEN 1
+  ELSE childAttempt[c]
+
+BackoffEscalationIncident(c) ==
+  IF BackoffHasContext(c) THEN childIncident[c] ELSE incidentId + 1
+
+BackoffEscalationAttempt(c) ==
+  IF BackoffHasContext(c) THEN childAttempt[c] ELSE 1
+
+DropUnaffectedDuringBackoff(c) ==
+  /\ UnaffectedBackoffFailure(c)
+  /\ LifecyclePolicy = "backoff-termination-drop-broken"
+  /\ mode' = mode
+  /\ terminal' = terminal
+  /\ result' = result
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' = affected
+  /\ recoveryExpected' = recoveryExpected \cup {c}
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  trigger, recoveryImpact, incidentId, incidentAttempt,
+                  incidentActive, childIncident, childAttempt, lastStopRank,
+                  lastStartRank, familyOpen, familyController,
+                  retiredControllers, familyIncarnation, familyShutdown,
+                  familyTerminal, slotState, slotLive, slotReady, slotStop,
+                  slotRecover, slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+TerminateRecoverableIsolateDuringBackoff(c) ==
+  /\ UnaffectedBackoffFailure(c)
+  /\ LifecyclePolicy # "backoff-termination-drop-broken"
+  /\ IF BackoffUsesCurrent(c) THEN incidentAttempt < MaxAttempts
+       ELSE IF ~BackoffHasContext(c)
+            THEN incidentId < MaxGeneration + MaxAttempts + 1
+            ELSE TRUE
+  /\ mode' = mode
+  /\ terminal' = terminal
+  /\ result' = result
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' = affected \cup {c}
+  /\ recoveryExpected' = recoveryExpected \cup {c}
+  /\ trigger' = c
+  /\ recoveryImpact' = "isolate"
+  /\ incidentId' = BackoffNextIncident(c)
+  /\ incidentAttempt' = BackoffNextAttempt(c)
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = lastStopRank
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  childIncident, childAttempt, lastStartRank,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation, familyShutdown, familyTerminal,
+                  slotState, slotLive, slotReady, slotStop, slotRecover,
+                  slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+TerminateExhaustedIsolateDuringBackoff(c) ==
+  /\ UnaffectedBackoffFailure(c)
+  /\ LifecyclePolicy # "backoff-termination-drop-broken"
+  /\ BackoffUsesCurrent(c)
+  /\ incidentAttempt = MaxAttempts
+  /\ mode' = "terminal-stop"
+  /\ terminal' = TRUE
+  /\ result' = "recovery-exhausted"
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' = Children
+  /\ recoveryExpected' = Children
+  /\ trigger' = c
+  /\ recoveryImpact' = "isolate"
+  /\ incidentId' = incidentId
+  /\ incidentAttempt' = incidentAttempt
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = 3
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  childIncident, childAttempt, lastStartRank,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation, familyShutdown, familyTerminal,
+                  slotState, slotLive, slotReady, slotStop, slotRecover,
+                  slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+TerminateNonIsolateDuringBackoff(c, impact) ==
+  /\ UnaffectedBackoffFailure(c)
+  /\ impact \in Impacts \ {"isolate"}
+  /\ (BackoffHasContext(c)
+        \/ incidentId < MaxGeneration + MaxAttempts + 1)
+  /\ mode' = "terminal-stop"
+  /\ terminal' = TRUE
+  /\ result' = "failure-escalated"
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' = Children
+  /\ recoveryExpected' = Children
+  /\ trigger' = c
+  /\ recoveryImpact' = impact
+  /\ incidentId' = BackoffEscalationIncident(c)
+  /\ incidentAttempt' = BackoffEscalationAttempt(c)
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = 3
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  childIncident, childAttempt, lastStartRank,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation, familyShutdown, familyTerminal,
+                  slotState, slotLive, slotReady, slotStop, slotRecover,
+                  slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+BackoffIncidentProgresses ==
+  [][
+    /\ \A c \in Children :
+         TerminateRecoverableIsolateDuringBackoff(c) =>
+           \/ incidentId' > incidentId
+           \/ (incidentId' = incidentId
+                 /\ incidentAttempt' > incidentAttempt)
+    /\ \A c \in Children :
+         TerminateExhaustedIsolateDuringBackoff(c) =>
+           /\ result' = "recovery-exhausted"
+           /\ incidentId' = incidentId
+           /\ incidentAttempt' = MaxAttempts
+    /\ \A c \in Children, impact \in Impacts \ {"isolate"} :
+         TerminateNonIsolateDuringBackoff(c, impact) =>
+           /\ result' = "failure-escalated"
+           /\ incidentId' = BackoffEscalationIncident(c)
+           /\ incidentAttempt' = BackoffEscalationAttempt(c)
+           /\ incidentActive']_vars
+
 OuterCommandAllowed(c, controller, gen) ==
   IF LifecyclePolicy = "stale-authority-broken"
   THEN c \in Children /\ gen = generation[c]
@@ -573,6 +752,7 @@ ManualRestart(c, controller, gen, impact) ==
   /\ CanRecover(c, impact)
   /\ mode' = "recovery-stop"
   /\ affected' = AffectedFor(c, impact)
+  /\ recoveryExpected' = AffectedFor(c, impact)
   /\ trigger' = c
   /\ recoveryImpact' = impact
   /\ incidentId' = IF incidentActive THEN incidentId ELSE incidentId + 1
@@ -600,6 +780,7 @@ RequestShutdown ==
   /\ mode' = "shutdown-stop"
   /\ result' = "shutdown-completed"
   /\ affected' = Children
+  /\ recoveryExpected' = Children
   /\ trigger' = NoChild
   /\ recoveryImpact' = NoImpact
   /\ lastStopRank' = 3
@@ -629,7 +810,7 @@ IssueOuterStop(c) ==
   /\ lastStopRank' = Rank(c)
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childLive, childStuck, generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -649,7 +830,7 @@ ForwardParentStop ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -667,7 +848,7 @@ RequestFamilyShutdown ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -692,7 +873,7 @@ CancelFamilyPending(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -714,7 +895,7 @@ StopFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -733,7 +914,7 @@ TerminateFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -759,7 +940,7 @@ JoinFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -783,7 +964,7 @@ RestartFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -805,7 +986,7 @@ FailFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -832,7 +1013,7 @@ EscalateFamilySlot(slot) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive,
                   childIncident, childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -864,7 +1045,7 @@ StopFamilyByHandle(slot, controller, gen) ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -883,7 +1064,7 @@ CloseNestedFamily ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyController, familyIncarnation,
@@ -908,6 +1089,7 @@ PropagateNestedEscalation ==
   /\ childLive' = [childLive EXCEPT ![Owner] = FALSE]
   /\ childReady' = [childReady EXCEPT ![Owner] = FALSE]
   /\ affected' = {Owner}
+  /\ recoveryExpected' = {Owner}
   /\ trigger' = Owner
   /\ recoveryImpact' = "isolate"
   /\ mode' = "recovery-stop"
@@ -939,7 +1121,7 @@ TerminateOuter(c) ==
   /\ childReady' = [childReady EXCEPT ![c] = FALSE]
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childStop, childStuck, generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -959,7 +1141,7 @@ JoinOuter(c) ==
        [joinedGeneration EXCEPT ![c] = generation[c]]
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childLive, childReady, childStop, childStuck,
-                  generation, affected, trigger, recoveryImpact,
+                  generation, affected, recoveryExpected, trigger, recoveryImpact,
                   incidentId, incidentAttempt, incidentActive,
                   childIncident, childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -980,7 +1162,7 @@ BeginRecoveryBackoff ==
   /\ UNCHANGED <<shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -998,7 +1180,7 @@ FinishRecoveryBackoff ==
   /\ UNCHANGED <<shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank,
                   familyOpen, familyController, retiredControllers,
@@ -1031,7 +1213,7 @@ StartReplacement(c) ==
   /\ replacementBeforeJoin' =
        replacementBeforeJoin \/ childState[c] # "joined"
   /\ UNCHANGED <<mode, shutdown, terminal, result, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, lastStopRank,
                   familyOpen, familyController, retiredControllers,
                   familyIncarnation, familyShutdown, familyTerminal,
@@ -1046,6 +1228,7 @@ FinishRecovery ==
   /\ \A c \in affected : childState[c] = "running"
   /\ mode' = "running"
   /\ affected' = {}
+  /\ recoveryExpected' = {}
   /\ trigger' = NoChild
   /\ recoveryImpact' = NoImpact
   /\ lastStopRank' = 3
@@ -1072,7 +1255,7 @@ CloseStableIncident ==
   /\ UNCHANGED <<mode, shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   childIncident, childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
                   familyIncarnation, familyShutdown, familyTerminal,
@@ -1091,7 +1274,7 @@ BecomeStuck(c) ==
   /\ mode' = "terminal-stop"
   /\ result' = "child-stuck"
   /\ UNCHANGED <<shutdown, childState, childLive, childReady, childStop,
-                  generation, joinedGeneration, affected, trigger,
+                  generation, joinedGeneration, affected, recoveryExpected, trigger,
                   recoveryImpact, incidentId, incidentAttempt,
                   incidentActive, childIncident, childAttempt,
                   lastStopRank, lastStartRank,
@@ -1112,7 +1295,7 @@ FinishRun ==
   /\ UNCHANGED <<shutdown, terminal, result,
                   childState, childLive, childReady, childStop, childStuck,
                   generation, joinedGeneration,
-                  affected, trigger, recoveryImpact, incidentId,
+                  affected, recoveryExpected, trigger, recoveryImpact, incidentId,
                   incidentAttempt, incidentActive, childIncident,
                   childAttempt, lastStopRank, lastStartRank,
                   familyOpen, familyController, retiredControllers,
@@ -1142,6 +1325,11 @@ StartupAndServiceActions ==
 FailureAndCommandActions ==
   \/ \E c \in Children, impact \in Impacts :
        BeginRecoverableFailure(c, impact) \/ BeginTerminalFailure(c, impact)
+         \/ TerminateNonIsolateDuringBackoff(c, impact)
+  \/ \E c \in Children :
+       DropUnaffectedDuringBackoff(c)
+         \/ TerminateRecoverableIsolateDuringBackoff(c)
+         \/ TerminateExhaustedIsolateDuringBackoff(c)
   \/ \E c \in Children, controller \in 0 .. MaxController,
         gen \in 0 .. MaxGeneration, impact \in Impacts \ {"escalate"} :
        ManualRestart(c, controller, gen, impact)
@@ -1221,6 +1409,7 @@ TypeOK ==
   /\ generation \in [Children -> 0 .. MaxGeneration]
   /\ joinedGeneration \in [Children -> 0 .. MaxGeneration]
   /\ affected \subseteq Children
+  /\ recoveryExpected \subseteq Children
   /\ trigger \in Children \cup {NoChild}
   /\ recoveryImpact \in Impacts \cup {NoImpact}
   /\ incidentId \in 0 .. (MaxGeneration + MaxAttempts + 1)
@@ -1295,7 +1484,11 @@ StartOrderIsTopological ==
 
 AffectedSetIsExact ==
   mode \in {"recovery-stop", "recovery-backoff", "recovery-start"} =>
-    affected = AffectedFor(trigger, recoveryImpact)
+    affected = recoveryExpected
+
+RecoveryBackoffKeepsTerminationsManaged ==
+  mode = "recovery-backoff" =>
+    \A c \in Children : childState[c] \in {"terminated", "joined"} => c \in affected
 
 AttemptIsBounded ==
   /\ incidentAttempt <= MaxAttempts
