@@ -131,6 +131,18 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
            Rewarm_Time                => 0.0);
    end Policy;
 
+   --  GNAT 15 crashes when this boxed conditional value is nested inside the
+   --  enclosing delta aggregate. Give it a type before building Config.
+   function Test_Interference (Enabled : Boolean) return Interference_Policy
+   is (if Enabled
+       then
+         (Enabled                     => True,
+          Response                    => Observe,
+          Maximum_Foreign_CPU_Percent => 100.0,
+          Window                      => 0.001,
+          others                      => <>)
+       else (others => <>));
+
    --  GNAT 13 and 14 require inner parentheses around delta aggregates in
    --  expression functions.
    function Config
@@ -146,15 +158,7 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
          Subtract_Timer_Cost  => False,
          Bootstrap_Resamples  => 100,
          Metrics              => Time_Metrics,
-         Interference         =>
-           (if Interference
-            then
-              (Enabled                     => True,
-               Response                    => Observe,
-               Maximum_Foreign_CPU_Percent => 100.0,
-               Window                      => 0.001,
-               others                      => <>)
-            else (others => <>)),
+         Interference         => Test_Interference (Interference),
          Operating_Conditions => Policy (Policy_Mode)));
 
    function Config
@@ -171,15 +175,7 @@ procedure Flyology_Bench.Internal_Condition_Integration_Smoke is
          Subtract_Timer_Cost  => False,
          Bootstrap_Resamples  => 100,
          Metrics              => Time_Metrics,
-         Interference         =>
-           (if Interference
-            then
-              (Enabled                     => True,
-               Response                    => Observe,
-               Maximum_Foreign_CPU_Percent => 100.0,
-               Window                      => 0.001,
-               others                      => <>)
-            else (others => <>)),
+         Interference         => Test_Interference (Interference),
          Operating_Conditions => Policy (Policy_Mode, On_Pause_Timeout)));
 
 begin
