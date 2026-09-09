@@ -2532,6 +2532,10 @@ package body Flyology.Supervision.Families is
                   Signals : aliased Monitor_Signal_Guard (Item);
                begin
                   Item.State.Manager_Done (Managed_Slot, Value, Signals'Access);
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Admission_After_Manager_Done);
+                  end if;
                   Flush_Monitor_Signals (Signals);
                end;
             end loop;

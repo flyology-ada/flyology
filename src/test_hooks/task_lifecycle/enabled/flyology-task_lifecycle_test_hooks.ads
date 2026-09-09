@@ -27,6 +27,7 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
       Admission_Immediate_Claimed,
       Admission_Before_Replacement,
       Admission_Before_Manager_Done,
+      Admission_After_Manager_Done,
       Admission_Signal_Claimed,
       Admission_Signal_Interrupted,
       Admission_Signal_Finalizing,

@@ -173,9 +173,15 @@ begin
             end if;
             delay 0.001;
          end loop;
+         Flyology.Task_Lifecycle_Testing.Arm
+           (Flyology.Task_Lifecycle_Testing.Admission_After_Manager_Done);
          Families.Stop (Item, Ordinary);
          Observation :=
            Families.Wait_Termination (Item, Ordinary, Timeout => 2.0);
+         Flyology.Task_Lifecycle_Testing.Wait_Reached
+           (Flyology.Task_Lifecycle_Testing.Admission_After_Manager_Done);
+         Flyology.Task_Lifecycle_Testing.Release
+           (Flyology.Task_Lifecycle_Testing.Admission_After_Manager_Done);
          if Observation.Status /= Generation_Terminated then
             raise Program_Error
               with "ordinary Start did not skip a retired prepared slot";
@@ -209,6 +215,8 @@ begin
    Owner.Join;
 exception
    when others =>
+      Flyology.Task_Lifecycle_Testing.Release
+        (Flyology.Task_Lifecycle_Testing.Admission_After_Manager_Done);
       Families.Request_Shutdown (Item);
       begin
          Owner.Join;
