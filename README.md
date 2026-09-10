@@ -4017,12 +4017,23 @@ To run every Alire release covered by the patch family:
   state-trace conformance, and required invariant and temporal
   counterexamples, with TLC 2.19.
 
+A separate CI policy job reads the official TLC 1.8.0 release metadata before
+toolchain provisioning. While that release is explicitly marked as a
+prerelease, the policy job records its phase, mutability, and published digest
+as machine-readable outputs and defers the TLA+ gate because the asset may be
+replaced. It does not accept that observed digest as a checksum. As soon as the
+release is final, the TLA+ job automatically resumes the reviewed harness,
+whose single pinned SHA-256 remains mandatory for installation and
+verification. Missing or malformed release metadata fails the policy job
+instead of bypassing the gate.
+
 The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact
 GNAT/GPRbuild selection, so toolchains are reused without sharing incompatible
-runtime objects. The TLA+ job pins the official 1.7.4 CLI archive by SHA-256 and
-runs the same `scripts/check-tla.sh` entry point used locally. Local and Docker
-scripts remain the source of the commands run by CI; generated `alire`,
+runtime objects. The reviewed harness pins the official TLC 1.8.0 release-name
+artifact by SHA-256, and the TLA+ job runs the same `scripts/check-tla.sh` entry
+point used locally. Local and Docker scripts remain the source of the commands
+run by CI; generated `alire`,
 `config`, `obj`, `lib`, `build`, and test/showcase output directories stay
 ignored and are not release inputs.
 

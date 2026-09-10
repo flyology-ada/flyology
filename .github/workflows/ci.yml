@@ -186,8 +186,45 @@ jobs:
           ./scripts/prove.sh 2>&1 | tee "$proof_log"
           grep -Fqx 'Flyology SPARK proof suite passed' "$proof_log"
 
+  tlc_release:
+    name: TLC release policy / v1.8.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      checksum_policy: ${{ steps.release.outputs.checksum_policy }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      published_asset_digest: ${{ steps.release.outputs.published_asset_digest }}
+      release_immutable: ${{ steps.release.outputs.release_immutable }}
+      release_phase: ${{ steps.release.outputs.release_phase }}
+      run_tla: ${{ steps.release.outputs.run_tla }}
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Classify the official TLC release
+        id: release
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ./scripts/check-tlc-release.py
+      - name: Report prerelease deferral
+        if: steps.release.outputs.run_tla == 'false'
+        env:
+          TLC_ASSET_DIGEST: ${{ steps.release.outputs.published_asset_digest }}
+          TLC_RELEASE_IMMUTABLE: ${{ steps.release.outputs.release_immutable }}
+        run: |
+          message="Official v1.8.0 is still a prerelease"
+          message="$message (immutable=$TLC_RELEASE_IMMUTABLE;"
+          message="$message published digest=$TLC_ASSET_DIGEST)."
+          message="$message Its mutable artifact is not admitted;"
+          message="$message CI will resume the strict pinned-SHA-256 TLA+ gate"
+          message="$message automatically when the release becomes final."
+          printf '%s\n' "::notice title=TLC prerelease gate deferred::$message"
+
   tla:
     name: TLA+ models and Ada replay / ubuntu-latest / TLC 1.8.0
+    needs: tlc_release
+    if: needs.tlc_release.outputs.run_tla == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
