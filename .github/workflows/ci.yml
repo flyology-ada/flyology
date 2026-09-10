@@ -186,15 +186,65 @@ jobs:
           ./scripts/prove.sh 2>&1 | tee "$proof_log"
           grep -Fqx 'Flyology SPARK proof suite passed' "$proof_log"
 
-  tla:
-    name: TLA+ models and Ada replay / ubuntu-latest / TLC 1.8.0
+  tlc_release:
+    name: TLC release policy / v1.8.0
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    outputs:
+      checksum_policy: ${{ steps.release.outputs.checksum_policy }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      published_asset_digest: ${{ steps.release.outputs.published_asset_digest }}
+      release_immutable: ${{ steps.release.outputs.release_immutable }}
+      release_phase: ${{ steps.release.outputs.release_phase }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      run_tla: ${{ steps.release.outputs.run_tla }}
     steps:
       - name: Check out sources
         timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Classify the official TLC release
+        id: release
+        timeout-minutes: 5
+        env:
+          FLYOLOGY_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ./scripts/check-tlc-release.py
+
+  tla:
+    name: TLA+ models and Ada replay / ubuntu-latest / TLC 1.8.0
+    needs: tlc_release
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require TLC release classification
+        if: needs.tlc_release.result != 'success'
+        run: |
+          message='The established TLA gate cannot proceed or defer'
+          message="$message without validated official release metadata."
+          printf '%s\n' "::error title=TLC release classification failed::$message"
+          exit 1
+      - name: Report authorized prerelease deferral
+        if: >-
+          needs.tlc_release.result == 'success' &&
+          needs.tlc_release.outputs.run_tla == 'false'
+        env:
+          TLC_ASSET_DIGEST: ${{ needs.tlc_release.outputs.published_asset_digest }}
+          TLC_RELEASE_IMMUTABLE: ${{ needs.tlc_release.outputs.release_immutable }}
+        run: |
+          message="Official v1.8.0 is still a prerelease"
+          message="$message (immutable=$TLC_RELEASE_IMMUTABLE;"
+          message="$message published digest=$TLC_ASSET_DIGEST)."
+          message="$message Its mutable artifact is not admitted;"
+          message="$message ordinary CI defers the TLA+ gate until it is final."
+          printf '%s\n' "::notice title=TLC prerelease gate deferred::$message"
+          printf '### TLA+ gate\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check out sources
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Check out the reviewed TLA+ harness
+        if: needs.tlc_release.outputs.run_tla == 'true'
         timeout-minutes: 10
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -202,6 +252,7 @@ jobs:
           ref: dea289018a3eef2ac2aeab7a5ee8bc4e287fe231
           path: build/flyology-tla
       - name: Install Alire
+        if: needs.tlc_release.outputs.run_tla == 'true'
         timeout-minutes: 15
         uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
@@ -209,6 +260,7 @@ jobs:
           toolchain: gnat_native=16.1.0 gprbuild=26.0.1
           cache: true
       - name: Select toolchain
+        if: needs.tlc_release.outputs.run_tla == 'true'
         timeout-minutes: 10
         run: |
           alr --non-interactive toolchain --select \
@@ -216,11 +268,13 @@ jobs:
             gprbuild=26.0.1
           printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
       - name: Configure Flyology index
+        if: needs.tlc_release.outputs.run_tla == 'true'
         timeout-minutes: 10
         run: |
           alr index --reset-community
           alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
       - name: Build the TLA+ harness and provision its toolchain
+        if: needs.tlc_release.outputs.run_tla == 'true'
         shell: bash
         timeout-minutes: 15
         working-directory: build/flyology-tla
@@ -238,4 +292,5 @@ jobs:
             printf 'FLYOLOGY_TLAPM=%s\n' "$FLYOLOGY_TLAPM"
           } >> "$GITHUB_ENV"
       - name: Check TLA+ models and replay implementation traces
+        if: needs.tlc_release.outputs.run_tla == 'true'
         run: ./scripts/check-tla.sh
