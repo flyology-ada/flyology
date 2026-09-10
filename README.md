@@ -4017,12 +4017,26 @@ To run every Alire release covered by the patch family:
   state-trace conformance, and required invariant and temporal
   counterexamples, with TLC 2.19.
 
+A separate CI policy job reads the official TLC 1.8.0 release metadata before
+toolchain provisioning and records its phase, mutability, published digest,
+trigger kind, and selected checksum policy as machine-readable outputs. On
+ordinary pull-request and main-branch runs, an explicit prerelease defers the
+TLA+ work because the asset may be replaced; the established TLA+ job still
+runs and reports that deferral as its successful result. It does not accept the
+observed digest as a checksum. Flyology release-tag runs always require the
+full TLA+/TLAPS/Ada replay gate, even while TLC is a prerelease. A final TLC
+release also automatically selects that strict path. The reviewed harness's
+single pinned SHA-256 remains mandatory for installation and verification.
+Missing or malformed release metadata fails both the policy job and the
+established TLA+ job instead of turning the latter into a successful skip.
+
 The official Alire setup action is pinned to its v6.0.0 commit and Alire 2.1.1.
 Its cache key includes runner OS, architecture, Alire revision, and the exact
 GNAT/GPRbuild selection, so toolchains are reused without sharing incompatible
-runtime objects. The TLA+ job pins the official 1.7.4 CLI archive by SHA-256 and
-runs the same `scripts/check-tla.sh` entry point used locally. Local and Docker
-scripts remain the source of the commands run by CI; generated `alire`,
+runtime objects. The reviewed harness pins the official TLC 1.8.0 release-name
+artifact by SHA-256, and the TLA+ job runs the same `scripts/check-tla.sh` entry
+point used locally. Local and Docker scripts remain the source of the commands
+run by CI; generated `alire`,
 `config`, `obj`, `lib`, `build`, and test/showcase output directories stay
 ignored and are not release inputs.
 
