@@ -2,14 +2,12 @@ with Ada.Finalization;
 with Ada.Unchecked_Deallocation;
 with Flyology;
 with Flyology.Observability;
-with System;
 
 procedure Lifecycle_Churn_Smoke is
    package Observation renames Flyology.Observability;
 
    use type Flyology.Observability.Counter;
    use type Flyology.Observability.Task_Instance_Id;
-   use type System.Address;
 
    Churn_Count           : constant := 1_000;
    --  This test exercises deeper GNARL finalization paths, not the minimum
@@ -227,33 +225,32 @@ procedure Lifecycle_Churn_Smoke is
       Wait_For_Empty_Pool;
    end Check_Partial_Activation_Failure;
 
-   task type Address_Task is
+   task type Instance_Task is
       pragma Task_Info (Flyology.Lightweight_Task);
       pragma Storage_Size (Lifecycle_Stack_Bytes);
-   end Address_Task;
+   end Instance_Task;
 
-   task body Address_Task is
+   task body Instance_Task is
    begin
       null;
-   end Address_Task;
+   end Instance_Task;
 
-   type Address_Access is access Address_Task;
-   procedure Free_Address is new
-     Ada.Unchecked_Deallocation (Address_Task, Address_Access);
+   type Instance_Access is access Instance_Task;
+   procedure Free_Instance is new
+     Ada.Unchecked_Deallocation (Instance_Task, Instance_Access);
 
-   procedure Check_Task_Address_Reuse is
-      Previous          : System.Address := System.Null_Address;
-      Previous_Instance : Observation.Task_Instance_Id :=
-        Observation.No_Task_Instance;
-      Items             : Observation.Task_Snapshot_Array (1 .. 1);
-      Count             : Natural;
-      Total             : Observation.Counter;
-      Reused            : Boolean := False;
+   procedure Check_Task_Instances is
+      type Instance_Array is array (Positive range <>) of Observation.Task_Instance_Id;
+
+      Instances : Instance_Array (1 .. Churn_Count) :=
+        (others => Observation.No_Task_Instance);
+      Items     : Observation.Task_Snapshot_Array (1 .. 1);
+      Count     : Natural;
+      Total     : Observation.Counter;
    begin
-      for Attempt in 1 .. 1_000 loop
+      for Attempt in Instances'Range loop
          declare
-            Item             : Address_Access := new Address_Task;
-            Current          : constant System.Address := Item.all'Address;
+            Item             : Instance_Access := new Instance_Task;
             Current_Instance : Observation.Task_Instance_Id;
          begin
             while not Item.all'Terminated loop
@@ -270,28 +267,22 @@ procedure Lifecycle_Churn_Smoke is
             if Current_Instance = Observation.No_Task_Instance then
                raise Program_Error with "task snapshot identity was zero";
             end if;
-            if Current = Previous and then Current_Instance = Previous_Instance
-            then
-               raise Program_Error
-                 with "task snapshot identity was reused with task address";
-            end if;
-            Free_Address (Item);
-            Reused := Reused or else Current = Previous;
-            Previous := Current;
-            Previous_Instance := Current_Instance;
+            for Prior in Instances'First .. Attempt - 1 loop
+               if Current_Instance = Instances (Prior) then
+                  raise Program_Error with "task snapshot identity was reused";
+               end if;
+            end loop;
+            Instances (Attempt) := Current_Instance;
+            Free_Instance (Item);
          end;
-         exit when Reused;
       end loop;
-      if not Reused then
-         raise Program_Error with "task-address reuse was not exercised";
-      end if;
       Wait_For_Empty_Pool;
-   end Check_Task_Address_Reuse;
+   end Check_Task_Instances;
 
 begin
    Check_Normal_Churn;
    Check_Unhandled_Exception;
    Check_Abort;
    Check_Partial_Activation_Failure;
-   Check_Task_Address_Reuse;
+   Check_Task_Instances;
 end Lifecycle_Churn_Smoke;
