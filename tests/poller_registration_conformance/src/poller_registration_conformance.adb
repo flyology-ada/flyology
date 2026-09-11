@@ -24,14 +24,14 @@ procedure Poller_Registration_Conformance is
 
    type Runner_Request_Kind is (Replacement_Run, Stop_Run);
 
-   --  Strict duplicate validation retains names from every simultaneously open object.  The
-   --  deepest checked-in step state needs root (23) + step (40) + expected (12) + state (207)
-   --  = 282 decoded name bytes.
+   --  Strict duplicate validation retains names from every simultaneously open object. The
+   --  seven checked-in steps contain 312 object members, while the deepest step state needs
+   --  root (23) + step (40) + expected (12) + state (207) = 282 decoded name bytes.
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
      (Maximum_File_Bytes   => 1_000_000,
       Maximum_Steps        => 8,
       Maximum_JSON_Depth   => 32,
-      Maximum_Object_Names => 256,
+      Maximum_Object_Names => 512,
       Maximum_Name_Bytes   => 282,
       Maximum_String_Bytes => 4_096,
       Maximum_Value_Bytes  => 32_768);
