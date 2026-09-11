@@ -12,6 +12,7 @@ RUN apt-get update \
        jq \
        libssl-dev \
        pkg-config \
+       python3 \
        unzip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,6 +45,7 @@ RUN alr --non-interactive toolchain \
 
 WORKDIR /workspace
 COPY . .
+RUN python3 ./scripts/test-tlc-release-policy.py
 
 # Resolve the development workspace so the root build uses the in-tree
 # allocator while the publishable Flyology manifest retains its indexed
