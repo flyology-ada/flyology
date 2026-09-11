@@ -51,7 +51,8 @@ THEOREM NextPreservesSafety ==
                 NoStaleCancellation, Next, BeginWaitBatch, ForeignWake,
                 DrainBudget, DeliverTarget, StartReplacement,
                 ReregisterTarget, ReapTarget, DrainRemaining,
-                DrainReplacement, DrainReused, DeliverReplacement
+                DrainReplacement, DrainReused, DrainTimer,
+                DeliverReplacement
 <1>2. /\ CancelMode = "Deferred"
        /\ DeliveryMode = "CancellationOwned"
        /\ ReplacementArmMode = "IgnoreQueued"
@@ -63,7 +64,7 @@ THEOREM NextPreservesSafety ==
                 Next, BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
-                DeliverReplacement
+                DrainTimer, DeliverReplacement
 <1>3. /\ CancelMode = "Deferred"
        /\ DeliveryMode = "CancellationOwned"
        /\ ReplacementArmMode = "IgnoreQueued"
@@ -75,7 +76,7 @@ THEOREM NextPreservesSafety ==
                 QueuedLinkDoesNotSuppressReplacementArm, Next,
                 BeginWaitBatch, ForeignWake, DrainBudget, DeliverTarget,
                 StartReplacement, ReregisterTarget, ReapTarget,
-                DrainRemaining, DrainReplacement, DrainReused,
+                DrainRemaining, DrainReplacement, DrainReused, DrainTimer,
                 DeliverReplacement
 <1>. QED BY <1>1, <1>2, <1>3 DEF Safety
 

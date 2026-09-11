@@ -110,7 +110,7 @@ evidence.
 | `ForeignWake` | `Scheduler.Wake` queuing descriptor cancellation for the owning event-loop thread |
 | `DrainBudget` / `DrainRemaining` | `Process_Descriptor_Cancellations_Locked` consuming at most 64 entries per scheduler turn, retaining a poller wake while work remains |
 | `DeliverTarget` with readiness | `Handle_Poll_Event` retaining a wait whose descriptor cancellation is still queued |
-| `DeliverTarget` with timer expiry | `Promote_Expired_Timers` retaining an expired wait whose descriptor cancellation is still queued |
+| `DeliverTarget` with timer expiry / later `DrainRemaining` | `Promote_Expired_Timers` retaining an expired wait whose descriptor cancellation is still queued, followed by the next scheduler turn consuming that queue entry |
 | `StartReplacement` | `Wait_IO_Many.Plan_Arm` ignoring a matching scheduler link whose owner still has `Descriptor_Cancel_Queued`, then asking the Linux poller to rearm the consumed one-shot |
 | `ReregisterTarget` / `ReapTarget` | the otherwise unsafe reuse or release of a fiber before its queued cancellation is consumed |
 | `DeliverReplacement` | the replacement descriptor waiter receiving readiness from its newly armed one-shot |
@@ -276,7 +276,9 @@ The safe readiness and timer configurations require a single registration-list
 writer, a live fiber and matching wait generation for every queued cancellation,
 exclusive cancellation ownership of the target, a retained progress wake, and
 no stale cancellation after reuse, plus a kernel interest for every replacement
-wait. The direct-cancellation broken configuration
+wait. Timer expiry enters a retained state with the wait, fiber, kernel interest,
+and cancellation entry unchanged; only the later modeled drain releases that
+state and makes the target runnable. The direct-cancellation broken configuration
 violates the single-writer rule during batch translation. The unowned-readiness
 configuration permits the target to re-register before its old queue entry is
 drained, and the unowned-timer configuration permits it to be reaped while that
@@ -291,8 +293,8 @@ This is an invariant proof over the extraction, not a refinement proof of the
 Ada scheduler or Linux poller. The deterministic seven-transition Ada replay
 uses the readiness witness and compares the real queued/processed cancellation,
 replacement-arm, and replacement-delivery observations with the generated
-model boundary. It does not replay timer
-delivery. The timer side is instead exercised by the Linux-only
+model boundary. It does not replay timer delivery. The timer side is instead
+aligned with production by the Linux-only
 `linux_abort_readiness_waiter_smoke`, which holds an expired finite-deadline
 target beyond the 64-entry drain budget at the production scheduler guard.
 Both that runtime test and the Ada replay require Linux epoll behavior; on other
