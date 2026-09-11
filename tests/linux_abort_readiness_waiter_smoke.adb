@@ -29,7 +29,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       Second_Peer  : Sockets.Socket_Type;
 
       protected Observation is
-         procedure Note_First_Return;
+         procedure Note_First_Return (Ready : Boolean);
          procedure Note_Second_Return;
          procedure Start_Blocker;
          procedure Note_Blocker_Entered;
@@ -40,6 +40,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          procedure Stop_Runner;
          entry Await_Runner_Request (Request : out Runner_Request_Kind);
          function First_Returned return Boolean;
+         function First_Ready return Boolean;
          function Second_Returned return Boolean;
          function Blocker_Entered return Boolean;
          function Replacement_Ready return Boolean;
@@ -48,6 +49,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          function Runner_Stopped return Boolean;
       private
          First_Done           : Boolean := False;
+         First_Was_Ready      : Boolean := False;
          Second_Done          : Boolean := False;
          Blocker_Request      : Boolean := False;
          Blocker_Is_Ready     : Boolean := False;
@@ -59,9 +61,10 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       end Observation;
 
       protected body Observation is
-         procedure Note_First_Return is
+         procedure Note_First_Return (Ready : Boolean) is
          begin
             First_Done := True;
+            First_Was_Ready := Ready;
          end Note_First_Return;
 
          procedure Note_Second_Return is
@@ -120,6 +123,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          function First_Returned return Boolean
          is (First_Done);
 
+         function First_Ready return Boolean
+         is (First_Was_Ready);
+
          function Second_Returned return Boolean
          is (Second_Done);
 
@@ -164,15 +170,14 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       end Target_Waiter;
 
       task body Target_Waiter is
+         Ready : Boolean;
       begin
-         if Flyology.IO.Wait
-              (First_Descriptor,
-               Flyology.IO.For_Read,
-               (if Scenario = Timer_Delivery then 1.0 else Flyology.IO.Infinite))
-         then
-            null;
-         end if;
-         Observation.Note_First_Return;
+         Ready :=
+           Flyology.IO.Wait
+             (First_Descriptor,
+              Flyology.IO.For_Read,
+              (if Scenario = Timer_Delivery then 1.0 else Flyology.IO.Infinite));
+         Observation.Note_First_Return (Ready);
          if Flyology.IO.Wait (Second_Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite) then
             Observation.Note_Second_Return;
          end if;
@@ -418,7 +423,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          raise Program_Error with "foreign Wake mutated the poller during event-loop translation";
       elsif Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count + 1 then
          raise Program_Error with "event loop did not consume the 65th queued cancellation";
-      elsif Observation.First_Returned then
+      elsif Observation.First_Ready then
          raise Program_Error with "selected readiness resumed a cancellation-owned waiter";
       elsif Observation.Second_Returned then
          raise Program_Error with "stale cancellation reached a replacement wait generation";
