@@ -380,7 +380,7 @@ int flyology_in_fork_child(void) {
 #ifdef FLYOLOGY_TEST_FAULTS
 #include <stdatomic.h>
 
-#define FLYOLOGY_FAULT_POINT_COUNT 41
+#define FLYOLOGY_FAULT_POINT_COUNT 47
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
 

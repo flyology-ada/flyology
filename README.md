@@ -1739,8 +1739,13 @@ Descriptor registrations are one-shot so the resumed task owns the retry and
 decides whether another wait is needed. On Darwin, an undelivered one-shot
 knote may remain after its last waiter detaches; it can yield at most one
 discarded readiness hint and descriptor close removes it before the integer can
-be reused. This avoids a per-wait delete transaction. Linux still deletes an
-orphaned epoll interest because the poller owns a matching process-side record.
+be reused. This avoids a per-wait delete transaction. Linux indexes its
+process-side registration records by descriptor. When readiness consumes the
+final direction, it leaves the `EPOLLONESHOT` record disabled in that slot, so
+a later wait rearms it with `EPOLL_CTL_MOD` without deleting, reallocating, or
+scanning other descriptors. Explicit cancellation of the final direction
+removes the record; descriptor close and reuse retains the MOD-to-ADD recovery
+when the kernel has already removed the old interest.
 Exact reads and complete writes loop over partial progress while preserving a
 single deadline.
 
