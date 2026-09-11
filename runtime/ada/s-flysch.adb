@@ -1216,6 +1216,11 @@ package body System.Flyology.Scheduler is
          if Position.Registered
            and then Position.Descriptor = Descriptor
            and then Position.Interest = Interest
+           --  Linux may have consumed this owner's one-shot while its
+           --  scheduler link remains behind the bounded cancellation drain.
+           --  It cannot prove that a replacement wait has a kernel arm.
+           and then
+             (Position.Owner = null or else not Position.Owner.Descriptor_Cancel_Queued)
          then
             return True;
          end if;

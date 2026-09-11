@@ -1,12 +1,14 @@
 ------------------- MODULE PollerRegistrationOwnership -------------------
 EXTENDS Naturals
 
-CONSTANTS CancelMode, DeliveryMode, AfterDelivery, SelectedSource
+CONSTANTS CancelMode, DeliveryMode, AfterDelivery, SelectedSource,
+          ReplacementArmMode
 
 ASSUME CancelMode \in {"Direct", "Deferred"}
 ASSUME DeliveryMode \in {"Unowned", "CancellationOwned"}
 ASSUME AfterDelivery \in {"Reregister", "Reap"}
 ASSUME SelectedSource \in {"Readiness", "Timer"}
+ASSUME ReplacementArmMode \in {"CountQueued", "IgnoreQueued"}
 
 VARIABLES phase,
           groupLockHeld,
@@ -23,17 +25,27 @@ VARIABLES phase,
           progressWake,
           staleCancellation,
           targetReleased,
+          kernelInterestArmed,
+          replacementReady,
+          replacementWaiting,
+          replacementDelivered,
+          replacementArmAttempted,
+          replacementArmSuppressed,
           lastAction
 
 vars ==
     <<phase, groupLockHeld, loopWriter, foreignWriter, pendingCancels,
       targetCancelQueued, targetWaiting, targetRunnable, targetLive,
       waitGeneration, cancelGeneration, deliverySource, progressWake,
-      staleCancellation, targetReleased, lastAction>>
+      staleCancellation, targetReleased, kernelInterestArmed,
+      replacementReady, replacementWaiting, replacementDelivered,
+      replacementArmAttempted, replacementArmSuppressed, lastAction>>
 
 TypeOK ==
-    /\ phase \in {"Idle", "Translating", "BudgetDrained", "Delivered",
-                  "Reused", "Reaped", "Done"}
+    /\ phase \in {"Idle", "Translating", "BudgetDrained",
+                  "SelectedRetained", "ReplacementWaiting",
+                  "ReplacementDrained", "Delivered", "Reused", "Reaped",
+                  "Done"}
     /\ groupLockHeld \in BOOLEAN
     /\ loopWriter \in BOOLEAN
     /\ foreignWriter \in BOOLEAN
@@ -48,10 +60,16 @@ TypeOK ==
     /\ progressWake \in BOOLEAN
     /\ staleCancellation \in BOOLEAN
     /\ targetReleased \in BOOLEAN
+    /\ kernelInterestArmed \in BOOLEAN
+    /\ replacementReady \in BOOLEAN
+    /\ replacementWaiting \in BOOLEAN
+    /\ replacementDelivered \in BOOLEAN
+    /\ replacementArmAttempted \in BOOLEAN
+    /\ replacementArmSuppressed \in BOOLEAN
     /\ lastAction \in
          {"Init", "BeginWaitBatch", "ForeignWake", "DrainBudget",
-          "DeliverTarget", "ReregisterTarget", "ReapTarget",
-          "DrainRemaining"}
+          "DeliverTarget", "StartReplacement", "ReregisterTarget",
+          "ReapTarget", "DrainRemaining", "DeliverReplacement"}
 
 Init ==
     /\ phase = "Idle"
@@ -69,10 +87,16 @@ Init ==
     /\ progressWake = FALSE
     /\ staleCancellation = FALSE
     /\ targetReleased = FALSE
+    /\ kernelInterestArmed = FALSE
+    /\ replacementReady = FALSE
+    /\ replacementWaiting = FALSE
+    /\ replacementDelivered = FALSE
+    /\ replacementArmAttempted = FALSE
+    /\ replacementArmSuppressed = FALSE
     /\ lastAction = "Init"
 
-\* The target is selected for descriptor readiness or has an expired timer
-\* while the loop translates an epoll batch without the scheduler group lock.
+\* The target has a one-shot kernel interest when the loop begins translating
+\* the selected epoll batch.
 BeginWaitBatch ==
     /\ phase = "Idle"
     /\ phase' = "Translating"
@@ -90,6 +114,12 @@ BeginWaitBatch ==
     /\ progressWake' = FALSE
     /\ staleCancellation' = FALSE
     /\ targetReleased' = FALSE
+    /\ kernelInterestArmed' = TRUE
+    /\ replacementReady' = FALSE
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = FALSE
+    /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "BeginWaitBatch"
 
 \* A native thread wakes 65 waiters with the selected target queued last.
@@ -113,9 +143,17 @@ ForeignWake ==
     /\ progressWake' = (CancelMode = "Deferred")
     /\ staleCancellation' = FALSE
     /\ targetReleased' = (CancelMode = "Direct")
+    /\ kernelInterestArmed' = kernelInterestArmed
+    /\ replacementReady' = replacementReady
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = FALSE
+    /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "ForeignWake"
 
-\* The bounded drain consumes 64 earlier entries and leaves the target queued.
+\* epoll consumes the selected one-shot and Wait_Batch removes its process-side
+\* record before the loop regains the group lock. The first bounded drain then
+\* consumes 64 earlier entries and leaves the target's scheduler link queued.
 DrainBudget ==
     /\ phase = "Translating"
     /\ CancelMode = "Deferred"
@@ -136,30 +174,94 @@ DrainBudget ==
     /\ progressWake' = TRUE
     /\ staleCancellation' = FALSE
     /\ targetReleased' = FALSE
+    /\ kernelInterestArmed' = IF SelectedSource = "Readiness" THEN FALSE
+                                ELSE kernelInterestArmed
+    /\ replacementReady' = replacementReady
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = FALSE
+    /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "DrainBudget"
 
-\* Unsafe delivery wakes the still-queued target. The repaired behavior treats
-\* selected readiness or timer expiry as cancellation-owned and consumes the
-\* target's original wait before it can run.
+\* Cancellation ownership retains selected readiness or an expired timer. An
+\* unowned delivery instead permits the legacy reuse and reap counterexamples.
 DeliverTarget ==
     /\ phase = "BudgetDrained"
     /\ targetCancelQueued
-    /\ phase' = IF DeliveryMode = "CancellationOwned" THEN "Done" ELSE "Delivered"
+    /\ phase' =
+         IF DeliveryMode = "CancellationOwned"
+           THEN IF SelectedSource = "Readiness" /\ AfterDelivery = "Reregister"
+                  THEN "SelectedRetained"
+                  ELSE "Done"
+           ELSE "Delivered"
     /\ groupLockHeld' = TRUE
     /\ loopWriter' = FALSE
     /\ foreignWriter' = FALSE
-    /\ pendingCancels' = IF DeliveryMode = "CancellationOwned" THEN 0 ELSE 1
-    /\ targetCancelQueued' = (DeliveryMode = "Unowned")
-    /\ targetWaiting' = FALSE
-    /\ targetRunnable' = TRUE
+    /\ pendingCancels' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource /= "Readiness"
+           THEN 0
+           ELSE pendingCancels
+    /\ targetCancelQueued' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource /= "Readiness"
+           THEN FALSE
+           ELSE targetCancelQueued
+    /\ targetWaiting' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource = "Readiness"
+           THEN TRUE
+           ELSE FALSE
+    /\ targetRunnable' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource = "Readiness"
+           THEN FALSE
+           ELSE TRUE
     /\ targetLive' = targetLive
     /\ waitGeneration' = waitGeneration
     /\ cancelGeneration' = cancelGeneration
     /\ deliverySource' = deliverySource
-    /\ progressWake' = (DeliveryMode = "Unowned")
+    /\ progressWake' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource /= "Readiness"
+           THEN FALSE
+           ELSE progressWake
     /\ staleCancellation' = FALSE
-    /\ targetReleased' = (DeliveryMode = "CancellationOwned")
+    /\ targetReleased' =
+         (DeliveryMode = "CancellationOwned" /\ SelectedSource /= "Readiness")
+    /\ kernelInterestArmed' = kernelInterestArmed
+    /\ replacementReady' =
+         IF DeliveryMode = "CancellationOwned"
+              /\ SelectedSource = "Readiness"
+              /\ AfterDelivery = "Reregister"
+           THEN TRUE
+           ELSE replacementReady
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = FALSE
+    /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "DeliverTarget"
+
+\* The already-ready replacement starts before the next cancellation drain.
+\* Counting the cancellation-owned target link suppresses the needed kernel
+\* arm; ignoring that link permits Poller.Watch to ADD the consumed one-shot.
+StartReplacement ==
+    /\ phase = "SelectedRetained"
+    /\ targetCancelQueued
+    /\ replacementReady
+    /\ phase' = "ReplacementWaiting"
+    /\ kernelInterestArmed' = (ReplacementArmMode = "IgnoreQueued")
+    /\ replacementReady' = FALSE
+    /\ replacementWaiting' = TRUE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = TRUE
+    /\ replacementArmSuppressed' = (ReplacementArmMode = "CountQueued")
+    /\ lastAction' = "StartReplacement"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
+                   targetCancelQueued, targetWaiting, targetRunnable,
+                   targetLive, waitGeneration, cancelGeneration,
+                   deliverySource, progressWake, staleCancellation,
+                   targetReleased>>
 
 ReregisterTarget ==
     /\ phase = "Delivered"
@@ -174,7 +276,9 @@ ReregisterTarget ==
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
                    targetCancelQueued, targetLive, cancelGeneration,
                    deliverySource, progressWake, staleCancellation,
-                   targetReleased>>
+                   targetReleased, kernelInterestArmed, replacementReady,
+                   replacementWaiting, replacementDelivered,
+                   replacementArmAttempted, replacementArmSuppressed>>
 
 ReapTarget ==
     /\ phase = "Delivered"
@@ -188,9 +292,29 @@ ReapTarget ==
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
                    targetCancelQueued, targetWaiting, waitGeneration,
                    cancelGeneration, deliverySource, progressWake,
-                   staleCancellation, targetReleased>>
+                   staleCancellation, targetReleased, kernelInterestArmed,
+                   replacementReady, replacementWaiting,
+                   replacementDelivered, replacementArmAttempted,
+                   replacementArmSuppressed>>
 
-DrainRemaining ==
+DrainReplacement ==
+    /\ phase = "ReplacementWaiting"
+    /\ targetCancelQueued
+    /\ phase' = "ReplacementDrained"
+    /\ pendingCancels' = 0
+    /\ targetCancelQueued' = FALSE
+    /\ targetWaiting' = FALSE
+    /\ targetRunnable' = TRUE
+    /\ progressWake' = FALSE
+    /\ targetReleased' = TRUE
+    /\ lastAction' = "DrainRemaining"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, targetLive,
+                   waitGeneration, cancelGeneration, deliverySource,
+                   staleCancellation, kernelInterestArmed, replacementReady,
+                   replacementWaiting, replacementDelivered,
+                   replacementArmAttempted, replacementArmSuppressed>>
+
+DrainReused ==
     /\ phase = "Reused"
     /\ targetCancelQueued
     /\ waitGeneration /= cancelGeneration
@@ -204,16 +328,38 @@ DrainRemaining ==
     /\ targetReleased' = TRUE
     /\ lastAction' = "DrainRemaining"
     /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, targetLive,
-                   waitGeneration, cancelGeneration, deliverySource>>
+                   waitGeneration, cancelGeneration, deliverySource,
+                   kernelInterestArmed, replacementReady,
+                   replacementWaiting, replacementDelivered,
+                   replacementArmAttempted, replacementArmSuppressed>>
+
+DrainRemaining == DrainReplacement \/ DrainReused
+
+DeliverReplacement ==
+    /\ phase = "ReplacementDrained"
+    /\ replacementWaiting
+    /\ kernelInterestArmed
+    /\ phase' = "Done"
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = TRUE
+    /\ lastAction' = "DeliverReplacement"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, pendingCancels,
+                   targetCancelQueued, targetWaiting, targetRunnable,
+                   targetLive, waitGeneration, cancelGeneration,
+                   deliverySource, progressWake, staleCancellation,
+                   targetReleased, kernelInterestArmed, replacementReady,
+                   replacementArmAttempted, replacementArmSuppressed>>
 
 Next ==
     \/ BeginWaitBatch
     \/ ForeignWake
     \/ DrainBudget
     \/ DeliverTarget
+    \/ StartReplacement
     \/ ReregisterTarget
     \/ ReapTarget
     \/ DrainRemaining
+    \/ DeliverReplacement
 
 Spec == Init /\ [][Next]_vars
 
@@ -224,16 +370,25 @@ QueuedCancellationMatchesWaitGeneration ==
 QueuedCancellationOwnsTarget == targetCancelQueued => ~targetRunnable
 PendingCancellationHasWake == (pendingCancels > 0) => progressWake
 NoStaleCancellation == ~staleCancellation
+ReplacementWaitHasKernelInterest == replacementWaiting => kernelInterestArmed
+QueuedLinkDoesNotSuppressReplacementArm ==
+    replacementArmAttempted /\ targetCancelQueued => ~replacementArmSuppressed
 
 HarnessInputType ==
-    [command : {"BeginWaitBatch", "ForeignWake", "DrainBudget", "DeliverTarget"}]
+    [command : {"BeginWaitBatch", "ForeignWake", "DrainBudget",
+                "DeliverTarget", "StartReplacement", "DrainRemaining",
+                "DeliverReplacement"}]
 
 HarnessOutcomeType ==
     [pending : 0..65,
      queued : BOOLEAN,
      foreignMutation : BOOLEAN,
      targetRunnable : BOOLEAN,
-     targetReleased : BOOLEAN]
+     targetReleased : BOOLEAN,
+     kernelArmed : BOOLEAN,
+     replacementWaiting : BOOLEAN,
+     replacementDelivered : BOOLEAN,
+     armSuppressed : BOOLEAN]
 
 WitnessIncomplete == phase /= "Done"
 
@@ -246,7 +401,11 @@ Alias == [
        queued |-> targetCancelQueued,
        foreignMutation |-> foreignWriter,
        targetRunnable |-> targetRunnable,
-       targetReleased |-> targetReleased],
+       targetReleased |-> targetReleased,
+       kernelArmed |-> kernelInterestArmed,
+       replacementWaiting |-> replacementWaiting,
+       replacementDelivered |-> replacementDelivered,
+       armSuppressed |-> replacementArmSuppressed],
     state |->
       [phase |-> phase,
        groupLockHeld |-> groupLockHeld,
@@ -263,6 +422,12 @@ Alias == [
        progressWake |-> progressWake,
        staleCancellation |-> staleCancellation,
        targetReleased |-> targetReleased,
+       kernelInterestArmed |-> kernelInterestArmed,
+       replacementReady |-> replacementReady,
+       replacementWaiting |-> replacementWaiting,
+       replacementDelivered |-> replacementDelivered,
+       replacementArmAttempted |-> replacementArmAttempted,
+       replacementArmSuppressed |-> replacementArmSuppressed,
        lastAction |-> lastAction],
     model_source |-> lastAction
 ]
