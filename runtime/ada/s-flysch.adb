@@ -1219,8 +1219,7 @@ package body System.Flyology.Scheduler is
            --  Linux may have consumed this owner's one-shot while its
            --  scheduler link remains behind the bounded cancellation drain.
            --  It cannot prove that a replacement wait has a kernel arm.
-           and then
-             (Position.Owner = null or else not Position.Owner.Descriptor_Cancel_Queued)
+           and then (Position.Owner = null or else not Position.Owner.Descriptor_Cancel_Queued)
          then
             return True;
          end if;

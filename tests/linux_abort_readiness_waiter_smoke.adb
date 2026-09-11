@@ -146,16 +146,13 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
 
       task body Backlog_Waiter is
       begin
-         if Flyology.IO.Wait
-              (Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite)
-         then
+         if Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite) then
             null;
          end if;
       end Backlog_Waiter;
 
       type Backlog_Waiter_Access is access Backlog_Waiter;
-      type Backlog_Waiter_Array is
-        array (Positive range <>) of Backlog_Waiter_Access;
+      type Backlog_Waiter_Array is array (Positive range <>) of Backlog_Waiter_Access;
       Waiters : Backlog_Waiter_Array (1 .. Backlog_Count) := [others => null];
 
       task type Target_Waiter
@@ -171,16 +168,12 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          if Flyology.IO.Wait
               (First_Descriptor,
                Flyology.IO.For_Read,
-               (if Scenario = Timer_Delivery
-                then 1.0
-                else Flyology.IO.Infinite))
+               (if Scenario = Timer_Delivery then 1.0 else Flyology.IO.Infinite))
          then
             null;
          end if;
          Observation.Note_First_Return;
-         if Flyology.IO.Wait
-              (Second_Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite)
-         then
+         if Flyology.IO.Wait (Second_Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite) then
             Observation.Note_Second_Return;
          end if;
       end Target_Waiter;
@@ -200,16 +193,12 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          case Request is
             when Replacement_Run =>
                Observation.Note_Replacement_Ready;
-               while not Observation.Replacement_May_Proceed
-                 and then not Observation.Runner_Stopped
-               loop
+               while not Observation.Replacement_May_Proceed and then not Observation.Runner_Stopped loop
                   null;
                end loop;
                if not Observation.Runner_Stopped
                  and then Flyology.IO.Wait
-                            (Replacement_Descriptor,
-                             Flyology.IO.For_Read,
-                             Flyology.IO.Infinite)
+                            (Replacement_Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite)
                then
                   Observation.Note_Replacement_Return;
                end if;
@@ -228,11 +217,8 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       type Runner_Access is access Runner;
       Loop_Runner : Runner_Access := null;
 
-      procedure Await
-        (Condition : not null access function return Boolean; Failure : String)
-      is
-         Limit : constant Ada.Real_Time.Time :=
-           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (3);
+      procedure Await (Condition : not null access function return Boolean; Failure : String) is
+         Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (3);
       begin
          while not Condition.all loop
             if Ada.Real_Time.Clock >= Limit then
@@ -243,8 +229,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       end Await;
 
       function All_Registered return Boolean
-      is (Fault_Control.Calls (Fault_Control.Poller_Watch)
-          >= Backlog_Count + 1);
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= Backlog_Count + 1);
 
       function Translation_Parked return Boolean
       is (Fault_Control.Poller_Translation_Parked);
@@ -262,8 +247,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       is (Observation.Replacement_Ready);
 
       function Replacement_Watch_Registered return Boolean
-      is (Fault_Control.Calls (Fault_Control.Poller_Watch)
-          >= Backlog_Count + 2);
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= Backlog_Count + 2);
 
       function Replacement_Returned return Boolean
       is (Observation.Replacement_Returned);
@@ -342,30 +326,21 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       Loop_Runner := new Runner (Sockets.Native_Descriptor (Target));
 
       for Index in Waiters'Range loop
-         Waiters (Index) :=
-           new Backlog_Waiter (Sockets.Native_Descriptor (Victims (Index)));
+         Waiters (Index) := new Backlog_Waiter (Sockets.Native_Descriptor (Victims (Index)));
       end loop;
       Target_Task :=
-        new Target_Waiter
-              (Sockets.Native_Descriptor (Target),
-               Sockets.Native_Descriptor (Second));
+        new Target_Waiter (Sockets.Native_Descriptor (Target), Sockets.Native_Descriptor (Second));
 
-      Await
-        (All_Registered'Access,
-         "65 descriptor waiters did not reach the poller");
+      Await (All_Registered'Access, "65 descriptor waiters did not reach the poller");
       if Scenario = Readiness_Delivery then
          Sockets.Send_Socket (Target_Peer, Payload, Last);
          if Last /= Payload'Last then
             raise Program_Error with "readiness signal was short";
          end if;
-         Await
-           (Translation_Parked'Access,
-            "event loop did not reach poller translation");
+         Await (Translation_Parked'Access, "event loop did not reach poller translation");
       else
          Observation.Start_Blocker;
-         Await
-           (Blocker_Entered'Access,
-            "event loop did not enter the timer test blocker");
+         Await (Blocker_Entered'Access, "event loop did not enter the timer test blocker");
       end if;
 
       --  Queue the selected, high-priority target last so the first bounded
@@ -375,8 +350,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       end loop;
       abort Target_Task.all;
       if Fault_Control.Descriptor_Cancel_Queued_Count /= Backlog_Count + 1 then
-         raise Program_Error
-           with "foreign wakes did not queue all 65 descriptor cancellations";
+         raise Program_Error with "foreign wakes did not queue all 65 descriptor cancellations";
       end if;
 
       if Scenario = Readiness_Delivery then
@@ -384,50 +358,31 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       else
          Observation.Stop_Runner;
       end if;
-      Await
-        (Budget_Parked'Access,
-         "event loop did not stop after the 64-item cancellation budget");
+      Await (Budget_Parked'Access, "event loop did not stop after the 64-item cancellation budget");
       if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
-         raise Program_Error
-           with
-             "bounded cancellation drain did not process exactly 64 waiters";
+         raise Program_Error with "bounded cancellation drain did not process exactly 64 waiters";
       end if;
       if Target_Terminated then
-         raise Program_Error
-           with "cancellation-owned target terminated before its queue entry";
+         raise Program_Error with "cancellation-owned target terminated before its queue entry";
       elsif Observation.First_Returned then
-         raise Program_Error
-           with "cancellation-owned target returned before its queue entry";
+         raise Program_Error with "cancellation-owned target returned before its queue entry";
       elsif Observation.Second_Returned then
-         raise Program_Error
-           with
-             "cancellation-owned target re-registered before its queue entry";
+         raise Program_Error with "cancellation-owned target re-registered before its queue entry";
       end if;
 
       if Scenario = Timer_Delivery then
          delay 1.1;
          Fault_Control.Arm (Fault_Control.Timer_Maintenance_Due);
          Fault_Control.Release_Descriptor_Cancel_Budget;
-         Await
-           (Timer_Parked'Access,
-            "expired cancellation-owned timer did not reach its scheduler guard");
-         if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count
-         then
-            raise Program_Error
-              with
-                "timer guard ran after the queued cancellation was processed";
+         Await (Timer_Parked'Access, "expired cancellation-owned timer did not reach its scheduler guard");
+         if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
+            raise Program_Error with "timer guard ran after the queued cancellation was processed";
          elsif Target_Terminated then
-            raise Program_Error
-              with
-                "expired cancellation-owned target terminated before cancellation";
+            raise Program_Error with "expired cancellation-owned target terminated before cancellation";
          elsif Observation.First_Returned then
-            raise Program_Error
-              with
-                "expired cancellation-owned wait returned before cancellation";
+            raise Program_Error with "expired cancellation-owned wait returned before cancellation";
          elsif Observation.Second_Returned then
-            raise Program_Error
-              with
-                "expired cancellation-owned wait re-registered before cancellation";
+            raise Program_Error with "expired cancellation-owned wait re-registered before cancellation";
          end if;
          Fault_Control.Release_Descriptor_Cancel_Timer;
       else
@@ -440,47 +395,30 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          Await
            (Replacement_Ready'Access,
             "ready replacement task did not run before the next cancellation drain");
-         if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count
-         then
-            raise Program_Error
-              with
-                "65th cancellation drained before the replacement wait started";
+         if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
+            raise Program_Error with "65th cancellation drained before the replacement wait started";
          end if;
          Observation.Proceed_Replacement;
          Await
            (Replacement_Watch_Registered'Access,
             "replacement wait did not rearm the consumed one-shot interest");
-         Await
-           (Replacement_Returned'Access,
-            "replacement waiter did not receive retained readiness");
+         Await (Replacement_Returned'Access, "replacement waiter did not receive retained readiness");
       end if;
 
-      Await
-        (Target_Terminated'Access,
-         "65th cancellation target did not terminate");
-      Await
-        (Backlog_Terminated'Access, "cancellation backlog did not terminate");
+      Await (Target_Terminated'Access, "65th cancellation target did not terminate");
+      Await (Backlog_Terminated'Access, "cancellation backlog did not terminate");
       Observation.Stop_Runner;
       Await (Runner_Terminated'Access, "replacement runner did not terminate");
 
       if Fault_Control.Poller_Cancel_During_Translation_Count /= 0 then
-         raise Program_Error
-           with
-             "foreign Wake mutated the poller during event-loop translation";
-      elsif Fault_Control.Descriptor_Cancel_Processed_Count
-        /= Backlog_Count + 1
-      then
-         raise Program_Error
-           with "event loop did not consume the 65th queued cancellation";
+         raise Program_Error with "foreign Wake mutated the poller during event-loop translation";
+      elsif Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count + 1 then
+         raise Program_Error with "event loop did not consume the 65th queued cancellation";
       elsif Observation.First_Returned then
-         raise Program_Error
-           with "selected readiness resumed a cancellation-owned waiter";
+         raise Program_Error with "selected readiness resumed a cancellation-owned waiter";
       elsif Observation.Second_Returned then
-         raise Program_Error
-           with "stale cancellation reached a replacement wait generation";
-      elsif Scenario = Readiness_Delivery
-        and then not Observation.Replacement_Returned
-      then
+         raise Program_Error with "stale cancellation reached a replacement wait generation";
+      elsif Scenario = Readiness_Delivery and then not Observation.Replacement_Returned then
          raise Program_Error with "replacement readiness was lost";
       end if;
       Cleanup;
@@ -492,8 +430,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
 
 begin
    if not Fault_Control.Enabled then
-      raise Program_Error
-        with "abort/readiness test requires FLYOLOGY_TEST_FAULTS=1 runtime";
+      raise Program_Error with "abort/readiness test requires FLYOLOGY_TEST_FAULTS=1 runtime";
    end if;
    for Iteration in 1 .. Iterations loop
       Run_One (Readiness_Delivery);
