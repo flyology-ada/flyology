@@ -515,6 +515,7 @@ guide_utilization_example
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke
+library_finalize_runtime_smoke
 lifecycle_smoke
 lifecycle_churn_smoke
 loop_thread_placement_smoke
