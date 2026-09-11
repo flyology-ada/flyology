@@ -646,6 +646,7 @@ $test_main"
 done
 
 all_test_mains="default_policy_smoke
+interrupt_service_native_smoke
 $ordinary_unhooked_mains
 process_generation_agent_v1
 process_generation_agent_v2
@@ -730,8 +731,12 @@ unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
 
 FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
 link_test_mains \
-  "$test_subdir" "$project_root/build/rts" default_policy_smoke
+  "$test_subdir" "$project_root/build/rts" \
+  "default_policy_smoke interrupt_service_native_smoke"
 "$test_bin/default_policy_smoke" lightweight
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+  "$test_bin/interrupt_service_native_smoke"
 
 FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
 native_mains="default_policy_smoke

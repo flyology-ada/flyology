@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-interr.adb
++++ b/s-interr.adb
+@@ -53,1 +53,2 @@ with Ada.Unchecked_Conversion;
++with System.Flyology;
+ with System.Interrupt_Management;
+@@ -71,1 +72,2 @@ with System.Tasking.Rendezvous;
++pragma Elaborate_All (System.Flyology);
+ pragma Elaborate_All (System.Interrupt_Management.Operations);
+@@ -94,1 +96,2 @@ package body System.Interrupts is
+    task Interrupt_Manager is
++      pragma Task_Info (System.Flyology.Native_Designation);
+@@ -131,1 +134,2 @@ package body System.Interrupts is
+    task type Server_Task (Interrupt : Interrupt_ID) is
++      pragma Task_Info (System.Flyology.Native_Designation);

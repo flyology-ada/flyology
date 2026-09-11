@@ -481,6 +481,7 @@ if [ "$platform" = darwin ]; then
 fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 blocking_detection_patch="$patch_root/common/s-taskin.adb.patch"
+interrupt_service_patch="$patch_root/common/s-interr.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
 case "$compiler_release" in
   13.2.2|14.1.3|14.2.1)
@@ -563,6 +564,7 @@ if [ -n "$monotonic_patch" ]; then
 fi
 apply_runtime_patch "$task_state_patch"
 apply_runtime_patch "$blocking_detection_patch"
+apply_runtime_patch "$interrupt_service_patch"
 if [ "$compat_family" = gnat-legacy ]; then
   apply_runtime_patch "$legacy_suspension_spec_patch"
   apply_runtime_patch "$legacy_suspension_body_patch"
@@ -584,6 +586,10 @@ require_generated_text \
   "$generated_include/s-taskin.adb" \
   "System.Flyology.Scheduler.Current_Task" \
   "blocking-detection scheduler"
+require_generated_text \
+  "$generated_include/s-interr.adb" \
+  "pragma Task_Info (System.Flyology.Native_Designation);" \
+  "native interrupt service"
 if [ "$platform" = linux ]; then
   require_generated_text \
     "$generated_include/s-taprop.adb" \
@@ -646,6 +652,18 @@ compile_upstream_runtime_ada () {
   fi
 }
 
+#  The explicit Task_Info pragmas in the patched interrupt service are the
+#  supported designation mechanism, but current GNAT diagnoses that mechanism
+#  as obsolete. Suppress only that warning for this one patched unit.
+compile_interrupt_runtime_ada () {
+  if [ -n "$runtime_warnings" ]; then
+    "$compiler" -c -gnatpg -gnatyM110 -gnatwJ -gnat2022 -O2 -fPIC \
+      "-gnatec=$runtime_warnings" -gnateb "$@"
+  else
+    "$compiler" -c -gnatpg -gnatyM110 -gnatwJ -gnat2022 -O2 -fPIC "$@"
+  fi
+}
+
 if [ "$platform" = linux ]; then
   compile_flyology_runtime_ada \
     -I "$generated_include" \
@@ -676,6 +694,9 @@ compile_upstream_runtime_ada \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
+compile_interrupt_runtime_ada \
+  -I "$generated_include" \
+  "$generated_include/s-interr.adb"
 if [ "$compat_family" = gnat-legacy ]; then
   compile_upstream_runtime_ada \
     -I "$generated_include" \
@@ -687,7 +708,8 @@ cp \
   s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
   s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
-  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-taskin.ali s-tassta.ali \
+  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-interr.ali \
+  s-taskin.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$compat_family" = gnat-legacy ]; then
   cp a-sytaco.ali "$generated_lib/"
@@ -714,6 +736,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-fszcpo.o \
   s-flysch.o \
   s-taprop.o \
+  s-interr.o \
   s-taskin.o \
   s-tassta.o \
   context_switch.o \
@@ -775,7 +798,8 @@ verification_root="$build_root/patch-verification"
 mkdir "$verification_root"
 (
   cd "$verification_root"
-  ar -x "$generated_lib/libgnarl.a" s-taprop.o s-taskin.o s-tassta.o
+  ar -x "$generated_lib/libgnarl.a" \
+    s-taprop.o s-interr.o s-taskin.o s-tassta.o
   if [ "$compat_family" = gnat-legacy ]; then
     ar -x "$generated_lib/libgnarl.a" a-sytaco.o
   fi
@@ -800,6 +824,10 @@ require_archived_symbol \
   "$verification_root/s-taskin.o" \
   system__flyology__scheduler__current_task \
   "blocking-detection scheduler"
+require_archived_symbol \
+  "$verification_root/s-interr.o" \
+  system__flyology__native_designation \
+  "native interrupt service"
 if [ "$platform" = linux ]; then
   require_archived_symbol \
     "$verification_root/s-taprop.o" \
@@ -832,6 +860,8 @@ record_patched_core source adainclude/s-tassta.adb \
   "$generated_include/s-tassta.adb"
 record_patched_core source adainclude/s-taskin.adb \
   "$generated_include/s-taskin.adb"
+record_patched_core source adainclude/s-interr.adb \
+  "$generated_include/s-interr.adb"
 if [ -n "$monotonic_patch" ]; then
   record_patched_core source adainclude/s-tpopmo.adb \
     "$generated_include/s-tpopmo.adb"
@@ -848,6 +878,8 @@ record_patched_core archive adalib/libgnarl.a:s-tassta.o \
   "$verification_root/s-tassta.o"
 record_patched_core archive adalib/libgnarl.a:s-taskin.o \
   "$verification_root/s-taskin.o"
+record_patched_core archive adalib/libgnarl.a:s-interr.o \
+  "$verification_root/s-interr.o"
 if [ "$compat_family" = gnat-legacy ]; then
   record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
     "$verification_root/a-sytaco.o"
