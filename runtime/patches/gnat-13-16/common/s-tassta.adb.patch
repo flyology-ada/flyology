@@ -98,15 +98,18 @@
 -      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
 +      if not Is_Lightweight
 +        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
-@@ -886,2 +935,7 @@
-       SSL.Task_Termination_Handler.all (Ada.Exceptions.Null_Occurrence);
+@@ -888,5 +937,12 @@
+       --  Finalize all library-level controlled objects
 
+       if not SSL."=" (SSL.Finalize_Library_Objects, null) then
+          SSL.Finalize_Library_Objects.all;
+       end if;
++
 +      --  GNARL has completed global tasks and library objects. Flyology may
 +      --  now join quiescent event-loop threads; if an unexpected fiber is
 +      --  still live, the scheduler records deferred cleanup and leaves the
 +      --  resources to process exit instead of racing that task.
 +      System.Flyology.Scheduler.Finalize;
-+
 @@ -916,18 +972,22 @@
     procedure Free_Task (T : Task_Id) is
 -      Self_Id : constant Task_Id := Self;

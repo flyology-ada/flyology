@@ -105,6 +105,7 @@ project Runtime_Smoke is
       "io_starvation_smoke.adb",
       "interrupt_service_native_smoke.adb",
       "lazy_event_start_smoke.adb",
+      "library_finalize_runtime_smoke.adb",
       "lifecycle_smoke.adb",
       "lifecycle_churn_smoke.adb",
       "linux_poller_cloexec_smoke.adb",
