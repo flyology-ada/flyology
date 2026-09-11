@@ -25,6 +25,12 @@ package System.Flyology.Poller is
 
    type Poll_Event_Array is array (Positive range <>) of Poll_Event;
 
+   --  While a poller's event loop is active, Watch, Watch_Many, Cancel,
+   --  Cancel_Many, Wait, and Wait_Batch belong to that owning thread. Wake is
+   --  the foreign-thread entry and only signals the owning event loop.
+   --  Initialize and Finalize instead require exclusive lifecycle ownership;
+   --  Finalize runs before an event thread starts or after it has been joined.
+
    function Initialize (Item : in out Poller) return Boolean;
    procedure Finalize (Item : in out Poller);
 
