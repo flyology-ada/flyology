@@ -20,6 +20,7 @@ package body System.Flyology.Poller is
    EPOLL_CTL_ADD : constant C.int := 1;
    EPOLL_CTL_DEL : constant C.int := 2;
    EPOLL_CTL_MOD : constant C.int := 3;
+   EPOLL_CLOEXEC : constant C.int := 16#0008_0000#;
 
    EPOLLIN      : constant C.unsigned := 16#0000_0001#;
    EPOLLOUT     : constant C.unsigned := 16#0000_0004#;
@@ -201,7 +202,7 @@ package body System.Flyology.Poller is
    function Initialize (Item : in out Poller) return Boolean is
       Result : C.int;
    begin
-      Item.Descriptor := Epoll_Create1 (0);
+      Item.Descriptor := Epoll_Create1 (EPOLL_CLOEXEC);
       if Item.Descriptor < 0 then
          return False;
       end if;
