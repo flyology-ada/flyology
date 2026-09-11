@@ -5,16 +5,31 @@ have been tested. `prepare-rts.sh` reads the active compiler release and
 refuses to continue when no matching family exists; it never guesses or falls
 back to an unverified patch.
 
-`gnat-13-16` is verified against these exact Alire compiler releases. The
-patched provider publishes GNAT 16.2 before the community `gnat_native`
-provider, so the newest release is intentionally identity-specific:
+`gnat-13-16` is verified against these exact Alire compiler cells. The patched
+provider publishes GNAT 16.2 before the community `gnat_native` provider, so
+the newest release is intentionally identity-specific. Linux availability is
+architecture-specific:
 
 | Identity | Host | Releases |
 | --- | --- | --- |
 | `gnat_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| `gnat_native` | Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 | `gnat_flyology_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
-| `gnat_flyology_native` | Linux | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+
+<!-- BEGIN ALIRE LINUX RUNTIME MATRIX -->
+| Provider | GNAT release | GPRbuild release | Linux/x86-64 | Linux/AArch64 |
+| --- | --- | --- | --- | --- |
+| `gnat_native` | `13.2.2` | `25.0.1` | required | not published |
+| `gnat_native` | `14.1.3` | `25.0.1` | required | not published |
+| `gnat_native` | `14.2.1` | `25.0.1` | required | required |
+| `gnat_native` | `15.1.2` | `25.0.1` | required | required |
+| `gnat_native` | `15.3.1` | `25.0.1` | required | required |
+| `gnat_native` | `16.1.0` | `26.0.1` | required | required |
+| `gnat_flyology_native` | `16.2.0-patchset.1.1.0` | `26.0.1` | required | required |
+<!-- END ALIRE LINUX RUNTIME MATRIX -->
+
+The ordered executable source for the Linux table is
+`scripts/alire-runtime-matrix.txt`; its focused regression verifies that both
+documentation copies remain identical to the executable matrix.
 
 The Darwin GNARL source bundled with Alire's GNAT 15 releases has a different
 task-primitives shape and needs its own patch family before it can be enabled.

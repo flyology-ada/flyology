@@ -105,12 +105,13 @@ to the exact host and GNAT releases listed under
 [Build and test](#build-and-test) and fails closed for an unverified
 combination.
 
-The current patch family covers the exact Alire `gnat_native` and
-`gnat_flyology_native` releases from 13 through 16 listed below.
-Linux/AArch64 and Linux/x86-64 support 13.2.2, 14.1.3, 14.2.1, 15.1.2,
-15.3.1, and 16.1.0 through either provider, plus
-`gnat_flyology_native` 16.2.0-patchset.1.1.0. macOS supports 13.2.2, 14.1.3,
-14.2.1, and 16.1.0 through either provider, plus the patched 16.2 release.
+The current patch family covers the exact Alire compiler cells listed below.
+Linux/x86-64 runs six stock `gnat_native` releases from 13.2.2 through 16.1.0
+and `gnat_flyology_native` 16.2.0-patchset.1.1.0. Linux/AArch64 starts with
+stock 14.2.1 and runs the remaining five cells; the configured Alire indexes do
+not publish Linux/AArch64 origins for stock 13.2.2 or 14.1.3, and the matrix
+runner reports both exclusions. macOS supports the releases shown in the
+Build and test table.
 The event backend is
 `kqueue` on macOS and `epoll` plus `eventfd` on Linux. Lightweight tasks resume
 through the small ABI-specific context switch described below.
@@ -3675,18 +3676,32 @@ cd flyology
 alr build
 ```
 
-Flyology supports Alire 2.1 or newer with the exact compiler releases shown
-below. The patched provider publishes GNAT 16.2 before the community provider,
-so the newest release is intentionally identity-specific:
+Flyology supports Alire 2.1 or newer with the exact compiler cells shown below.
+The patched provider publishes GNAT 16.2 before the community provider, so the
+newest release is intentionally identity-specific. Darwin support and the
+ordered Linux runtime matrix are listed separately because Linux compiler
+publication varies by architecture:
 
 | Identity | Host | Releases |
 | --- | --- | --- |
 | `gnat_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| `gnat_native` | Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
-| `gnat_native` | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0 |
 | `gnat_flyology_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
-| `gnat_flyology_native` | Linux/AArch64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
-| `gnat_flyology_native` | Linux/x86-64 | 13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+
+<!-- BEGIN ALIRE LINUX RUNTIME MATRIX -->
+| Provider | GNAT release | GPRbuild release | Linux/x86-64 | Linux/AArch64 |
+| --- | --- | --- | --- | --- |
+| `gnat_native` | `13.2.2` | `25.0.1` | required | not published |
+| `gnat_native` | `14.1.3` | `25.0.1` | required | not published |
+| `gnat_native` | `14.2.1` | `25.0.1` | required | required |
+| `gnat_native` | `15.1.2` | `25.0.1` | required | required |
+| `gnat_native` | `15.3.1` | `25.0.1` | required | required |
+| `gnat_native` | `16.1.0` | `26.0.1` | required | required |
+| `gnat_flyology_native` | `16.2.0-patchset.1.1.0` | `26.0.1` | required | required |
+<!-- END ALIRE LINUX RUNTIME MATRIX -->
+
+The ordered executable source for this Linux table is
+`scripts/alire-runtime-matrix.txt`. The focused enumeration regression checks
+both documentation copies against that file.
 
 The crate declares a generic `gnat >=13 & <17` dependency so Alire can select
 either compiler provider; no package-specific dependency is required. Runtime
@@ -3998,7 +4013,8 @@ retain it for inspection. `FLYOLOGY_LINUX_PERF=1` adds Docker's `PERFMON`
 capability, requires the benchmark example to collect every Linux hardware
 counter, and requires the crate's smoke test to show that worker-task work is
 counted; the run fails when the host or virtual machine does not expose a PMU.
-To run every Alire release covered by the patch family:
+To run every cell published for the selected Linux architecture and report any
+architecture exclusions:
 
 ```sh
 ./scripts/test-alire-runtime-matrix.sh
