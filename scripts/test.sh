@@ -594,6 +594,8 @@ semantic_termination_matrix'
 fault_mains='accept_transient_smoke
 connect_transient_smoke
 create_finalize_race_smoke
+library_finalize_exception_runtime_smoke
+library_finalize_runtime_smoke
 pool_reduction_claim_smoke
 structured_server_reuse_smoke
 task_result_publication_smoke
@@ -1068,6 +1070,38 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 #  here on its stop invariant, so the timeout also bounds a regression.
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/create_finalize_race_smoke"
+#  The post-Ada-finalization verifier requires exactly one library-object
+#  finalizer event followed by exactly one scheduler-finalizer event.
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$test_bin/library_finalize_runtime_smoke"
+#  A saved exception from a controlled library finalizer must propagate after
+#  scheduler teardown. The atexit marker proves the exceptional path retained
+#  the same exactly-once ordering instead of merely producing a nonzero exit.
+if exceptional_finalize_output=$(\
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/library_finalize_exception_runtime_smoke" 2>&1); then
+  printf '%s\n' \
+    "library_finalize_exception_runtime_smoke unexpectedly succeeded" >&2
+  exit 1
+fi
+case "$exceptional_finalize_output" in
+  *"raised PROGRAM_ERROR : finalize/adjust raised exception"*) ;;
+  *)
+    printf '%s\n' "$exceptional_finalize_output" >&2
+    printf '%s\n' \
+      "library_finalize_exception_runtime_smoke lost the original exception" >&2
+    exit 1
+    ;;
+esac
+case "$exceptional_finalize_output" in
+  *"Flyology exceptional finalization-order test passed"*) ;;
+  *)
+    printf '%s\n' "$exceptional_finalize_output" >&2
+    printf '%s\n' \
+      "library_finalize_exception_runtime_smoke missed scheduler teardown" >&2
+    exit 1
+    ;;
+esac
 #  Hold an automatic creator between its round-robin claim and group startup;
 #  reduction must retain that claim until the released task drains to group 0.
 "$project_root/scripts/run-with-timeout.sh" 30 \
