@@ -3710,6 +3710,8 @@ package body System.Flyology.Scheduler is
          Links              : aliased IO_Wait_Link_Array (1 .. Actual_Count);
          Kernel_Watches     : Pollers.Interest_Request_Array (1 .. Actual_Count);
          Kernel_Watch_Count : Natural := 0;
+         Rollback_Watches   : Pollers.Interest_Request_Array (1 .. Actual_Count);
+         Rollback_Count     : Natural := 0;
 
          function Request_At (Index : Positive) return Runtime_Wait_Request;
          function Plan_Arm (Index : Positive) return Boolean;
@@ -3727,26 +3729,30 @@ package body System.Flyology.Scheduler is
             Request            : constant Runtime_Wait_Request := Request_At (Index);
             Interest           : constant Pollers.Interest :=
               (if Request.For_Write = 0 then Pollers.Readable else Pollers.Writable);
-            Needs_Kernel_Watch : Boolean;
+            Needs_Kernel_Watch : Boolean := True;
+            Was_Registered     : Boolean;
          begin
             if Request.Descriptor < 0 or else Request.For_Write not in 0 | 1 then
                return False;
             end if;
-            Needs_Kernel_Watch := not IO_Interest_Registered_Locked (Group, Request.Descriptor, Interest);
+            for Planned in 1 .. Kernel_Watch_Count loop
+               if Kernel_Watches (Planned).Descriptor = Request.Descriptor
+                 and then Kernel_Watches (Planned).Condition = Interest
+               then
+                  Needs_Kernel_Watch := False;
+                  exit;
+               end if;
+            end loop;
             if Needs_Kernel_Watch then
-               for Planned in 1 .. Kernel_Watch_Count loop
-                  if Kernel_Watches (Planned).Descriptor = Request.Descriptor
-                    and then Kernel_Watches (Planned).Condition = Interest
-                  then
-                     Needs_Kernel_Watch := False;
-                     exit;
-                  end if;
-               end loop;
-            end if;
-            if Needs_Kernel_Watch then
+               Was_Registered := IO_Interest_Registered_Locked (Group, Request.Descriptor, Interest);
                Kernel_Watch_Count := Kernel_Watch_Count + 1;
                Kernel_Watches (Kernel_Watch_Count) :=
                  (Descriptor => Request.Descriptor, Condition => Interest);
+               if not Was_Registered then
+                  Rollback_Count := Rollback_Count + 1;
+                  Rollback_Watches (Rollback_Count) :=
+                    (Descriptor => Request.Descriptor, Condition => Interest);
+               end if;
             end if;
             return True;
          end Plan_Arm;
@@ -3793,7 +3799,13 @@ package body System.Flyology.Scheduler is
          if Kernel_Watch_Count > 0
            and then not Pollers.Watch_Many (Group.Scheduler_Poller, Kernel_Watches (1 .. Kernel_Watch_Count))
          then
-            if not Pollers.Cancel_Many (Group.Scheduler_Poller, Kernel_Watches (1 .. Kernel_Watch_Count)) then
+            --  A failed batch can have applied an earlier rearm. Roll back
+            --  only interests introduced by this waiter; an older scheduler
+            --  link still owns every pre-existing interest.
+            if Rollback_Count > 0
+              and then not Pollers.Cancel_Many
+                             (Group.Scheduler_Poller, Rollback_Watches (1 .. Rollback_Count))
+            then
                Fatal (Poller_Failure);
             end if;
             Remove_Timer_Locked (Group, Item);
@@ -3922,9 +3934,7 @@ package body System.Flyology.Scheduler is
       if Cancel_FD >= 0 then
          Item.Active_IO_Links := Item.Inline_IO_Links (Primary_IO)'Unchecked_Access;
          Item.Active_IO_Link_Count := 1;
-         if not IO_Interest_Registered_Locked (Group, Cancel_FD, Pollers.Readable)
-           and then not Pollers.Watch (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable)
-         then
+         if not Pollers.Watch (Group.Scheduler_Poller, Cancel_FD, Pollers.Readable) then
             Item.File_Wait := False;
             Item.File_Cancel_Descriptor := -1;
             Item.Active_IO_Links := null;

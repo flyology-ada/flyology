@@ -14,11 +14,15 @@ Safety ==
     /\ CoreSafety
     /\ ReplacementWaitHasKernelInterest
     /\ QueuedLinkDoesNotSuppressReplacementArm
+    /\ CurrentReusedWaitIsArmed
+    /\ StaleLinkDoesNotSuppressReuseArm
+    /\ ReusedReadinessDelivered
 
 THEOREM InitImpliesSafety ==
     /\ CancelMode = "Deferred"
     /\ DeliveryMode = "CancellationOwned"
     /\ ReplacementArmMode = "IgnoreQueued"
+    /\ ReuseArmMode = "AlwaysRearm"
     /\ SelectedSource \in {"Readiness", "Timer"}
     => (Init => Safety)
 <1>. QED BY DEF Init, Safety, CoreSafety, TypeOK, SingleRegistrationWriter,
@@ -26,12 +30,16 @@ THEOREM InitImpliesSafety ==
                 QueuedCancellationMatchesWaitGeneration,
                 QueuedCancellationOwnsTarget, PendingCancellationHasWake,
                 NoStaleCancellation, ReplacementWaitHasKernelInterest,
-                QueuedLinkDoesNotSuppressReplacementArm
+                QueuedLinkDoesNotSuppressReplacementArm,
+                CurrentReusedWaitIsArmed,
+                StaleLinkDoesNotSuppressReuseArm,
+                ReusedReadinessDelivered, reuseVars
 
 THEOREM NextPreservesSafety ==
     /\ CancelMode = "Deferred"
     /\ DeliveryMode = "CancellationOwned"
     /\ ReplacementArmMode = "IgnoreQueued"
+    /\ ReuseArmMode = "AlwaysRearm"
     /\ SelectedSource \in {"Readiness", "Timer"}
     /\ Safety
     /\ Next
@@ -39,6 +47,7 @@ THEOREM NextPreservesSafety ==
 <1>1. /\ CancelMode = "Deferred"
        /\ DeliveryMode = "CancellationOwned"
        /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
        /\ SelectedSource \in {"Readiness", "Timer"}
        /\ Safety
        /\ Next
@@ -52,10 +61,12 @@ THEOREM NextPreservesSafety ==
                 DrainBudget, DeliverTarget, StartReplacement,
                 ReregisterTarget, ReapTarget, DrainRemaining,
                 DrainReplacement, DrainReused, DrainTimer,
-                DeliverReplacement
+                DeliverReplacement, BeginOldWait, CloseAndReuse,
+                BeginReusedWait, DeliverReusedWait, reuseVars
 <1>2. /\ CancelMode = "Deferred"
        /\ DeliveryMode = "CancellationOwned"
        /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
        /\ SelectedSource \in {"Readiness", "Timer"}
        /\ Safety
        /\ Next
@@ -64,10 +75,13 @@ THEOREM NextPreservesSafety ==
                 Next, BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
-                DrainTimer, DeliverReplacement
+                DrainTimer, DeliverReplacement, BeginOldWait,
+                CloseAndReuse, BeginReusedWait, DeliverReusedWait,
+                reuseVars
 <1>3. /\ CancelMode = "Deferred"
        /\ DeliveryMode = "CancellationOwned"
        /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
        /\ SelectedSource \in {"Readiness", "Timer"}
        /\ Safety
        /\ Next
@@ -77,7 +91,54 @@ THEOREM NextPreservesSafety ==
                 BeginWaitBatch, ForeignWake, DrainBudget, DeliverTarget,
                 StartReplacement, ReregisterTarget, ReapTarget,
                 DrainRemaining, DrainReplacement, DrainReused, DrainTimer,
-                DeliverReplacement
-<1>. QED BY <1>1, <1>2, <1>3 DEF Safety
+                DeliverReplacement, BeginOldWait, CloseAndReuse,
+                BeginReusedWait, DeliverReusedWait, reuseVars
+<1>4. /\ CancelMode = "Deferred"
+       /\ DeliveryMode = "CancellationOwned"
+       /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
+       /\ SelectedSource \in {"Readiness", "Timer"}
+       /\ Safety
+       /\ Next
+       => CurrentReusedWaitIsArmed'
+<2>. QED BY DEF Safety, CoreSafety, CurrentReusedWaitIsArmed,
+                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                DeliverTarget, StartReplacement, ReregisterTarget,
+                ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
+                DrainTimer, DeliverReplacement, BeginOldWait,
+                CloseAndReuse, BeginReusedWait, DeliverReusedWait,
+                reuseVars
+<1>5. /\ CancelMode = "Deferred"
+       /\ DeliveryMode = "CancellationOwned"
+       /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
+       /\ SelectedSource \in {"Readiness", "Timer"}
+       /\ Safety
+       /\ Next
+       => StaleLinkDoesNotSuppressReuseArm'
+<2>. QED BY DEF Safety, CoreSafety, StaleLinkDoesNotSuppressReuseArm,
+                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                DeliverTarget, StartReplacement, ReregisterTarget,
+                ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
+                DrainTimer, DeliverReplacement, BeginOldWait,
+                CloseAndReuse, BeginReusedWait, DeliverReusedWait,
+                reuseVars
+<1>6. /\ CancelMode = "Deferred"
+       /\ DeliveryMode = "CancellationOwned"
+       /\ ReplacementArmMode = "IgnoreQueued"
+       /\ ReuseArmMode = "AlwaysRearm"
+       /\ SelectedSource \in {"Readiness", "Timer"}
+       /\ Safety
+       /\ Next
+       => ReusedReadinessDelivered'
+<2>. QED BY DEF Safety, CoreSafety, CurrentReusedWaitIsArmed,
+                ReusedReadinessDelivered,
+                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                DeliverTarget, StartReplacement, ReregisterTarget,
+                ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
+                DrainTimer, DeliverReplacement, BeginOldWait,
+                CloseAndReuse, BeginReusedWait, DeliverReusedWait,
+                reuseVars
+<1>. QED BY <1>1, <1>2, <1>3, <1>4, <1>5, <1>6 DEF Safety
 
 =============================================================================

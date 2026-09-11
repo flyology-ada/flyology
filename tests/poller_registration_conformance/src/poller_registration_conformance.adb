@@ -18,6 +18,7 @@ procedure Poller_Registration_Conformance is
    use Ada.Strings.Unbounded;
    use type Ada.Real_Time.Time;
    use type Ada.Streams.Stream_Element_Offset;
+   use type Flyology.IO.Descriptor;
    use type Model.Input_Command_Type;
 
    Backlog_Count : constant Positive := 64;
@@ -25,14 +26,14 @@ procedure Poller_Registration_Conformance is
    type Runner_Request_Kind is (Replacement_Run, Stop_Run);
 
    --  Strict duplicate validation retains decoded name bytes from every simultaneously open
-   --  object. The deepest step needs root (23) + step (40) + expected (12) + state (327) = 402
+   --  object. The deepest step needs root (23) + step (40) + expected (12) + state (479) = 554
    --  decoded name bytes; its 34 simultaneous members remain below the default object-name limit.
    Limits : constant Flyology_TLA.Traces.Load_Limits :=
      (Maximum_File_Bytes   => 1_000_000,
       Maximum_Steps        => 8,
       Maximum_JSON_Depth   => 32,
       Maximum_Object_Names => 256,
-      Maximum_Name_Bytes   => 512,
+      Maximum_Name_Bytes   => 768,
       Maximum_String_Bytes => 4_096,
       Maximum_Value_Bytes  => 32_768);
 
@@ -44,6 +45,7 @@ procedure Poller_Registration_Conformance is
       procedure Note_Replacement_Ready;
       procedure Proceed_Replacement;
       procedure Note_Replacement_Return;
+      procedure Note_Reuse_Return (Ready : Boolean);
       procedure Stop_Runner;
       entry Await_Runner_Request (Request : out Runner_Request_Kind);
       function First_Returned return Boolean;
@@ -51,6 +53,8 @@ procedure Poller_Registration_Conformance is
       function Replacement_Ready return Boolean;
       function Replacement_May_Proceed return Boolean;
       function Replacement_Returned return Boolean;
+      function Reuse_Returned return Boolean;
+      function Reuse_Was_Ready return Boolean;
       function Runner_Stopped return Boolean;
    private
       First_Done           : Boolean := False;
@@ -59,6 +63,8 @@ procedure Poller_Registration_Conformance is
       Replacement_Is_Ready : Boolean := False;
       Replacement_Proceed  : Boolean := False;
       Replacement_Done     : Boolean := False;
+      Reuse_Done           : Boolean := False;
+      Reuse_Ready          : Boolean := False;
       Stop                 : Boolean := False;
    end Observation;
 
@@ -71,6 +77,8 @@ procedure Poller_Registration_Conformance is
          Replacement_Is_Ready := False;
          Replacement_Proceed := False;
          Replacement_Done := False;
+         Reuse_Done := False;
+         Reuse_Ready := False;
          Stop := False;
       end Reset;
 
@@ -104,6 +112,12 @@ procedure Poller_Registration_Conformance is
          Replacement_Done := True;
       end Note_Replacement_Return;
 
+      procedure Note_Reuse_Return (Ready : Boolean) is
+      begin
+         Reuse_Done := True;
+         Reuse_Ready := Ready;
+      end Note_Reuse_Return;
+
       procedure Stop_Runner is
       begin
          Stop := True;
@@ -132,6 +146,12 @@ procedure Poller_Registration_Conformance is
 
       function Replacement_Returned return Boolean
       is (Replacement_Done);
+
+      function Reuse_Returned return Boolean
+      is (Reuse_Done);
+
+      function Reuse_Was_Ready return Boolean
+      is (Reuse_Ready);
 
       function Runner_Stopped return Boolean
       is (Stop);
@@ -172,6 +192,20 @@ procedure Poller_Registration_Conformance is
    end Target_Waiter;
 
    type Target_Waiter_Access is access Target_Waiter;
+
+   task type Reuse_Waiter (Descriptor : Flyology.IO.Descriptor) is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      pragma Priority (25);
+   end Reuse_Waiter;
+
+   task body Reuse_Waiter is
+      Ready : Boolean;
+   begin
+      Ready := Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Timeout => 3.0);
+      Observation.Note_Reuse_Return (Ready);
+   end Reuse_Waiter;
+
+   type Reuse_Waiter_Access is access Reuse_Waiter;
 
    task type Runner (Replacement_Descriptor : Flyology.IO.Descriptor) is
       pragma Task_Info (Flyology.Lightweight_Task);
@@ -225,19 +259,34 @@ procedure Poller_Registration_Conformance is
        Replacement_Delivered      => False,
        Replacement_Arm_Attempted  => False,
        Replacement_Arm_Suppressed => False,
+       Descriptor_Generation      => 0,
+       Stale_Link_Registered      => False,
+       Reuse_Kernel_Generation    => 0,
+       Reused_Wait_Waiting        => False,
+       Reused_Descriptor_Ready    => False,
+       Reused_Wait_Delivered      => False,
+       Reuse_Arm_Attempted        => False,
+       Reuse_Arm_Suppressed       => False,
        Last_Action                => Model.State_Last_Action_Init);
 
    type Registration_Adapter is new Model.Adapter with record
-      Current      : Model.State_Type := Initial_State;
-      Victims      : Backlog_Sockets;
-      Victim_Peers : Backlog_Sockets;
-      Target       : Sockets.Socket_Type;
-      Target_Peer  : Sockets.Socket_Type;
-      Second       : Sockets.Socket_Type;
-      Second_Peer  : Sockets.Socket_Type;
-      Waiters      : Backlog_Waiters := [others => null];
-      Target_Task  : Target_Waiter_Access := null;
-      Loop_Runner  : Runner_Access := null;
+      Current          : Model.State_Type := Initial_State;
+      Victims          : Backlog_Sockets;
+      Victim_Peers     : Backlog_Sockets;
+      Target           : Sockets.Socket_Type;
+      Target_Peer      : Sockets.Socket_Type;
+      Second           : Sockets.Socket_Type;
+      Second_Peer      : Sockets.Socket_Type;
+      Reuse_Old        : Sockets.Socket_Type;
+      Reuse_Peer       : Sockets.Socket_Type;
+      Reused           : Sockets.Socket_Type;
+      Reused_Peer      : Sockets.Socket_Type;
+      Reuse_Descriptor : Flyology.IO.Descriptor := -1;
+      Waiters          : Backlog_Waiters := [others => null];
+      Target_Task      : Target_Waiter_Access := null;
+      Reuse_Old_Task   : Backlog_Waiter_Access := null;
+      Reuse_Task       : Reuse_Waiter_Access := null;
+      Loop_Runner      : Runner_Access := null;
    end record;
 
    overriding
@@ -281,6 +330,12 @@ procedure Poller_Registration_Conformance is
       if Self.Target_Task /= null and then not Self.Target_Task'Terminated then
          abort Self.Target_Task.all;
       end if;
+      if Self.Reuse_Old_Task /= null and then not Self.Reuse_Old_Task'Terminated then
+         abort Self.Reuse_Old_Task.all;
+      end if;
+      if Self.Reuse_Task /= null and then not Self.Reuse_Task'Terminated then
+         abort Self.Reuse_Task.all;
+      end if;
       for Item of Self.Waiters loop
          if Item /= null and then not Item'Terminated then
             abort Item.all;
@@ -290,6 +345,8 @@ procedure Poller_Registration_Conformance is
       loop
          exit when
            (Self.Target_Task = null or else Self.Target_Task'Terminated)
+           and then (Self.Reuse_Old_Task = null or else Self.Reuse_Old_Task'Terminated)
+           and then (Self.Reuse_Task = null or else Self.Reuse_Task'Terminated)
            and then (Self.Loop_Runner = null or else Self.Loop_Runner'Terminated);
          exit when Ada.Real_Time.Clock >= Limit;
          delay 0.001;
@@ -314,6 +371,18 @@ procedure Poller_Registration_Conformance is
       if Sockets.Is_Open (Self.Second_Peer) then
          Sockets.Close_Socket (Self.Second_Peer);
       end if;
+      if Sockets.Is_Open (Self.Reuse_Old) then
+         Sockets.Close_Socket (Self.Reuse_Old);
+      end if;
+      if Sockets.Is_Open (Self.Reuse_Peer) then
+         Sockets.Close_Socket (Self.Reuse_Peer);
+      end if;
+      if Sockets.Is_Open (Self.Reused) then
+         Sockets.Close_Socket (Self.Reused);
+      end if;
+      if Sockets.Is_Open (Self.Reused_Peer) then
+         Sockets.Close_Socket (Self.Reused_Peer);
+      end if;
       Fault_Control.Reset;
    end Cleanup;
 
@@ -322,7 +391,11 @@ procedure Poller_Registration_Conformance is
       Observed : out Model.State_Type;
       Status   : out Flyology_TLA.Replay.Adapter_Outcome) is
    begin
-      if Self.Target_Task /= null or else Self.Loop_Runner /= null then
+      if Self.Target_Task /= null
+        or else Self.Reuse_Old_Task /= null
+        or else Self.Reuse_Task /= null
+        or else Self.Loop_Runner /= null
+      then
          Cleanup (Self);
       end if;
       Self.Current := Initial_State;
@@ -362,6 +435,15 @@ procedure Poller_Registration_Conformance is
       function Replacement_Returned return Boolean
       is (Observation.Replacement_Returned);
 
+      function Old_Wait_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= 1);
+
+      function Reused_Watch_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= 2);
+
+      function Reuse_Returned return Boolean
+      is (Observation.Reuse_Returned);
+
       function Runner_Terminated return Boolean
       is (Self.Loop_Runner /= null and then Self.Loop_Runner'Terminated);
 
@@ -387,15 +469,24 @@ procedure Poller_Registration_Conformance is
       procedure Set_Outcome is
       begin
          Observed :=
-           (Pending               => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
-            Queued                => Self.Current.Target_Cancel_Queued,
-            Foreign_Mutation      => Self.Current.Foreign_Writer,
-            Target_Runnable       => Self.Current.Target_Runnable,
-            Target_Released       => Self.Current.Target_Released,
-            Kernel_Armed          => Self.Current.Kernel_Interest_Armed,
-            Replacement_Waiting   => Self.Current.Replacement_Waiting,
-            Replacement_Delivered => Self.Current.Replacement_Delivered,
-            Arm_Suppressed        => Self.Current.Replacement_Arm_Suppressed);
+           (Pending                 => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
+            Queued                  => Self.Current.Target_Cancel_Queued,
+            Foreign_Mutation        => Self.Current.Foreign_Writer,
+            Target_Runnable         => Self.Current.Target_Runnable,
+            Target_Released         => Self.Current.Target_Released,
+            Kernel_Armed            => Self.Current.Kernel_Interest_Armed,
+            Replacement_Waiting     => Self.Current.Replacement_Waiting,
+            Replacement_Delivered   => Self.Current.Replacement_Delivered,
+            Arm_Suppressed          => Self.Current.Replacement_Arm_Suppressed,
+            Descriptor_Generation   =>
+              Model.Outcome_Descriptor_Generation_Type (Self.Current.Descriptor_Generation),
+            Stale_Link_Registered   => Self.Current.Stale_Link_Registered,
+            Reuse_Kernel_Generation =>
+              Model.Outcome_Reuse_Kernel_Generation_Type (Self.Current.Reuse_Kernel_Generation),
+            Reused_Wait_Waiting     => Self.Current.Reused_Wait_Waiting,
+            Reused_Descriptor_Ready => Self.Current.Reused_Descriptor_Ready,
+            Reused_Wait_Delivered   => Self.Current.Reused_Wait_Delivered,
+            Reuse_Arm_Suppressed    => Self.Current.Reuse_Arm_Suppressed);
       end Set_Outcome;
 
       procedure Fail (Detail : String) is
@@ -464,6 +555,14 @@ procedure Poller_Registration_Conformance is
                Replacement_Delivered      => False,
                Replacement_Arm_Attempted  => False,
                Replacement_Arm_Suppressed => False,
+               Descriptor_Generation      => 0,
+               Stale_Link_Registered      => False,
+               Reuse_Kernel_Generation    => 0,
+               Reused_Wait_Waiting        => False,
+               Reused_Descriptor_Ready    => False,
+               Reused_Wait_Delivered      => False,
+               Reuse_Arm_Attempted        => False,
+               Reuse_Arm_Suppressed       => False,
                Last_Action                => Model.State_Last_Action_Begin_Wait_Batch);
 
          when Model.Input_Command_Foreign_Wake        =>
@@ -575,27 +674,104 @@ procedure Poller_Registration_Conformance is
             Self.Current.Replacement_Waiting := False;
             Self.Current.Replacement_Delivered := True;
             Self.Current.Last_Action := Model.State_Last_Action_Deliver_Replacement;
+
+         when Model.Input_Command_Begin_Old_Wait      =>
+            if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginOldWait" then
+               Fail ("unexpected BeginOldWait step");
+               return;
+            end if;
+            Observation.Reset;
+            Fault_Control.Reset;
+            Sockets.Create_Socket_Pair (Self.Reuse_Old, Self.Reuse_Peer);
+            Self.Reuse_Descriptor := Sockets.Native_Descriptor (Self.Reuse_Old);
+            Self.Reuse_Old_Task := new Backlog_Waiter (Self.Reuse_Descriptor);
+            Await (Old_Wait_Registered'Access, "old descriptor wait did not reach the poller");
+            Self.Current.Phase := Model.State_Phase_Old_Descriptor_Waiting;
+            Self.Current.Descriptor_Generation := 1;
+            Self.Current.Stale_Link_Registered := True;
+            Self.Current.Reuse_Kernel_Generation := 1;
+            Self.Current.Last_Action := Model.State_Last_Action_Begin_Old_Wait;
+
+         when Model.Input_Command_Close_And_Reuse     =>
+            if Index /= 2 or else Action /= "PollerRegistrationOwnership!CloseAndReuse" then
+               Fail ("unexpected CloseAndReuse step");
+               return;
+            end if;
+            Sockets.Close_Socket (Self.Reuse_Old);
+            Sockets.Close_Socket (Self.Reuse_Peer);
+            Sockets.Create_Socket_Pair (Self.Reused, Self.Reused_Peer);
+            if Sockets.Native_Descriptor (Self.Reused) /= Self.Reuse_Descriptor then
+               Fail ("closed descriptor number was not reused");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Descriptor_Reused;
+            Self.Current.Descriptor_Generation := 2;
+            Self.Current.Reuse_Kernel_Generation := 0;
+            Self.Current.Last_Action := Model.State_Last_Action_Close_And_Reuse;
+
+         when Model.Input_Command_Begin_Reused_Wait   =>
+            if Index /= 3 or else Action /= "PollerRegistrationOwnership!BeginReusedWait" then
+               Fail ("unexpected BeginReusedWait step");
+               return;
+            end if;
+            Self.Reuse_Task := new Reuse_Waiter (Sockets.Native_Descriptor (Self.Reused));
+            Await (Reused_Watch_Registered'Access, "reused descriptor wait did not rearm the poller");
+            Self.Current.Phase := Model.State_Phase_Reused_Descriptor_Waiting;
+            Self.Current.Reuse_Kernel_Generation := 2;
+            Self.Current.Reused_Wait_Waiting := True;
+            Self.Current.Reuse_Arm_Attempted := True;
+            Self.Current.Reuse_Arm_Suppressed := False;
+            Self.Current.Last_Action := Model.State_Last_Action_Begin_Reused_Wait;
+
+         when Model.Input_Command_Deliver_Reused_Wait =>
+            if Index /= 4 or else Action /= "PollerRegistrationOwnership!DeliverReusedWait" then
+               Fail ("unexpected DeliverReusedWait step");
+               return;
+            end if;
+            Sockets.Send_Socket (Self.Reused_Peer, Payload, Last);
+            if Last /= Payload'Last then
+               Fail ("reused descriptor readiness signal was short");
+               return;
+            end if;
+            Await (Reuse_Returned'Access, "reused descriptor wait did not return");
+            if not Observation.Reuse_Was_Ready then
+               Fail ("reused descriptor wait missed readiness");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Done;
+            Self.Current.Reused_Wait_Waiting := False;
+            Self.Current.Reused_Descriptor_Ready := True;
+            Self.Current.Reused_Wait_Delivered := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Reused_Wait;
       end case;
 
       Set_Outcome;
       State := Self.Current;
       Status := (Succeeded => True, Detail => Null_Unbounded_String);
-      if Index = 7 then
+      if Input.Command in Model.Input_Command_Deliver_Replacement | Model.Input_Command_Deliver_Reused_Wait
+      then
          Cleanup (Self);
       end if;
    exception
       when Error : others =>
          Cleanup (Self);
          Observed :=
-           (Pending               => 0,
-            Queued                => False,
-            Foreign_Mutation      => True,
-            Target_Runnable       => False,
-            Target_Released       => False,
-            Kernel_Armed          => False,
-            Replacement_Waiting   => False,
-            Replacement_Delivered => False,
-            Arm_Suppressed        => True);
+           (Pending                 => 0,
+            Queued                  => False,
+            Foreign_Mutation        => True,
+            Target_Runnable         => False,
+            Target_Released         => False,
+            Kernel_Armed            => False,
+            Replacement_Waiting     => False,
+            Replacement_Delivered   => False,
+            Arm_Suppressed          => True,
+            Descriptor_Generation   => 0,
+            Stale_Link_Registered   => False,
+            Reuse_Kernel_Generation => 0,
+            Reused_Wait_Waiting     => False,
+            Reused_Descriptor_Ready => False,
+            Reused_Wait_Delivered   => False,
+            Reuse_Arm_Suppressed    => True);
          State := Self.Current;
          Status :=
            (Succeeded => False, Detail => To_Unbounded_String (Ada.Exceptions.Exception_Information (Error)));
