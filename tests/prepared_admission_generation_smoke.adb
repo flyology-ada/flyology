@@ -180,6 +180,14 @@ begin
             raise Program_Error
               with "ordinary Start did not skip a retired prepared slot";
          end if;
+         loop
+            exit when Families.Current (Item, Ordinary).State = Joined;
+            if Ada.Real_Time.Clock >= Deadline then
+               raise Program_Error
+                 with "ordinary Start did not become reservable";
+            end if;
+            delay 0.001;
+         end loop;
       end;
 
       Flyology.Task_Lifecycle_Testing.Force_Next_Prepared_Generation_Final;
