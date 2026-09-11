@@ -300,6 +300,15 @@ package body System.Flyology.Poller is
            (if Created then EPOLL_CTL_ADD else EPOLL_CTL_MOD),
            Descriptor,
            Mask_For (Watch_Item));
+      if Result /= 0
+        and then not Created
+        and then Integer (OSI.errno) = Poller_Policy.Interest_Absent_Error
+      then
+         --  Closing a watched descriptor removes its epoll registration but
+         --  leaves this process-side record until the old waiter departs. A
+         --  reused descriptor therefore needs ADD after MOD reports ENOENT.
+         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_ADD, Descriptor, Mask_For (Watch_Item));
+      end if;
       if Result /= 0 then
          Watch_Item.Readable := Was_Readable;
          Watch_Item.Writable := Was_Writable;
