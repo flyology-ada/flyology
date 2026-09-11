@@ -106,6 +106,11 @@ package System.Flyology.Faults is
    procedure Release_Final_Reaper;
    pragma Inline_Always (Release_Final_Reaper);
 
+   --  Test-only references must remain inside a literal Enabled guard. The
+   --  unresolved sentinel makes any production reference observable.
+   procedure Note_Scheduler_Finalize;
+   pragma Import (C, Note_Scheduler_Finalize, "flyology_disabled_hook_must_be_elided_scheduler_finalize");
+
    function Pause_Create_Registration return Boolean;
    pragma Inline_Always (Pause_Create_Registration);
 
