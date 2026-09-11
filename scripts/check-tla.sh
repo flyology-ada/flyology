@@ -252,6 +252,10 @@ expect_counterexample \
 expect_counterexample \
   PollerRegistrationOwnership PollerRegistrationOwnership_reap_broken.cfg \
   CancellationQueueReferencesLiveFiber poller-registration-reap-broken
+expect_counterexample \
+  PollerRegistrationOwnership \
+  PollerRegistrationOwnership_replacement_broken.cfg \
+  ReplacementWaitHasKernelInterest poller-registration-replacement-broken
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
   DriverFailureCompletes completion-finalize-blocking-close
@@ -407,12 +411,12 @@ then
   cat "$poller_proof_log" >&2
   exit 1
 fi
-if ! grep -Fq 'All 2 obligations proved' "$poller_proof_log"; then
-  cat "$poller_proof_log" >&2
-  printf '%s\n' 'poller-registration proof did not discharge both obligations' >&2
-  exit 1
+if ! grep -Fq 'All 8 obligations proved' "$poller_proof_log"; then
+   cat "$poller_proof_log" >&2
+   printf '%s\n' 'poller-registration proof did not discharge all eight obligations' >&2
+   exit 1
 fi
-printf '%s\n' 'TLAPS proved       PollerRegistrationOwnershipProof 2 obligations'
+printf '%s\n' 'TLAPS proved       PollerRegistrationOwnershipProof 8 obligations'
 
 finalize_raw="$run_root/completion-set-finalize-raw.json"
 finalize_log="$run_root/completion-set-finalize-witness.log"
@@ -656,13 +660,16 @@ poller_status=$?
 set -e
 if [ "$poller_status" -ne 12 ] \
   || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$poller_log" \
-  || ! grep -Fq '6 states generated, 5 distinct states found' "$poller_log"
+  || ! grep -Fq '9 states generated, 8 distinct states found' "$poller_log"
 then
   cat "$poller_log" >&2
   printf '%s\n' 'poller-registration witness did not reach its exact terminal state' >&2
   exit 1
 fi
-for action in BeginWaitBatch ForeignWake DrainBudget DeliverTarget; do
+for action in \
+  BeginWaitBatch ForeignWake DrainBudget DeliverTarget StartReplacement \
+  DrainReplacement DeliverReplacement
+do
   if ! grep -Eq "^<$action .*: [1-9]" "$poller_log"; then
     cat "$poller_log" >&2
     printf '%s\n' "poller-registration witness did not cover $action" >&2
@@ -987,9 +994,9 @@ if [ "$(uname -s)" = Linux ]; then
     "$run_root/poller-registration-stdout.json"
   grep -Fq '"verdict":"conformant"' \
     "$run_root/poller-registration-result.json"
-  grep -Fq '"compared_steps":4' \
+  grep -Fq '"compared_steps":7' \
     "$run_root/poller-registration-result.json"
-  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   4 transitions'
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   7 transitions'
 else
   printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   Linux-only replay deferred'
 fi
