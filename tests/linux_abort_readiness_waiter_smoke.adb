@@ -19,6 +19,8 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
 
       type Socket_Array is array (Positive range <>) of Sockets.Socket_Type;
 
+      type Runner_Request_Kind is (Blocker_Run, Replacement_Run, Stop_Run);
+
       Victims      : Socket_Array (1 .. Backlog_Count);
       Victim_Peers : Socket_Array (1 .. Backlog_Count);
       Target       : Sockets.Socket_Type;
@@ -31,18 +33,29 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          procedure Note_Second_Return;
          procedure Start_Blocker;
          procedure Note_Blocker_Entered;
+         procedure Start_Replacement;
+         procedure Note_Replacement_Ready;
+         procedure Proceed_Replacement;
+         procedure Note_Replacement_Return;
          procedure Stop_Runner;
+         entry Await_Runner_Request (Request : out Runner_Request_Kind);
          function First_Returned return Boolean;
          function Second_Returned return Boolean;
-         function Blocker_Requested return Boolean;
          function Blocker_Entered return Boolean;
+         function Replacement_Ready return Boolean;
+         function Replacement_May_Proceed return Boolean;
+         function Replacement_Returned return Boolean;
          function Runner_Stopped return Boolean;
       private
-         First_Done       : Boolean := False;
-         Second_Done      : Boolean := False;
-         Blocker_Request  : Boolean := False;
-         Blocker_Is_Ready : Boolean := False;
-         Stop             : Boolean := False;
+         First_Done           : Boolean := False;
+         Second_Done          : Boolean := False;
+         Blocker_Request      : Boolean := False;
+         Blocker_Is_Ready     : Boolean := False;
+         Replacement_Request  : Boolean := False;
+         Replacement_Is_Ready : Boolean := False;
+         Replacement_Proceed  : Boolean := False;
+         Replacement_Done     : Boolean := False;
+         Stop                 : Boolean := False;
       end Observation;
 
       protected body Observation is
@@ -66,10 +79,43 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
             Blocker_Is_Ready := True;
          end Note_Blocker_Entered;
 
+         procedure Start_Replacement is
+         begin
+            Replacement_Request := True;
+         end Start_Replacement;
+
+         procedure Note_Replacement_Ready is
+         begin
+            Replacement_Is_Ready := True;
+         end Note_Replacement_Ready;
+
+         procedure Proceed_Replacement is
+         begin
+            Replacement_Proceed := True;
+         end Proceed_Replacement;
+
+         procedure Note_Replacement_Return is
+         begin
+            Replacement_Done := True;
+         end Note_Replacement_Return;
+
          procedure Stop_Runner is
          begin
             Stop := True;
          end Stop_Runner;
+
+         entry Await_Runner_Request (Request : out Runner_Request_Kind)
+           when Blocker_Request or Replacement_Request or Stop
+         is
+         begin
+            if Stop then
+               Request := Stop_Run;
+            elsif Replacement_Request then
+               Request := Replacement_Run;
+            else
+               Request := Blocker_Run;
+            end if;
+         end Await_Runner_Request;
 
          function First_Returned return Boolean
          is (First_Done);
@@ -77,11 +123,17 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          function Second_Returned return Boolean
          is (Second_Done);
 
-         function Blocker_Requested return Boolean
-         is (Blocker_Request);
-
          function Blocker_Entered return Boolean
          is (Blocker_Is_Ready);
+
+         function Replacement_Ready return Boolean
+         is (Replacement_Is_Ready);
+
+         function Replacement_May_Proceed return Boolean
+         is (Replacement_Proceed);
+
+         function Replacement_Returned return Boolean
+         is (Replacement_Done);
 
          function Runner_Stopped return Boolean
          is (Stop);
@@ -136,24 +188,45 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       type Target_Waiter_Access is access Target_Waiter;
       Target_Task : Target_Waiter_Access := null;
 
-      task Runner is
+      task type Runner (Replacement_Descriptor : Flyology.IO.Descriptor) is
          pragma Task_Info (Flyology.Lightweight_Task);
-         pragma Priority (1);
+         pragma Priority (30);
       end Runner;
 
       task body Runner is
+         Request : Runner_Request_Kind;
       begin
-         while not Observation.Runner_Stopped loop
-            if Observation.Blocker_Requested then
+         Observation.Await_Runner_Request (Request);
+         case Request is
+            when Replacement_Run =>
+               Observation.Note_Replacement_Ready;
+               while not Observation.Replacement_May_Proceed
+                 and then not Observation.Runner_Stopped
+               loop
+                  null;
+               end loop;
+               if not Observation.Runner_Stopped
+                 and then Flyology.IO.Wait
+                            (Replacement_Descriptor,
+                             Flyology.IO.For_Read,
+                             Flyology.IO.Infinite)
+               then
+                  Observation.Note_Replacement_Return;
+               end if;
+
+            when Blocker_Run     =>
                Observation.Note_Blocker_Entered;
                while not Observation.Runner_Stopped loop
                   null;
                end loop;
-            else
-               delay 0.0;
-            end if;
-         end loop;
+
+            when Stop_Run        =>
+               null;
+         end case;
       end Runner;
+
+      type Runner_Access is access Runner;
+      Loop_Runner : Runner_Access := null;
 
       procedure Await
         (Condition : not null access function return Boolean; Failure : String)
@@ -185,6 +258,19 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       function Blocker_Entered return Boolean
       is (Observation.Blocker_Entered);
 
+      function Replacement_Ready return Boolean
+      is (Observation.Replacement_Ready);
+
+      function Replacement_Watch_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch)
+          >= Backlog_Count + 2);
+
+      function Replacement_Returned return Boolean
+      is (Observation.Replacement_Returned);
+
+      function Runner_Terminated return Boolean
+      is (Loop_Runner /= null and then Loop_Runner'Terminated);
+
       function Target_Terminated return Boolean
       is (Target_Task /= null and then Target_Task'Terminated);
 
@@ -204,6 +290,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          Fault_Control.Release_Descriptor_Cancel_Budget;
          Fault_Control.Release_Descriptor_Cancel_Timer;
          Observation.Stop_Runner;
+         if Loop_Runner /= null and then not Loop_Runner'Terminated then
+            abort Loop_Runner.all;
+         end if;
          if Target_Task /= null and then not Target_Task'Terminated then
             abort Target_Task.all;
          end if;
@@ -250,6 +339,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       else
          Fault_Control.Arm (Fault_Control.Descriptor_Cancel_Timer_Pause);
       end if;
+      Loop_Runner := new Runner (Sockets.Native_Descriptor (Target));
 
       for Index in Waiters'Range loop
          Waiters (Index) :=
@@ -341,7 +431,28 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          end if;
          Fault_Control.Release_Descriptor_Cancel_Timer;
       else
+         --  Runner is already ready in the same scheduler turn. Hold it on
+         --  its task stack until the native environment has observed that the
+         --  65th cancellation is still queued, then let it start a distinct
+         --  wait on the one-shot epoll has just consumed.
+         Observation.Start_Replacement;
          Fault_Control.Release_Descriptor_Cancel_Budget;
+         Await
+           (Replacement_Ready'Access,
+            "ready replacement task did not run before the next cancellation drain");
+         if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count
+         then
+            raise Program_Error
+              with
+                "65th cancellation drained before the replacement wait started";
+         end if;
+         Observation.Proceed_Replacement;
+         Await
+           (Replacement_Watch_Registered'Access,
+            "replacement wait did not rearm the consumed one-shot interest");
+         Await
+           (Replacement_Returned'Access,
+            "replacement waiter did not receive retained readiness");
       end if;
 
       Await
@@ -350,6 +461,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       Await
         (Backlog_Terminated'Access, "cancellation backlog did not terminate");
       Observation.Stop_Runner;
+      Await (Runner_Terminated'Access, "replacement runner did not terminate");
 
       if Fault_Control.Poller_Cancel_During_Translation_Count /= 0 then
          raise Program_Error
@@ -366,6 +478,10 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       elsif Observation.Second_Returned then
          raise Program_Error
            with "stale cancellation reached a replacement wait generation";
+      elsif Scenario = Readiness_Delivery
+        and then not Observation.Replacement_Returned
+      then
+         raise Program_Error with "replacement readiness was lost";
       end if;
       Cleanup;
    exception

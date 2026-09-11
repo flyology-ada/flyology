@@ -22,6 +22,8 @@ procedure Poller_Registration_Conformance is
 
    Backlog_Count : constant Positive := 64;
 
+   type Runner_Request_Kind is (Replacement_Run, Stop_Run);
+
    --  Strict duplicate validation retains names from every simultaneously open object.  The
    --  deepest checked-in step state needs root (23) + step (40) + expected (12) + state (207)
    --  = 282 decoded name bytes.
@@ -38,14 +40,26 @@ procedure Poller_Registration_Conformance is
       procedure Reset;
       procedure Note_First_Return;
       procedure Note_Second_Return;
+      procedure Start_Replacement;
+      procedure Note_Replacement_Ready;
+      procedure Proceed_Replacement;
+      procedure Note_Replacement_Return;
       procedure Stop_Runner;
+      entry Await_Runner_Request (Request : out Runner_Request_Kind);
       function First_Returned return Boolean;
       function Second_Returned return Boolean;
+      function Replacement_Ready return Boolean;
+      function Replacement_May_Proceed return Boolean;
+      function Replacement_Returned return Boolean;
       function Runner_Stopped return Boolean;
    private
-      First_Done  : Boolean := False;
-      Second_Done : Boolean := False;
-      Stop        : Boolean := False;
+      First_Done           : Boolean := False;
+      Second_Done          : Boolean := False;
+      Replacement_Request  : Boolean := False;
+      Replacement_Is_Ready : Boolean := False;
+      Replacement_Proceed  : Boolean := False;
+      Replacement_Done     : Boolean := False;
+      Stop                 : Boolean := False;
    end Observation;
 
    protected body Observation is
@@ -53,6 +67,10 @@ procedure Poller_Registration_Conformance is
       begin
          First_Done := False;
          Second_Done := False;
+         Replacement_Request := False;
+         Replacement_Is_Ready := False;
+         Replacement_Proceed := False;
+         Replacement_Done := False;
          Stop := False;
       end Reset;
 
@@ -66,16 +84,54 @@ procedure Poller_Registration_Conformance is
          Second_Done := True;
       end Note_Second_Return;
 
+      procedure Start_Replacement is
+      begin
+         Replacement_Request := True;
+      end Start_Replacement;
+
+      procedure Note_Replacement_Ready is
+      begin
+         Replacement_Is_Ready := True;
+      end Note_Replacement_Ready;
+
+      procedure Proceed_Replacement is
+      begin
+         Replacement_Proceed := True;
+      end Proceed_Replacement;
+
+      procedure Note_Replacement_Return is
+      begin
+         Replacement_Done := True;
+      end Note_Replacement_Return;
+
       procedure Stop_Runner is
       begin
          Stop := True;
       end Stop_Runner;
+
+      entry Await_Runner_Request (Request : out Runner_Request_Kind) when Replacement_Request or Stop is
+      begin
+         if Stop then
+            Request := Stop_Run;
+         else
+            Request := Replacement_Run;
+         end if;
+      end Await_Runner_Request;
 
       function First_Returned return Boolean
       is (First_Done);
 
       function Second_Returned return Boolean
       is (Second_Done);
+
+      function Replacement_Ready return Boolean
+      is (Replacement_Is_Ready);
+
+      function Replacement_May_Proceed return Boolean
+      is (Replacement_Proceed);
+
+      function Replacement_Returned return Boolean
+      is (Replacement_Done);
 
       function Runner_Stopped return Boolean
       is (Stop);
@@ -117,16 +173,30 @@ procedure Poller_Registration_Conformance is
 
    type Target_Waiter_Access is access Target_Waiter;
 
-   task type Runner is
+   task type Runner (Replacement_Descriptor : Flyology.IO.Descriptor) is
       pragma Task_Info (Flyology.Lightweight_Task);
-      pragma Priority (1);
+      pragma Priority (30);
    end Runner;
 
    task body Runner is
+      Request : Runner_Request_Kind;
    begin
-      while not Observation.Runner_Stopped loop
-         delay 0.0;
-      end loop;
+      Observation.Await_Runner_Request (Request);
+      case Request is
+         when Replacement_Run =>
+            Observation.Note_Replacement_Ready;
+            while not Observation.Replacement_May_Proceed and then not Observation.Runner_Stopped loop
+               null;
+            end loop;
+            if not Observation.Runner_Stopped
+              and then Flyology.IO.Wait (Replacement_Descriptor, Flyology.IO.For_Read, Flyology.IO.Infinite)
+            then
+               Observation.Note_Replacement_Return;
+            end if;
+
+         when Stop_Run        =>
+            null;
+      end case;
    end Runner;
 
    type Runner_Access is access Runner;
@@ -134,22 +204,28 @@ procedure Poller_Registration_Conformance is
    subtype Backlog_Sockets is Socket_Array (1 .. Backlog_Count);
 
    function Initial_State return Model.State_Type
-   is (Phase                => Model.State_Phase_Idle,
-       Group_Lock_Held      => True,
-       Loop_Writer          => False,
-       Foreign_Writer       => False,
-       Pending_Cancels      => 0,
-       Target_Cancel_Queued => False,
-       Target_Waiting       => False,
-       Target_Runnable      => False,
-       Target_Live          => True,
-       Wait_Generation      => 0,
-       Cancel_Generation    => 0,
-       Delivery_Source      => Model.State_Delivery_Source_None,
-       Progress_Wake        => False,
-       Stale_Cancellation   => False,
-       Target_Released      => False,
-       Last_Action          => Model.State_Last_Action_Init);
+   is (Phase                      => Model.State_Phase_Idle,
+       Group_Lock_Held            => True,
+       Loop_Writer                => False,
+       Foreign_Writer             => False,
+       Pending_Cancels            => 0,
+       Target_Cancel_Queued       => False,
+       Target_Waiting             => False,
+       Target_Runnable            => False,
+       Target_Live                => True,
+       Wait_Generation            => 0,
+       Cancel_Generation          => 0,
+       Delivery_Source            => Model.State_Delivery_Source_None,
+       Progress_Wake              => False,
+       Stale_Cancellation         => False,
+       Target_Released            => False,
+       Kernel_Interest_Armed      => False,
+       Replacement_Ready          => False,
+       Replacement_Waiting        => False,
+       Replacement_Delivered      => False,
+       Replacement_Arm_Attempted  => False,
+       Replacement_Arm_Suppressed => False,
+       Last_Action                => Model.State_Last_Action_Init);
 
    type Registration_Adapter is new Model.Adapter with record
       Current      : Model.State_Type := Initial_State;
@@ -199,6 +275,9 @@ procedure Poller_Registration_Conformance is
       Fault_Control.Release_Poller_Translation;
       Fault_Control.Release_Descriptor_Cancel_Budget;
       Observation.Stop_Runner;
+      if Self.Loop_Runner /= null and then not Self.Loop_Runner'Terminated then
+         abort Self.Loop_Runner.all;
+      end if;
       if Self.Target_Task /= null and then not Self.Target_Task'Terminated then
          abort Self.Target_Task.all;
       end if;
@@ -274,6 +353,21 @@ procedure Poller_Registration_Conformance is
       function Budget_Parked return Boolean
       is (Fault_Control.Descriptor_Cancel_Budget_Parked);
 
+      function Replacement_Ready return Boolean
+      is (Observation.Replacement_Ready);
+
+      function Replacement_Watch_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) >= Backlog_Count + 2);
+
+      function Replacement_Returned return Boolean
+      is (Observation.Replacement_Returned);
+
+      function Runner_Terminated return Boolean
+      is (Self.Loop_Runner /= null and then Self.Loop_Runner'Terminated);
+
+      function Remaining_Cancel_Processed return Boolean
+      is (Fault_Control.Descriptor_Cancel_Processed_Count = Backlog_Count + 1);
+
       function Target_Terminated return Boolean
       is (Self.Target_Task /= null and then Self.Target_Task'Terminated);
 
@@ -293,11 +387,15 @@ procedure Poller_Registration_Conformance is
       procedure Set_Outcome is
       begin
          Observed :=
-           (Pending          => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
-            Queued           => Self.Current.Target_Cancel_Queued,
-            Foreign_Mutation => Self.Current.Foreign_Writer,
-            Target_Runnable  => Self.Current.Target_Runnable,
-            Target_Released  => Self.Current.Target_Released);
+           (Pending               => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
+            Queued                => Self.Current.Target_Cancel_Queued,
+            Foreign_Mutation      => Self.Current.Foreign_Writer,
+            Target_Runnable       => Self.Current.Target_Runnable,
+            Target_Released       => Self.Current.Target_Released,
+            Kernel_Armed          => Self.Current.Kernel_Interest_Armed,
+            Replacement_Waiting   => Self.Current.Replacement_Waiting,
+            Replacement_Delivered => Self.Current.Replacement_Delivered,
+            Arm_Suppressed        => Self.Current.Replacement_Arm_Suppressed);
       end Set_Outcome;
 
       procedure Fail (Detail : String) is
@@ -316,7 +414,7 @@ procedure Poller_Registration_Conformance is
       end if;
 
       case Input.Command is
-         when Model.Input_Command_Begin_Wait_Batch =>
+         when Model.Input_Command_Begin_Wait_Batch    =>
             if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginWaitBatch" then
                Fail ("unexpected BeginWaitBatch step");
                return;
@@ -330,7 +428,7 @@ procedure Poller_Registration_Conformance is
             end loop;
             Sockets.Create_Socket_Pair (Self.Target, Self.Target_Peer);
             Sockets.Create_Socket_Pair (Self.Second, Self.Second_Peer);
-            Self.Loop_Runner := new Runner;
+            Self.Loop_Runner := new Runner (Sockets.Native_Descriptor (Self.Target));
             for Waiter_Index in Self.Waiters'Range loop
                Self.Waiters (Waiter_Index) :=
                  new Backlog_Waiter (Sockets.Native_Descriptor (Self.Victims (Waiter_Index)));
@@ -345,24 +443,30 @@ procedure Poller_Registration_Conformance is
             end if;
             Await (Translation_Parked'Access, "event loop did not reach poller translation");
             Self.Current :=
-              (Phase                => Model.State_Phase_Translating,
-               Group_Lock_Held      => False,
-               Loop_Writer          => True,
-               Foreign_Writer       => False,
-               Pending_Cancels      => 0,
-               Target_Cancel_Queued => False,
-               Target_Waiting       => True,
-               Target_Runnable      => False,
-               Target_Live          => True,
-               Wait_Generation      => 1,
-               Cancel_Generation    => 0,
-               Delivery_Source      => Model.State_Delivery_Source_Readiness,
-               Progress_Wake        => False,
-               Stale_Cancellation   => False,
-               Target_Released      => False,
-               Last_Action          => Model.State_Last_Action_Begin_Wait_Batch);
+              (Phase                      => Model.State_Phase_Translating,
+               Group_Lock_Held            => False,
+               Loop_Writer                => True,
+               Foreign_Writer             => False,
+               Pending_Cancels            => 0,
+               Target_Cancel_Queued       => False,
+               Target_Waiting             => True,
+               Target_Runnable            => False,
+               Target_Live                => True,
+               Wait_Generation            => 1,
+               Cancel_Generation          => 0,
+               Delivery_Source            => Model.State_Delivery_Source_Readiness,
+               Progress_Wake              => False,
+               Stale_Cancellation         => False,
+               Target_Released            => False,
+               Kernel_Interest_Armed      => True,
+               Replacement_Ready          => False,
+               Replacement_Waiting        => False,
+               Replacement_Delivered      => False,
+               Replacement_Arm_Attempted  => False,
+               Replacement_Arm_Suppressed => False,
+               Last_Action                => Model.State_Last_Action_Begin_Wait_Batch);
 
-         when Model.Input_Command_Foreign_Wake     =>
+         when Model.Input_Command_Foreign_Wake        =>
             if Index /= 2 or else Action /= "PollerRegistrationOwnership!ForeignWake" then
                Fail ("unexpected ForeignWake step");
                return;
@@ -380,7 +484,7 @@ procedure Poller_Registration_Conformance is
             Self.Current.Progress_Wake := True;
             Self.Current.Last_Action := Model.State_Last_Action_Foreign_Wake;
 
-         when Model.Input_Command_Drain_Budget     =>
+         when Model.Input_Command_Drain_Budget        =>
             if Index /= 3 or else Action /= "PollerRegistrationOwnership!DrainBudget" then
                Fail ("unexpected DrainBudget step");
                return;
@@ -395,25 +499,57 @@ procedure Poller_Registration_Conformance is
             Self.Current.Group_Lock_Held := True;
             Self.Current.Loop_Writer := False;
             Self.Current.Pending_Cancels := 1;
+            Self.Current.Kernel_Interest_Armed := False;
             Self.Current.Last_Action := Model.State_Last_Action_Drain_Budget;
 
-         when Model.Input_Command_Deliver_Target   =>
+         when Model.Input_Command_Deliver_Target      =>
             if Index /= 4 or else Action /= "PollerRegistrationOwnership!DeliverTarget" then
                Fail ("unexpected DeliverTarget step");
                return;
             end if;
+            Observation.Start_Replacement;
             Fault_Control.Release_Descriptor_Cancel_Budget;
+            Await (Replacement_Ready'Access, "ready replacement did not run after retained readiness");
+            if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
+               Fail ("remaining cancellation drained before replacement dispatch");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Selected_Retained;
+            Self.Current.Replacement_Ready := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Target;
+
+         when Model.Input_Command_Start_Replacement   =>
+            if Index /= 5 or else Action /= "PollerRegistrationOwnership!StartReplacement" then
+               Fail ("unexpected StartReplacement step");
+               return;
+            end if;
+            Observation.Proceed_Replacement;
+            Await
+              (Replacement_Watch_Registered'Access, "replacement wait did not rearm the consumed one-shot");
+            Self.Current.Phase := Model.State_Phase_Replacement_Waiting;
+            Self.Current.Kernel_Interest_Armed := True;
+            Self.Current.Replacement_Ready := False;
+            Self.Current.Replacement_Waiting := True;
+            Self.Current.Replacement_Arm_Attempted := True;
+            Self.Current.Replacement_Arm_Suppressed := False;
+            Self.Current.Last_Action := Model.State_Last_Action_Start_Replacement;
+
+         when Model.Input_Command_Drain_Remaining     =>
+            if Index /= 6 or else Action /= "PollerRegistrationOwnership!DrainRemaining" then
+               Fail ("unexpected DrainRemaining step");
+               return;
+            end if;
+            Await
+              (Remaining_Cancel_Processed'Access, "event loop did not consume the remaining cancellation");
             Await (All_Terminated'Access, "descriptor waiters did not terminate");
-            Observation.Stop_Runner;
-            Self.Current.Phase := Model.State_Phase_Done;
+            Self.Current.Phase := Model.State_Phase_Replacement_Drained;
             Self.Current.Pending_Cancels := 0;
             Self.Current.Target_Cancel_Queued := False;
             Self.Current.Target_Waiting := False;
             Self.Current.Target_Runnable := True;
             Self.Current.Progress_Wake := False;
-            Self.Current.Stale_Cancellation := Observation.Second_Returned;
             Self.Current.Target_Released := Target_Terminated;
-            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Target;
+            Self.Current.Last_Action := Model.State_Last_Action_Drain_Remaining;
             if Fault_Control.Poller_Cancel_During_Translation_Count /= 0
               or else Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count + 1
               or else Observation.First_Returned
@@ -422,23 +558,40 @@ procedure Poller_Registration_Conformance is
                Fail ("runtime violated cancellation ownership after the bounded drain");
                return;
             end if;
+
+         when Model.Input_Command_Deliver_Replacement =>
+            if Index /= 7 or else Action /= "PollerRegistrationOwnership!DeliverReplacement" then
+               Fail ("unexpected DeliverReplacement step");
+               return;
+            end if;
+            Await (Replacement_Returned'Access, "replacement waiter did not receive retained readiness");
+            Observation.Stop_Runner;
+            Await (Runner_Terminated'Access, "replacement runner did not terminate");
+            Self.Current.Phase := Model.State_Phase_Done;
+            Self.Current.Replacement_Waiting := False;
+            Self.Current.Replacement_Delivered := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Replacement;
       end case;
 
       Set_Outcome;
       State := Self.Current;
       Status := (Succeeded => True, Detail => Null_Unbounded_String);
-      if Index = 4 then
+      if Index = 7 then
          Cleanup (Self);
       end if;
    exception
       when Error : others =>
          Cleanup (Self);
          Observed :=
-           (Pending          => 0,
-            Queued           => False,
-            Foreign_Mutation => True,
-            Target_Runnable  => False,
-            Target_Released  => False);
+           (Pending               => 0,
+            Queued                => False,
+            Foreign_Mutation      => True,
+            Target_Runnable       => False,
+            Target_Released       => False,
+            Kernel_Armed          => False,
+            Replacement_Waiting   => False,
+            Replacement_Delivered => False,
+            Arm_Suppressed        => True);
          State := Self.Current;
          Status :=
            (Succeeded => False, Detail => To_Unbounded_String (Ada.Exceptions.Exception_Information (Error)));
