@@ -656,6 +656,7 @@ loop_thread_project_placement_smoke
 $fault_mains"
 if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
+lightweight_affinity_smoke
 linux_poller_cloexec_smoke
 linux_poller_fairness_smoke
 native_cpu_activation_failure_smoke"
