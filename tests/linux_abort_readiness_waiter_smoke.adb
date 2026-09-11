@@ -354,6 +354,11 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       end if;
 
       if Scenario = Readiness_Delivery then
+         --  Make the replacement runner ready while poller translation is
+         --  paused with the group lock released. It cannot dispatch until
+         --  translation resumes, and no protected wake is then needed while
+         --  the bounded cancellation drain holds the group lock.
+         Observation.Start_Replacement;
          Fault_Control.Release_Poller_Translation;
       else
          Observation.Stop_Runner;
@@ -386,11 +391,10 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          end if;
          Fault_Control.Release_Descriptor_Cancel_Timer;
       else
-         --  Runner is already ready in the same scheduler turn. Hold it on
-         --  its task stack until the native environment has observed that the
-         --  65th cancellation is still queued, then let it start a distinct
-         --  wait on the one-shot epoll has just consumed.
-         Observation.Start_Replacement;
+         --  The runner was made ready while poller translation was paused.
+         --  Let the scheduler leave its locked budget seam and dispatch it,
+         --  then hold it on its task stack until the native environment has
+         --  observed that the 65th cancellation is still queued.
          Fault_Control.Release_Descriptor_Cancel_Budget;
          Await
            (Replacement_Ready'Access,

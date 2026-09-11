@@ -489,6 +489,11 @@ procedure Poller_Registration_Conformance is
                Fail ("unexpected DrainBudget step");
                return;
             end if;
+            --  Ready the lightweight runner while poller translation is
+            --  paused with the group lock released. The later budget pause
+            --  holds that lock, so its release path must not perform a
+            --  protected wake that tries to acquire the same lock.
+            Observation.Start_Replacement;
             Fault_Control.Release_Poller_Translation;
             Await (Budget_Parked'Access, "event loop did not stop after cancellation budget");
             if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
@@ -507,7 +512,6 @@ procedure Poller_Registration_Conformance is
                Fail ("unexpected DeliverTarget step");
                return;
             end if;
-            Observation.Start_Replacement;
             Fault_Control.Release_Descriptor_Cancel_Budget;
             Await (Replacement_Ready'Access, "ready replacement did not run after retained readiness");
             if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
