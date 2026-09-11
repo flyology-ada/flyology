@@ -43,7 +43,7 @@ vars ==
 
 TypeOK ==
     /\ phase \in {"Idle", "Translating", "BudgetDrained",
-                  "SelectedRetained", "ReplacementWaiting",
+                  "SelectedRetained", "TimerRetained", "ReplacementWaiting",
                   "ReplacementDrained", "Delivered", "Reused", "Reaped",
                   "Done"}
     /\ groupLockHeld \in BOOLEAN
@@ -192,43 +192,30 @@ DeliverTarget ==
          IF DeliveryMode = "CancellationOwned"
            THEN IF SelectedSource = "Readiness" /\ AfterDelivery = "Reregister"
                   THEN "SelectedRetained"
-                  ELSE "Done"
+                  ELSE IF SelectedSource = "Timer"
+                         THEN "TimerRetained"
+                         ELSE "Done"
            ELSE "Delivered"
     /\ groupLockHeld' = TRUE
     /\ loopWriter' = FALSE
     /\ foreignWriter' = FALSE
-    /\ pendingCancels' =
-         IF DeliveryMode = "CancellationOwned"
-              /\ SelectedSource /= "Readiness"
-           THEN 0
-           ELSE pendingCancels
-    /\ targetCancelQueued' =
-         IF DeliveryMode = "CancellationOwned"
-              /\ SelectedSource /= "Readiness"
-           THEN FALSE
-           ELSE targetCancelQueued
+    /\ pendingCancels' = pendingCancels
+    /\ targetCancelQueued' = targetCancelQueued
     /\ targetWaiting' =
          IF DeliveryMode = "CancellationOwned"
-              /\ SelectedSource = "Readiness"
            THEN TRUE
            ELSE FALSE
     /\ targetRunnable' =
          IF DeliveryMode = "CancellationOwned"
-              /\ SelectedSource = "Readiness"
            THEN FALSE
            ELSE TRUE
     /\ targetLive' = targetLive
     /\ waitGeneration' = waitGeneration
     /\ cancelGeneration' = cancelGeneration
     /\ deliverySource' = deliverySource
-    /\ progressWake' =
-         IF DeliveryMode = "CancellationOwned"
-              /\ SelectedSource /= "Readiness"
-           THEN FALSE
-           ELSE progressWake
+    /\ progressWake' = progressWake
     /\ staleCancellation' = FALSE
-    /\ targetReleased' =
-         (DeliveryMode = "CancellationOwned" /\ SelectedSource /= "Readiness")
+    /\ targetReleased' = FALSE
     /\ kernelInterestArmed' = kernelInterestArmed
     /\ replacementReady' =
          IF DeliveryMode = "CancellationOwned"
@@ -333,7 +320,30 @@ DrainReused ==
                    replacementWaiting, replacementDelivered,
                    replacementArmAttempted, replacementArmSuppressed>>
 
-DrainRemaining == DrainReplacement \/ DrainReused
+\* An expired timer stays owned by its queued cancellation until the next
+\* scheduler turn drains the entry and removes the original descriptor wait.
+DrainTimer ==
+    /\ phase = "TimerRetained"
+    /\ deliverySource = "Timer"
+    /\ targetCancelQueued
+    /\ pendingCancels = 1
+    /\ ~replacementWaiting
+    /\ phase' = "Done"
+    /\ pendingCancels' = 0
+    /\ targetCancelQueued' = FALSE
+    /\ targetWaiting' = FALSE
+    /\ targetRunnable' = TRUE
+    /\ progressWake' = FALSE
+    /\ targetReleased' = TRUE
+    /\ kernelInterestArmed' = FALSE
+    /\ lastAction' = "DrainRemaining"
+    /\ UNCHANGED <<groupLockHeld, loopWriter, foreignWriter, targetLive,
+                   waitGeneration, cancelGeneration, deliverySource,
+                   staleCancellation, replacementReady, replacementWaiting,
+                   replacementDelivered, replacementArmAttempted,
+                   replacementArmSuppressed>>
+
+DrainRemaining == DrainReplacement \/ DrainReused \/ DrainTimer
 
 DeliverReplacement ==
     /\ phase = "ReplacementDrained"
