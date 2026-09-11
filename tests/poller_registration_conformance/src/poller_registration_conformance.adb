@@ -9,11 +9,13 @@ with Flyology.IO.Sockets;
 with Flyology_TLA.Command_Line;
 with Flyology_TLA.Replay;
 with Flyology_TLA.Traces;
+with Interfaces.C;
 with Poller_Registration_Ownership_Model;
 
 procedure Poller_Registration_Conformance is
    package Model renames Poller_Registration_Ownership_Model;
    package Sockets renames Flyology.IO.Sockets;
+   package C renames Interfaces.C;
 
    use Ada.Strings.Unbounded;
    use type Ada.Real_Time.Time;
@@ -23,7 +25,79 @@ procedure Poller_Registration_Conformance is
 
    Backlog_Count : constant Positive := 64;
 
+   Sparse_First  : constant C.int := 32_768;
+   Sparse_Second : constant C.int := Sparse_First + 8;
+
+   function Dup2 (Old_FD, New_FD : C.int) return C.int;
+   pragma Import (C, Dup2, "dup2");
+
+   function Close (Descriptor : C.int) return C.int;
+   pragma Import (C, Close, "close");
+
+   function Expect_Poller_Finalize_Releases (Minimum : C.unsigned) return C.int;
+   pragma Import (C, Expect_Poller_Finalize_Releases, "flyology_test_expect_poller_finalize_releases");
+
    type Runner_Request_Kind is (Replacement_Run, Stop_Run);
+
+   type Probe_Id is (Invalid_High, Sparse_First_Id, Sparse_Second_Id, Cancellation_Id);
+   type Probe_Flags is array (Probe_Id) of Boolean;
+
+   protected Probe_Observation is
+      procedure Reset;
+      procedure Note (Id : Probe_Id; Ready, Failed : Boolean);
+      function Done (Id : Probe_Id) return Boolean;
+      function Was_Ready (Id : Probe_Id) return Boolean;
+      function Failed (Id : Probe_Id) return Boolean;
+   private
+      Completed : Probe_Flags := [others => False];
+      Readied   : Probe_Flags := [others => False];
+      Errors    : Probe_Flags := [others => False];
+   end Probe_Observation;
+
+   protected body Probe_Observation is
+      procedure Reset is
+      begin
+         Completed := [others => False];
+         Readied := [others => False];
+         Errors := [others => False];
+      end Reset;
+
+      procedure Note (Id : Probe_Id; Ready, Failed : Boolean) is
+      begin
+         Completed (Id) := True;
+         Readied (Id) := Ready;
+         Errors (Id) := Failed;
+      end Note;
+
+      function Done (Id : Probe_Id) return Boolean
+      is (Completed (Id));
+
+      function Was_Ready (Id : Probe_Id) return Boolean
+      is (Readied (Id));
+
+      function Failed (Id : Probe_Id) return Boolean
+      is (Errors (Id));
+   end Probe_Observation;
+
+   task type Probe_Waiter
+     (Descriptor : Flyology.IO.Descriptor;
+      Id         : Probe_Id)
+   is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      pragma Priority (25);
+   end Probe_Waiter;
+
+   task body Probe_Waiter is
+      Ready : Boolean;
+   begin
+      Ready := Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Timeout => 3.0);
+      Probe_Observation.Note (Id, Ready, Failed => False);
+   exception
+      when Flyology.IO.Device_Error =>
+         Probe_Observation.Note (Id, Ready => False, Failed => True);
+   end Probe_Waiter;
+
+   type Probe_Waiter_Access is access Probe_Waiter;
 
    --  Strict duplicate validation retains decoded name bytes from every simultaneously open
    --  object. The deepest step needs root (23) + step (40) + expected (12) + state (479) = 554
@@ -46,6 +120,10 @@ procedure Poller_Registration_Conformance is
       procedure Proceed_Replacement;
       procedure Note_Replacement_Return;
       procedure Note_Reuse_Return (Ready : Boolean);
+      procedure Note_Retained_First_Return;
+      procedure Note_Retained_Second_Return;
+      procedure Release_Retained_Rearm;
+      entry Await_Retained_Rearm;
       procedure Stop_Runner;
       entry Await_Runner_Request (Request : out Runner_Request_Kind);
       function First_Returned return Boolean;
@@ -55,6 +133,8 @@ procedure Poller_Registration_Conformance is
       function Replacement_Returned return Boolean;
       function Reuse_Returned return Boolean;
       function Reuse_Was_Ready return Boolean;
+      function Retained_First_Returned return Boolean;
+      function Retained_Second_Returned return Boolean;
       function Runner_Stopped return Boolean;
    private
       First_Done           : Boolean := False;
@@ -65,6 +145,9 @@ procedure Poller_Registration_Conformance is
       Replacement_Done     : Boolean := False;
       Reuse_Done           : Boolean := False;
       Reuse_Ready          : Boolean := False;
+      Retained_First_Done  : Boolean := False;
+      Retained_Second_Done : Boolean := False;
+      Retained_Rearm       : Boolean := False;
       Stop                 : Boolean := False;
    end Observation;
 
@@ -79,6 +162,9 @@ procedure Poller_Registration_Conformance is
          Replacement_Done := False;
          Reuse_Done := False;
          Reuse_Ready := False;
+         Retained_First_Done := False;
+         Retained_Second_Done := False;
+         Retained_Rearm := False;
          Stop := False;
       end Reset;
 
@@ -118,6 +204,26 @@ procedure Poller_Registration_Conformance is
          Reuse_Ready := Ready;
       end Note_Reuse_Return;
 
+      procedure Note_Retained_First_Return is
+      begin
+         Retained_First_Done := True;
+      end Note_Retained_First_Return;
+
+      procedure Note_Retained_Second_Return is
+      begin
+         Retained_Second_Done := True;
+      end Note_Retained_Second_Return;
+
+      procedure Release_Retained_Rearm is
+      begin
+         Retained_Rearm := True;
+      end Release_Retained_Rearm;
+
+      entry Await_Retained_Rearm when Retained_Rearm is
+      begin
+         null;
+      end Await_Retained_Rearm;
+
       procedure Stop_Runner is
       begin
          Stop := True;
@@ -152,6 +258,12 @@ procedure Poller_Registration_Conformance is
 
       function Reuse_Was_Ready return Boolean
       is (Reuse_Ready);
+
+      function Retained_First_Returned return Boolean
+      is (Retained_First_Done);
+
+      function Retained_Second_Returned return Boolean
+      is (Retained_Second_Done);
 
       function Runner_Stopped return Boolean
       is (Stop);
@@ -206,6 +318,24 @@ procedure Poller_Registration_Conformance is
    end Reuse_Waiter;
 
    type Reuse_Waiter_Access is access Reuse_Waiter;
+
+   task type Retained_Waiter (Descriptor : Flyology.IO.Descriptor) is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      pragma Priority (25);
+   end Retained_Waiter;
+
+   task body Retained_Waiter is
+   begin
+      if Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Timeout => 3.0) then
+         Observation.Note_Retained_First_Return;
+         Observation.Await_Retained_Rearm;
+         if Flyology.IO.Wait (Descriptor, Flyology.IO.For_Read, Timeout => 3.0) then
+            Observation.Note_Retained_Second_Return;
+         end if;
+      end if;
+   end Retained_Waiter;
+
+   type Retained_Waiter_Access is access Retained_Waiter;
 
    task type Runner (Replacement_Descriptor : Flyology.IO.Descriptor) is
       pragma Task_Info (Flyology.Lightweight_Task);
@@ -267,6 +397,14 @@ procedure Poller_Registration_Conformance is
        Reused_Wait_Delivered      => False,
        Reuse_Arm_Attempted        => False,
        Reuse_Arm_Suppressed       => False,
+       Retained_Wait_Waiting      => False,
+       Retained_Descriptor_Ready  => False,
+       Retained_Wait_Delivered    => False,
+       Retained_Kernel_Generation => 0,
+       Target_Slot_State          => Model.State_Target_Slot_State_Absent,
+       Target_Slot_Owner          => 0,
+       Other_Slot_State           => Model.State_Other_Slot_State_Absent,
+       Other_Slot_Owner           => 0,
        Last_Action                => Model.State_Last_Action_Init);
 
    type Registration_Adapter is new Model.Adapter with record
@@ -281,11 +419,14 @@ procedure Poller_Registration_Conformance is
       Reuse_Peer       : Sockets.Socket_Type;
       Reused           : Sockets.Socket_Type;
       Reused_Peer      : Sockets.Socket_Type;
+      Retained         : Sockets.Socket_Type;
+      Retained_Peer    : Sockets.Socket_Type;
       Reuse_Descriptor : Flyology.IO.Descriptor := -1;
       Waiters          : Backlog_Waiters := [others => null];
       Target_Task      : Target_Waiter_Access := null;
       Reuse_Old_Task   : Backlog_Waiter_Access := null;
       Reuse_Task       : Reuse_Waiter_Access := null;
+      Retained_Task    : Retained_Waiter_Access := null;
       Loop_Runner      : Runner_Access := null;
    end record;
 
@@ -318,6 +459,136 @@ procedure Poller_Registration_Conformance is
       end loop;
    end Await;
 
+   procedure Check_Index_Regressions is
+      First              : Sockets.Socket_Type;
+      First_Peer         : Sockets.Socket_Type;
+      Second             : Sockets.Socket_Type;
+      Second_Peer        : Sockets.Socket_Type;
+      Cancellation       : Sockets.Socket_Type;
+      Cancellation_Peer  : Sockets.Socket_Type;
+      Invalid_Task       : Probe_Waiter_Access := null;
+      First_Task         : Probe_Waiter_Access := null;
+      Second_Task        : Probe_Waiter_Access := null;
+      Cancellation_Task  : Probe_Waiter_Access := null;
+      Payload            : constant Ada.Streams.Stream_Element_Array := [1 => 41];
+      Last               : Ada.Streams.Stream_Element_Offset;
+      Result             : C.int;
+      Sparse_First_Open  : Boolean := False;
+      Sparse_Second_Open : Boolean := False;
+      pragma Unreferenced (Result);
+
+      function Invalid_Done return Boolean
+      is (Probe_Observation.Done (Invalid_High));
+
+      function Sparse_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) = 2
+          and then Fault_Control.Calls (Fault_Control.Poller_Control_Add) = 2);
+
+      function Sparse_First_Done return Boolean
+      is (Probe_Observation.Done (Sparse_First_Id));
+
+      function Sparse_Second_Done return Boolean
+      is (Probe_Observation.Done (Sparse_Second_Id));
+
+      function Cancellation_Registered return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Watch) = 1);
+
+      function Cancellation_Terminated return Boolean
+      is (Cancellation_Task /= null and then Cancellation_Task'Terminated);
+   begin
+      Probe_Observation.Reset;
+      Fault_Control.Reset;
+      Invalid_Task := new Probe_Waiter (Flyology.IO.Descriptor (C.int'Last), Invalid_High);
+      Await (Invalid_Done'Access, "invalid high descriptor wait did not finish");
+      if not Probe_Observation.Failed (Invalid_High)
+        or else Fault_Control.Calls (Fault_Control.Poller_Control_Add) /= 1
+        or else Fault_Control.Calls (Fault_Control.Poller_Record_Allocation) /= 1
+        or else Fault_Control.Calls (Fault_Control.Poller_Record_Release) /= 1
+      then
+         raise Program_Error with "invalid high descriptor did not fail through bounded poller registration";
+      end if;
+
+      Sockets.Create_Socket_Pair (First, First_Peer);
+      Sockets.Create_Socket_Pair (Second, Second_Peer);
+      if Dup2 (C.int (Sockets.Native_Descriptor (First)), Sparse_First) /= Sparse_First then
+         raise Program_Error with "cannot create sparse descriptor regression inputs";
+      end if;
+      Sparse_First_Open := True;
+      if Dup2 (C.int (Sockets.Native_Descriptor (Second)), Sparse_Second) /= Sparse_Second then
+         raise Program_Error with "cannot create sparse descriptor regression inputs";
+      end if;
+      Sparse_Second_Open := True;
+
+      Probe_Observation.Reset;
+      Fault_Control.Reset;
+      First_Task := new Probe_Waiter (Flyology.IO.Descriptor (Sparse_First), Sparse_First_Id);
+      Second_Task := new Probe_Waiter (Flyology.IO.Descriptor (Sparse_Second), Sparse_Second_Id);
+      Await (Sparse_Registered'Access, "sparse descriptor waits did not reach the poller");
+      if Fault_Control.Calls (Fault_Control.Poller_Lookup) /= 3
+        or else Fault_Control.Calls (Fault_Control.Poller_Record_Allocation) /= 2
+        or else Fault_Control.Calls (Fault_Control.Poller_Control_Add) /= 2
+      then
+         raise Program_Error with "sparse descriptor registrations did not use their exact probe chains";
+      end if;
+
+      Sockets.Send_Socket (Second_Peer, Payload, Last);
+      Await (Sparse_Second_Done'Access, "second sparse descriptor wait did not return");
+      if Last /= Payload'Last
+        or else Probe_Observation.Done (Sparse_First_Id)
+        or else not Probe_Observation.Was_Ready (Sparse_Second_Id)
+        or else Fault_Control.Calls (Fault_Control.Poller_Lookup) /= 5
+      then
+         raise Program_Error with "second sparse descriptor resolved through the wrong probe chain";
+      end if;
+
+      Sockets.Send_Socket (First_Peer, Payload, Last);
+      Await (Sparse_First_Done'Access, "first sparse descriptor wait did not return");
+      if Last /= Payload'Last
+        or else not Probe_Observation.Was_Ready (Sparse_First_Id)
+        or else Fault_Control.Calls (Fault_Control.Poller_Lookup) /= 6
+      then
+         raise Program_Error with "first sparse descriptor resolved through the wrong probe chain";
+      end if;
+      Result := Close (Sparse_First);
+      Sparse_First_Open := False;
+      Result := Close (Sparse_Second);
+      Sparse_Second_Open := False;
+
+      Sockets.Create_Socket_Pair (Cancellation, Cancellation_Peer);
+      Fault_Control.Reset;
+      Cancellation_Task := new Probe_Waiter (Sockets.Native_Descriptor (Cancellation), Cancellation_Id);
+      Await (Cancellation_Registered'Access, "cancellation descriptor did not reach the poller");
+      abort Cancellation_Task.all;
+      Await (Cancellation_Terminated'Access, "cancelled descriptor waiter did not terminate");
+      if Fault_Control.Calls (Fault_Control.Poller_Control_Delete) /= 1
+        or else Fault_Control.Calls (Fault_Control.Poller_Record_Release) /= 1
+      then
+         raise Program_Error with "final-direction cancellation did not delete and release its registration";
+      end if;
+      Fault_Control.Reset;
+   exception
+      when others =>
+         if Invalid_Task /= null and then not Invalid_Task'Terminated then
+            abort Invalid_Task.all;
+         end if;
+         if First_Task /= null and then not First_Task'Terminated then
+            abort First_Task.all;
+         end if;
+         if Second_Task /= null and then not Second_Task'Terminated then
+            abort Second_Task.all;
+         end if;
+         if Cancellation_Task /= null and then not Cancellation_Task'Terminated then
+            abort Cancellation_Task.all;
+         end if;
+         if Sparse_First_Open then
+            Result := Close (Sparse_First);
+         end if;
+         if Sparse_Second_Open then
+            Result := Close (Sparse_Second);
+         end if;
+         raise;
+   end Check_Index_Regressions;
+
    procedure Cleanup (Self : in out Registration_Adapter) is
       Limit : Ada.Real_Time.Time;
    begin
@@ -337,6 +608,10 @@ procedure Poller_Registration_Conformance is
       if Self.Reuse_Task /= null and then not Self.Reuse_Task'Terminated then
          abort Self.Reuse_Task.all;
       end if;
+      Observation.Release_Retained_Rearm;
+      if Self.Retained_Task /= null and then not Self.Retained_Task'Terminated then
+         abort Self.Retained_Task.all;
+      end if;
       for Item of Self.Waiters loop
          if Item /= null and then not Item'Terminated then
             abort Item.all;
@@ -348,6 +623,7 @@ procedure Poller_Registration_Conformance is
            (Self.Target_Task = null or else Self.Target_Task'Terminated)
            and then (Self.Reuse_Old_Task = null or else Self.Reuse_Old_Task'Terminated)
            and then (Self.Reuse_Task = null or else Self.Reuse_Task'Terminated)
+           and then (Self.Retained_Task = null or else Self.Retained_Task'Terminated)
            and then (Self.Loop_Runner = null or else Self.Loop_Runner'Terminated);
          exit when Ada.Real_Time.Clock >= Limit;
          delay 0.001;
@@ -384,6 +660,12 @@ procedure Poller_Registration_Conformance is
       if Sockets.Is_Open (Self.Reused_Peer) then
          Sockets.Close_Socket (Self.Reused_Peer);
       end if;
+      if Sockets.Is_Open (Self.Retained) then
+         Sockets.Close_Socket (Self.Retained);
+      end if;
+      if Sockets.Is_Open (Self.Retained_Peer) then
+         Sockets.Close_Socket (Self.Retained_Peer);
+      end if;
       Fault_Control.Reset;
    end Cleanup;
 
@@ -395,6 +677,7 @@ procedure Poller_Registration_Conformance is
       if Self.Target_Task /= null
         or else Self.Reuse_Old_Task /= null
         or else Self.Reuse_Task /= null
+        or else Self.Retained_Task /= null
         or else Self.Loop_Runner /= null
       then
          Cleanup (Self);
@@ -448,6 +731,29 @@ procedure Poller_Registration_Conformance is
       function Reuse_Returned return Boolean
       is (Observation.Reuse_Returned);
 
+      function Retained_First_Returned return Boolean
+      is (Observation.Retained_First_Returned);
+
+      function Retained_Second_Returned return Boolean
+      is (Observation.Retained_Second_Returned);
+
+      function Retained_Counters_Are
+        (Lookup, Allocation, Release, Add, Modify, Delete : Natural) return Boolean
+      is (Fault_Control.Calls (Fault_Control.Poller_Lookup) = Lookup
+          and then Fault_Control.Calls (Fault_Control.Poller_Record_Allocation) = Allocation
+          and then Fault_Control.Calls (Fault_Control.Poller_Record_Release) = Release
+          and then Fault_Control.Calls (Fault_Control.Poller_Control_Add) = Add
+          and then Fault_Control.Calls (Fault_Control.Poller_Control_Modify) = Modify
+          and then Fault_Control.Calls (Fault_Control.Poller_Control_Delete) = Delete);
+
+      function Initial_Retained_Registration_Complete return Boolean
+      is (Retained_Counters_Are
+            (Lookup => 1, Allocation => 1, Release => 0, Add => 1, Modify => 0, Delete => 0));
+
+      function Retained_Rearmed return Boolean
+      is (Retained_Counters_Are
+            (Lookup => 3, Allocation => 1, Release => 0, Add => 1, Modify => 1, Delete => 0));
+
       function Runner_Terminated return Boolean
       is (Self.Loop_Runner /= null and then Self.Loop_Runner'Terminated);
 
@@ -473,24 +779,43 @@ procedure Poller_Registration_Conformance is
       procedure Set_Outcome is
       begin
          Observed :=
-           (Pending                 => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
-            Queued                  => Self.Current.Target_Cancel_Queued,
-            Foreign_Mutation        => Self.Current.Foreign_Writer,
-            Target_Runnable         => Self.Current.Target_Runnable,
-            Target_Released         => Self.Current.Target_Released,
-            Kernel_Armed            => Self.Current.Kernel_Interest_Armed,
-            Replacement_Waiting     => Self.Current.Replacement_Waiting,
-            Replacement_Delivered   => Self.Current.Replacement_Delivered,
-            Arm_Suppressed          => Self.Current.Replacement_Arm_Suppressed,
-            Descriptor_Generation   =>
+           (Pending                    => Model.Outcome_Pending_Type (Self.Current.Pending_Cancels),
+            Queued                     => Self.Current.Target_Cancel_Queued,
+            Foreign_Mutation           => Self.Current.Foreign_Writer,
+            Target_Runnable            => Self.Current.Target_Runnable,
+            Target_Released            => Self.Current.Target_Released,
+            Kernel_Armed               => Self.Current.Kernel_Interest_Armed,
+            Replacement_Waiting        => Self.Current.Replacement_Waiting,
+            Replacement_Delivered      => Self.Current.Replacement_Delivered,
+            Arm_Suppressed             => Self.Current.Replacement_Arm_Suppressed,
+            Descriptor_Generation      =>
               Model.Outcome_Descriptor_Generation_Type (Self.Current.Descriptor_Generation),
-            Stale_Link_Registered   => Self.Current.Stale_Link_Registered,
-            Reuse_Kernel_Generation =>
+            Stale_Link_Registered      => Self.Current.Stale_Link_Registered,
+            Reuse_Kernel_Generation    =>
               Model.Outcome_Reuse_Kernel_Generation_Type (Self.Current.Reuse_Kernel_Generation),
-            Reused_Wait_Waiting     => Self.Current.Reused_Wait_Waiting,
-            Reused_Descriptor_Ready => Self.Current.Reused_Descriptor_Ready,
-            Reused_Wait_Delivered   => Self.Current.Reused_Wait_Delivered,
-            Reuse_Arm_Suppressed    => Self.Current.Reuse_Arm_Suppressed);
+            Reused_Wait_Waiting        => Self.Current.Reused_Wait_Waiting,
+            Reused_Descriptor_Ready    => Self.Current.Reused_Descriptor_Ready,
+            Reused_Wait_Delivered      => Self.Current.Reused_Wait_Delivered,
+            Reuse_Arm_Suppressed       => Self.Current.Reuse_Arm_Suppressed,
+            Retained_Wait_Waiting      => Self.Current.Retained_Wait_Waiting,
+            Retained_Descriptor_Ready  => Self.Current.Retained_Descriptor_Ready,
+            Retained_Wait_Delivered    => Self.Current.Retained_Wait_Delivered,
+            Retained_Kernel_Generation =>
+              Model.Outcome_Retained_Kernel_Generation_Type (Self.Current.Retained_Kernel_Generation),
+            Target_Slot_State          =>
+              (case Self.Current.Target_Slot_State is
+                 when Model.State_Target_Slot_State_Absent   => Model.Outcome_Target_Slot_State_Absent,
+                 when Model.State_Target_Slot_State_Armed    => Model.Outcome_Target_Slot_State_Armed,
+                 when Model.State_Target_Slot_State_Disabled => Model.Outcome_Target_Slot_State_Disabled),
+            Target_Slot_Owner          =>
+              Model.Outcome_Target_Slot_Owner_Type (Self.Current.Target_Slot_Owner),
+            Other_Slot_State           =>
+              (case Self.Current.Other_Slot_State is
+                 when Model.State_Other_Slot_State_Absent   => Model.Outcome_Other_Slot_State_Absent,
+                 when Model.State_Other_Slot_State_Armed    => Model.Outcome_Other_Slot_State_Armed,
+                 when Model.State_Other_Slot_State_Disabled => Model.Outcome_Other_Slot_State_Disabled),
+            Other_Slot_Owner           =>
+              Model.Outcome_Other_Slot_Owner_Type (Self.Current.Other_Slot_Owner));
       end Set_Outcome;
 
       procedure Fail (Detail : String) is
@@ -501,6 +826,7 @@ procedure Poller_Registration_Conformance is
       end Fail;
 
       Payload : constant Ada.Streams.Stream_Element_Array := [1 => 73];
+      Drained : Ada.Streams.Stream_Element_Array (1 .. 1);
       Last    : Ada.Streams.Stream_Element_Offset;
    begin
       if Role /= "poller-registration" or else Action /= Model_Source then
@@ -509,16 +835,13 @@ procedure Poller_Registration_Conformance is
       end if;
 
       case Input.Command is
-         when Model.Input_Command_Begin_Wait_Batch    =>
+         when Model.Input_Command_Begin_Wait_Batch          =>
             if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginWaitBatch" then
                Fail ("unexpected BeginWaitBatch step");
                return;
             end if;
             Observation.Reset;
             Fault_Control.Reset;
-            Fault_Control.Arm (Fault_Control.Poller_Translation_Pause);
-            Fault_Control.Arm (Fault_Control.Poller_Batch_Delivery_Pause);
-            Fault_Control.Arm (Fault_Control.Descriptor_Cancel_Budget_Pause);
             for Socket_Index in Self.Victims'Range loop
                Sockets.Create_Socket_Pair (Self.Victims (Socket_Index), Self.Victim_Peers (Socket_Index));
             end loop;
@@ -533,6 +856,9 @@ procedure Poller_Registration_Conformance is
               new Target_Waiter
                     (Sockets.Native_Descriptor (Self.Target), Sockets.Native_Descriptor (Self.Second));
             Await (All_Registered'Access, "65 descriptor waiters did not reach the poller");
+            Fault_Control.Arm (Fault_Control.Poller_Translation_Pause);
+            Fault_Control.Arm (Fault_Control.Poller_Batch_Delivery_Pause);
+            Fault_Control.Arm (Fault_Control.Descriptor_Cancel_Budget_Pause);
             Sockets.Send_Socket (Self.Target_Peer, Payload, Last);
             if Last /= Payload'Last then
                raise Program_Error with "readiness signal was short";
@@ -568,9 +894,17 @@ procedure Poller_Registration_Conformance is
                Reused_Wait_Delivered      => False,
                Reuse_Arm_Attempted        => False,
                Reuse_Arm_Suppressed       => False,
+               Retained_Wait_Waiting      => False,
+               Retained_Descriptor_Ready  => False,
+               Retained_Wait_Delivered    => False,
+               Retained_Kernel_Generation => 0,
+               Target_Slot_State          => Model.State_Target_Slot_State_Disabled,
+               Target_Slot_Owner          => 1,
+               Other_Slot_State           => Model.State_Other_Slot_State_Absent,
+               Other_Slot_Owner           => 0,
                Last_Action                => Model.State_Last_Action_Begin_Wait_Batch);
 
-         when Model.Input_Command_Foreign_Wake        =>
+         when Model.Input_Command_Foreign_Wake              =>
             if Index /= 2 or else Action /= "PollerRegistrationOwnership!ForeignWake" then
                Fail ("unexpected ForeignWake step");
                return;
@@ -588,7 +922,7 @@ procedure Poller_Registration_Conformance is
             Self.Current.Progress_Wake := True;
             Self.Current.Last_Action := Model.State_Last_Action_Foreign_Wake;
 
-         when Model.Input_Command_Deliver_Target      =>
+         when Model.Input_Command_Deliver_Target            =>
             if Index /= 3 or else Action /= "PollerRegistrationOwnership!DeliverTarget" then
                Fail ("unexpected DeliverTarget step");
                return;
@@ -608,9 +942,10 @@ procedure Poller_Registration_Conformance is
             Self.Current.Group_Lock_Held := True;
             Self.Current.Loop_Writer := False;
             Self.Current.Replacement_Ready := True;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Disabled;
             Self.Current.Last_Action := Model.State_Last_Action_Deliver_Target;
 
-         when Model.Input_Command_Drain_Budget        =>
+         when Model.Input_Command_Drain_Budget              =>
             if Index /= 4 or else Action /= "PollerRegistrationOwnership!DrainBudget" then
                Fail ("unexpected DrainBudget step");
                return;
@@ -627,7 +962,7 @@ procedure Poller_Registration_Conformance is
             Self.Current.Pending_Cancels := 1;
             Self.Current.Last_Action := Model.State_Last_Action_Drain_Budget;
 
-         when Model.Input_Command_Start_Replacement   =>
+         when Model.Input_Command_Start_Replacement         =>
             if Index /= 5 or else Action /= "PollerRegistrationOwnership!StartReplacement" then
                Fail ("unexpected StartReplacement step");
                return;
@@ -647,9 +982,10 @@ procedure Poller_Registration_Conformance is
             Self.Current.Replacement_Waiting := True;
             Self.Current.Replacement_Arm_Attempted := True;
             Self.Current.Replacement_Arm_Suppressed := False;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Armed;
             Self.Current.Last_Action := Model.State_Last_Action_Start_Replacement;
 
-         when Model.Input_Command_Drain_Remaining     =>
+         when Model.Input_Command_Drain_Remaining           =>
             if Index /= 6 or else Action /= "PollerRegistrationOwnership!DrainRemaining" then
                Fail ("unexpected DrainRemaining step");
                return;
@@ -674,7 +1010,7 @@ procedure Poller_Registration_Conformance is
                return;
             end if;
 
-         when Model.Input_Command_Deliver_Replacement =>
+         when Model.Input_Command_Deliver_Replacement       =>
             if Index /= 7 or else Action /= "PollerRegistrationOwnership!DeliverReplacement" then
                Fail ("unexpected DeliverReplacement step");
                return;
@@ -685,9 +1021,10 @@ procedure Poller_Registration_Conformance is
             Self.Current.Phase := Model.State_Phase_Done;
             Self.Current.Replacement_Waiting := False;
             Self.Current.Replacement_Delivered := True;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Disabled;
             Self.Current.Last_Action := Model.State_Last_Action_Deliver_Replacement;
 
-         when Model.Input_Command_Begin_Old_Wait      =>
+         when Model.Input_Command_Begin_Old_Wait            =>
             if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginOldWait" then
                Fail ("unexpected BeginOldWait step");
                return;
@@ -702,9 +1039,11 @@ procedure Poller_Registration_Conformance is
             Self.Current.Descriptor_Generation := 1;
             Self.Current.Stale_Link_Registered := True;
             Self.Current.Reuse_Kernel_Generation := 1;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Armed;
+            Self.Current.Target_Slot_Owner := 1;
             Self.Current.Last_Action := Model.State_Last_Action_Begin_Old_Wait;
 
-         when Model.Input_Command_Close_And_Reuse     =>
+         when Model.Input_Command_Close_And_Reuse           =>
             if Index /= 2 or else Action /= "PollerRegistrationOwnership!CloseAndReuse" then
                Fail ("unexpected CloseAndReuse step");
                return;
@@ -721,7 +1060,7 @@ procedure Poller_Registration_Conformance is
             Self.Current.Reuse_Kernel_Generation := 0;
             Self.Current.Last_Action := Model.State_Last_Action_Close_And_Reuse;
 
-         when Model.Input_Command_Begin_Reused_Wait   =>
+         when Model.Input_Command_Begin_Reused_Wait         =>
             if Index /= 3 or else Action /= "PollerRegistrationOwnership!BeginReusedWait" then
                Fail ("unexpected BeginReusedWait step");
                return;
@@ -735,7 +1074,7 @@ procedure Poller_Registration_Conformance is
             Self.Current.Reuse_Arm_Suppressed := False;
             Self.Current.Last_Action := Model.State_Last_Action_Begin_Reused_Wait;
 
-         when Model.Input_Command_Deliver_Reused_Wait =>
+         when Model.Input_Command_Deliver_Reused_Wait       =>
             if Index /= 4 or else Action /= "PollerRegistrationOwnership!DeliverReusedWait" then
                Fail ("unexpected DeliverReusedWait step");
                return;
@@ -754,13 +1093,108 @@ procedure Poller_Registration_Conformance is
             Self.Current.Reused_Wait_Waiting := False;
             Self.Current.Reused_Descriptor_Ready := True;
             Self.Current.Reused_Wait_Delivered := True;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Disabled;
             Self.Current.Last_Action := Model.State_Last_Action_Deliver_Reused_Wait;
+
+         when Model.Input_Command_Begin_Indexed_Wait        =>
+            if Index /= 1 or else Action /= "PollerRegistrationOwnership!BeginIndexedWait" then
+               Fail ("unexpected BeginIndexedWait step");
+               return;
+            end if;
+            Observation.Reset;
+            Fault_Control.Reset;
+            Sockets.Create_Socket_Pair (Self.Retained, Self.Retained_Peer);
+            Self.Retained_Task := new Retained_Waiter (Sockets.Native_Descriptor (Self.Retained));
+            Await
+              (Initial_Retained_Registration_Complete'Access,
+               "indexed descriptor wait did not complete its poller registration");
+            Self.Current.Phase := Model.State_Phase_Indexed_Wait;
+            Self.Current.Retained_Wait_Waiting := True;
+            Self.Current.Retained_Kernel_Generation := 1;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Armed;
+            Self.Current.Target_Slot_Owner := 1;
+            Self.Current.Last_Action := Model.State_Last_Action_Begin_Indexed_Wait;
+
+         when Model.Input_Command_Deliver_Indexed_One_Shot  =>
+            if Index /= 2 or else Action /= "PollerRegistrationOwnership!DeliverIndexedOneShot" then
+               Fail ("unexpected DeliverIndexedOneShot step");
+               return;
+            end if;
+            Sockets.Send_Socket (Self.Retained_Peer, Payload, Last);
+            if Last /= Payload'Last then
+               Fail ("first indexed readiness signal was short");
+               return;
+            end if;
+            Await (Retained_First_Returned'Access, "first indexed descriptor wait did not return");
+            Sockets.Receive_Socket (Self.Retained, Drained, Last);
+            if Last /= Drained'Last then
+               Fail ("first indexed readiness signal was not drained");
+               return;
+            end if;
+            if not Retained_Counters_Are
+                     (Lookup => 2, Allocation => 1, Release => 0, Add => 1, Modify => 0, Delete => 0)
+            then
+               Fail ("one-shot delivery did not retain the indexed registration");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_One_Shot_Disabled;
+            Self.Current.Retained_Wait_Waiting := False;
+            Self.Current.Retained_Descriptor_Ready := True;
+            Self.Current.Retained_Wait_Delivered := True;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Disabled;
+            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Indexed_One_Shot;
+
+         when Model.Input_Command_Rearm_Indexed_One_Shot    =>
+            if Index /= 3 or else Action /= "PollerRegistrationOwnership!RearmIndexedOneShot" then
+               Fail ("unexpected RearmIndexedOneShot step");
+               return;
+            end if;
+            Observation.Release_Retained_Rearm;
+            Await (Retained_Rearmed'Access, "retained indexed descriptor wait did not rearm");
+            Self.Current.Phase := Model.State_Phase_Indexed_Rearmed;
+            Self.Current.Retained_Wait_Waiting := True;
+            Self.Current.Retained_Descriptor_Ready := False;
+            Self.Current.Retained_Wait_Delivered := False;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Armed;
+            Self.Current.Last_Action := Model.State_Last_Action_Rearm_Indexed_One_Shot;
+
+         when Model.Input_Command_Publish_Indexed_Readiness =>
+            if Index /= 4 or else Action /= "PollerRegistrationOwnership!PublishIndexedReadiness" then
+               Fail ("unexpected PublishIndexedReadiness step");
+               return;
+            end if;
+            Sockets.Send_Socket (Self.Retained_Peer, Payload, Last);
+            if Last /= Payload'Last then
+               Fail ("second indexed readiness signal was short");
+               return;
+            end if;
+            Await (Retained_Second_Returned'Access, "second indexed descriptor wait did not return");
+            Sockets.Receive_Socket (Self.Retained, Drained, Last);
+            if Last /= Drained'Last then
+               Fail ("second indexed readiness signal was not drained");
+               return;
+            end if;
+            if not Retained_Counters_Are
+                     (Lookup => 4, Allocation => 1, Release => 0, Add => 1, Modify => 1, Delete => 0)
+            then
+               Fail ("second delivery did not retain the indexed registration");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Done;
+            Self.Current.Retained_Wait_Waiting := False;
+            Self.Current.Retained_Descriptor_Ready := True;
+            Self.Current.Retained_Wait_Delivered := True;
+            Self.Current.Target_Slot_State := Model.State_Target_Slot_State_Disabled;
+            Self.Current.Last_Action := Model.State_Last_Action_Publish_Indexed_Readiness;
       end case;
 
       Set_Outcome;
       State := Self.Current;
       Status := (Succeeded => True, Detail => Null_Unbounded_String);
-      if Input.Command in Model.Input_Command_Deliver_Replacement | Model.Input_Command_Deliver_Reused_Wait
+      if Input.Command
+         in Model.Input_Command_Deliver_Replacement
+          | Model.Input_Command_Deliver_Reused_Wait
+          | Model.Input_Command_Publish_Indexed_Readiness
       then
          Cleanup (Self);
       end if;
@@ -768,22 +1202,30 @@ procedure Poller_Registration_Conformance is
       when Error : others =>
          Cleanup (Self);
          Observed :=
-           (Pending                 => 0,
-            Queued                  => False,
-            Foreign_Mutation        => True,
-            Target_Runnable         => False,
-            Target_Released         => False,
-            Kernel_Armed            => False,
-            Replacement_Waiting     => False,
-            Replacement_Delivered   => False,
-            Arm_Suppressed          => True,
-            Descriptor_Generation   => 0,
-            Stale_Link_Registered   => False,
-            Reuse_Kernel_Generation => 0,
-            Reused_Wait_Waiting     => False,
-            Reused_Descriptor_Ready => False,
-            Reused_Wait_Delivered   => False,
-            Reuse_Arm_Suppressed    => True);
+           (Pending                    => 0,
+            Queued                     => False,
+            Foreign_Mutation           => True,
+            Target_Runnable            => False,
+            Target_Released            => False,
+            Kernel_Armed               => False,
+            Replacement_Waiting        => False,
+            Replacement_Delivered      => False,
+            Arm_Suppressed             => True,
+            Descriptor_Generation      => 0,
+            Stale_Link_Registered      => False,
+            Reuse_Kernel_Generation    => 0,
+            Reused_Wait_Waiting        => False,
+            Reused_Descriptor_Ready    => False,
+            Reused_Wait_Delivered      => False,
+            Reuse_Arm_Suppressed       => True,
+            Retained_Wait_Waiting      => False,
+            Retained_Descriptor_Ready  => False,
+            Retained_Wait_Delivered    => False,
+            Retained_Kernel_Generation => 0,
+            Target_Slot_State          => Model.Outcome_Target_Slot_State_Absent,
+            Target_Slot_Owner          => 0,
+            Other_Slot_State           => Model.Outcome_Other_Slot_State_Absent,
+            Other_Slot_Owner           => 0);
          State := Self.Current;
          Status :=
            (Succeeded => False, Detail => To_Unbounded_String (Ada.Exceptions.Exception_Information (Error)));
@@ -792,6 +1234,10 @@ procedure Poller_Registration_Conformance is
 begin
    if not Fault_Control.Enabled then
       raise Program_Error with "poller conformance requires FLYOLOGY_TEST_FAULTS=1 runtime";
+   end if;
+   Check_Index_Regressions;
+   if Expect_Poller_Finalize_Releases (1) /= 0 then
+      raise Program_Error with "cannot register poller finalization assertion";
    end if;
    declare
       Config : Flyology_TLA.Command_Line.Configuration := Flyology_TLA.Command_Line.Parse (Limits);
