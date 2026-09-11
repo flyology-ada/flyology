@@ -529,6 +529,7 @@ operations_finalize_smoke
 operation_gates_smoke
 operation_composition_smoke
 operation_return_boundary_smoke
+past_deadline_smoke
 poller_policy_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke

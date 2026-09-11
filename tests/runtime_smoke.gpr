@@ -124,6 +124,7 @@ project Runtime_Smoke is
       "operation_gates_smoke.adb",
       "operation_composition_smoke.adb",
       "operation_return_boundary_smoke.adb",
+      "past_deadline_smoke.adb",
       "poller_policy_smoke.adb",
       "pool_growth_smoke.adb",
       "pool_reduction_claim_smoke.adb",
