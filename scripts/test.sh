@@ -92,6 +92,7 @@ trap 'exit 1' HUP INT TERM
 cd "$project_root"
 
 "$project_root/scripts/test-ci-triggers.sh"
+"$project_root/scripts/test-alire-runtime-matrix-enumeration.sh"
 python3 "$project_root/scripts/test-tlc-release-policy.py"
 "$project_root/scripts/test-run-with-timeout.sh"
 "$project_root/scripts/test-compiler-identities.sh"

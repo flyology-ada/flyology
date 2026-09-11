@@ -1,0 +1,12 @@
+# provider:GNAT release:GPRbuild release:published Linux architectures
+#
+# Availability is from alire-project/alire-index stable-1.4.0 at
+# b99c12857c6068ec46172dd614ff6f1954e9027e and flyology-ada/alire-index at
+# 0c53e305221cf86109acce92a1865421eef6204b.
+gnat_native:13.2.2:25.0.1:amd64
+gnat_native:14.1.3:25.0.1:amd64
+gnat_native:14.2.1:25.0.1:amd64,arm64
+gnat_native:15.1.2:25.0.1:amd64,arm64
+gnat_native:15.3.1:25.0.1:amd64,arm64
+gnat_native:16.1.0:26.0.1:amd64,arm64
+gnat_flyology_native:16.2.0-patchset.1.1.0:26.0.1:amd64,arm64
