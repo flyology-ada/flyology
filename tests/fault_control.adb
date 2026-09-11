@@ -13,15 +13,9 @@ package body Fault_Control is
       C_Reset;
    end Reset;
 
-   procedure Arm
-     (At_Point : Point; First : Natural := 0; Count : Positive := 1) is
+   procedure Arm (At_Point : Point; First : Natural := 0; Count : Positive := 1) is
    begin
-      if C_Arm
-           (Id (At_Point),
-            Interfaces.C.unsigned (First),
-            Interfaces.C.unsigned (Count))
-        /= 0
-      then
+      if C_Arm (Id (At_Point), Interfaces.C.unsigned (First), Interfaces.C.unsigned (Count)) /= 0 then
          raise Program_Error with "runtime fault injection is disabled";
       end if;
    end Arm;
@@ -89,9 +83,7 @@ package body Fault_Control is
    is (Natural (C_Descriptor_Cancel_Processed_Count));
 
    function File_Cancel_Count
-     (Backend     : File_Cancel_Backend;
-      Disposition : File_Cancel_Disposition;
-      Terminal    : Boolean) return Natural
+     (Backend : File_Cancel_Backend; Disposition : File_Cancel_Disposition; Terminal : Boolean) return Natural
    is (Natural
          (C_File_Cancel_Count
             (Interfaces.C.int (File_Cancel_Backend'Enum_Rep (Backend)),
@@ -99,13 +91,10 @@ package body Fault_Control is
              Boolean'Pos (Terminal))));
 
    function Atomic_Store_Model_Count (Model : Memory_Model) return Natural
-   is (Natural
-         (C_Atomic_Store_Model_Count
-            (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
+   is (Natural (C_Atomic_Store_Model_Count (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
 
    function Uring_Identity_Count (Reused : Boolean) return Natural
-   is (Natural
-         (C_Uring_Identity_Count (Interfaces.C.int (Boolean'Pos (Reused)))));
+   is (Natural (C_Uring_Identity_Count (Interfaces.C.int (Boolean'Pos (Reused)))));
 
    function Uring_Admin_Complete_Count return Natural
    is (Natural (C_Uring_Admin_Complete_Count));
