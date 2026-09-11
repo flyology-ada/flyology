@@ -2,7 +2,7 @@
 EXTENDS PollerRegistrationOwnership
 
 CoreSafety ==
-    /\ TypeOK
+    /\ LegacyTypeOK
     /\ SingleRegistrationWriter
     /\ CancellationQueueReferencesLiveFiber
     /\ QueuedCancellationMatchesWaitGeneration
@@ -25,7 +25,8 @@ THEOREM InitImpliesSafety ==
     /\ ReuseArmMode = "AlwaysRearm"
     /\ SelectedSource \in {"Readiness", "Timer"}
     => (Init => Safety)
-<1>. QED BY DEF Init, Safety, CoreSafety, TypeOK, SingleRegistrationWriter,
+<1>. QED BY DEF Init, Safety, CoreSafety, LegacyTypeOK,
+                SingleRegistrationWriter,
                 CancellationQueueReferencesLiveFiber,
                 QueuedCancellationMatchesWaitGeneration,
                 QueuedCancellationOwnsTarget, PendingCancellationHasWake,
@@ -52,12 +53,13 @@ THEOREM NextPreservesSafety ==
        /\ Safety
        /\ Next
        => CoreSafety'
-<2>. QED BY DEF Safety, CoreSafety, TypeOK,
+<2>. QED BY DEF Safety, CoreSafety, LegacyTypeOK,
                 SingleRegistrationWriter,
                 CancellationQueueReferencesLiveFiber,
                 QueuedCancellationMatchesWaitGeneration,
                 QueuedCancellationOwnsTarget, PendingCancellationHasWake,
-                NoStaleCancellation, Next, BeginWaitBatch, ForeignWake,
+                NoStaleCancellation, Next, CancellationNext, ReuseNext,
+                IndexNext, coreVars, BeginWaitBatch, ForeignWake,
                 DrainBudget, DeliverTarget, StartReplacement,
                 ReregisterTarget, ReapTarget, DrainRemaining,
                 DrainReplacement, DrainReused, DrainTimer,
@@ -72,7 +74,8 @@ THEOREM NextPreservesSafety ==
        /\ Next
        => ReplacementWaitHasKernelInterest'
 <2>. QED BY DEF Safety, CoreSafety, ReplacementWaitHasKernelInterest,
-                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                Next, CancellationNext, ReuseNext, IndexNext,
+                BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
                 DrainTimer, DeliverReplacement, BeginOldWait,
@@ -88,6 +91,7 @@ THEOREM NextPreservesSafety ==
        => QueuedLinkDoesNotSuppressReplacementArm'
 <2>. QED BY DEF Safety, CoreSafety,
                 QueuedLinkDoesNotSuppressReplacementArm, Next,
+                CancellationNext, ReuseNext, IndexNext,
                 BeginWaitBatch, ForeignWake, DrainBudget, DeliverTarget,
                 StartReplacement, ReregisterTarget, ReapTarget,
                 DrainRemaining, DrainReplacement, DrainReused, DrainTimer,
@@ -102,7 +106,8 @@ THEOREM NextPreservesSafety ==
        /\ Next
        => CurrentReusedWaitIsArmed'
 <2>. QED BY DEF Safety, CoreSafety, CurrentReusedWaitIsArmed,
-                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                Next, CancellationNext, ReuseNext, IndexNext,
+                BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
                 DrainTimer, DeliverReplacement, BeginOldWait,
@@ -117,7 +122,8 @@ THEOREM NextPreservesSafety ==
        /\ Next
        => StaleLinkDoesNotSuppressReuseArm'
 <2>. QED BY DEF Safety, CoreSafety, StaleLinkDoesNotSuppressReuseArm,
-                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                Next, CancellationNext, ReuseNext, IndexNext,
+                BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
                 DrainTimer, DeliverReplacement, BeginOldWait,
@@ -133,7 +139,8 @@ THEOREM NextPreservesSafety ==
        => ReusedReadinessDelivered'
 <2>. QED BY DEF Safety, CoreSafety, CurrentReusedWaitIsArmed,
                 ReusedReadinessDelivered,
-                Next, BeginWaitBatch, ForeignWake, DrainBudget,
+                Next, CancellationNext, ReuseNext, IndexNext,
+                BeginWaitBatch, ForeignWake, DrainBudget,
                 DeliverTarget, StartReplacement, ReregisterTarget,
                 ReapTarget, DrainRemaining, DrainReplacement, DrainReused,
                 DrainTimer, DeliverReplacement, BeginOldWait,

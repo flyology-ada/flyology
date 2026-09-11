@@ -60,6 +60,13 @@ package body System.Flyology.Faults is
    function Fail (Point : Fault_Point) return Boolean
    is (Test_Fault_Hit (Interfaces.C.int (Fault_Point'Enum_Rep (Point))) /= 0);
 
+   procedure Note (Point : Fault_Point) is
+      Ignored : constant Boolean := Fail (Point);
+      pragma Unreferenced (Ignored);
+   begin
+      null;
+   end Note;
+
    function Pause_Final_Reaper return Boolean
    is (Test_Pause_Final_Reaper = 0);
 

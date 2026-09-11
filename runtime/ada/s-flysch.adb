@@ -1324,8 +1324,8 @@ package body System.Flyology.Scheduler is
       --  that event and needs no delete. Darwin can safely retain every other
       --  one-shot knote until it fires once or its descriptor closes; an event
       --  arriving without a waiter is only a discarded readiness hint. Linux
-      --  still clears orphans because its poller owns one process-side record
-      --  per epoll registration. A raw wait does not own its descriptor, so
+      --  clears undelivered orphans because its poller owns one mutable record
+      --  per descriptor. A raw wait does not own its descriptor, so
       --  cancellation accepts a source closed concurrently by its owner as
       --  already removed.
       for Kind in 1 .. Item.Active_IO_Link_Count loop
@@ -4161,9 +4161,9 @@ package body System.Flyology.Scheduler is
          Need_Wake := True;
          Group.Wakeups := Group.Wakeups + 1;
       elsif Item.State = Waiting and then Item.IO_Wait and then not Pollers.Retains_Orphaned_One_Shots then
-         --  Linux Wait_Batch is the sole owner of the poller's linked
-         --  registration records while the group lock is released. A foreign
-         --  abort or ATC therefore queues cancellation for the loop thread.
+         --  Linux Wait_Batch is the sole owner of the poller's descriptor-
+         --  indexed registration records while the group lock is released. A
+         --  foreign abort or ATC therefore queues cancellation for the loop.
          Queue_Descriptor_Cancel_Locked (Group, Item);
          Need_Wake := True;
          Group.Wakeups := Group.Wakeups + 1;

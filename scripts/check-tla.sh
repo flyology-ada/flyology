@@ -171,6 +171,9 @@ expect_safe \
   PollerRegistrationOwnership PollerRegistrationOwnership_reuse.cfg \
   poller-registration-reuse-safe
 expect_safe \
+  PollerRegistrationOwnership PollerRegistrationOwnership_retained.cfg \
+  poller-registration-retained-safe
+expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_buddy.cfg allocator-buddy
 expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_best_fit.cfg allocator-best-fit
@@ -262,6 +265,32 @@ expect_counterexample \
 expect_counterexample \
   PollerRegistrationOwnership PollerRegistrationOwnership_reuse_broken.cfg \
   ReusedReadinessDelivered poller-registration-reuse-broken
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_retention_broken.cfg \
+  DisabledOneShotRetained poller-registration-retention-broken
+if ! grep -Fq 'targetSlotState = "Absent"' \
+  "$run_root/poller-registration-retention-broken.log" \
+  || ! grep -Fq 'retainedKernelGeneration = 0' \
+    "$run_root/poller-registration-retention-broken.log"
+then
+  cat "$run_root/poller-registration-retention-broken.log" >&2
+  printf '%s\n' \
+    'broken retention policy did not expose one-shot deletion' >&2
+  exit 1
+fi
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_index_broken.cfg \
+  DescriptorIndexExact poller-registration-index-broken
+if ! grep -Fq 'targetSlotState = "Absent"' \
+  "$run_root/poller-registration-index-broken.log" \
+  || ! grep -Fq 'otherSlotState = "Armed"' \
+    "$run_root/poller-registration-index-broken.log"
+then
+  cat "$run_root/poller-registration-index-broken.log" >&2
+  printf '%s\n' \
+    'broken index policy did not expose the wrong descriptor slot' >&2
+  exit 1
+fi
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
   DriverFailureCompletes completion-finalize-blocking-close
@@ -772,6 +801,55 @@ cmp \
   "$project_root/tests/poller_registration_conformance/traces/poller-registration-reuse.trace.json" \
   "$poller_reuse_trace"
 
+poller_retained_raw="$run_root/poller-registration-retained-raw.json"
+poller_retained_log="$run_root/poller-registration-retained-witness.log"
+poller_retained_meta="$run_root/poller-registration-retained-witness-states"
+poller_retained_config="$project_root/tests/poller_registration_conformance/PollerRegistrationOwnership_retained_trace.cfg"
+set +e
+"$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+  -workers 1 -coverage 1 -noGenerateSpecTE -metadir "$poller_retained_meta" \
+  -config "$poller_retained_config" \
+  -dumpTrace json "$poller_retained_raw" PollerRegistrationOwnership.tla \
+  >"$poller_retained_log" 2>&1
+poller_retained_status=$?
+set -e
+if [ "$poller_retained_status" -ne 12 ] \
+  || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$poller_retained_log" \
+  || ! grep -Fq '5 states generated, 5 distinct states found' "$poller_retained_log"
+then
+  cat "$poller_retained_log" >&2
+  printf '%s\n' \
+    'poller-registration retained witness did not reach its exact terminal state' >&2
+  exit 1
+fi
+for action in \
+  BeginIndexedWait DeliverIndexedOneShot RearmIndexedOneShot \
+  PublishIndexedReadiness
+do
+  if ! grep -Fq "\"action\":\"$action\"" "$poller_retained_raw"; then
+    cat "$poller_retained_log" >&2
+    printf '%s\n' \
+      "poller-registration retained witness did not cover $action" >&2
+    exit 1
+  fi
+done
+if grep -q '^Warning:' "$poller_retained_log"; then
+  cat "$poller_retained_log" >&2
+  printf '%s\n' 'poller-registration retained witness emitted a TLC warning' >&2
+  exit 1
+fi
+
+poller_retained_trace="$run_root/poller-registration-retained.trace.json"
+"$tla_cli" trace normalize \
+  "$poller_retained_raw" "$poller_retained_trace" \
+  "$model_root/PollerRegistrationOwnership.tla" \
+  --config "$poller_retained_config" \
+  --toolchain tla2tools-1.8.0+b123b22 8 32
+"$tla_cli" trace validate "$poller_retained_trace" 8 32
+cmp \
+  "$project_root/tests/poller_registration_conformance/traces/poller-registration-retained.trace.json" \
+  "$poller_retained_trace"
+
 if [ -n "${ALR:-}" ]; then
   alire=$ALR
 else
@@ -1002,6 +1080,7 @@ if [ "$(uname -s)" = Linux ]; then
     "$poller_conformance_source/poller_registration_conformance.gpr" \
     "$poller_conformance_source/PollerRegistrationOwnership_trace.cfg" \
     "$poller_conformance_source/PollerRegistrationOwnership_reuse_trace.cfg" \
+    "$poller_conformance_source/PollerRegistrationOwnership_retained_trace.cfg" \
     "$poller_conformance_root/"
   cp "$poller_conformance_source/src/"* "$poller_conformance_root/src/"
   cp "$poller_conformance_source/generated/"* "$poller_conformance_root/generated/"
@@ -1061,6 +1140,18 @@ if [ "$(uname -s)" = Linux ]; then
   grep -Fq '"compared_steps":4' \
     "$run_root/poller-registration-reuse-result.json"
   printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership reuse 4 transitions'
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    ./bin/poller-registration-conformance --format json \
+    --result-json "$run_root/poller-registration-retained-result.json" \
+    "$poller_retained_trace" >"$run_root/poller-registration-retained-stdout.json"
+  cmp \
+    "$run_root/poller-registration-retained-result.json" \
+    "$run_root/poller-registration-retained-stdout.json"
+  grep -Fq '"verdict":"conformant"' \
+    "$run_root/poller-registration-retained-result.json"
+  grep -Fq '"compared_steps":4' \
+    "$run_root/poller-registration-retained-result.json"
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership retained 4 transitions'
 else
   printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership traces Linux-only replay deferred'
 fi
