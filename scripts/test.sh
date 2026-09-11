@@ -748,11 +748,14 @@ process_generation_agent_v1
 process_generation_agent_v2"
 if [ "$(uname -s)" = Linux ]; then
   native_mains="$native_mains
+lightweight_affinity_smoke
 linux_poller_cloexec_smoke
 native_cpu_activation_failure_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
 if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/lightweight_affinity_smoke"
   "$project_root/scripts/run-with-timeout.sh" 10 \
     "$test_bin/linux_poller_cloexec_smoke"
   "$project_root/scripts/run-with-timeout.sh" 10 \
