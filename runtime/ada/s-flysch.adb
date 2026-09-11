@@ -4371,7 +4371,9 @@ package body System.Flyology.Scheduler is
       end if;
       Group.Poll_Batches := Group.Poll_Batches + 1;
       Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
-      Process_Descriptor_Cancellations_Locked (Group);
+      --  A foreign wake during the unlocked probe leaves descriptor
+      --  cancellation as the matching readiness owner's barrier. The next
+      --  scheduler turn drains one bounded batch before another dispatch.
       Process_File_Cancellations_Locked (Group);
       for Index in 1 .. Count loop
          Handle_Poll_Event (Group, Events (Index));
@@ -4400,6 +4402,10 @@ package body System.Flyology.Scheduler is
             Unlock_Group (Group);
             return;
          end if;
+         --  Keep descriptor cancellation to one bounded batch per scheduler
+         --  turn. Poll paths below retain newly queued ownership barriers
+         --  through event translation, then return here before another
+         --  cancellation batch can run.
          Process_Descriptor_Cancellations_Locked (Group);
          Process_File_Cancellations_Locked (Group);
          Timeout := No_Deadline;
@@ -4482,7 +4488,8 @@ package body System.Flyology.Scheduler is
             end if;
             Group.Poll_Batches := Group.Poll_Batches + 1;
             Group.Poll_Events := Group.Poll_Events + C.unsigned_long_long (Count);
-            Process_Descriptor_Cancellations_Locked (Group);
+            --  Descriptor cancellations queued while the group was unlocked
+            --  retain matching readiness until the next scheduler turn.
             Process_File_Cancellations_Locked (Group);
             for Index in 1 .. Count loop
                Handle_Poll_Event (Group, Events (Index));

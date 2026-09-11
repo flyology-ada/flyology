@@ -282,9 +282,11 @@ configuration permits the target to re-register before its old queue entry is
 drained, and the unowned-timer configuration permits it to be reaped while that
 entry still references it; both are required counterexamples.
 
-`PollerRegistrationOwnershipProof` discharges two TLAPS obligations: the
-deferred, cancellation-owned configurations initialize in the stated safety
-conjunction, and every modeled action preserves it for either selected source.
+`PollerRegistrationOwnershipProof` states two top-level safety theorems. TLAPM
+expands their proof into eight obligations, all of which `check-tla.sh` requires:
+the deferred, cancellation-owned configurations initialize in the stated
+safety conjunction, and every modeled action preserves it for either selected
+source.
 This is an invariant proof over the extraction, not a refinement proof of the
 Ada scheduler or Linux poller. The deterministic seven-transition Ada replay
 uses the readiness witness and compares the real queued/processed cancellation,
