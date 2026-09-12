@@ -309,10 +309,10 @@ package body System.Flyology.Scheduler is
       Dormancy_Policy         : Dormancy_Advice := Prompt_Advice;
       Dormancy_Minimum_Wait   : Duration := 1.0;
       Stack_Cold              : Boolean := False;
-      --  RM D.2.2(9) puts a runnable task at the head of its new priority
-      --  queue when it loses inherited priority.  GNARL can report that
-      --  transition while this fiber is still running, so remember it until
-      --  the next scheduler handoff.
+      --  Queue-head placement exists only while a Ready fiber is immediately
+      --  requeued after losing inherited priority. Enqueue consumes it before
+      --  the fiber runs; a running fiber retains no preference, so a later
+      --  yield uses normal FIFO tail placement.
       Enqueue_At_Head         : Boolean := False;
       Group                   : Loop_Group_Access;
       Migration_Target        : Loop_Group_Access;
@@ -1995,9 +1995,9 @@ package body System.Flyology.Scheduler is
          Fatal;
       end if;
 
-      --  Migration has its own target-loop enqueue operation. A queue-head
-      --  designation caused by a prior loss of inherited priority applies
-      --  only to yielding on the current loop and must not cross groups.
+      --  A priority update while running does not retain queue placement. If
+      --  the fiber later migrates, the target loop therefore enqueues it at
+      --  the normal FIFO tail.
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlink_Group_Locked (Source, Item);
@@ -3966,8 +3966,6 @@ package body System.Flyology.Scheduler is
          Enqueue (Item.Group, Item);
       else
          Item.Priority := Priority;
-         Item.Enqueue_At_Head :=
-           Scheduling.Placement_After_Priority_Update (Loss_Of_Inheritance /= 0) = Scheduling.Queue_Head;
       end if;
       Unlock_Group (Item.Group);
       Unlock_Registry_Shard (Shard);
