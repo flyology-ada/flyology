@@ -34,7 +34,8 @@ procedure Priority_Semantics_Smoke is
             return;
          end if;
          if RT.Clock >= Deadline then
-            raise Program_Error with "timed out awaiting event-group priority state";
+            raise Program_Error
+              with "timed out awaiting event-group priority state";
          end if;
          delay 0.001;
       end loop;
@@ -139,7 +140,8 @@ procedure Priority_Semantics_Smoke is
       Stop_Blocker := True;
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with "priority change while waiting did not affect wake ordering";
+         raise Program_Error
+           with "priority change while waiting did not affect wake ordering";
       end if;
    end Check_Waiting_Priority_Change;
 
@@ -208,76 +210,42 @@ procedure Priority_Semantics_Smoke is
       STC.Set_True (Controller_Gate);
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with "self priority lowering did not dispatch the higher ready task";
+         raise Program_Error
+           with
+             "self priority lowering did not dispatch the higher ready task";
       end if;
    end Check_Running_Priority_Change;
 
    procedure Check_Rendezvous_Inheritance is
-      Blocker_Gate : STC.Suspension_Object;
-      Caller_Gate  : STC.Suspension_Object;
-      Medium_Gate  : STC.Suspension_Object;
-      Peer_Gate    : STC.Suspension_Object;
-      Caller_Done  : STC.Suspension_Object;
-      Stop_Blocker : Boolean := False
-      with Atomic;
+      Caller_Gate : STC.Suspension_Object;
+      Medium_Gate : STC.Suspension_Object;
+      Caller_Done : STC.Suspension_Object;
 
       protected Result is
-         procedure Blocker_Running;
-         entry Await_Blocker;
-         procedure Record_Accept;
-         procedure Record_Medium;
-         procedure Record_After_Loss;
-         procedure Record_Peer;
+         procedure Record_Run (Id : Positive);
          entry Await_Done;
          function Passed return Boolean;
       private
-         Blocker_Is_Running : Boolean := False;
-         Accept_Count       : Natural := 0;
-         Accept_First       : Boolean := False;
-         Loss_Count         : Natural := 0;
-         Loss_First         : Boolean := False;
+         Count : Natural := 0;
+         First : Positive := 1;
       end Result;
 
       protected body Result is
-         procedure Blocker_Running is
+         procedure Record_Run (Id : Positive) is
          begin
-            Blocker_Is_Running := True;
-         end Blocker_Running;
+            Count := Count + 1;
+            if Count = 1 then
+               First := Id;
+            end if;
+         end Record_Run;
 
-         entry Await_Blocker when Blocker_Is_Running is
-         begin
-            null;
-         end Await_Blocker;
-
-         procedure Record_Accept is
-         begin
-            Accept_Count := Accept_Count + 1;
-            Accept_First := Accept_Count = 1;
-         end Record_Accept;
-
-         procedure Record_Medium is
-         begin
-            Accept_Count := Accept_Count + 1;
-         end Record_Medium;
-
-         procedure Record_After_Loss is
-         begin
-            Loss_Count := Loss_Count + 1;
-            Loss_First := Loss_Count = 1;
-         end Record_After_Loss;
-
-         procedure Record_Peer is
-         begin
-            Loss_Count := Loss_Count + 1;
-         end Record_Peer;
-
-         entry Await_Done when Accept_Count = 2 and Loss_Count = 2 is
+         entry Await_Done when Count = 2 is
          begin
             null;
          end Await_Done;
 
          function Passed return Boolean
-         is (Accept_First and Loss_First);
+         is (First = 1);
       end Result;
 
       task Server
@@ -299,32 +267,15 @@ procedure Priority_Semantics_Smoke is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Medium;
 
-      task Peer
-        with CPU => 3 is
-         pragma Priority (5);
-         pragma Task_Info (Flyology.Lightweight_Task);
-      end Peer;
-
-      task Blocker
-        with CPU => 3 is
-         pragma Priority (25);
-         pragma Task_Info (Flyology.Lightweight_Task);
-      end Blocker;
-
       task body Server is
       begin
          accept Work do
-            --  The caller's active priority must be inherited before the
-            --  medium task already in the ready queue can run.
-            Result.Record_Accept;
-            STC.Set_True (Peer_Gate);
+            STC.Set_True (Medium_Gate);
+            --  Server must retain Caller's inherited priority across this
+            --  dispatching point and run before the medium-priority task.
+            delay 0.0;
+            Result.Record_Run (1);
          end Work;
-
-         --  Completion lowers the inherited priority. RM D.2.2(9) requires
-         --  the server at the head of its base-priority queue at this next
-         --  dispatching point, ahead of Peer which was readied first.
-         delay 0.0;
-         Result.Record_After_Loss;
       end Server;
 
       task body Caller is
@@ -337,37 +288,107 @@ procedure Priority_Semantics_Smoke is
       task body Medium is
       begin
          STC.Suspend_Until_True (Medium_Gate);
-         Result.Record_Medium;
+         Result.Record_Run (2);
       end Medium;
+   begin
+      Await_Group_State (3, 0, 3, 0);
+      STC.Set_True (Caller_Gate);
+      Result.Await_Done;
+      STC.Set_True (Caller_Done);
+      if not Result.Passed then
+         raise Program_Error
+           with
+             "rendezvous acceptor did not retain the caller's inherited priority";
+      end if;
+   end Check_Rendezvous_Inheritance;
+
+   procedure Check_Rendezvous_Loss_Yield is
+      Caller_Gate : STC.Suspension_Object;
+      Peer_Gate   : STC.Suspension_Object;
+      Caller_Done : STC.Suspension_Object;
+
+      protected Result is
+         procedure Record_Run (Id : Positive);
+         entry Await_Done;
+         function Passed return Boolean;
+      private
+         Count : Natural := 0;
+         First : Positive := 1;
+      end Result;
+
+      protected body Result is
+         procedure Record_Run (Id : Positive) is
+         begin
+            Count := Count + 1;
+            if Count = 1 then
+               First := Id;
+            end if;
+         end Record_Run;
+
+         entry Await_Done when Count = 2 is
+         begin
+            null;
+         end Await_Done;
+
+         function Passed return Boolean
+         is (First = 1);
+      end Result;
+
+      task Server
+        with CPU => 3 is
+         pragma Priority (5);
+         pragma Task_Info (Flyology.Lightweight_Task);
+         entry Work;
+      end Server;
+
+      task Caller
+        with CPU => 3 is
+         pragma Priority (10);
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Caller;
+
+      task Peer
+        with CPU => 3 is
+         pragma Priority (5);
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Peer;
+
+      task body Server is
+      begin
+         accept Work do
+            --  Peer becomes ready while Server still has Caller's inherited
+            --  priority, before GNARL restores Server's base priority.
+            STC.Set_True (Peer_Gate);
+         end Work;
+
+         --  Restoring the priority of a running task does not place it in a
+         --  ready queue. This yield must therefore use normal FIFO placement.
+         delay 0.0;
+         Result.Record_Run (2);
+      end Server;
+
+      task body Caller is
+      begin
+         STC.Suspend_Until_True (Caller_Gate);
+         Server.Work;
+         STC.Suspend_Until_True (Caller_Done);
+      end Caller;
 
       task body Peer is
       begin
          STC.Suspend_Until_True (Peer_Gate);
-         Result.Record_Peer;
+         Result.Record_Run (1);
       end Peer;
-
-      task body Blocker is
-      begin
-         STC.Suspend_Until_True (Blocker_Gate);
-         Result.Blocker_Running;
-         while not Stop_Blocker loop
-            null;
-         end loop;
-      end Blocker;
    begin
-      Await_Group_State (3, 0, 5, 0);
-      STC.Set_True (Blocker_Gate);
-      Result.Await_Blocker;
-      STC.Set_True (Medium_Gate);
+      Await_Group_State (3, 0, 3, 0);
       STC.Set_True (Caller_Gate);
-      Await_Group_State (3, 2, 2, 1);
-      Stop_Blocker := True;
       Result.Await_Done;
       STC.Set_True (Caller_Done);
       if not Result.Passed then
-         raise Program_Error with "rendezvous inheritance or loss ordering was not preserved";
+         raise Program_Error
+           with "loss-of-inheritance flag contaminated the next yield";
       end if;
-   end Check_Rendezvous_Inheritance;
+   end Check_Rendezvous_Loss_Yield;
 
    procedure Check_Loss_Then_Block is
       Blocker_Gate : STC.Suspension_Object;
@@ -515,7 +536,8 @@ procedure Priority_Semantics_Smoke is
       Result.Await_Done;
       STC.Set_True (Caller_Done);
       if not Result.Passed then
-         raise Program_Error with "loss-of-inheritance placement leaked across a blocking wait";
+         raise Program_Error
+           with "loss-of-inheritance placement leaked across a blocking wait";
       end if;
    end Check_Loss_Then_Block;
 
@@ -617,7 +639,8 @@ procedure Priority_Semantics_Smoke is
       Stop_Blocker := True;
       Result.Await_Done;
       if not Result.Passed then
-         raise Program_Error with "migration did not preserve lightweight task priority";
+         raise Program_Error
+           with "migration did not preserve lightweight task priority";
       end if;
    end Check_Migration_Priority;
 
@@ -625,6 +648,7 @@ begin
    Check_Waiting_Priority_Change;
    Check_Running_Priority_Change;
    Check_Rendezvous_Inheritance;
+   Check_Rendezvous_Loss_Yield;
    Check_Loss_Then_Block;
    Check_Migration_Priority;
 end Priority_Semantics_Smoke;
