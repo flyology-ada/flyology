@@ -647,6 +647,8 @@ cc -O2 -c "$project_root/runtime/native/heap_trampoline.c" \
 cd "$build_root/obj"
 
 compile_flyology_runtime_ada () {
+  # GNAT's -gnatg runtime mode suppresses arithmetic and range checks. Guard
+  # potentially overflowing operations explicitly and discharge them in proof.
   if [ -n "$runtime_warnings" ]; then
     "$compiler" -c -gnatg -gnatyM110 -gnat2022 -O2 -fPIC -gnata \
       "-gnatec=$runtime_warnings" -gnateb "$@"
