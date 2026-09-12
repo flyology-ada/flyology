@@ -11,6 +11,11 @@ package body System.Flyology.Poller is
    package OSI renames System.OS_Interface;
    package SSE renames System.Storage_Elements;
 
+   --  XNU rejects a kevent timeout whose seconds exceed the signed 32-bit
+   --  range even though timespec.tv_sec is wider. A longer finite scheduler
+   --  deadline is retained and revisited after this bounded poll slice.
+   Maximum_Kevent_Timeout : constant Duration := Duration (C.int'Last);
+
    use type C.int;
    use type C.long_long;
    use type C.short;
@@ -306,7 +311,9 @@ package body System.Flyology.Poller is
               0,
               System.Null_Address);
       else
-         Limit := Time_ABI.To_Timespec (Timeout);
+         Limit :=
+           Time_ABI.To_Timespec
+             (if Timeout > Maximum_Kevent_Timeout then Maximum_Kevent_Timeout else Timeout);
          Result :=
            Kevent
              (Item.Descriptor,

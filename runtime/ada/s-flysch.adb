@@ -3676,7 +3676,7 @@ package body System.Flyology.Scheduler is
          Item := Group.Current_Fiber;
          Item.Active_IO_Links := Links (1)'Unchecked_Access;
          Item.Active_IO_Link_Count := Natural (Actual_Count);
-         Item.Deadline := (if Timeout < 0.0 then No_Deadline else Clock + Timeout);
+         Item.Deadline := Scheduling.Deadline_After (Clock, Timeout);
          Item.Timed_Out := False;
          Item.IO_Result := 0;
          Item.IO_Interrupt_Wait := Interrupt_Wait /= 0;

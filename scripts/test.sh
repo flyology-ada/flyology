@@ -462,6 +462,7 @@ context_abi_matrix
 data_structures_concurrency_smoke
 data_structures_smoke
 datagram_io_smoke
+deadline_clamp_smoke
 descriptor_ownership_smoke
 dns_child_capacity_smoke
 dns_smoke

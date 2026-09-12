@@ -2655,12 +2655,16 @@ Each loop stores finite deadlines in an indexed binary min-heap. Insertion and
 cancellation are `O(log n)`, the next poll deadline is available in `O(1)`, and
 expiration removes the minimum repeatedly without scanning unrelated fibers.
 The index stored in each fiber also lets readiness, abort wakeups, and reaping
-remove that fiber's deadline directly.
+remove that fiber's deadline directly. A positive timeout that extends beyond
+the monotonic clock's representable range saturates at the largest finite
+deadline; only a negative timeout selects an unlimited wait.
 
 The earliest deadline becomes the timeout of the group's next `kevent64` or
 `epoll_wait`; expiry therefore wakes the same event-loop syscall already used
-for sockets and file completions. There is no timer thread and no per-task OS
-timer object.
+for sockets and file completions. A platform poll whose relative-timeout field
+cannot represent the full remaining interval uses its largest accepted finite
+slice and re-evaluates the retained absolute deadline afterward. There is no
+timer thread and no per-task OS timer object.
 
 ### Dormant stack advice
 
@@ -3332,8 +3336,9 @@ reported close error can reach another cleanup path. This proves only the Ada
 ownership-state update. It does not model `close(2)`, its return semantics, or
 descriptor reuse; the fault-enabled cross-lane reuse test covers that boundary.
 
-The scheduler policy unit proves deadline classification and safe calculation
-of the next poll timeout. It also proves earliest-deadline selection,
+The scheduler policy unit proves saturated construction of finite deadlines,
+deadline classification, and safe calculation of the next poll timeout. It
+also proves earliest-deadline selection,
 maintenance cadence, dispatch-counter safety, and the distinction between
 immediate and deferred fiber destruction, including the in-flight `Migrating`
 phase. Shared/dedicated group classification, dedicated-lane availability, and

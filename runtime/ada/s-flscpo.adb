@@ -96,6 +96,17 @@ is
    function After_Dispatch (Dispatches_Until_Check : Positive) return Natural
    is (Dispatches_Until_Check - 1);
 
+   function Deadline_After (Now, Timeout : Duration) return Duration is
+   begin
+      if Timeout < 0.0 then
+         return No_Deadline;
+      elsif Timeout > Duration'Last - Now then
+         return Duration'Last;
+      else
+         return Now + Timeout;
+      end if;
+   end Deadline_After;
+
    function Earlier_Deadline (Left, Right : Duration) return Duration is
    begin
       if Left < 0.0 then
