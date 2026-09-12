@@ -2429,12 +2429,15 @@ but never consume or close them.
 
 A raw wait borrows its descriptor rather than owning it, so another task may
 close that descriptor while a poller interest is still armed. The kernel then
-drops the registration silently, and the suspended wait no longer has a
-readiness source: it ends at its deadline, or through an interrupt source, or
-not at all when neither is supplied. Closing a watched descriptor is therefore
-a liveness hazard for the waiting task, but it is not a runtime error. The
-pollers report the resulting `EBADF` or `ENOENT` cancellation as a removed
-interest, so a close race cannot escalate into a fatal scheduler failure.
+drops the registration silently. Unless a later wait rearms the reused number,
+the suspended wait has no readiness source: it ends at its deadline, through
+an interrupt source, or not at all when neither is supplied. Closing a watched
+descriptor is therefore a liveness hazard for the waiting task, but it is not
+a runtime error. The pollers report the resulting `EBADF` or `ENOENT`
+cancellation as a removed interest, so a close race cannot escalate into a
+fatal scheduler failure. A later wait on a reused descriptor number always
+rearms the kernel interest; because raw waits identify only the integer, both
+the old and replacement wait may observe the reused descriptor's readiness.
 `Connections` avoids the hazard entirely by draining scheduler waiters before
 it releases a descriptor; descriptor close then removes any retained Darwin
 one-shot knotes before numeric reuse.
