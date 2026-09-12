@@ -245,6 +245,9 @@ fails activation with `Tasking_Error` rather than selecting a CPU.
 The automatic pool is likewise limited to 128 shared groups. This interpretation
 applies only after event-loop designation: an Ada `CPU` aspect on a native task
 continues through stock GNARL's processor-affinity path.
+Later dispatching-domain affinity calls on a lightweight task are inert: they
+do not change its execution group, its GNARL CPU/domain bookkeeping, or the
+affinity of the group's shared pthread. Native tasks retain GNARL's behavior.
 Ada D.16 CPU inheritance is also preserved: a task without its own aspect but
 activated by a task with an assigned CPU inherits that effective assignment and
 therefore stays on the inherited group rather than entering the automatic pool.

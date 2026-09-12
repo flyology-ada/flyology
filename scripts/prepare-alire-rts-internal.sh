@@ -239,6 +239,9 @@ runtime_artifacts_valid () {
     && [ -f "$include/s-tassta.adb" ] \
     && [ -f "$include/s-taskin.adb" ] \
     && [ -f "$include/s-interr.adb" ] || return 1
+  if [ "$(uname -s)" = Linux ]; then
+    [ -f "$include/s-mudido.adb" ] || return 1
+  fi
   ar -t "$archive" | grep '^context_switch[.]o$' >/dev/null || return 1
   object_hash=$(hash_file "$object")
   archived_hash=$(ar -p "$archive" context_switch.o | hash_stream |
@@ -252,6 +255,9 @@ runtime_artifacts_valid () {
   validation_root=$(mktemp -d \
     "$project_root/build/.flyology-rts-validation.XXXXXX")
   set -- s-taprop.o s-interr.o s-taskin.o s-tassta.o
+  if [ "$(uname -s)" = Linux ]; then
+    set -- "$@" s-mudido.o
+  fi
   case "$compiler_release" in
     13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
       set -- "$@" a-sytaco.o
@@ -273,6 +279,10 @@ runtime_artifacts_valid () {
     "$include/s-taskin.adb"
   record_patched_core source adainclude/s-interr.adb \
     "$include/s-interr.adb"
+  if [ "$(uname -s)" = Linux ]; then
+    record_patched_core source adainclude/s-mudido.adb \
+      "$include/s-mudido.adb"
+  fi
   if [ "$(uname -s)" = Darwin ]; then
     record_patched_core source adainclude/s-tpopmo.adb \
       "$include/s-tpopmo.adb"
@@ -293,6 +303,10 @@ runtime_artifacts_valid () {
     "$validation_root/s-taskin.o"
   record_patched_core archive adalib/libgnarl.a:s-interr.o \
     "$validation_root/s-interr.o"
+  if [ "$(uname -s)" = Linux ]; then
+    record_patched_core archive adalib/libgnarl.a:s-mudido.o \
+      "$validation_root/s-mudido.o"
+  fi
   case "$compiler_release" in
     13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
       record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
@@ -337,6 +351,10 @@ runtime_artifacts_valid () {
         s-taprop.o flyology_darwin_cond_timedwait_relative || return 1
       ;;
     Linux)
+      grep -F "System.Flyology.Scheduler.Is_Lightweight_Task" \
+        "$include/s-mudido.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-mudido.o system__flyology__scheduler__is_lightweight_task || return 1
       grep -F '"flyology_linux_pthread_stack_min"' \
         "$include/s-taprop.adb" >/dev/null || return 1
       archive_member_has_symbol \

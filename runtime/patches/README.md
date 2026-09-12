@@ -48,6 +48,11 @@ reported pthread minimum. GNAT 13 and 14 otherwise request 48 KiB for a 16 KiB
 task on AArch64, where glibc requires 128 KiB. The clamp is a no-op when the
 compiler already requests enough space.
 
+The Linux dispatching-domain patch returns before `Unchecked_Set_Affinity`
+mutates a lightweight task's native CPU/domain bookkeeping. The task-primitives
+guard remains necessary because dispatching-domain creation reapplies affinity
+without passing through that helper. Native tasks retain both stock paths.
+
 The Darwin monotonic subunit patches replace GNAT's realtime tasking clock with
 Mach absolute time. Native condition waits and kqueue timeouts use that same
 sleep-pausing clock domain; adjustable calendar delays are translated again at
