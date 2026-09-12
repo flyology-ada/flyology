@@ -48,6 +48,7 @@ project Runtime_Smoke is
       "data_structures_concurrency_smoke.adb",
       "data_structures_destroy_contention_smoke.adb",
       "data_structures_smoke.adb",
+      "deadline_clamp_smoke.adb",
       "flyology-data_structures-clock_policy-smoke.adb",
       "descriptor_ownership_smoke.adb",
       "dns_child_capacity_smoke.adb",
