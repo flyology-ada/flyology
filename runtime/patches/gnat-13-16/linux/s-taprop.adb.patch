@@ -184,7 +184,8 @@
 -      Yielded  : out Boolean) renames Monotonic.Timed_Sleep;
 +      Yielded  : out Boolean)
 +   is
-+      Result       : C.int;
++      Deadline           : Duration;
++      Result             : C.int;
 +      Lightweight_Result : aliased C.int;
 +   begin
 +      if not Is_Lightweight_Task (Self_ID) then
@@ -193,16 +194,20 @@
 +         return;
 +      end if;
 +
++      Deadline := Lightweight_Deadline (Time, Mode);
 +      Timedout := True;
 +      Yielded := False;
 +      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         return;
++      end if;
++      if Deadline <= Monotonic.Monotonic_Clock then
 +         return;
 +      end if;
 +
 +      Result :=
 +        Lightweight_Sleep
 +          (Self_ID.Common.LL.L'Address,
-+           Lightweight_Deadline (Time, Mode),
++           Deadline,
 +           Lightweight_Result'Access);
 +      if Result /= 0 then
 +         raise Program_Error with "Flyology timed sleep failed";
