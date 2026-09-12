@@ -667,7 +667,7 @@ then
   exit 1
 fi
 for action in \
-  BeginWaitBatch ForeignWake DrainBudget DeliverTarget StartReplacement \
+  BeginWaitBatch ForeignWake DeliverTarget DrainBudget StartReplacement \
   DrainReplacement DeliverReplacement
 do
   if ! grep -Eq "^<$action .*: [1-9]" "$poller_log"; then

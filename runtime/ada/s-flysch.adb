@@ -4494,6 +4494,9 @@ package body System.Flyology.Scheduler is
             for Index in 1 .. Count loop
                Handle_Poll_Event (Group, Events (Index));
             end loop;
+            if Faults.Enabled and then Faults.Fail (Faults.Poller_Batch_Delivery_Pause) then
+               Faults.Pause_Poller_Batch_Delivery;
+            end if;
          end if;
       end loop;
    end Scheduler_Main;

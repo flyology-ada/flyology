@@ -57,6 +57,14 @@ package body Fault_Control is
       C_Release_Poller_Translation;
    end Release_Poller_Translation;
 
+   function Poller_Batch_Delivery_Parked return Boolean
+   is (C_Poller_Batch_Delivery_Parked /= 0);
+
+   procedure Release_Poller_Batch_Delivery is
+   begin
+      C_Release_Poller_Batch_Delivery;
+   end Release_Poller_Batch_Delivery;
+
    function Descriptor_Cancel_Budget_Parked return Boolean
    is (C_Descriptor_Cancel_Budget_Parked /= 0);
 

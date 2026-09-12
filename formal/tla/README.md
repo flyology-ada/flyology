@@ -106,10 +106,10 @@ evidence.
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
 | `MarkRestartReady` / `AdvanceRestartTime` / `RestartFailure` / `StartRestartGeneration` | static and family restart-window projection from `Ready_Since` and `Stability_Reset` boundaries to admissibility counters |
-| `PollerRegistrationOwnership.BeginWaitBatch` | Linux `Pollers.Wait_Batch` translating an epoll batch while the scheduler group lock is released |
+| `PollerRegistrationOwnership.BeginWaitBatch` with readiness | Linux `Pollers.Wait_Batch` after `epoll_wait` selects and consumes a one-shot, while translation is paused with the scheduler group lock released |
 | `ForeignWake` | `Scheduler.Wake` queuing descriptor cancellation for the owning event-loop thread |
-| `DrainBudget` / `DrainRemaining` | `Process_Descriptor_Cancellations_Locked` consuming at most 64 entries per scheduler turn, retaining a poller wake while work remains |
-| `DeliverTarget` with readiness | `Handle_Poll_Event` retaining a wait whose descriptor cancellation is still queued |
+| `DeliverTarget` with readiness | `Wait_Batch` returning its translated batch and `Handle_Poll_Event` retaining a wait whose descriptor cancellation is still queued |
+| `DrainBudget` / `DrainRemaining` | A subsequent scheduler turn's `Process_Descriptor_Cancellations_Locked` consuming at most 64 entries, retaining a poller wake while work remains |
 | `DeliverTarget` with timer expiry / later `DrainRemaining` | `Promote_Expired_Timers` retaining an expired wait whose descriptor cancellation is still queued, followed by the next scheduler turn consuming that queue entry |
 | `StartReplacement` | `Wait_IO_Many.Plan_Arm` ignoring a matching scheduler link whose owner still has `Descriptor_Cancel_Queued`, then asking the Linux poller to rearm the consumed one-shot |
 | `ReregisterTarget` / `ReapTarget` | the otherwise unsafe reuse or release of a fiber before its queued cancellation is consumed |
@@ -265,10 +265,12 @@ conformance for the same lane.
 `PollerRegistrationOwnership` models one loop thread translating a poll batch,
 a foreign wake that cancels 65 descriptor waiters, the loop's 64-entry drain
 budget, and either readiness or timer expiry selecting the last queued target.
-On the readiness path, epoll consumes and removes the selected one-shot, the
-last cancellation-owned scheduler link survives the bounded drain, and an
-already-ready replacement waiter starts before the next drain. A matching link
-whose owner remains cancellation-queued is not evidence of a live kernel arm.
+On the readiness path, epoll first selects and consumes the one-shot, the loop
+then translates and delivers the returned batch, and only the subsequent
+scheduler turn drains 64 earlier cancellations. The last cancellation-owned
+scheduler link survives that drain, and an already-ready replacement waiter
+starts before the next drain. A matching link whose owner remains
+cancellation-queued is not evidence of a live kernel arm.
 The repaired configuration ignores that link and rearms the replacement; the
 named `PollerRegistrationOwnership_replacement_broken.cfg` configuration counts
 it, suppresses the arm, and violates `ReplacementWaitHasKernelInterest`.

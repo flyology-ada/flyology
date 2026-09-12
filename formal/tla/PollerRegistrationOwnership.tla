@@ -95,8 +95,9 @@ Init ==
     /\ replacementArmSuppressed = FALSE
     /\ lastAction = "Init"
 
-\* The target has a one-shot kernel interest when the loop begins translating
-\* the selected epoll batch.
+\* The readiness witness reaches this boundary only after epoll has selected
+\* the target and consumed its one-shot kernel interest. A timer selection has
+\* not consumed the descriptor interest that accompanies the pending wait.
 BeginWaitBatch ==
     /\ phase = "Idle"
     /\ phase' = "Translating"
@@ -114,7 +115,7 @@ BeginWaitBatch ==
     /\ progressWake' = FALSE
     /\ staleCancellation' = FALSE
     /\ targetReleased' = FALSE
-    /\ kernelInterestArmed' = TRUE
+    /\ kernelInterestArmed' = (SelectedSource = "Timer")
     /\ replacementReady' = FALSE
     /\ replacementWaiting' = FALSE
     /\ replacementDelivered' = FALSE
@@ -151,42 +152,15 @@ ForeignWake ==
     /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "ForeignWake"
 
-\* epoll consumes the selected one-shot and Wait_Batch removes its process-side
-\* record before the loop regains the group lock. The first bounded drain then
-\* consumes 64 earlier entries and leaves the target's scheduler link queued.
-DrainBudget ==
-    /\ phase = "Translating"
-    /\ CancelMode = "Deferred"
-    /\ pendingCancels = 65
-    /\ targetCancelQueued
-    /\ phase' = "BudgetDrained"
-    /\ groupLockHeld' = TRUE
-    /\ loopWriter' = FALSE
-    /\ foreignWriter' = FALSE
-    /\ pendingCancels' = 1
-    /\ targetCancelQueued' = TRUE
-    /\ targetWaiting' = TRUE
-    /\ targetRunnable' = FALSE
-    /\ targetLive' = targetLive
-    /\ waitGeneration' = waitGeneration
-    /\ cancelGeneration' = cancelGeneration
-    /\ deliverySource' = deliverySource
-    /\ progressWake' = TRUE
-    /\ staleCancellation' = FALSE
-    /\ targetReleased' = FALSE
-    /\ kernelInterestArmed' = IF SelectedSource = "Readiness" THEN FALSE
-                                ELSE kernelInterestArmed
-    /\ replacementReady' = replacementReady
-    /\ replacementWaiting' = FALSE
-    /\ replacementDelivered' = FALSE
-    /\ replacementArmAttempted' = FALSE
-    /\ replacementArmSuppressed' = FALSE
-    /\ lastAction' = "DrainBudget"
-
-\* Cancellation ownership retains selected readiness or an expired timer. An
-\* unowned delivery instead permits the legacy reuse and reap counterexamples.
+\* Wait_Batch finishes translating the already-selected readiness batch before
+\* the scheduler regains the group lock and delivers every returned event. A
+\* timer is instead delivered after the first cancellation drain. Cancellation
+\* ownership retains either source; an unowned delivery permits the legacy
+\* reuse and reap counterexamples.
 DeliverTarget ==
-    /\ phase = "BudgetDrained"
+    /\ IF SelectedSource = "Readiness"
+         THEN phase = "Translating"
+         ELSE phase = "BudgetDrained"
     /\ targetCancelQueued
     /\ phase' =
          IF DeliveryMode = "CancellationOwned"
@@ -229,11 +203,47 @@ DeliverTarget ==
     /\ replacementArmSuppressed' = FALSE
     /\ lastAction' = "DeliverTarget"
 
+\* The first bounded deferred-cancellation drain is a later scheduler turn.
+\* It consumes 64 earlier entries and leaves the target's scheduler link
+\* queued, after readiness delivery or before timer delivery respectively.
+DrainBudget ==
+    /\ CancelMode = "Deferred"
+    /\ pendingCancels = 65
+    /\ targetCancelQueued
+    /\ IF SelectedSource = "Readiness"
+         THEN phase \in {"SelectedRetained", "Delivered"}
+         ELSE phase = "Translating"
+    /\ phase' = "BudgetDrained"
+    /\ groupLockHeld' = TRUE
+    /\ loopWriter' = FALSE
+    /\ foreignWriter' = FALSE
+    /\ pendingCancels' = 1
+    /\ targetCancelQueued' = TRUE
+    /\ targetWaiting' = targetWaiting
+    /\ targetRunnable' = targetRunnable
+    /\ targetLive' = targetLive
+    /\ waitGeneration' = waitGeneration
+    /\ cancelGeneration' = cancelGeneration
+    /\ deliverySource' = deliverySource
+    /\ progressWake' = TRUE
+    /\ staleCancellation' = FALSE
+    /\ targetReleased' = targetReleased
+    /\ kernelInterestArmed' = kernelInterestArmed
+    /\ replacementReady' = replacementReady
+    /\ replacementWaiting' = FALSE
+    /\ replacementDelivered' = FALSE
+    /\ replacementArmAttempted' = FALSE
+    /\ replacementArmSuppressed' = FALSE
+    /\ lastAction' = "DrainBudget"
+
 \* The already-ready replacement starts before the next cancellation drain.
 \* Counting the cancellation-owned target link suppresses the needed kernel
 \* arm; ignoring that link permits Poller.Watch to ADD the consumed one-shot.
 StartReplacement ==
-    /\ phase = "SelectedRetained"
+    /\ phase = "BudgetDrained"
+    /\ DeliveryMode = "CancellationOwned"
+    /\ SelectedSource = "Readiness"
+    /\ AfterDelivery = "Reregister"
     /\ targetCancelQueued
     /\ replacementReady
     /\ phase' = "ReplacementWaiting"
@@ -251,7 +261,7 @@ StartReplacement ==
                    targetReleased>>
 
 ReregisterTarget ==
-    /\ phase = "Delivered"
+    /\ phase = IF SelectedSource = "Readiness" THEN "BudgetDrained" ELSE "Delivered"
     /\ DeliveryMode = "Unowned"
     /\ AfterDelivery = "Reregister"
     /\ targetRunnable
@@ -268,7 +278,7 @@ ReregisterTarget ==
                    replacementArmAttempted, replacementArmSuppressed>>
 
 ReapTarget ==
-    /\ phase = "Delivered"
+    /\ phase = IF SelectedSource = "Readiness" THEN "BudgetDrained" ELSE "Delivered"
     /\ DeliveryMode = "Unowned"
     /\ AfterDelivery = "Reap"
     /\ targetRunnable
@@ -363,8 +373,8 @@ DeliverReplacement ==
 Next ==
     \/ BeginWaitBatch
     \/ ForeignWake
-    \/ DrainBudget
     \/ DeliverTarget
+    \/ DrainBudget
     \/ StartReplacement
     \/ ReregisterTarget
     \/ ReapTarget

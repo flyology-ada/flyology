@@ -316,12 +316,12 @@ do
   fi
   symbols=$(undefined_symbols "$artifact")
   if printf '%s\n' "$symbols" | grep -E \
-    'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_translation|poller_translation_released|begin_descriptor_cancel_(budget|timer)|descriptor_cancel_(budget|timer)_released|note_poller_cancel|note_descriptor_cancel)' \
+    'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_(translation|batch_delivery)|poller_(translation|batch_delivery)_released|begin_descriptor_cancel_(budget|timer)|descriptor_cancel_(budget|timer)_released|note_poller_cancel|note_descriptor_cancel)' \
     >/dev/null
   then
     printf '%s\n' "production runtime hook reference survived in $artifact" >&2
     printf '%s\n' "$symbols" | grep -E \
-      'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_translation|poller_translation_released|begin_descriptor_cancel_(budget|timer)|descriptor_cancel_(budget|timer)_released|note_poller_cancel|note_descriptor_cancel)' \
+      'flyology_disabled_hook_must_be_elided|flyology_test_(begin_poller_(translation|batch_delivery)|poller_(translation|batch_delivery)_released|begin_descriptor_cancel_(budget|timer)|descriptor_cancel_(budget|timer)_released|note_poller_cancel|note_descriptor_cancel)' \
       >&2 || true
     exit 1
   fi

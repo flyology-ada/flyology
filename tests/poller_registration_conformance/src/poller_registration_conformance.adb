@@ -273,6 +273,7 @@ procedure Poller_Registration_Conformance is
       Limit : Ada.Real_Time.Time;
    begin
       Fault_Control.Release_Poller_Translation;
+      Fault_Control.Release_Poller_Batch_Delivery;
       Fault_Control.Release_Descriptor_Cancel_Budget;
       Observation.Stop_Runner;
       if Self.Loop_Runner /= null and then not Self.Loop_Runner'Terminated then
@@ -346,6 +347,9 @@ procedure Poller_Registration_Conformance is
 
       function Translation_Parked return Boolean
       is (Fault_Control.Poller_Translation_Parked);
+
+      function Batch_Delivery_Parked return Boolean
+      is (Fault_Control.Poller_Batch_Delivery_Parked);
 
       function All_Cancels_Queued return Boolean
       is (Fault_Control.Descriptor_Cancel_Queued_Count = Backlog_Count + 1);
@@ -422,6 +426,7 @@ procedure Poller_Registration_Conformance is
             Observation.Reset;
             Fault_Control.Reset;
             Fault_Control.Arm (Fault_Control.Poller_Translation_Pause);
+            Fault_Control.Arm (Fault_Control.Poller_Batch_Delivery_Pause);
             Fault_Control.Arm (Fault_Control.Descriptor_Cancel_Budget_Pause);
             for Socket_Index in Self.Victims'Range loop
                Sockets.Create_Socket_Pair (Self.Victims (Socket_Index), Self.Victim_Peers (Socket_Index));
@@ -458,7 +463,7 @@ procedure Poller_Registration_Conformance is
                Progress_Wake              => False,
                Stale_Cancellation         => False,
                Target_Released            => False,
-               Kernel_Interest_Armed      => True,
+               Kernel_Interest_Armed      => False,
                Replacement_Ready          => False,
                Replacement_Waiting        => False,
                Replacement_Delivered      => False,
@@ -484,17 +489,34 @@ procedure Poller_Registration_Conformance is
             Self.Current.Progress_Wake := True;
             Self.Current.Last_Action := Model.State_Last_Action_Foreign_Wake;
 
-         when Model.Input_Command_Drain_Budget        =>
-            if Index /= 3 or else Action /= "PollerRegistrationOwnership!DrainBudget" then
-               Fail ("unexpected DrainBudget step");
+         when Model.Input_Command_Deliver_Target      =>
+            if Index /= 3 or else Action /= "PollerRegistrationOwnership!DeliverTarget" then
+               Fail ("unexpected DeliverTarget step");
                return;
             end if;
             --  Ready the lightweight runner while poller translation is
-            --  paused with the group lock released. The later budget pause
-            --  holds that lock, so its release path must not perform a
-            --  protected wake that tries to acquire the same lock.
+            --  paused with the group lock released. The delivery pause is
+            --  reached only after Wait_Batch returns and Handle_Poll_Event
+            --  retains the cancellation-owned target under the group lock.
             Observation.Start_Replacement;
             Fault_Control.Release_Poller_Translation;
+            Await (Batch_Delivery_Parked'Access, "event loop did not finish poll-batch delivery");
+            if Fault_Control.Descriptor_Cancel_Processed_Count /= 0 then
+               Fail ("cancellation drain ran before returned poll-batch delivery was observed");
+               return;
+            end if;
+            Self.Current.Phase := Model.State_Phase_Selected_Retained;
+            Self.Current.Group_Lock_Held := True;
+            Self.Current.Loop_Writer := False;
+            Self.Current.Replacement_Ready := True;
+            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Target;
+
+         when Model.Input_Command_Drain_Budget        =>
+            if Index /= 4 or else Action /= "PollerRegistrationOwnership!DrainBudget" then
+               Fail ("unexpected DrainBudget step");
+               return;
+            end if;
+            Fault_Control.Release_Poller_Batch_Delivery;
             Await (Budget_Parked'Access, "event loop did not stop after cancellation budget");
             if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
                Fail ("bounded drain did not process exactly 64 cancellations");
@@ -504,27 +526,17 @@ procedure Poller_Registration_Conformance is
             Self.Current.Group_Lock_Held := True;
             Self.Current.Loop_Writer := False;
             Self.Current.Pending_Cancels := 1;
-            Self.Current.Kernel_Interest_Armed := False;
             Self.Current.Last_Action := Model.State_Last_Action_Drain_Budget;
-
-         when Model.Input_Command_Deliver_Target      =>
-            if Index /= 4 or else Action /= "PollerRegistrationOwnership!DeliverTarget" then
-               Fail ("unexpected DeliverTarget step");
-               return;
-            end if;
-            Fault_Control.Release_Descriptor_Cancel_Budget;
-            Await (Replacement_Ready'Access, "ready replacement did not run after retained readiness");
-            if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
-               Fail ("remaining cancellation drained before replacement dispatch");
-               return;
-            end if;
-            Self.Current.Phase := Model.State_Phase_Selected_Retained;
-            Self.Current.Replacement_Ready := True;
-            Self.Current.Last_Action := Model.State_Last_Action_Deliver_Target;
 
          when Model.Input_Command_Start_Replacement   =>
             if Index /= 5 or else Action /= "PollerRegistrationOwnership!StartReplacement" then
                Fail ("unexpected StartReplacement step");
+               return;
+            end if;
+            Fault_Control.Release_Descriptor_Cancel_Budget;
+            Await (Replacement_Ready'Access, "ready replacement did not run after the bounded drain");
+            if Fault_Control.Descriptor_Cancel_Processed_Count /= Backlog_Count then
+               Fail ("remaining cancellation drained before replacement dispatch");
                return;
             end if;
             Observation.Proceed_Replacement;

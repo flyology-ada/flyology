@@ -43,7 +43,8 @@ package Fault_Control is
       Poller_Translation_Pause,
       Descriptor_Cancel_Budget_Pause,
       Descriptor_Cancel_Timer_Pause,
-      Timer_Maintenance_Due);
+      Timer_Maintenance_Due,
+      Poller_Batch_Delivery_Pause);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -86,7 +87,8 @@ package Fault_Control is
       Poller_Translation_Pause       => 38,
       Descriptor_Cancel_Budget_Pause => 39,
       Descriptor_Cancel_Timer_Pause  => 40,
-      Timer_Maintenance_Due          => 41);
+      Timer_Maintenance_Due          => 41,
+      Poller_Batch_Delivery_Pause    => 42);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -103,6 +105,8 @@ package Fault_Control is
 
    function Poller_Translation_Parked return Boolean;
    procedure Release_Poller_Translation;
+   function Poller_Batch_Delivery_Parked return Boolean;
+   procedure Release_Poller_Batch_Delivery;
    function Descriptor_Cancel_Budget_Parked return Boolean;
    procedure Release_Descriptor_Cancel_Budget;
    function Descriptor_Cancel_Timer_Parked return Boolean;
@@ -173,6 +177,12 @@ private
 
    procedure C_Release_Poller_Translation;
    pragma Import (C, C_Release_Poller_Translation, "flyology_test_release_poller_translation");
+
+   function C_Poller_Batch_Delivery_Parked return Interfaces.C.int;
+   pragma Import (C, C_Poller_Batch_Delivery_Parked, "flyology_test_poller_batch_delivery_parked");
+
+   procedure C_Release_Poller_Batch_Delivery;
+   pragma Import (C, C_Release_Poller_Batch_Delivery, "flyology_test_release_poller_batch_delivery");
 
    function C_Descriptor_Cancel_Budget_Parked return Interfaces.C.int;
    pragma Import (C, C_Descriptor_Cancel_Budget_Parked, "flyology_test_descriptor_cancel_budget_parked");

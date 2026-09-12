@@ -45,7 +45,8 @@ package System.Flyology.Faults is
       Poller_Translation_Pause,
       Descriptor_Cancel_Budget_Pause,
       Descriptor_Cancel_Timer_Pause,
-      Timer_Maintenance_Due);
+      Timer_Maintenance_Due,
+      Poller_Batch_Delivery_Pause);
 
    for Fault_Point use
      (Fiber_Allocation               => 1,
@@ -87,7 +88,8 @@ package System.Flyology.Faults is
       Poller_Translation_Pause       => 38,
       Descriptor_Cancel_Budget_Pause => 39,
       Descriptor_Cancel_Timer_Pause  => 40,
-      Timer_Maintenance_Due          => 41);
+      Timer_Maintenance_Due          => 41,
+      Poller_Batch_Delivery_Pause    => 42);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);
@@ -115,6 +117,9 @@ package System.Flyology.Faults is
 
    procedure Pause_Poller_Translation;
    pragma Import (C, Pause_Poller_Translation, "flyology_disabled_hook_must_be_elided");
+
+   procedure Pause_Poller_Batch_Delivery;
+   pragma Import (C, Pause_Poller_Batch_Delivery, "flyology_disabled_hook_must_be_elided");
 
    procedure Pause_Descriptor_Cancel_Budget;
    pragma Import (C, Pause_Descriptor_Cancel_Budget, "flyology_disabled_hook_must_be_elided");

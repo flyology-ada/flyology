@@ -32,6 +32,12 @@ package body System.Flyology.Faults is
    function Test_Poller_Translation_Released return Interfaces.C.int;
    pragma Import (C, Test_Poller_Translation_Released, "flyology_test_poller_translation_released");
 
+   procedure Test_Begin_Poller_Batch_Delivery;
+   pragma Import (C, Test_Begin_Poller_Batch_Delivery, "flyology_test_begin_poller_batch_delivery");
+
+   function Test_Poller_Batch_Delivery_Released return Interfaces.C.int;
+   pragma Import (C, Test_Poller_Batch_Delivery_Released, "flyology_test_poller_batch_delivery_released");
+
    procedure Test_Begin_Descriptor_Cancel_Budget;
    pragma Import (C, Test_Begin_Descriptor_Cancel_Budget, "flyology_test_begin_descriptor_cancel_budget");
 
@@ -100,6 +106,16 @@ package body System.Flyology.Faults is
          Ignored := Usleep (1_000);
       end loop;
    end Pause_Poller_Translation;
+
+   procedure Pause_Poller_Batch_Delivery is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
+   begin
+      Test_Begin_Poller_Batch_Delivery;
+      while Test_Poller_Batch_Delivery_Released = 0 loop
+         Ignored := Usleep (1_000);
+      end loop;
+   end Pause_Poller_Batch_Delivery;
 
    procedure Pause_Descriptor_Cancel_Budget is
       Ignored : Interfaces.C.int;
