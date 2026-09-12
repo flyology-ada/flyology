@@ -28,9 +28,9 @@ package System.Flyology.Scheduler is
    function Set_Priority
      (T : System.Address; Priority : Interfaces.C.int; Loss_Of_Inheritance : Interfaces.C.int)
       return Interfaces.C.int;
-   --  Priority is GNARL's current (active) Ada priority. A nonzero
-   --  Loss_Of_Inheritance preserves RM D.2.2(9) head-of-queue placement at
-   --  the lightweight task's next event-loop dispatching point.
+   --  Priority is GNARL's current (active) Ada priority. When a ready task
+   --  loses inherited priority, a nonzero Loss_Of_Inheritance selects the
+   --  RM D.2.2(9) head-of-queue placement for its immediate requeue.
 
    function Destroy (T : System.Address) return Interfaces.C.int;
 
