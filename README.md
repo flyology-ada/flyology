@@ -478,22 +478,23 @@ tasks of equal priority run FIFO. The state transitions are precise:
 
 | Priority change while the lightweight task is… | Scheduler effect |
 | --- | --- |
-| Ready | Remove from the old bucket and append to the new bucket in constant time |
+| Ready | Remove from the old bucket and reinsert in constant time: at the head after loss of inherited priority, otherwise at the tail |
 | Waiting | Record the active priority; the next wake enters that priority's bucket |
 | Running | Record the active priority; it takes effect at the next suspension or yield |
 | Migrating | Preserve the active priority and use it when the target loop accepts the task |
-| Losing rendezvous-inherited priority | If the next handoff is a yield on the same loop, enter the head of the base-priority bucket as required by RM D.2.2(9); a wait, migration, or finish consumes that intent without carrying it to a later wake or another group |
+| Losing rendezvous-inherited priority | Requeue at the head only if the task is already Ready; a Running or waiting task retains no placement preference for its next yield or wake |
 
 `Ada.Dynamic_Priorities.Set_Priority` remains the standard public operation. A
 self-change reaches GNARL's normal dispatching point, which yields the lightweight
 task after the runtime update. GNARL's rendezvous priority boost is also routed
 into the lightweight scheduler, so a low-base-priority acceptor runs at the caller's
 inherited active priority and returns with the specified loss-of-inheritance
-queue placement. Head placement describes entering a ready queue now; it is not
-a durable preference. A server that blocks after losing inheritance was never
-inserted in that queue, so its later wake uses normal FIFO placement. The
-deterministic `priority_semantics_smoke` test covers ready, waiting, running,
-rendezvous, loss followed by blocking, and cross-group migration cases; the
+queue placement. Head placement describes reordering a task that is already
+ready; it is not a durable preference. A running server that yields or blocks
+after losing inheritance was never reinserted by the priority change, so its
+next yield or wake uses normal FIFO placement. The deterministic
+`priority_semantics_smoke` test covers ready, waiting, running, rendezvous loss
+followed by a yield or blocking, and cross-group migration cases; the
 `priority_scheduling` showcase prints the visible highest-priority/FIFO trace.
 
 This is fixed-priority cooperative scheduling, not a hard-real-time claim:
