@@ -106,6 +106,14 @@ evidence.
 | `ForwardParentStop` | `Run_Nested` forwarding the parent generation's stop token into family shutdown |
 | `PropagateNestedEscalation` | `Run_Nested` reporting the same active incident context to its parent control |
 | `MarkRestartReady` / `AdvanceRestartTime` / `RestartFailure` / `StartRestartGeneration` | static and family restart-window projection from `Ready_Since` and `Stability_Reset` boundaries to admissibility counters |
+| `PollerRegistrationOwnership.BeginWaitBatch` with readiness | Linux `Pollers.Wait_Batch` after `epoll_wait` selects and consumes a one-shot, while translation is paused with the scheduler group lock released |
+| `ForeignWake` | `Scheduler.Wake` queuing descriptor cancellation for the owning event-loop thread |
+| `DeliverTarget` with readiness | `Wait_Batch` returning its translated batch and `Handle_Poll_Event` retaining a wait whose descriptor cancellation is still queued |
+| `DrainBudget` / `DrainRemaining` | A subsequent scheduler turn's `Process_Descriptor_Cancellations_Locked` consuming at most 64 entries, retaining a poller wake while work remains |
+| `DeliverTarget` with timer expiry / later `DrainRemaining` | `Promote_Expired_Timers` retaining an expired wait whose descriptor cancellation is still queued, followed by the next scheduler turn consuming that queue entry |
+| `StartReplacement` | `Wait_IO_Many.Plan_Arm` ignoring a matching scheduler link whose owner still has `Descriptor_Cancel_Queued`, then asking the Linux poller to rearm the consumed one-shot |
+| `ReregisterTarget` / `ReapTarget` | the otherwise unsafe reuse or release of a fiber before its queued cancellation is consumed |
+| `DeliverReplacement` | the replacement descriptor waiter receiving readiness from its newly armed one-shot |
 | `CompletionSetFinalize.BeginFinalize` | `Operations.Finalize` requesting cancellation while the model records the peer's initial reported state as a ghost baseline |
 | `EarlyGateReturn` | `Wait_Some` publishing an unrelated terminal, unreported slot before polling descriptors |
 | `RestoreReported` | the finalizer restoring every non-target slot's saved reported flag after `Wait_Some` |
@@ -253,6 +261,47 @@ family restart windows. A dedicated safe/broken restart-window pair confirms
 that stale readiness does not carry over across replacement starts, and
 `check-tla.sh` validates a full nine-transition witness plus implementation
 conformance for the same lane.
+
+`PollerRegistrationOwnership` models one loop thread translating a poll batch,
+a foreign wake that cancels 65 descriptor waiters, the loop's 64-entry drain
+budget, and either readiness or timer expiry selecting the last queued target.
+On the readiness path, epoll first selects and consumes the one-shot, the loop
+then translates and delivers the returned batch, and only the subsequent
+scheduler turn drains 64 earlier cancellations. The last cancellation-owned
+scheduler link survives that drain, and an already-ready replacement waiter
+starts before the next drain. A matching link whose owner remains
+cancellation-queued is not evidence of a live kernel arm.
+The repaired configuration ignores that link and rearms the replacement; the
+named `PollerRegistrationOwnership_replacement_broken.cfg` configuration counts
+it, suppresses the arm, and violates `ReplacementWaitHasKernelInterest`.
+The safe readiness and timer configurations require a single registration-list
+writer, a live fiber and matching wait generation for every queued cancellation,
+exclusive cancellation ownership of the target, a retained progress wake, and
+no stale cancellation after reuse, plus a kernel interest for every replacement
+wait. Timer expiry enters a retained state with the wait, fiber, kernel interest,
+and cancellation entry unchanged; only the later modeled drain releases that
+state and makes the target runnable. The direct-cancellation broken configuration
+violates the single-writer rule during batch translation. The unowned-readiness
+configuration permits the target to re-register before its old queue entry is
+drained, and the unowned-timer configuration permits it to be reaped while that
+entry still references it; both are required counterexamples.
+
+`PollerRegistrationOwnershipProof` states two top-level safety theorems. TLAPM
+expands their proof into eight obligations, all of which `check-tla.sh` requires:
+the deferred, cancellation-owned configurations initialize in the stated
+safety conjunction, and every modeled action preserves it for either selected
+source.
+This is an invariant proof over the extraction, not a refinement proof of the
+Ada scheduler or Linux poller. The deterministic seven-transition Ada replay
+uses the readiness witness and compares the real queued/processed cancellation,
+replacement-arm, and replacement-delivery observations with the generated
+model boundary. It does not replay timer delivery. The timer side is instead
+aligned with production by the Linux-only
+`linux_abort_readiness_waiter_smoke`, which holds an expired finite-deadline
+target beyond the 64-entry drain budget at the production scheduler guard.
+Both that runtime test and the Ada replay require Linux epoll behavior; on other
+hosts `check-tla.sh` runs the TLC and TLAPS coverage but explicitly defers the
+implementation replay.
 
 `CompletionSetFinalize` isolates the scope-exit drain for one pending target
 and one unrelated terminal slot, models one failed TLS-upgrade driver with an

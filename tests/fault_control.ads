@@ -39,7 +39,12 @@ package Fault_Control is
       File_Uring_Synchronous_Eventfd,
       Connect_Interrupted,
       Create_Lifecycle_Window,
-      Automatic_Placement_Window);
+      Automatic_Placement_Window,
+      Poller_Translation_Pause,
+      Descriptor_Cancel_Budget_Pause,
+      Descriptor_Cancel_Timer_Pause,
+      Timer_Maintenance_Due,
+      Poller_Batch_Delivery_Pause);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -78,7 +83,12 @@ package Fault_Control is
       File_Uring_Synchronous_Eventfd => 34,
       Connect_Interrupted            => 35,
       Create_Lifecycle_Window        => 36,
-      Automatic_Placement_Window     => 37);
+      Automatic_Placement_Window     => 37,
+      Poller_Translation_Pause       => 38,
+      Descriptor_Cancel_Budget_Pause => 39,
+      Descriptor_Cancel_Timer_Pause  => 40,
+      Timer_Maintenance_Due          => 41,
+      Poller_Batch_Delivery_Pause    => 42);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -92,6 +102,18 @@ package Fault_Control is
    function Automatic_Placement_Claim_Group return Integer;
    procedure Release_Create_Registration;
    procedure Release_Automatic_Placement;
+
+   function Poller_Translation_Parked return Boolean;
+   procedure Release_Poller_Translation;
+   function Poller_Batch_Delivery_Parked return Boolean;
+   procedure Release_Poller_Batch_Delivery;
+   function Descriptor_Cancel_Budget_Parked return Boolean;
+   procedure Release_Descriptor_Cancel_Budget;
+   function Descriptor_Cancel_Timer_Parked return Boolean;
+   procedure Release_Descriptor_Cancel_Timer;
+   function Poller_Cancel_During_Translation_Count return Natural;
+   function Descriptor_Cancel_Queued_Count return Natural;
+   function Descriptor_Cancel_Processed_Count return Natural;
 
    type File_Cancel_Backend is (Darwin_AIO, Linux_IO_Uring, Linux_Native_AIO);
    for File_Cancel_Backend use (Darwin_AIO => 1, Linux_IO_Uring => 2, Linux_Native_AIO => 3);
@@ -149,6 +171,41 @@ private
 
    procedure C_Release_Automatic_Placement;
    pragma Import (C, C_Release_Automatic_Placement, "flyology_test_release_automatic_placement");
+
+   function C_Poller_Translation_Parked return Interfaces.C.int;
+   pragma Import (C, C_Poller_Translation_Parked, "flyology_test_poller_translation_parked");
+
+   procedure C_Release_Poller_Translation;
+   pragma Import (C, C_Release_Poller_Translation, "flyology_test_release_poller_translation");
+
+   function C_Poller_Batch_Delivery_Parked return Interfaces.C.int;
+   pragma Import (C, C_Poller_Batch_Delivery_Parked, "flyology_test_poller_batch_delivery_parked");
+
+   procedure C_Release_Poller_Batch_Delivery;
+   pragma Import (C, C_Release_Poller_Batch_Delivery, "flyology_test_release_poller_batch_delivery");
+
+   function C_Descriptor_Cancel_Budget_Parked return Interfaces.C.int;
+   pragma Import (C, C_Descriptor_Cancel_Budget_Parked, "flyology_test_descriptor_cancel_budget_parked");
+
+   procedure C_Release_Descriptor_Cancel_Budget;
+   pragma Import (C, C_Release_Descriptor_Cancel_Budget, "flyology_test_release_descriptor_cancel_budget");
+
+   function C_Descriptor_Cancel_Timer_Parked return Interfaces.C.int;
+   pragma Import (C, C_Descriptor_Cancel_Timer_Parked, "flyology_test_descriptor_cancel_timer_parked");
+
+   procedure C_Release_Descriptor_Cancel_Timer;
+   pragma Import (C, C_Release_Descriptor_Cancel_Timer, "flyology_test_release_descriptor_cancel_timer");
+
+   function C_Poller_Cancel_During_Translation_Count return Interfaces.C.unsigned;
+   pragma
+     Import
+       (C, C_Poller_Cancel_During_Translation_Count, "flyology_test_poller_cancel_during_translation_count");
+
+   function C_Descriptor_Cancel_Queued_Count return Interfaces.C.unsigned;
+   pragma Import (C, C_Descriptor_Cancel_Queued_Count, "flyology_test_descriptor_cancel_queued_count");
+
+   function C_Descriptor_Cancel_Processed_Count return Interfaces.C.unsigned;
+   pragma Import (C, C_Descriptor_Cancel_Processed_Count, "flyology_test_descriptor_cancel_processed_count");
 
    function C_File_Cancel_Count
      (Backend : Interfaces.C.int; Disposition : Interfaces.C.int; Terminal : Interfaces.C.int)

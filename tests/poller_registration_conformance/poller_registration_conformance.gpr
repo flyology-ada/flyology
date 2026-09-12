@@ -1,0 +1,31 @@
+with "flyology.gpr";
+with "flyology_tla.gpr";
+
+project Poller_Registration_Conformance is
+   for Languages use ("Ada");
+   for Source_Dirs use ("src", "generated", "..");
+   for Source_Files use
+     ("poller_registration_conformance.adb",
+      "poller_registration_ownership_model.ads",
+      "poller_registration_ownership_model.adb",
+      "fault_control.ads",
+      "fault_control.adb");
+   for Object_Dir use "build/obj";
+   for Exec_Dir use "bin";
+   for Main use ("poller_registration_conformance.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatw.X", "-gnatwJ", "-gnatyM110");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Builder is
+      for Executable ("poller_registration_conformance.adb") use
+        "poller-registration-conformance";
+   end Builder;
+end Poller_Registration_Conformance;

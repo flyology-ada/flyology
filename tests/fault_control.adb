@@ -49,6 +49,47 @@ package body Fault_Control is
       C_Release_Automatic_Placement;
    end Release_Automatic_Placement;
 
+   function Poller_Translation_Parked return Boolean
+   is (C_Poller_Translation_Parked /= 0);
+
+   procedure Release_Poller_Translation is
+   begin
+      C_Release_Poller_Translation;
+   end Release_Poller_Translation;
+
+   function Poller_Batch_Delivery_Parked return Boolean
+   is (C_Poller_Batch_Delivery_Parked /= 0);
+
+   procedure Release_Poller_Batch_Delivery is
+   begin
+      C_Release_Poller_Batch_Delivery;
+   end Release_Poller_Batch_Delivery;
+
+   function Descriptor_Cancel_Budget_Parked return Boolean
+   is (C_Descriptor_Cancel_Budget_Parked /= 0);
+
+   procedure Release_Descriptor_Cancel_Budget is
+   begin
+      C_Release_Descriptor_Cancel_Budget;
+   end Release_Descriptor_Cancel_Budget;
+
+   function Descriptor_Cancel_Timer_Parked return Boolean
+   is (C_Descriptor_Cancel_Timer_Parked /= 0);
+
+   procedure Release_Descriptor_Cancel_Timer is
+   begin
+      C_Release_Descriptor_Cancel_Timer;
+   end Release_Descriptor_Cancel_Timer;
+
+   function Poller_Cancel_During_Translation_Count return Natural
+   is (Natural (C_Poller_Cancel_During_Translation_Count));
+
+   function Descriptor_Cancel_Queued_Count return Natural
+   is (Natural (C_Descriptor_Cancel_Queued_Count));
+
+   function Descriptor_Cancel_Processed_Count return Natural
+   is (Natural (C_Descriptor_Cancel_Processed_Count));
+
    function File_Cancel_Count
      (Backend : File_Cancel_Backend; Disposition : File_Cancel_Disposition; Terminal : Boolean) return Natural
    is (Natural
