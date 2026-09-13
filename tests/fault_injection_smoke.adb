@@ -9,6 +9,7 @@ with Flyology.IO.Sockets;
 with Flyology;
 with Flyology.Buffers;
 with Flyology.Dormancy;
+with Flyology.Execution_Groups;
 with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Files;
@@ -16,6 +17,8 @@ with Flyology.Observability;
 with Flyology.Operations;
 with Interfaces;
 with Interfaces.C;
+with System;
+with System.Flyology.Scheduler;
 
 procedure Fault_Injection_Smoke is
    use type Ada.Real_Time.Time;
@@ -40,6 +43,9 @@ procedure Fault_Injection_Smoke is
 
    function Open_FD_Count return Interfaces.C.int;
    pragma Import (C, Open_FD_Count, "flyology_test_open_fd_count");
+
+   function Arm_Lifecycle_Exit_Check (State, Groups : Interfaces.C.int) return Interfaces.C.int;
+   pragma Import (C, Arm_Lifecycle_Exit_Check, "flyology_test_arm_exit_check");
 
    Case_Name : constant String :=
      (if Ada.Command_Line.Argument_Count = 0 then "" else Ada.Command_Line.Argument (1));
@@ -97,6 +103,81 @@ procedure Fault_Injection_Smoke is
       Fault_Control.Reset;
       Warm_Group;
    end Expect_Activation_Failure;
+
+   procedure Expect_Creation_Allocation_Failure_Recovery
+     (At_Point : Fault_Control.Point; Cold_Start : Boolean; Expect_Null_Response : Boolean)
+   is
+      package Groups renames Flyology.Execution_Groups;
+      package Scheduler renames System.Flyology.Scheduler;
+
+      use type Groups.Pool_Reduction_Phase;
+      use type Groups.Pool_Reduction_Request_Result;
+
+      Grown_Size            : constant Groups.Loop_Pool_Size := 3;
+      Target_Size           : constant Groups.Loop_Pool_Size := 1;
+      Stack_Size            : constant Interfaces.C.size_t := Interfaces.C.size_t (512 * 1_024);
+      Key                   : aliased Interfaces.C.int := 0;
+      Result                : Interfaces.C.int := 0;
+      Storage_Error_Escaped : Boolean := False;
+      Status                : Groups.Pool_Reduction_Status;
+
+      procedure Unused_Wrapper (T : System.Address);
+      pragma Convention (C, Unused_Wrapper);
+
+      procedure Unused_Wrapper (T : System.Address) is
+         pragma Unreferenced (T);
+      begin
+         raise Program_Error with "failed creation unexpectedly ran its wrapper";
+      end Unused_Wrapper;
+   begin
+      if Arm_Lifecycle_Exit_Check (3, 0) /= 0 then
+         raise Program_Error with "cannot arm post-allocation-failure lifecycle check";
+      end if;
+      if not Cold_Start then
+         Warm_Group;
+      end if;
+      Groups.Grow_Configured_Pool (Grown_Size);
+      Fault_Control.Reset;
+      Fault_Control.Arm (At_Point);
+      begin
+         Result :=
+           Scheduler.Create
+             (T          => Key'Address,
+              Stack_Size => Stack_Size,
+              Priority   => Interfaces.C.int (System.Default_Priority),
+              Wrapper    => Unused_Wrapper'Address,
+              Group      => -1);
+      exception
+         when Storage_Error =>
+            Storage_Error_Escaped := True;
+      end;
+      if Expect_Null_Response then
+         if Storage_Error_Escaped or else Result /= -1 then
+            raise Program_Error with "context allocation failure escaped its null-result boundary";
+         end if;
+      elsif not Storage_Error_Escaped then
+         raise Program_Error with "creation storage allocation failure did not raise Storage_Error";
+      end if;
+      if Fault_Control.Calls (At_Point) = 0 then
+         raise Program_Error with "creation allocation fault was not reached";
+      end if;
+
+      Fault_Control.Reset;
+      if Groups.Request_Pool_Reduction (Target_Size) /= Groups.Reduction_Started then
+         raise Program_Error with "post-failure pool reduction did not start";
+      end if;
+      Status := Groups.Pool_Reduction;
+      if Status.Phase /= Groups.Drained or else Status.Placement_Claims /= 0 then
+         raise Program_Error
+           with
+             "creation allocation failure retained a placement claim: phase="
+             & Groups.Pool_Reduction_Phase'Image (Status.Phase)
+             & " claims="
+             & Natural'Image (Status.Placement_Claims);
+      end if;
+      Groups.Grow_Configured_Pool (Grown_Size);
+      Warm_Group;
+   end Expect_Creation_Allocation_Failure_Recovery;
 
    procedure Expect_Discard_Failure_Recovery is
    begin
@@ -1807,6 +1888,15 @@ begin
    if Case_Name = "fiber-allocation" then
       Warm_Group;
       Expect_Activation_Failure (Fault_Control.Fiber_Allocation);
+   elsif Case_Name = "group-storage-allocation" then
+      Expect_Creation_Allocation_Failure_Recovery
+        (Fault_Control.Group_Storage_Allocation, Cold_Start => True, Expect_Null_Response => False);
+   elsif Case_Name = "fiber-storage-allocation" then
+      Expect_Creation_Allocation_Failure_Recovery
+        (Fault_Control.Fiber_Storage_Allocation, Cold_Start => False, Expect_Null_Response => False);
+   elsif Case_Name = "context-storage-allocation" then
+      Expect_Creation_Allocation_Failure_Recovery
+        (Fault_Control.Context_Storage_Allocation, Cold_Start => False, Expect_Null_Response => True);
    elsif Case_Name = "stack-map" then
       Warm_Group;
       Expect_Activation_Failure (Fault_Control.Stack_Mapping);

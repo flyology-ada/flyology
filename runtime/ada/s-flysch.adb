@@ -999,10 +999,57 @@ package body System.Flyology.Scheduler is
    end Group_Thread;
 
    function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access is
-      Group  : Loop_Group_Access;
-      Result : C.int;
-      Ready  : Boolean;
-      Failed : Boolean;
+      Group                  : Loop_Group_Access := null;
+      Result                 : C.int;
+      Ready                  : Boolean;
+      Failed                 : Boolean;
+      Group_Lock_Initialized : Boolean := False;
+      Poller_Initialized     : Boolean := False;
+      Topology_Locked        : Boolean := False;
+      Group_Owned            : Boolean := False;
+      Group_Published        : Boolean := False;
+
+      procedure Release_Topology_Lock;
+      procedure Release_Unpublished_Group;
+      --  Reclaim the initialized prefix of a group that was never published.
+      procedure Unpublish_Group;
+
+      procedure Release_Topology_Lock is
+      begin
+         if Topology_Locked then
+            Topology_Locked := False;
+            Unlock_Topology;
+         end if;
+      end Release_Topology_Lock;
+
+      procedure Release_Unpublished_Group is
+         Item : Loop_Group_Access := Group;
+      begin
+         Group := null;
+         Group_Owned := False;
+         if Poller_Initialized then
+            Poller_Initialized := False;
+            Pollers.Finalize (Item.Scheduler_Poller);
+         end if;
+         if Group_Lock_Initialized then
+            Group_Lock_Initialized := False;
+            Result := OSI.pthread_mutex_destroy (Item.Lock.Value'Access);
+            if Result /= 0 then
+               Fatal (Mutex_Failure);
+            end if;
+         end if;
+         Free_Group (Item);
+      end Release_Unpublished_Group;
+
+      procedure Unpublish_Group is
+      begin
+         Groups (Group_Index (Id)) := null;
+         Group_Published := False;
+         Created_Group_Count := Created_Group_Count - 1;
+         if Created_Group_Count = 0 then
+            Lifecycle_State := 0;
+         end if;
+      end Unpublish_Group;
    begin
       if not Initialized or else not Scheduling.Valid_Group (Id) then
          return null;
@@ -1011,48 +1058,56 @@ package body System.Flyology.Scheduler is
       end if;
 
       Lock_Topology;
+      Topology_Locked := True;
       --  Revalidate under the lock Finalize holds while it inspects and stops
       --  the group table, so finalization cannot be restarted into by a
       --  caller that passed the unlocked guard above.
       if not Scheduling.Creation_Admitted (Lifecycle_State) then
-         Unlock_Topology;
+         Release_Topology_Lock;
          return null;
       end if;
       Group := Groups (Group_Index (Id));
       if Group /= null then
          if Group.Dedicated /= Dedicated and then Scheduling.Dedicated_Group (Id) then
-            Unlock_Topology;
+            Release_Topology_Lock;
             return null;
          end if;
-         Unlock_Topology;
+         Release_Topology_Lock;
       else
          if Faults.Enabled and then Faults.Fail (Faults.Group_Startup) then
-            Unlock_Topology;
+            Release_Topology_Lock;
             return null;
          end if;
+         if Faults.Enabled and then Faults.Fail (Faults.Group_Storage_Allocation) then
+            raise Storage_Error;
+         end if;
          Group := new Loop_Group;
+         Group_Owned := True;
          Group.Id := Id;
          Group.Dedicated := Dedicated;
          Group.Placement_Mode := Placement_Requests (Group_Index (Id)).Mode;
          Group.Placement_Value := Placement_Requests (Group_Index (Id)).Value;
          if Group.Placement_Mode /= No_Placement_Mode and then Ensure_Placement_Platform /= 0 then
-            Free_Group (Group);
-            Unlock_Topology;
+            Release_Topology_Lock;
+            Release_Unpublished_Group;
             return null;
          end if;
          Result := OSI.pthread_mutex_init (Group.Lock.Value'Access, null);
          if Result /= 0 then
-            Free_Group (Group);
-            Unlock_Topology;
+            Release_Topology_Lock;
+            Release_Unpublished_Group;
             return null;
          end if;
+         Group_Lock_Initialized := True;
          if not Pollers.Initialize (Group.Scheduler_Poller) then
-            Free_Group (Group);
-            Unlock_Topology;
+            Release_Topology_Lock;
+            Release_Unpublished_Group;
             return null;
          end if;
+         Poller_Initialized := True;
 
          Groups (Group_Index (Id)) := Group;
+         Group_Published := True;
          Created_Group_Count := Created_Group_Count + 1;
          Lifecycle_State := 1;
          Result :=
@@ -1062,17 +1117,13 @@ package body System.Flyology.Scheduler is
          --  cannot publish Started until it acquires Topology_Lock, which is
          --  still held here, so readers cannot observe an uninitialized id.
          if Result /= 0 then
-            Groups (Group_Index (Id)) := null;
-            Created_Group_Count := Created_Group_Count - 1;
-            if Created_Group_Count = 0 then
-               Lifecycle_State := 0;
-            end if;
-            Pollers.Finalize (Group.Scheduler_Poller);
-            Free_Group (Group);
-            Unlock_Topology;
+            Unpublish_Group;
+            Release_Topology_Lock;
+            Release_Unpublished_Group;
             return null;
          end if;
-         Unlock_Topology;
+         Group_Owned := False;
+         Release_Topology_Lock;
       end if;
 
       --  This is a bounded, first-use-only startup wait. If called by an
@@ -1080,9 +1131,10 @@ package body System.Flyology.Scheduler is
       --  group thread publishes Started or Start_Failed under Topology_Lock.
       loop
          Lock_Topology;
+         Topology_Locked := True;
          Ready := Group.Started;
          Failed := Group.Start_Failed;
-         Unlock_Topology;
+         Release_Topology_Lock;
          exit when Ready or else Failed;
          Result := Sched_Yield;
          if Result /= 0 then
@@ -1094,6 +1146,18 @@ package body System.Flyology.Scheduler is
          return null;
       end if;
       return Group;
+   exception
+      when others =>
+         if Group_Owned and then Group_Published and then Topology_Locked then
+            Unpublish_Group;
+         end if;
+         --  Once unpublished, the group is private. Drop the topology lock
+         --  before cleanup so a cleanup failure cannot strand global state.
+         Release_Topology_Lock;
+         if Group_Owned then
+            Release_Unpublished_Group;
+         end if;
+         raise;
    end Ensure_Group;
 
    function Select_Automatic_Group return C.int is
@@ -2561,7 +2625,7 @@ package body System.Flyology.Scheduler is
      (T : System.Address; Stack_Size : C.size_t; Priority : C.int; Wrapper : System.Address; Group : C.int)
       return C.int
    is
-      Item              : Fiber_Access;
+      Item              : Fiber_Access := null;
       Target            : Loop_Group_Access;
       Shard             : constant Registry_Shard_Index := Registry_Shard_For (T);
       Group_Id          : C.int := Group;
@@ -2624,38 +2688,59 @@ package body System.Flyology.Scheduler is
          end if;
       end if;
 
-      Target := Ensure_Group (Group_Id, Dedicated => False);
-      if Target = null then
-         if Automatic_Claimed then
-            Release_Automatic_Placement_Claim (Group_Id);
+      begin
+         Target := Ensure_Group (Group_Id, Dedicated => False);
+         if Target = null then
+            if Automatic_Claimed then
+               Release_Automatic_Placement_Claim (Group_Id);
+            end if;
+            Release_Claim;
+            return -1;
          end if;
-         Release_Claim;
-         return -1;
-      end if;
 
-      if Faults.Enabled and then Faults.Fail (Faults.Fiber_Allocation) then
-         if Automatic_Claimed then
-            Release_Automatic_Placement_Claim (Group_Id);
+         if Faults.Enabled and then Faults.Fail (Faults.Fiber_Allocation) then
+            if Automatic_Claimed then
+               Release_Automatic_Placement_Claim (Group_Id);
+            end if;
+            Release_Claim;
+            return -1;
          end if;
-         Release_Claim;
-         return -1;
-      end if;
-      Item := new Fiber;
-      Item.T := T;
-      Item.Wrapper := Wrapper;
-      Item.Priority := Priority;
-      Item.Group := Target;
-      Item.Automatic_Placement := Automatic;
-      Item.Context :=
-        Contexts.Create (Stack_Size, Fiber_Main'Address, Fiber_To_Address (Item), Target.Scheduler_Context);
-      if Item.Context = null then
-         Free_Fiber (Item);
-         if Automatic_Claimed then
-            Release_Automatic_Placement_Claim (Group_Id);
+         if Faults.Enabled and then Faults.Fail (Faults.Fiber_Storage_Allocation) then
+            raise Storage_Error;
          end if;
-         Release_Claim;
-         return -1;
-      end if;
+         Item := new Fiber;
+         Item.T := T;
+         Item.Wrapper := Wrapper;
+         Item.Priority := Priority;
+         Item.Group := Target;
+         Item.Automatic_Placement := Automatic;
+         Item.Context :=
+           Contexts.Create
+             (Stack_Size, Fiber_Main'Address, Fiber_To_Address (Item), Target.Scheduler_Context);
+         if Item.Context = null then
+            Free_Fiber (Item);
+            if Automatic_Claimed then
+               Release_Automatic_Placement_Claim (Group_Id);
+            end if;
+            Release_Claim;
+            return -1;
+         end if;
+      exception
+         when others =>
+            --  Neither cleanup path touches Target, so claims may be released
+            --  before reclaiming partially constructed task state. This also
+            --  ensures a cleanup failure cannot retain either claim.
+            if Automatic_Claimed then
+               Release_Automatic_Placement_Claim (Group_Id);
+               Automatic_Claimed := False;
+            end if;
+            Release_Claim;
+            if Item /= null then
+               Contexts.Destroy (Item.Context);
+               Free_Fiber (Item);
+            end if;
+            raise;
+      end;
 
       --  Test-only widening of the create window. It parks a creator that
       --  holds a claim and a started group so a concurrent finalization

@@ -585,11 +585,16 @@ package body System.Flyology.Contexts is
       Page_Size   : constant C.size_t := C.size_t (Get_Page_Size);
       Guard_Size  : constant C.size_t := Guard_Bytes (Page_Size);
       Usable_Size : C.size_t;
-      Item        : Context_Access := new Context;
+      Item        : Context_Access := null;
       Arena       : Stack_Arena_Access;
       Slot        : Natural;
       Top         : SSE.Integer_Address;
    begin
+      if Faults.Enabled and then Faults.Fail (Faults.Context_Storage_Allocation) then
+         raise Storage_Error;
+      end if;
+      Item := new Context;
+
       --  Sizing.Accepts rejects a zero request and every request whose page
       --  round-up would wrap size_t into a smaller usable size - zero for the
       --  classic (size_t) -1 request - or whose arena arithmetic would wrap.
@@ -618,6 +623,15 @@ package body System.Flyology.Contexts is
       Top := Top and not SSE.Integer_Address (16#0F#);
       Initialize_Registers (Item.Registers'Address, SSE.To_Address (Top), Trampoline'Address);
       return Item;
+   exception
+      when Storage_Error =>
+         if Item /= null then
+            if Item.Owns_Mapping then
+               Release_Stack (To_Arena (Item.Pool_Arena), Natural (Item.Pool_Slot), Item.Stack);
+            end if;
+            Free (Item);
+         end if;
+         return null;
    end Create;
 
    procedure Switch (From, To : not null Context_Access) is
