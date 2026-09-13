@@ -260,6 +260,122 @@ procedure Fault_Injection_Smoke is
       Flyology.IO.Sockets.Close_Socket (Writers (1));
    end Test_Multi_Watch_Rollback;
 
+   procedure Test_Overlapping_Rearm_Rollback is
+      type Socket_Array is array (Positive range <>) of Flyology.IO.Sockets.Socket_Type;
+      Readers   : Socket_Array (1 .. 3);
+      Writers   : Socket_Array (Readers'Range);
+      Old_Ready : Boolean := False
+      with Atomic;
+      Failed    : Boolean := False
+      with Atomic;
+
+      task type Old_Waiter is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Old_Waiter;
+
+      task body Old_Waiter is
+      begin
+         Old_Ready :=
+           IO.Wait (Flyology.IO.Sockets.Native_Descriptor (Readers (1)), IO.For_Read, Timeout => 1.0);
+      end Old_Waiter;
+
+      task type Failed_Waiter is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Failed_Waiter;
+
+      task body Failed_Waiter is
+         Outcome : IO.Wait_Outcome;
+         pragma Unreferenced (Outcome);
+      begin
+         begin
+            --  Reverse scheduler registration rearms Readers (1), introduces
+            --  Readers (2), and then faults while arming Readers (3).
+            Outcome :=
+              IO.Wait_Interruptibly
+                (Flyology.IO.Sockets.Native_Descriptor (Readers (3)),
+                 IO.For_Read,
+                 0.1,
+                 (1 => Flyology.IO.Sockets.Native_Descriptor (Readers (2)),
+                  2 => Flyology.IO.Sockets.Native_Descriptor (Readers (1))));
+         exception
+            when IO.Device_Error =>
+               Failed := True;
+         end;
+      end Failed_Waiter;
+
+      type Old_Waiter_Access is access Old_Waiter;
+      type Failed_Waiter_Access is access Failed_Waiter;
+      procedure Free_Old is new Ada.Unchecked_Deallocation (Old_Waiter, Old_Waiter_Access);
+      procedure Free_Failed is new Ada.Unchecked_Deallocation (Failed_Waiter, Failed_Waiter_Access);
+      Old_Item    : Old_Waiter_Access;
+      Failed_Item : Failed_Waiter_Access;
+   begin
+      for Index in Readers'Range loop
+         Flyology.IO.Sockets.Create_Socket_Pair (Readers (Index), Writers (Index));
+      end loop;
+
+      Fault_Control.Reset;
+      Old_Item := new Old_Waiter;
+      declare
+         Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while Fault_Control.Calls (Fault_Control.Poller_Watch) < 1 loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "old wait did not reach the poller";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+
+      Fault_Control.Reset;
+      Fault_Control.Arm (Fault_Control.Poller_Watch, First => 2);
+      Failed_Item := new Failed_Waiter;
+      declare
+         Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while not Failed_Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "overlapping fault waiter did not terminate";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free_Failed (Failed_Item);
+      if not Failed or else Fault_Control.Calls (Fault_Control.Poller_Watch) < 3 then
+         raise Program_Error with "overlapping later watch failure was not surfaced";
+      end if;
+
+      Fault_Control.Reset;
+      declare
+         Data : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 1);
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Flyology.IO.Sockets.Send_Socket (Writers (1), Data, Last);
+         if Last /= Data'Last then
+            raise Program_Error with "old waiter readiness signal was short";
+         end if;
+      end;
+      declare
+         Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      begin
+         while not Old_Item.all'Terminated loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "old waiter lost its kernel interest";
+            end if;
+            delay 0.001;
+         end loop;
+      end;
+      Free_Old (Old_Item);
+      if not Old_Ready then
+         raise Program_Error with "old waiter timed out after overlapping rollback";
+      end if;
+
+      for Index in Readers'Range loop
+         Flyology.IO.Sockets.Close_Socket (Readers (Index));
+         Flyology.IO.Sockets.Close_Socket (Writers (Index));
+      end loop;
+   end Test_Overlapping_Rearm_Rollback;
+
    procedure Test_EINTR is
       Item : Probe_Access;
    begin
@@ -1705,6 +1821,7 @@ begin
    elsif Case_Name = "watch-error" then
       Test_Watch_Error;
       Test_Multi_Watch_Rollback;
+      Test_Overlapping_Rearm_Rollback;
    elsif Case_Name = "eintr" then
       Test_EINTR;
    elsif Case_Name = "file-saturation" then

@@ -114,6 +114,9 @@ evidence.
 | `StartReplacement` | `Wait_IO_Many.Plan_Arm` ignoring a matching scheduler link whose owner still has `Descriptor_Cancel_Queued`, then asking the Linux poller to rearm the consumed one-shot |
 | `ReregisterTarget` / `ReapTarget` | the otherwise unsafe reuse or release of a fiber before its queued cancellation is consumed |
 | `DeliverReplacement` | the replacement descriptor waiter receiving readiness from its newly armed one-shot |
+| `BeginOldWait` / `CloseAndReuse` | a raw descriptor wait retaining its scheduler link after close removes the kernel interest and the descriptor number is reused |
+| `BeginReusedWait` | `Wait_IO_Many.Plan_Arm` submitting a new kernel arm despite the stale matching scheduler link; Linux `Poller.Watch` retries absent `EPOLL_CTL_MOD` state with `EPOLL_CTL_ADD` |
+| `DeliverReusedWait` | the reused descriptor waiter receiving readiness from the replacement file's kernel interest |
 | `CompletionSetFinalize.BeginFinalize` | `Operations.Finalize` requesting cancellation while the model records the peer's initial reported state as a ghost baseline |
 | `EarlyGateReturn` | `Wait_Some` publishing an unrelated terminal, unreported slot before polling descriptors |
 | `RestoreReported` | the finalizer restoring every non-target slot's saved reported flag after `Wait_Some` |
@@ -274,6 +277,11 @@ cancellation-queued is not evidence of a live kernel arm.
 The repaired configuration ignores that link and rearms the replacement; the
 named `PollerRegistrationOwnership_replacement_broken.cfg` configuration counts
 it, suppresses the arm, and violates `ReplacementWaitHasKernelInterest`.
+The separate descriptor-reuse path keeps the old raw wait link after close
+drops its kernel interest, reuses that numeric descriptor for a new file, and
+requires the replacement wait to rearm it. The repaired configuration always
+submits that arm; `PollerRegistrationOwnership_reuse_broken.cfg` treats the
+stale link as a registration cache and violates `ReusedReadinessDelivered`.
 The safe readiness and timer configurations require a single registration-list
 writer, a live fiber and matching wait generation for every queued cancellation,
 exclusive cancellation ownership of the target, a retained progress wake, and
@@ -287,15 +295,17 @@ drained, and the unowned-timer configuration permits it to be reaped while that
 entry still references it; both are required counterexamples.
 
 `PollerRegistrationOwnershipProof` states two top-level safety theorems. TLAPM
-expands their proof into eight obligations, all of which `check-tla.sh` requires:
+expands their proof into fourteen obligations, all of which `check-tla.sh` requires:
 the deferred, cancellation-owned configurations initialize in the stated
 safety conjunction, and every modeled action preserves it for either selected
-source.
+source and the always-rearm descriptor-reuse policy.
 This is an invariant proof over the extraction, not a refinement proof of the
 Ada scheduler or Linux poller. The deterministic seven-transition Ada replay
 uses the readiness witness and compares the real queued/processed cancellation,
 replacement-arm, and replacement-delivery observations with the generated
-model boundary. It does not replay timer delivery. The timer side is instead
+model boundary. A separate four-transition replay closes a watched descriptor,
+requires numeric reuse while the old link remains, and compares the replacement
+arm and readiness delivery. Neither replay covers timer delivery. The timer side is instead
 aligned with production by the Linux-only
 `linux_abort_readiness_waiter_smoke`, which holds an expired finite-deadline
 target beyond the 64-entry drain budget at the production scheduler guard.

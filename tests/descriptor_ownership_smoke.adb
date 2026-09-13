@@ -27,10 +27,10 @@ procedure Descriptor_Ownership_Smoke is
    function C_Dup (FD : Interfaces.C.int) return Interfaces.C.int
    with Import, Convention => C, External_Name => "dup";
 
-   procedure Assert_No_Event_Waits is
+   procedure Assert_No_Event_Waits (Group : Flyology.Execution_Groups.Group_Id := 0) is
       Sample : Flyology.Observability.Group_Snapshot;
    begin
-      pragma Assert (Flyology.Observability.Snapshot (0, Sample));
+      pragma Assert (Flyology.Observability.Snapshot (Group, Sample));
       pragma Assert (Sample.Descriptor_Waits = 0);
       pragma Assert (Sample.Interrupt_Waits = 0);
    end Assert_No_Event_Waits;
@@ -1704,6 +1704,62 @@ procedure Descriptor_Ownership_Smoke is
       Assert_No_Event_Waits;
    end Run_Timeout_Close_Reuse;
 
+   procedure Run_Overlapping_Close_Reuse is
+      Old_Server, Old_Peer : Sockets.Socket_Type;
+      Old_FD               : Flyology.IO.Descriptor;
+   begin
+      Sockets.Create_Socket_Pair (Old_Server, Old_Peer);
+      Old_FD := Sockets.Native_Descriptor (Old_Server);
+      declare
+         task Old_Waiter
+           with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Old_Waiter;
+
+         task body Old_Waiter is
+            Ready : Boolean;
+            pragma Unreferenced (Ready);
+         begin
+            Ready := Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, Timeout => 2.0);
+         end Old_Waiter;
+      begin
+         Await_Event_Waits (1, Group => 1);
+         Sockets.Close_Socket (Old_Server);
+         Sockets.Close_Socket (Old_Peer);
+
+         declare
+            New_Server, New_Peer : Sockets.Socket_Type;
+            Ready                : Boolean := False
+            with Atomic;
+            Data                 : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 42);
+            Last                 : Ada.Streams.Stream_Element_Offset;
+         begin
+            Sockets.Create_Socket_Pair (New_Server, New_Peer);
+            pragma Assert (Sockets.Native_Descriptor (New_Server) = Old_FD);
+            declare
+               task Reused_Waiter
+                 with CPU => 1 is
+                  pragma Task_Info (Flyology.Lightweight_Task);
+               end Reused_Waiter;
+
+               task body Reused_Waiter is
+               begin
+                  Ready := Flyology.IO.Wait (Old_FD, Flyology.IO.For_Read, Timeout => 0.5);
+               end Reused_Waiter;
+            begin
+               Await_Event_Waits (2, Group => 1);
+               Sockets.Send_Socket (New_Peer, Data, Last);
+               pragma Assert (Last = Data'Last);
+            end;
+            pragma Assert (Ready);
+            Sockets.Close_Socket (New_Server);
+            Sockets.Close_Socket (New_Peer);
+         end;
+         abort Old_Waiter;
+      end;
+      Assert_No_Event_Waits (Group => 1);
+   end Run_Overlapping_Close_Reuse;
+
    procedure Run_Timeout_Readiness_Races (Model : Flyology.Execution_Model) is
    begin
       for Iteration in 1 .. 12 loop
@@ -1788,6 +1844,7 @@ begin
    Run_Competing_Adopters (Flyology.Native_Task);
    Run_Exclusive_Waiters;
    Run_Timeout_Close_Reuse;
+   Run_Overlapping_Close_Reuse;
    Run_Timeout_Readiness_Races (Flyology.Lightweight_Task);
    Run_Timeout_Readiness_Races (Flyology.Native_Task);
 end Descriptor_Ownership_Smoke;

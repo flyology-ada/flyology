@@ -168,6 +168,9 @@ expect_safe \
   PollerRegistrationOwnership PollerRegistrationOwnership_timer.cfg \
   poller-registration-timer-safe
 expect_safe \
+  PollerRegistrationOwnership PollerRegistrationOwnership_reuse.cfg \
+  poller-registration-reuse-safe
+expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_buddy.cfg allocator-buddy
 expect_safe \
   AllocatorAlgorithms AllocatorAlgorithms_best_fit.cfg allocator-best-fit
@@ -256,6 +259,9 @@ expect_counterexample \
   PollerRegistrationOwnership \
   PollerRegistrationOwnership_replacement_broken.cfg \
   ReplacementWaitHasKernelInterest poller-registration-replacement-broken
+expect_counterexample \
+  PollerRegistrationOwnership PollerRegistrationOwnership_reuse_broken.cfg \
+  ReusedReadinessDelivered poller-registration-reuse-broken
 expect_temporal_counterexample \
   CompletionSetFinalize CompletionSetFinalize_blocking_close.cfg \
   DriverFailureCompletes completion-finalize-blocking-close
@@ -411,12 +417,12 @@ then
   cat "$poller_proof_log" >&2
   exit 1
 fi
-if ! grep -Fq 'All 8 obligations proved' "$poller_proof_log"; then
+if ! grep -Fq 'All 14 obligations proved' "$poller_proof_log"; then
    cat "$poller_proof_log" >&2
-   printf '%s\n' 'poller-registration proof did not discharge all eight obligations' >&2
+   printf '%s\n' 'poller-registration proof did not discharge all fourteen obligations' >&2
    exit 1
 fi
-printf '%s\n' 'TLAPS proved       PollerRegistrationOwnershipProof 8 obligations'
+printf '%s\n' 'TLAPS proved       PollerRegistrationOwnershipProof 14 obligations'
 
 finalize_raw="$run_root/completion-set-finalize-raw.json"
 finalize_log="$run_root/completion-set-finalize-witness.log"
@@ -721,6 +727,51 @@ cmp \
   "$project_root/tests/poller_registration_conformance/traces/poller-registration-ownership.trace.json" \
   "$poller_trace"
 
+poller_reuse_raw="$run_root/poller-registration-reuse-raw.json"
+poller_reuse_log="$run_root/poller-registration-reuse-witness.log"
+poller_reuse_meta="$run_root/poller-registration-reuse-witness-states"
+poller_reuse_config="$project_root/tests/poller_registration_conformance/PollerRegistrationOwnership_reuse_trace.cfg"
+set +e
+"$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+  -workers 1 -coverage 1 -noGenerateSpecTE -metadir "$poller_reuse_meta" \
+  -config "$poller_reuse_config" \
+  -dumpTrace json "$poller_reuse_raw" PollerRegistrationOwnership.tla \
+  >"$poller_reuse_log" 2>&1
+poller_reuse_status=$?
+set -e
+if [ "$poller_reuse_status" -ne 12 ] \
+  || ! grep -Fq 'Invariant WitnessIncomplete is violated.' "$poller_reuse_log" \
+  || ! grep -Fq '5 states generated, 5 distinct states found' "$poller_reuse_log"
+then
+  cat "$poller_reuse_log" >&2
+  printf '%s\n' 'poller-registration reuse witness did not reach its exact terminal state' >&2
+  exit 1
+fi
+for action in BeginOldWait CloseAndReuse BeginReusedWait DeliverReusedWait
+do
+  if ! grep -Eq "^<$action .*: [1-9]" "$poller_reuse_log"; then
+    cat "$poller_reuse_log" >&2
+    printf '%s\n' "poller-registration reuse witness did not cover $action" >&2
+    exit 1
+  fi
+done
+if grep -q '^Warning:' "$poller_reuse_log"; then
+  cat "$poller_reuse_log" >&2
+  printf '%s\n' 'poller-registration reuse witness emitted a TLC warning' >&2
+  exit 1
+fi
+
+poller_reuse_trace="$run_root/poller-registration-reuse.trace.json"
+"$tla_cli" trace normalize \
+  "$poller_reuse_raw" "$poller_reuse_trace" \
+  "$model_root/PollerRegistrationOwnership.tla" \
+  --config "$poller_reuse_config" \
+  --toolchain tla2tools-1.8.0+b123b22 8 32
+"$tla_cli" trace validate "$poller_reuse_trace" 8 32
+cmp \
+  "$project_root/tests/poller_registration_conformance/traces/poller-registration-reuse.trace.json" \
+  "$poller_reuse_trace"
+
 if [ -n "${ALR:-}" ]; then
   alire=$ALR
 else
@@ -950,6 +1001,7 @@ if [ "$(uname -s)" = Linux ]; then
     "$poller_conformance_source/alire.toml" \
     "$poller_conformance_source/poller_registration_conformance.gpr" \
     "$poller_conformance_source/PollerRegistrationOwnership_trace.cfg" \
+    "$poller_conformance_source/PollerRegistrationOwnership_reuse_trace.cfg" \
     "$poller_conformance_root/"
   cp "$poller_conformance_source/src/"* "$poller_conformance_root/src/"
   cp "$poller_conformance_source/generated/"* "$poller_conformance_root/generated/"
@@ -997,8 +1049,20 @@ if [ "$(uname -s)" = Linux ]; then
   grep -Fq '"compared_steps":7' \
     "$run_root/poller-registration-result.json"
   printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   7 transitions'
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    ./bin/poller-registration-conformance --format json \
+    --result-json "$run_root/poller-registration-reuse-result.json" \
+    "$poller_reuse_trace" >"$run_root/poller-registration-reuse-stdout.json"
+  cmp \
+    "$run_root/poller-registration-reuse-result.json" \
+    "$run_root/poller-registration-reuse-stdout.json"
+  grep -Fq '"verdict":"conformant"' \
+    "$run_root/poller-registration-reuse-result.json"
+  grep -Fq '"compared_steps":4' \
+    "$run_root/poller-registration-reuse-result.json"
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership reuse 4 transitions'
 else
-  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership   Linux-only replay deferred'
+  printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership traces Linux-only replay deferred'
 fi
 
 printf '%s\n' "Flyology TLA+ model checks passed"
