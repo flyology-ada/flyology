@@ -44,7 +44,10 @@ package Fault_Control is
       Descriptor_Cancel_Budget_Pause,
       Descriptor_Cancel_Timer_Pause,
       Timer_Maintenance_Due,
-      Poller_Batch_Delivery_Pause);
+      Poller_Batch_Delivery_Pause,
+      Fiber_Storage_Allocation,
+      Context_Storage_Allocation,
+      Group_Storage_Allocation);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -88,7 +91,10 @@ package Fault_Control is
       Descriptor_Cancel_Budget_Pause => 39,
       Descriptor_Cancel_Timer_Pause  => 40,
       Timer_Maintenance_Due          => 41,
-      Poller_Batch_Delivery_Pause    => 42);
+      Poller_Batch_Delivery_Pause    => 42,
+      Fiber_Storage_Allocation       => 43,
+      Context_Storage_Allocation     => 44,
+      Group_Storage_Allocation       => 45);
 
    function Enabled return Boolean;
    procedure Reset;

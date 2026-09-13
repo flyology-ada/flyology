@@ -1071,6 +1071,13 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 #  reduction must retain that claim until the released task drains to group 0.
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/pool_reduction_claim_smoke"
+#  Allocation failure after automatic placement must not retain the creation
+#  or placement claims that keep later pool reduction and growth coherent.
+for allocation_case in group-storage-allocation fiber-storage-allocation context-storage-allocation; do
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    "$allocation_case"
+done
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/connect_transient_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \

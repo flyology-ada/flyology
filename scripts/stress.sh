@@ -113,7 +113,9 @@ if [ "$run_faults" = 1 ]; then
     "$project_root/tests/bin/create_finalize_race_smoke"
 
   fault_cases='
-    fiber-allocation stack-map stack-protect stack-discard group-startup
+    fiber-allocation group-storage-allocation fiber-storage-allocation
+    context-storage-allocation
+    stack-map stack-protect stack-discard group-startup
     watch-error eintr file-saturation file-dormancy-exclusion
     file-uring-cq-backpressure file-uring-probe-fallback
     file-uring-post-setup-fallback
