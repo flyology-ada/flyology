@@ -91,13 +91,19 @@ procedure Lightweight_Affinity_Smoke is
          Result.Report (False);
    end Runner;
 
-   Passed         : Boolean;
-   Premain_Passed : Boolean;
+   Passed             : Boolean;
+   Bookkeeping_Passed : Boolean;
+   Creation_Passed    : Boolean;
 begin
-   Lightweight_Affinity_Premain.Wait (Premain_Passed);
-   if not Premain_Passed then
+   Lightweight_Affinity_Premain.Wait (Bookkeeping_Passed, Creation_Passed);
+   if not Bookkeeping_Passed then
       raise Program_Error
         with "pre-main lightweight affinity changed CPU or domain bookkeeping";
+   end if;
+   if not Creation_Passed then
+      raise Program_Error
+        with
+          "dispatching-domain creation changed the shared event-loop pthread mask";
    end if;
 
    Result.Wait (Passed);

@@ -47,6 +47,25 @@ int flyology_test_thread_affinity_observable_cpu(void) {
     return 0;
 }
 
+int flyology_test_thread_affinity_removable_cpu(void) {
+    cpu_set_t set;
+    int result = pthread_getaffinity_np(pthread_self(), sizeof(set), &set);
+
+    if (result != 0) {
+        return -result;
+    }
+    if (CPU_COUNT(&set) < 2) {
+        return 0;
+    }
+    for (int cpu = CPU_SETSIZE - 1; cpu >= 0; --cpu) {
+        if (CPU_ISSET(cpu, &set)) {
+            /* Leave the first allowed CPU for the post-main affinity case. */
+            return cpu + 1;
+        }
+    }
+    return 0;
+}
+
 int flyology_test_thread_affinity_snapshot(void *storage, size_t size) {
     cpu_set_t set;
     int result;
