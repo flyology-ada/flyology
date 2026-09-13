@@ -458,6 +458,11 @@ compiler="$compiler_prefix/bin/gcc"
 patch_root="$project_root/runtime/patches/$patch_family"
 
 tasking_patch="$patch_root/$platform/s-taprop.adb.patch"
+if [ "$platform" = linux ]; then
+  dispatching_domains_patch="$patch_root/linux/s-mudido.adb.patch"
+else
+  dispatching_domains_patch=
+fi
 case "$platform:$compat_family" in
   darwin:gnat-16)
     monotonic_patch="$patch_root/darwin/s-tpopmo-gnat-16.adb.patch"
@@ -559,6 +564,9 @@ require_generated_text () {
 }
 
 apply_runtime_patch "$tasking_patch"
+if [ -n "$dispatching_domains_patch" ]; then
+  apply_runtime_patch "$dispatching_domains_patch"
+fi
 if [ -n "$monotonic_patch" ]; then
   apply_runtime_patch "$monotonic_patch"
 fi
@@ -591,6 +599,10 @@ require_generated_text \
   "pragma Task_Info (System.Flyology.Native_Designation);" \
   "native interrupt service"
 if [ "$platform" = linux ]; then
+  require_generated_text \
+    "$generated_include/s-mudido.adb" \
+    "System.Flyology.Scheduler.Is_Lightweight_Task" \
+    "Linux lightweight dispatching-domain guard"
   require_generated_text \
     "$generated_include/s-taprop.adb" \
     '"flyology_linux_pthread_stack_min"' \
@@ -694,6 +706,11 @@ compile_upstream_runtime_ada \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
+if [ "$platform" = linux ]; then
+  compile_upstream_runtime_ada \
+    -I "$generated_include" \
+    "$generated_include/s-mudido.adb"
+fi
 compile_interrupt_runtime_ada \
   -I "$generated_include" \
   "$generated_include/s-interr.adb"
@@ -711,6 +728,9 @@ cp \
   s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-interr.ali \
   s-taskin.ali s-tassta.ali \
   "$generated_lib/"
+if [ "$platform" = linux ]; then
+  cp s-mudido.ali "$generated_lib/"
+fi
 if [ "$compat_family" = gnat-legacy ]; then
   cp a-sytaco.ali "$generated_lib/"
 fi
@@ -746,7 +766,7 @@ if [ "$compat_family" = gnat-legacy ]; then
   ar -r "$generated_lib/libgnarl.a" a-sytaco.o
 fi
 if [ "$platform" = linux ]; then
-  ar -r "$generated_lib/libgnarl.a" s-fllimo.o
+  ar -r "$generated_lib/libgnarl.a" s-fllimo.o s-mudido.o
 fi
 ranlib "$generated_lib/libgnarl.a"
 
@@ -800,6 +820,9 @@ mkdir "$verification_root"
   cd "$verification_root"
   ar -x "$generated_lib/libgnarl.a" \
     s-taprop.o s-interr.o s-taskin.o s-tassta.o
+  if [ "$platform" = linux ]; then
+    ar -x "$generated_lib/libgnarl.a" s-mudido.o
+  fi
   if [ "$compat_family" = gnat-legacy ]; then
     ar -x "$generated_lib/libgnarl.a" a-sytaco.o
   fi
@@ -829,6 +852,10 @@ require_archived_symbol \
   system__flyology__native_designation \
   "native interrupt service"
 if [ "$platform" = linux ]; then
+  require_archived_symbol \
+    "$verification_root/s-mudido.o" \
+    system__flyology__scheduler__is_lightweight_task \
+    "Linux lightweight dispatching-domain guard"
   require_archived_symbol \
     "$verification_root/s-taprop.o" \
     flyology_linux_pthread_stack_min \
@@ -862,6 +889,10 @@ record_patched_core source adainclude/s-taskin.adb \
   "$generated_include/s-taskin.adb"
 record_patched_core source adainclude/s-interr.adb \
   "$generated_include/s-interr.adb"
+if [ "$platform" = linux ]; then
+  record_patched_core source adainclude/s-mudido.adb \
+    "$generated_include/s-mudido.adb"
+fi
 if [ -n "$monotonic_patch" ]; then
   record_patched_core source adainclude/s-tpopmo.adb \
     "$generated_include/s-tpopmo.adb"
@@ -880,6 +911,10 @@ record_patched_core archive adalib/libgnarl.a:s-taskin.o \
   "$verification_root/s-taskin.o"
 record_patched_core archive adalib/libgnarl.a:s-interr.o \
   "$verification_root/s-interr.o"
+if [ "$platform" = linux ]; then
+  record_patched_core archive adalib/libgnarl.a:s-mudido.o \
+    "$verification_root/s-mudido.o"
+fi
 if [ "$compat_family" = gnat-legacy ]; then
   record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
     "$verification_root/a-sytaco.o"

@@ -432,3 +432,18 @@
        if State
            (System.Interrupt_Management.Abort_Task_Interrupt) /= Default
        then
+@@ -1288,6 +1572,11 @@
+    procedure Set_Task_Affinity (T : ST.Task_Id) is
+       use type Multiprocessors.CPU_Range;
+-
++
+    begin
++      --  Dispatching-domain creation reapplies affinity without passing
++      --  through Unchecked_Set_Affinity. A lightweight task shares its
++      --  event-loop pthread with its group, so keep that path inert too.
++      if Is_Lightweight_Task (T) then
++         return;
++      end if;
++
+       --  Do nothing if there is no support for setting affinities or the
+       --  underlying thread has not yet been created. If the thread has not
