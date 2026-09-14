@@ -118,6 +118,8 @@ is
    --  Task-owned scope guard that keeps a lightweight task on its current
    --  scheduler thread. Pins nest and each object releases one level. Declare,
    --  use, and finalize it in the task that acquires it; do not transfer it.
+   --  Finalization by another task raises Program_Error in that task and does
+   --  not release the acquiring task's pin level.
    --  Native tasks accept pins as no-ops because their thread is permanent.
    --  @field Active Whether this object owns one pin level
    --  @field Owner Runtime identity of the acquiring task
@@ -274,6 +276,8 @@ private
 
    --  Release Object's pin level on its acquiring task.
    --  @param Object Pin guard leaving scope
+   --  @exception Program_Error The runtime rejects finalization, including
+   --     finalization by a task other than the owner
    overriding
    procedure Finalize (Object : in out Thread_Pin);
 

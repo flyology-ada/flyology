@@ -1,3 +1,4 @@
+with Ada.Unchecked_Deallocation;
 with Flyology;
 with Flyology.Execution_Groups;
 with Interfaces.C.Extensions;
@@ -18,6 +19,11 @@ procedure Thread_Affinity_Smoke is
 
    Cleanup_Test : exception;
 
+   type Pin_Access is access Groups.Thread_Pin;
+
+   procedure Free_Pin is new
+     Ada.Unchecked_Deallocation (Groups.Thread_Pin, Pin_Access);
+
    function Current_Thread return System.Address;
    pragma Import (C, Current_Thread, "pthread_self");
 
@@ -30,7 +36,8 @@ procedure Thread_Affinity_Smoke is
    protected Observations is
       procedure Group_One_Seeded (Thread : System.Address);
       procedure Group_Two_Seeded (Thread : System.Address);
-      entry Wait_For_Seeds (One : out System.Address; Two : out System.Address);
+      entry Wait_For_Seeds
+        (One : out System.Address; Two : out System.Address);
       procedure Finished (Passed : Boolean);
       entry Wait_For_Results;
       function Passed return Boolean;
@@ -55,7 +62,9 @@ procedure Thread_Affinity_Smoke is
          Seed_Count := Seed_Count + 1;
       end Group_Two_Seeded;
 
-      entry Wait_For_Seeds (One : out System.Address; Two : out System.Address) when Seed_Count = 2 is
+      entry Wait_For_Seeds (One : out System.Address; Two : out System.Address)
+        when Seed_Count = 2
+      is
       begin
          One := One_Thread;
          Two := Two_Thread;
@@ -67,7 +76,7 @@ procedure Thread_Affinity_Smoke is
          OK := OK and Passed;
       end Finished;
 
-      entry Wait_For_Results when Finish_Count = 3 is
+      entry Wait_For_Results when Finish_Count = 4 is
       begin
          null;
       end Wait_For_Results;
@@ -100,6 +109,17 @@ procedure Thread_Affinity_Smoke is
       pragma Task_Info (Flyology.Native_Task);
    end Native;
 
+   task Pin_Owner
+     with CPU => 11 is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Pin_Owner;
+
+   task Pin_Finalizer
+     with CPU => 11 is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      entry Dispose (Pin : in out Pin_Access; Rejected : out Boolean);
+   end Pin_Finalizer;
+
    task body Group_One_Seeder is
    begin
       TLS_Set (Group_One_Value);
@@ -117,7 +137,10 @@ procedure Thread_Affinity_Smoke is
       Two : System.Address;
    begin
       Observations.Wait_For_Seeds (One, Two);
-      Observations.Finished (Current_Thread = One and then One /= Two and then TLS_Get = Group_One_Value);
+      Observations.Finished
+        (Current_Thread = One
+         and then One /= Two
+         and then TLS_Get = Group_One_Value);
    exception
       when others =>
          Observations.Finished (False);
@@ -231,7 +254,10 @@ procedure Thread_Affinity_Smoke is
    begin
       TLS_Set (Native_Value);
       delay 0.001;
-      OK := Groups.Is_Thread_Pinned and then Current_Thread = Thread and then TLS_Get = Native_Value;
+      OK :=
+        Groups.Is_Thread_Pinned
+        and then Current_Thread = Thread
+        and then TLS_Get = Native_Value;
       declare
          Pin : Groups.Thread_Pin := Groups.Pin_To_Current_Thread;
          pragma Unreferenced (Pin);
@@ -248,6 +274,33 @@ procedure Thread_Affinity_Smoke is
       when others =>
          Observations.Finished (False);
    end Native;
+
+   task body Pin_Owner is
+      Pin      : Pin_Access :=
+        new Groups.Thread_Pin'(Groups.Pin_To_Current_Thread);
+      Rejected : Boolean;
+   begin
+      --  Heap storage makes it possible to violate the task-owned contract;
+      --  the finalizing task must receive a diagnostic even without -gnata.
+      Pin_Finalizer.Dispose (Pin, Rejected);
+      Observations.Finished (Rejected and then Groups.Is_Thread_Pinned);
+   exception
+      when others =>
+         Observations.Finished (False);
+   end Pin_Owner;
+
+   task body Pin_Finalizer is
+   begin
+      accept Dispose (Pin : in out Pin_Access; Rejected : out Boolean) do
+         Rejected := False;
+         begin
+            Free_Pin (Pin);
+         exception
+            when Program_Error =>
+               Rejected := True;
+         end;
+      end Dispose;
+   end Pin_Finalizer;
 
 begin
    Observations.Wait_For_Results;
