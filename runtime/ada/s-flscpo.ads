@@ -191,6 +191,19 @@ is
    function After_Dispatch (Dispatches_Until_Check : Positive) return Natural
    with Inline, Post => After_Dispatch'Result = Dispatches_Until_Check - 1;
 
+   --  Translate a relative timeout into the scheduler's absolute monotonic
+   --  deadline. A finite timeout that exceeds the remaining clock range stays
+   --  finite by saturating at the largest representable deadline.
+   function Deadline_After (Now, Timeout : Duration) return Duration
+   with
+     Pre  => Now >= 0.0,
+     Post =>
+       (if Timeout < 0.0
+        then Deadline_After'Result = No_Deadline
+        elsif Timeout > Duration'Last - Now
+        then Deadline_After'Result = Duration'Last
+        else Deadline_After'Result = Now + Timeout);
+
    function Earlier_Deadline (Left, Right : Duration) return Duration
    with
      Post =>
