@@ -49,7 +49,8 @@ package System.Flyology.Faults is
       Poller_Batch_Delivery_Pause,
       Fiber_Storage_Allocation,
       Context_Storage_Allocation,
-      Group_Storage_Allocation);
+      Group_Storage_Allocation,
+      Cross_To_Shard_Window);
 
    for Fault_Point use
      (Fiber_Allocation               => 1,
@@ -95,7 +96,9 @@ package System.Flyology.Faults is
       Poller_Batch_Delivery_Pause    => 42,
       Fiber_Storage_Allocation       => 43,
       Context_Storage_Allocation     => 44,
-      Group_Storage_Allocation       => 45);
+      Group_Storage_Allocation       => 45,
+      --  46 .. 51 are reserved by the published poller fault bindings.
+      Cross_To_Shard_Window          => 52);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

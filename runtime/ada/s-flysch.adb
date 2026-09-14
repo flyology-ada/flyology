@@ -531,7 +531,9 @@ package body System.Flyology.Scheduler is
 
    procedure Fatal (Context : C.int := Scheduler_Invariant);
    pragma No_Return (Fatal);
-   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   function Ensure_Group
+     (Id : C.int; Dedicated : Boolean; Require_Configured : Boolean := False) return Loop_Group_Access;
+   function Migrate_Internal (Group : C.int; Require_Configured : Boolean) return C.int;
    function Ensure_Placement_Platform return C.int;
    function Select_Automatic_Group return C.int;
    procedure Release_Automatic_Placement_Claim (Group : C.int);
@@ -998,7 +1000,9 @@ package body System.Flyology.Scheduler is
       return System.Null_Address;
    end Group_Thread;
 
-   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access is
+   function Ensure_Group
+     (Id : C.int; Dedicated : Boolean; Require_Configured : Boolean := False) return Loop_Group_Access
+   is
       Group                  : Loop_Group_Access := null;
       Result                 : C.int;
       Ready                  : Boolean;
@@ -1063,6 +1067,10 @@ package body System.Flyology.Scheduler is
       --  the group table, so finalization cannot be restarted into by a
       --  caller that passed the unlocked guard above.
       if not Scheduling.Creation_Admitted (Lifecycle_State) then
+         Release_Topology_Lock;
+         return null;
+      end if;
+      if Require_Configured and then Id >= C.int (Automatic_Pool_Size) then
          Release_Topology_Lock;
          return null;
       end if;
@@ -3607,7 +3615,7 @@ package body System.Flyology.Scheduler is
    function Observe_Created_Groups return C.int
    is (if In_Fork_Child then 0 else Created_Group_Count);
 
-   function Migrate (Group : C.int) return C.int is
+   function Migrate_Internal (Group : C.int; Require_Configured : Boolean) return C.int is
       Item                : Fiber_Access;
       Source              : Loop_Group_Access;
       Target              : Loop_Group_Access;
@@ -3615,6 +3623,7 @@ package body System.Flyology.Scheduler is
       Shard               : constant Registry_Shard_Index := Registry_Shard_For (Current);
       Target_Member_Count : Natural := 0;
       Reservation_Matches : Boolean := False;
+      Target_Configured   : Boolean;
    begin
       if Current = System.Null_Address then
          return -1;
@@ -3631,7 +3640,18 @@ package body System.Flyology.Scheduler is
       if not Scheduling.Valid_Group (Group) then
          return -1;
       end if;
-      if Source.Id = Group then
+      if Require_Configured then
+         Lock_Topology;
+         Target_Configured := Group < C.int (Automatic_Pool_Size);
+         if Target_Configured and then Source.Id = Group then
+            Unlock_Topology;
+            return 0;
+         end if;
+         Unlock_Topology;
+         if not Target_Configured then
+            return -3;
+         end if;
+      elsif Source.Id = Group then
          return 0;
       end if;
 
@@ -3646,18 +3666,39 @@ package body System.Flyology.Scheduler is
       Unlock_Group (Source);
 
       if Scheduling.Shared_Group (Group) then
-         Target := Ensure_Group (Group, Dedicated => False);
+         Target := Ensure_Group (Group, Dedicated => False, Require_Configured => Require_Configured);
       else
          Lock_Topology;
          Target := Groups (Group_Index (Group));
          Unlock_Topology;
       end if;
       if Target = null then
+         if Require_Configured then
+            Lock_Topology;
+            Target_Configured := Group < C.int (Automatic_Pool_Size);
+            Unlock_Topology;
+            if not Target_Configured then
+               return -3;
+            end if;
+         end if;
          return -1;
+      end if;
+
+      if Faults.Enabled and then Faults.Fail (Faults.Cross_To_Shard_Window) then
+         while Faults.Fail (Faults.Cross_To_Shard_Window) loop
+            if Micro_Sleep (1_000) /= 0 then
+               Fatal;
+            end if;
+         end loop;
       end if;
 
       Lock_Registry_Shard (Shard);
       Lock_Topology;
+      if Require_Configured and then Group >= C.int (Automatic_Pool_Size) then
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
+         return -3;
+      end if;
       if Target.Dedicated then
          Lock_Group (Target);
          Target_Member_Count := Target.Member_Count;
@@ -3693,7 +3734,13 @@ package body System.Flyology.Scheduler is
       Unlock_Registry_Shard (Shard);
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
       return 0;
-   end Migrate;
+   end Migrate_Internal;
+
+   function Migrate (Group : C.int) return C.int
+   is (Migrate_Internal (Group, Require_Configured => False));
+
+   function Migrate_Configured (Group : C.int) return C.int
+   is (Migrate_Internal (Group, Require_Configured => True));
 
    function Pin_Current_Thread (Owner : access System.Address) return C.int is
       Group   : constant Loop_Group_Access := Thread_Group;
