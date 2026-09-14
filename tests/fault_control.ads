@@ -53,7 +53,8 @@ package Fault_Control is
       Poller_Record_Release,
       Poller_Control_Add,
       Poller_Control_Modify,
-      Poller_Control_Delete);
+      Poller_Control_Delete,
+      Cross_To_Shard_Window);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -106,7 +107,8 @@ package Fault_Control is
       Poller_Record_Release          => 48,
       Poller_Control_Add             => 49,
       Poller_Control_Modify          => 50,
-      Poller_Control_Delete          => 51);
+      Poller_Control_Delete          => 51,
+      Cross_To_Shard_Window          => 52);
 
    function Enabled return Boolean;
    procedure Reset;
