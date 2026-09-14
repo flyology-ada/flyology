@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -414,6 +415,108 @@ static atomic_uint flyology_file_cancel_counts
 static atomic_uint flyology_uring_identity_counts[2];
 static atomic_uint flyology_uring_admin_completions;
 static atomic_uint flyology_uring_cq_capacity;
+static atomic_uint flyology_finalization_order_armed;
+static atomic_uint flyology_finalization_sequence;
+static atomic_uint flyology_library_finalize_count;
+static atomic_uint flyology_library_finalize_order;
+static atomic_uint flyology_scheduler_finalize_count;
+static atomic_uint flyology_scheduler_finalize_order;
+static atomic_uint flyology_exceptional_finalization_expected;
+
+/* The binder runs Ada finalization before returning from main. This test-only
+   atexit callback is therefore the first observation point after both the
+   library-object and scheduler finalizers have returned. */
+static void flyology_test_verify_finalization_order(void) {
+    static const char message[] =
+        "Flyology finalization-order test failed\n";
+    static const char exceptional_success[] =
+        "Flyology exceptional finalization-order test passed\n";
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    if (atomic_load_explicit(&flyology_library_finalize_count,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_scheduler_finalize_count,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_library_finalize_order,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_scheduler_finalize_order,
+                             memory_order_relaxed) != 2) {
+        (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+        _Exit(EXIT_FAILURE);
+    }
+    if (atomic_load_explicit(&flyology_exceptional_finalization_expected,
+                             memory_order_relaxed) != 0) {
+        (void)write(STDERR_FILENO, exceptional_success,
+                    sizeof(exceptional_success) - 1);
+    }
+}
+
+static int flyology_test_arm_finalization_order_common(
+    unsigned exceptional_expected) {
+    if (atomic_exchange_explicit(&flyology_finalization_order_armed, 1,
+                                 memory_order_acq_rel) != 0) {
+        return -1;
+    }
+    atomic_store_explicit(&flyology_finalization_sequence, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_library_finalize_count, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_library_finalize_order, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_scheduler_finalize_count, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_scheduler_finalize_order, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_exceptional_finalization_expected,
+                          exceptional_expected, memory_order_relaxed);
+    if (atexit(flyology_test_verify_finalization_order) != 0) {
+        atomic_store_explicit(&flyology_finalization_order_armed, 0,
+                              memory_order_release);
+        return -1;
+    }
+    return 0;
+}
+
+int flyology_test_arm_finalization_order(void) {
+    return flyology_test_arm_finalization_order_common(0);
+}
+
+int flyology_test_arm_exceptional_finalization_order(void) {
+    return flyology_test_arm_finalization_order_common(1);
+}
+
+void flyology_test_note_library_finalize(void) {
+    unsigned order;
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    order = atomic_fetch_add_explicit(&flyology_finalization_sequence, 1,
+                                      memory_order_relaxed) + 1;
+    atomic_store_explicit(&flyology_library_finalize_order, order,
+                          memory_order_relaxed);
+    atomic_fetch_add_explicit(&flyology_library_finalize_count, 1,
+                              memory_order_relaxed);
+}
+
+void flyology_test_note_scheduler_finalize(void) {
+    unsigned order;
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    order = atomic_fetch_add_explicit(&flyology_finalization_sequence, 1,
+                                      memory_order_relaxed) + 1;
+    atomic_store_explicit(&flyology_scheduler_finalize_order, order,
+                          memory_order_relaxed);
+    atomic_fetch_add_explicit(&flyology_scheduler_finalize_count, 1,
+                              memory_order_relaxed);
+}
 
 /* Memory orders an Ada caller actually handed to the atomic-store bridge.
    Slot FLYOLOGY_MEMORY_MODEL_SLOTS - 1 collects every value outside the

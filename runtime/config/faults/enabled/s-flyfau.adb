@@ -11,6 +11,9 @@ package body System.Flyology.Faults is
    procedure Test_Release_Final_Reaper;
    pragma Import (C, Test_Release_Final_Reaper, "flyology_test_release_final_reaper");
 
+   procedure Test_Note_Scheduler_Finalize;
+   pragma Import (C, Test_Note_Scheduler_Finalize, "flyology_test_note_scheduler_finalize");
+
    function Test_Pause_Create_Registration return Interfaces.C.int;
    pragma Import (C, Test_Pause_Create_Registration, "flyology_test_pause_create_registration");
 
@@ -73,6 +76,11 @@ package body System.Flyology.Faults is
    begin
       Test_Release_Final_Reaper;
    end Release_Final_Reaper;
+
+   procedure Note_Scheduler_Finalize is
+   begin
+      Test_Note_Scheduler_Finalize;
+   end Note_Scheduler_Finalize;
 
    function Pause_Create_Registration return Boolean
    is (Test_Pause_Create_Registration = 0);
