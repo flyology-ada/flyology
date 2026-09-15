@@ -157,12 +157,9 @@ package System.Flyology.Faults is
    procedure Note_Descriptor_Cancel_Processed;
 
    type Waiter_Work_Kind is (Unlink_Scan, Retention_Scan, Delivery_Scan);
+   --  Derived observation bindings. 46 .. 52 belong to other fault seams;
+   --  these reuse their atomic counters without exposing injection policy.
+   for Waiter_Work_Kind use (Unlink_Scan => 53, Retention_Scan => 54, Delivery_Scan => 55);
 
    procedure Note_Waiter_Work (Kind : Waiter_Work_Kind);
-
-   procedure Reset_Waiter_Work
-   with Export, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_reset";
-
-   function Observe_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long
-   with Export, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_observe";
 end System.Flyology.Faults;

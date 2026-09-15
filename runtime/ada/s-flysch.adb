@@ -180,6 +180,7 @@ package body System.Flyology.Scheduler is
       Outcome    : C.int := 0;
       Bucket     : IO_Bucket_Index := 0;
       Registered : Boolean := False;
+      Previous   : IO_Wait_Link_Access := null;
       Next       : IO_Wait_Link_Access := null;
    end record;
    type IO_Wait_Link_Array is array (IO_Link_Kind range <>) of aliased IO_Wait_Link;
@@ -1349,7 +1350,15 @@ package body System.Flyology.Scheduler is
       Link.Outcome := Outcome;
       Link.Bucket := Bucket;
       Link.Registered := True;
+      Link.Previous := null;
       Link.Next := Group.IO_Waiters (Bucket);
+      if Link.Next /= null then
+         if not Link.Next.Registered or else Link.Next.Bucket /= Bucket or else Link.Next.Previous /= null
+         then
+            Fatal;
+         end if;
+         Link.Next.Previous := Link;
+      end if;
       Group.IO_Waiters (Bucket) := Link;
    end Register_IO_Wait_Locked;
 
@@ -1360,7 +1369,6 @@ package body System.Flyology.Scheduler is
       Read_Consumed       : Boolean := False;
       Write_Consumed      : Boolean := False)
    is
-      Position           : IO_Wait_Link_Access;
       Previous           : IO_Wait_Link_Access;
       Link               : IO_Wait_Link_Access;
       Cancellations      : Pollers.Interest_Request_Array (1 .. Item.Active_IO_Link_Count);
@@ -1392,22 +1400,33 @@ package body System.Flyology.Scheduler is
       for Kind in 1 .. Item.Active_IO_Link_Count loop
          Link := Active_IO_Link (Item, Kind);
          if Link.Registered then
-            Position := Group.IO_Waiters (Link.Bucket);
-            Previous := null;
-            while Position /= null and then Position /= Link loop
-               if Faults.Enabled then
-                  Faults.Note_Waiter_Work (Faults.Unlink_Scan);
+            --  The group lock protects both neighbors. Detach directly even
+            --  when this fiber's link is behind many other descriptor waits.
+            Previous := Link.Previous;
+            if Previous = null then
+               if Group.IO_Waiters (Link.Bucket) /= Link then
+                  Fatal;
                end if;
-               Previous := Position;
-               Position := Position.Next;
-            end loop;
-            if Position = null then
+            elsif not Previous.Registered or else Previous.Bucket /= Link.Bucket or else Previous.Next /= Link
+            then
                Fatal;
-            elsif Previous = null then
+            end if;
+            if Link.Next /= null
+              and then (not Link.Next.Registered
+                        or else Link.Next.Bucket /= Link.Bucket
+                        or else Link.Next.Previous /= Link)
+            then
+               Fatal;
+            end if;
+            if Previous = null then
                Group.IO_Waiters (Link.Bucket) := Link.Next;
             else
                Previous.Next := Link.Next;
             end if;
+            if Link.Next /= null then
+               Link.Next.Previous := Previous;
+            end if;
+            Link.Previous := null;
             Link.Next := null;
             Link.Registered := False;
          end if;

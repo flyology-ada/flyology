@@ -1,12 +1,6 @@
 package body System.Flyology.Faults is
 
    use type Interfaces.C.int;
-   use type Interfaces.C.unsigned_long_long;
-
-   type Waiter_Work_Array is array (Waiter_Work_Kind) of Interfaces.C.unsigned_long_long
-   with Atomic_Components;
-
-   Waiter_Work : Waiter_Work_Array := (others => 0);
 
    procedure Test_Note_Registry_Lookup (Kind : Interfaces.C.int);
    pragma Import (C, Test_Note_Registry_Lookup, "flyology_test_note_registry_lookup");
@@ -182,23 +176,10 @@ package body System.Flyology.Faults is
    end Note_Descriptor_Cancel_Processed;
 
    procedure Note_Waiter_Work (Kind : Waiter_Work_Kind) is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
    begin
-      if Waiter_Work (Kind) < Interfaces.C.unsigned_long_long'Last then
-         Waiter_Work (Kind) := Waiter_Work (Kind) + 1;
-      end if;
+      Ignored := Test_Fault_Hit (Interfaces.C.int (Waiter_Work_Kind'Enum_Rep (Kind)));
    end Note_Waiter_Work;
-
-   procedure Reset_Waiter_Work is
-   begin
-      Waiter_Work := (others => 0);
-   end Reset_Waiter_Work;
-
-   function Observe_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long is
-   begin
-      if Kind < 0 or else Kind > Interfaces.C.int (Waiter_Work_Kind'Pos (Waiter_Work_Kind'Last)) then
-         return 0;
-      end if;
-      return Waiter_Work (Waiter_Work_Kind'Val (Kind));
-   end Observe_Waiter_Work;
 
 end System.Flyology.Faults;

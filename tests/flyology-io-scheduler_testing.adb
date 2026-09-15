@@ -12,9 +12,12 @@ package body Flyology.IO.Scheduler_Testing is
    function Waiter_Work return Waiter_Work_Snapshot is
    begin
       return
-        (Unlink_Scans    => Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (0)),
-         Retention_Scans => Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (1)),
-         Delivery_Scans  => Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (2)));
+        (Unlink_Scans    =>
+           Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (53)),
+         Retention_Scans =>
+           Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (54)),
+         Delivery_Scans  =>
+           Interfaces.Unsigned_64 (Test_Hooks.Scheduler_Waiter_Work (55)));
    end Waiter_Work;
 
 end Flyology.IO.Scheduler_Testing;
