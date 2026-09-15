@@ -1,7 +1,9 @@
 with Ada.Exceptions;
 with Ada.Finalization;
+with Ada.Real_Time;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
+with Flyology.Supervision.Families;
 with Flyology.Supervision.Input_Task_Generations;
 with Flyology.Supervision.Task_Generations;
 with System.Multiprocessors;
@@ -280,6 +282,187 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
         Generation_Task     => Input_Task,
         Initialize          => Initialize_Input);
 
+   generic
+      Model : Flyology.Execution_Model;
+   procedure Check_Diagnostic_Identity;
+
+   procedure Check_Diagnostic_Identity is
+      use type Ada.Real_Time.Time;
+      use type Flyology.Execution_Model;
+
+      type Outcome is (Automatic_Return, Reported_Return, Reported_Unhealthy);
+      type Identity_Context is limited record
+         Mode      : Outcome := Automatic_Return;
+         Captured  : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
+         Reported  : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
+         Finalized : aliased Counter;
+      end record;
+
+      task type Identity_Task
+        (State : not null access Identity_Context; Control : not null access Generation_Control)
+      is
+         pragma Task_Info (Model);
+         entry Start;
+      end Identity_Task;
+
+      task body Identity_Task is
+      begin
+         accept Start;
+         declare
+            Cleanup : Guard (State.Finalized'Access);
+            pragma Unreferenced (Cleanup);
+         begin
+            pragma Assert (State.Captured /= Ada.Task_Identification.Null_Task_Id);
+            pragma Assert (Ada.Task_Identification.Current_Task = State.Captured);
+            Mark_Ready (Control.all);
+         end;
+         case State.Mode is
+            when Automatic_Return =>
+               null;
+            when Reported_Return =>
+               Report_Normal_Return (Control.all);
+               declare
+                  Reported : Boolean;
+                  Summary  : Termination_Summary;
+               begin
+                  Read_Termination (Control.all, Reported, Summary);
+                  pragma Assert (Reported);
+                  State.Reported := Summary.Task_Id;
+               end;
+            when Reported_Unhealthy =>
+               Report_Unhealthy (Control.all, "input generation unhealthy");
+         end case;
+      end Identity_Task;
+
+      function Create
+        (State : not null access Identity_Context; Control : not null access Generation_Control)
+         return Identity_Task is
+      begin
+         return Subject : Identity_Task (State, Control);
+      end Create;
+
+      function Create
+        (State   : not null access Identity_Context;
+         Value   : not null access constant Outcome;
+         Control : not null access Generation_Control) return Identity_Task is
+      begin
+         State.Mode := Value.all;
+         return Subject : Identity_Task (State, Control);
+      end Create;
+
+      function Task_Identity (Subject : in out Identity_Task) return Ada.Task_Identification.Task_Id is
+      begin
+         Subject.State.Captured := Subject'Identity;
+         return Subject.State.Captured;
+      end Task_Identity;
+
+      procedure Initialize (Subject : in out Identity_Task; Control : aliased in out Generation_Control) is
+         pragma Unreferenced (Control);
+      begin
+         Subject.Start;
+      end Initialize;
+
+      procedure Abort_Task (Subject : in out Identity_Task) is
+      begin
+         abort Subject;
+      end Abort_Task;
+
+      package Plain is new Task_Generations
+        (Application_Context => Identity_Context, Generation_Task => Identity_Task, Initialize => Initialize);
+      package Inputs is new Input_Task_Generations
+        (Input_Type => Outcome, Application_Context => Identity_Context,
+         Generation_Task => Identity_Task, Initialize => Initialize);
+      Child_Policy : constant Child_Specification :=
+        (Restart => Never, Impact => Isolate_Child, Task_Model => Model, others => <>);
+      package Identity_Families is new Families
+        (Request => Outcome, Application_Context => Identity_Context,
+         Run_One_Generation => Inputs.Run, Policy => Child_Policy,
+         First_Child_Id => 11_000, Maximum_Children => 1);
+
+      procedure Check_Summary (State : Identity_Context; Summary : Termination_Summary) is
+      begin
+         --  Captured while Subject was alive. Only compare opaque diagnostic
+         --  values here; Run has already destroyed the generation task object.
+         pragma Assert (State.Captured /= Ada.Task_Identification.Null_Task_Id);
+         pragma Assert (Summary.Task_Id = State.Captured);
+         pragma Assert (State.Finalized.Value = 1);
+         pragma
+           Assert (Summary.Kind = (if State.Mode = Reported_Unhealthy then Unhealthy else Normal_Return));
+         if State.Mode = Reported_Unhealthy then
+            pragma Assert (Message_Text (Summary) = "input generation unhealthy");
+         elsif State.Mode = Reported_Return then
+            pragma Assert (State.Reported /= Ada.Task_Identification.Null_Task_Id);
+            pragma Assert (Summary.Task_Id = State.Reported);
+         end if;
+      end Check_Summary;
+
+      procedure Check_Run (Mode : Outcome; Input_Runner : Boolean) is
+         State   : aliased Identity_Context;
+         Control : aliased Generation_Control;
+         Result  : Generation_Result;
+      begin
+         State.Mode := Mode;
+         Open (Control, (Controller => New_Controller, Id => 11_000, Generation => 1));
+         if Input_Runner then
+            Inputs.Run (State, Mode, Control, Result);
+         else
+            Plain.Run (State, Control, Result);
+         end if;
+         pragma Assert (Result.Reported_Ready);
+         Check_Summary (State, Result.Termination);
+      end Check_Run;
+
+      procedure Check_Family (Mode : Outcome) is
+         State       : aliased Identity_Context;
+         Item        : aliased Identity_Families.Family;
+         Result      : Supervisor_Result;
+         Handle      : Child_Handle;
+         Observation : Generation_Observation;
+         Deadline    : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+      begin
+         declare
+            task Owner;
+            task body Owner is
+            begin
+               Identity_Families.Run (Item, State, Result);
+            end Owner;
+         begin
+            loop
+               exit when Identity_Families.Accepting (Item);
+               if Ada.Real_Time.Clock >= Deadline then
+                  raise Test_Failure with "identity family did not open admission";
+               end if;
+               delay 0.001;
+            end loop;
+            Identity_Families.Start (Item, Mode, Handle);
+            Observation := Identity_Families.Wait_Termination (Item, Handle, Timeout => 2.0);
+            Identity_Families.Request_Shutdown (Item);
+         exception
+            when others =>
+               Identity_Families.Request_Shutdown (Item);
+               raise;
+         end;
+         pragma Assert (Observation.Status = Generation_Terminated);
+         Check_Summary (State, Observation.Snapshot.Termination);
+         declare
+            Snapshot : constant Child_Snapshot := Identity_Families.Current (Item, Handle);
+         begin
+            pragma Assert (Snapshot.State = Joined);
+            pragma Assert (Snapshot.Task_Model = Model);
+            Check_Summary (State, Snapshot.Termination);
+         end;
+      end Check_Family;
+   begin
+      for Mode in Outcome loop
+         Check_Run (Mode, Input_Runner => False);
+         Check_Run (Mode, Input_Runner => True);
+         Check_Family (Mode);
+      end loop;
+   end Check_Diagnostic_Identity;
+
+   procedure Check_Lightweight_Identity is new Check_Diagnostic_Identity (Flyology.Lightweight_Task);
+   procedure Check_Native_Identity is new Check_Diagnostic_Identity (Flyology.Native_Task);
+
 begin
    Check_Service (Return_Normally, Normal_Return, True, 1);
    Check_Service (Raise_Exception, Unhandled_Exception, True, 1);
@@ -301,4 +484,6 @@ begin
       pragma Assert (State.Observed.Value = 1);
       pragma Assert (State.Finalized.Value = 1);
    end;
+   Check_Lightweight_Identity;
+   Check_Native_Identity;
 end Flyology.Supervision.Task_Generations_Smoke;
