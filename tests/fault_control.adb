@@ -5,6 +5,9 @@ package body Fault_Control is
    function Id (At_Point : Point) return Interfaces.C.int
    is (Interfaces.C.int (Point'Enum_Rep (At_Point)));
 
+   function Registry_Lookup_Count (Kind : Registry_Lookup_Kind) return Natural
+   is (Natural (C_Registry_Lookup_Count (Interfaces.C.int (Registry_Lookup_Kind'Enum_Rep (Kind)))));
+
    function Enabled return Boolean
    is (C_Enabled /= 0);
 

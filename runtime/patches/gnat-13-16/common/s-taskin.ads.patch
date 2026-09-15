@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-taskin.ads
++++ b/s-taskin.ads
+@@ -682,0 +683,8 @@
++      Is_Lightweight : Boolean;
++      --  Immutable execution-lane identity. Ordinary task creation sets
++      --  this before publishing the ATCB; environment and foreign ATCBs
++      --  remain native. Task primitives may read it without taking the task
++      --  or Flyology registry locks.
++      --
++      --  Protection: Constant after ATCB initialization
++

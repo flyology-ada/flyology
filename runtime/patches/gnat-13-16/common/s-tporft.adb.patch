@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-tporft.adb
++++ b/s-tporft.adb
+@@ -53,0 +54,1 @@
++   Local_ATCB.Common.Is_Lightweight := False;
