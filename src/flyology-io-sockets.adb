@@ -2494,6 +2494,25 @@ package body Flyology.IO.Sockets is
          return;
       end if;
 
+      if Item.Kind = Connect_Internet then
+         declare
+            Requests : constant Wait_Request_Array :=
+              (1 => (FD => Item.Socket.Value, Condition => For_Write));
+         begin
+            --  A shared interrupt source may have been consumed by an earlier
+            --  operation. Zero SO_ERROR alone does not complete a pending
+            --  handshake; retain the original deadline while re-arming it.
+            if Wait_Any (Requests, Timeout => 0.0) = 0 then
+               Arm_Connection_Sources;
+               return;
+            end if;
+         exception
+            when Device_Error =>
+               Fail (Device_Failure);
+               return;
+         end;
+      end if;
+
       Result := C_Pending_Error (Item.Socket.Value, Pending'Access, Error'Access);
       if Result /= 0 then
          Fail (Socket_Failure, Error);

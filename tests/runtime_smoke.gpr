@@ -40,6 +40,7 @@ project Runtime_Smoke is
       "connection_state_model.adb",
       "connection_tls_upgrade_smoke.adb",
       "connect_transient_smoke.adb",
+      "scoped_connect_readiness_smoke.adb",
       "closed_descriptor_wait_smoke.adb",
       "concurrency_primitives_smoke.adb",
       "context_abi_matrix.adb",
