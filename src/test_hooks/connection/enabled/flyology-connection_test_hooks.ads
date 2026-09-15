@@ -16,9 +16,9 @@ private package Flyology.Connection_Test_Hooks is
    function Fail_Next_Capacity_Release_Wake return Boolean;
 
    procedure Reset_Scheduler_Waiter_Work
-   with Import, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_reset";
+   with Import, Convention => C, External_Name => "flyology_test_fault_reset";
 
-   function Scheduler_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long
-   with Import, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_observe";
+   function Scheduler_Waiter_Work (Point : Interfaces.C.int) return Interfaces.C.unsigned
+   with Import, Convention => C, External_Name => "flyology_test_fault_calls";
 
 end Flyology.Connection_Test_Hooks;

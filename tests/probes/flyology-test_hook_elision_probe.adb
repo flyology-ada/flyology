@@ -15,7 +15,7 @@ with Flyology.Worker_Pool_Test_Hooks;
 with Interfaces.C;
 
 procedure Flyology.Test_Hook_Elision_Probe is
-   use type Interfaces.C.unsigned_long_long;
+   use type Interfaces.C.unsigned;
 
    Observed : Boolean := False
    with Volatile;
@@ -41,7 +41,8 @@ begin
    if Flyology.Connection_Test_Hooks.Enabled then
       Flyology.Connection_Test_Hooks.Barrier (0);
       Flyology.Connection_Test_Hooks.Reset_Scheduler_Waiter_Work;
-      Observed := Flyology.Connection_Test_Hooks.Scheduler_Waiter_Work (0) /= 0;
+      Observed :=
+        Flyology.Connection_Test_Hooks.Scheduler_Waiter_Work (53) /= 0;
    end if;
    if Flyology.Worker_Pool_Test_Hooks.Enabled then
       Flyology.Worker_Pool_Test_Hooks.Run_Claim_Barrier;
