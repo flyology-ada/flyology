@@ -2375,7 +2375,10 @@ package body Flyology.Supervision.Families is
                      if Decision_Override.Kind /= No_Termination then
                         Override := Decision_Override;
                      end if;
-                     if not Ready and then Now - Started_At >= Policy.Readiness_Timeout then
+                     if not Stop_Published
+                       and then not Ready
+                       and then Now - Started_At >= Policy.Readiness_Timeout
+                     then
                         Stop_Now := True;
                         Shutdown := False;
                         Override := Empty_Summary (Readiness_Timeout);

@@ -501,6 +501,7 @@ prepared_admission_blocked_observation_smoke
 prepared_admission_cancellation_smoke
 prepared_admission_generation_smoke
 flyology-supervision-families_shutdown_smoke
+supervision_shutdown_reason_smoke
 flyology-supervision-nested_family_restart_smoke
 flyology-supervision-nested_static_shutdown_smoke
 flyology-supervision-adapters_smoke
@@ -914,7 +915,7 @@ for test_main in $ordinary_mains; do
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
       ;;
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|supervision_shutdown_reason_smoke)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
       ;;
