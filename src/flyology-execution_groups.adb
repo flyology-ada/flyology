@@ -108,10 +108,9 @@ package body Flyology.Execution_Groups is
          Result := Runtime_Unpin_Current_Thread (Object.Owner);
          Object.Active := False;
          Object.Owner := System.Null_Address;
-         --  Finalization cannot report an error safely. A nonzero result
-         --  indicates a runtime invariant violation; normal nesting and task
-         --  finalization always release the pin on the acquiring task.
-         pragma Assert (Result = 0);
+         if Result /= 0 then
+            raise Program_Error with "Thread_Pin finalization rejected by runtime";
+         end if;
       end if;
    end Finalize;
 

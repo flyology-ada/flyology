@@ -365,15 +365,18 @@ end; -- Pin is deterministically released, including during exception cleanup
 ```
 
 Pins nest safely, and migration remains disabled until the outermost pin is
-finalized. A pin is owned by the Ada task that acquired it and must be finalized
-by that same task; the intended use is a task-local lexical scope as above. A
-pin stabilizes the event-loop pthread; it does not give the task exclusive use
-of that pthread, so unrelated fibers in the group still share its pthread-local
-state. Use a dedicated group as well when a foreign resource requires both
-stable identity and exclusive access. Native tasks accept the same API as an
-inherent no-op because GNARL already fixes each native task to its own pthread.
-`Is_Thread_Pinned` reports both explicit lightweight pins and this inherent native
-binding.
+finalized. A lightweight task's pin is owned by the Ada task that acquired it
+and must be finalized by that same task; the intended use is a task-local lexical
+scope as above. Finalization of that pin by another task raises `Program_Error`
+in that task and leaves the acquiring task pinned. A pin stabilizes the
+event-loop pthread; it does not give the task exclusive use of that pthread,
+so unrelated fibers in the group still share its pthread-local state. Use a
+dedicated group as well when a foreign
+resource requires both stable identity and exclusive access. Native tasks accept
+the same API as an inherent no-op because GNARL already fixes each native task
+to its own pthread. A native-acquired guard's finalization is also a no-op,
+including when another task finalizes it. `Is_Thread_Pinned` reports both explicit
+lightweight pins and this inherent native binding.
 
 A dedicated group is a reusable event loop reserved for one fiber. Operationally
 it gives that task an OS thread to itself, which is the safe live transition for
