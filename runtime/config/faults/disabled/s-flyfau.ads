@@ -172,4 +172,15 @@ package System.Flyology.Faults is
 
    procedure Note_Descriptor_Cancel_Processed;
    pragma Import (C, Note_Descriptor_Cancel_Processed, "flyology_disabled_hook_must_be_elided");
+
+   type Waiter_Work_Kind is (Unlink_Scan, Retention_Scan, Delivery_Scan);
+
+   procedure Note_Waiter_Work (Kind : Waiter_Work_Kind)
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_note";
+
+   procedure Reset_Waiter_Work
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_reset";
+
+   function Observe_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_observe";
 end System.Flyology.Faults;

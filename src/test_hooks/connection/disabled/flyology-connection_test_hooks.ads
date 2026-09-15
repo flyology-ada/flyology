@@ -21,4 +21,10 @@ private package Flyology.Connection_Test_Hooks is
    function Fail_Next_Capacity_Release_Wake return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_capacity_wake";
 
+   procedure Reset_Scheduler_Waiter_Work
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_reset";
+
+   function Scheduler_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_observe";
+
 end Flyology.Connection_Test_Hooks;

@@ -1301,6 +1301,9 @@ package body System.Flyology.Scheduler is
       Position : IO_Wait_Link_Access := Group.IO_Waiters (IO_Bucket_For (Descriptor));
    begin
       while Position /= null loop
+         if Faults.Enabled then
+            Faults.Note_Waiter_Work (Faults.Retention_Scan);
+         end if;
          if Position.Registered
            and then Position.Descriptor = Descriptor
            and then Position.Interest = Interest
@@ -1392,6 +1395,9 @@ package body System.Flyology.Scheduler is
             Position := Group.IO_Waiters (Link.Bucket);
             Previous := null;
             while Position /= null and then Position /= Link loop
+               if Faults.Enabled then
+                  Faults.Note_Waiter_Work (Faults.Unlink_Scan);
+               end if;
                Previous := Position;
                Position := Position.Next;
             end loop;
@@ -4587,6 +4593,9 @@ package body System.Flyology.Scheduler is
       Bucket := IO_Bucket_For (Event.Descriptor);
       Link := Group.IO_Waiters (Bucket);
       while Link /= null loop
+         if Faults.Enabled then
+            Faults.Note_Waiter_Work (Faults.Delivery_Scan);
+         end if;
          Item := Link.Owner;
          Matches :=
            Item /= null

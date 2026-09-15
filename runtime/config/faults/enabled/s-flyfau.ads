@@ -155,4 +155,14 @@ package System.Flyology.Faults is
    procedure Note_Poller_Cancel;
    procedure Note_Descriptor_Cancel_Queued;
    procedure Note_Descriptor_Cancel_Processed;
+
+   type Waiter_Work_Kind is (Unlink_Scan, Retention_Scan, Delivery_Scan);
+
+   procedure Note_Waiter_Work (Kind : Waiter_Work_Kind);
+
+   procedure Reset_Waiter_Work
+   with Export, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_reset";
+
+   function Observe_Waiter_Work (Kind : Interfaces.C.int) return Interfaces.C.unsigned_long_long
+   with Export, Convention => C, External_Name => "flyology_test_scheduler_waiter_work_observe";
 end System.Flyology.Faults;
