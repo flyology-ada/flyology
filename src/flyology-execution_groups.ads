@@ -117,16 +117,19 @@ is
 
    --  Task-owned scope guard that keeps a lightweight task on its current
    --  scheduler thread. Pins nest and each object releases one level. Declare,
-   --  use, and finalize it in the task that acquires it; do not transfer it.
-   --  Finalization by another task raises Program_Error in that task and does
-   --  not release the acquiring task's pin level.
-   --  Native tasks accept pins as no-ops because their thread is permanent.
-   --  @field Active Whether this object owns one pin level
-   --  @field Owner Runtime identity of the acquiring task
+   --  use, and finalize a lightweight-acquired guard in its acquiring task;
+   --  do not transfer it. Finalization of that guard by another task raises
+   --  Program_Error in that task and does not release the acquiring task's
+   --  pin level.
+   --  Native tasks accept pins as no-ops because their thread is permanent;
+   --  native-acquired guards also finalize as no-ops, even in another task.
+   --  @field Active Whether this guard still needs finalization
+   --  @field Owner Runtime identity of the acquiring lightweight task, or null
+   --     for a native-acquired no-op
    type Thread_Pin is limited private;
 
-   --  Acquire one pin level for the calling task.
-   --  @return Task-owned guard that releases the pin during finalization
+   --  Acquire one pin level for a lightweight caller, or a no-op for a native caller.
+   --  @return Guard that releases the lightweight pin or finalizes the native no-op
    --  @exception Group_Error The runtime cannot pin the caller
    function Pin_To_Current_Thread return Thread_Pin;
 
@@ -274,10 +277,10 @@ private
       Owner  : System.Address := System.Null_Address;
    end record;
 
-   --  Release Object's pin level on its acquiring task.
+   --  Release a lightweight-acquired pin on its acquiring task, or finalize a native no-op.
    --  @param Object Pin guard leaving scope
-   --  @exception Program_Error The runtime rejects finalization, including
-   --     finalization by a task other than the owner
+   --  @exception Program_Error The runtime rejects a lightweight-acquired
+   --     guard's finalization, including finalization by another task
    overriding
    procedure Finalize (Object : in out Thread_Pin);
 

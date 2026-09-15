@@ -269,6 +269,21 @@ procedure Thread_Affinity_Smoke is
            and then Current_Thread = Thread
            and then TLS_Get = Native_Value;
       end;
+      declare
+         Pin      : Pin_Access :=
+           new Groups.Thread_Pin'(Groups.Pin_To_Current_Thread);
+         Rejected : Boolean;
+      begin
+         --  Native acquisition is a no-op, including finalization by another task.
+         Pin_Finalizer.Dispose (Pin, Rejected);
+         OK :=
+           OK
+           and then not Rejected
+           and then Pin = null
+           and then Groups.Is_Thread_Pinned
+           and then Current_Thread = Thread
+           and then TLS_Get = Native_Value;
+      end;
       Observations.Finished (OK);
    exception
       when others =>
@@ -291,15 +306,17 @@ procedure Thread_Affinity_Smoke is
 
    task body Pin_Finalizer is
    begin
-      accept Dispose (Pin : in out Pin_Access; Rejected : out Boolean) do
-         Rejected := False;
-         begin
-            Free_Pin (Pin);
-         exception
-            when Program_Error =>
-               Rejected := True;
-         end;
-      end Dispose;
+      for Transfer in 1 .. 2 loop
+         accept Dispose (Pin : in out Pin_Access; Rejected : out Boolean) do
+            Rejected := False;
+            begin
+               Free_Pin (Pin);
+            exception
+               when Program_Error =>
+                  Rejected := True;
+            end;
+         end Dispose;
+      end loop;
    end Pin_Finalizer;
 
 begin
