@@ -2,12 +2,13 @@ with "flyology.gpr";
 with "flyology_tla.gpr";
 
 project Poller_Registration_Conformance is
-   for Languages use ("Ada");
+   for Languages use ("Ada", "C");
    for Source_Dirs use ("src", "generated", "..");
    for Source_Files use
      ("poller_registration_conformance.adb",
       "poller_registration_ownership_model.ads",
       "poller_registration_ownership_model.adb",
+      "poller_finalize_probe.c",
       "fault_control.ads",
       "fault_control.adb");
    for Object_Dir use "build/obj";

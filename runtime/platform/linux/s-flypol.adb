@@ -49,12 +49,31 @@ package body System.Flyology.Poller is
       Descriptor : C.int := -1;
       Readable   : Boolean := False;
       Writable   : Boolean := False;
-      Next       : Watch_Access;
    end record;
 
-   function Watch_To_Address is new Ada.Unchecked_Conversion (Watch_Access, System.Address);
-   function Address_To_Watch is new Ada.Unchecked_Conversion (System.Address, Watch_Access);
+   Empty_Descriptor   : constant C.int := -1;
+   Deleted_Descriptor : constant C.int := -2;
+   Initial_Capacity   : constant Positive := 8;
+
+   type Watch_Slot is record
+      Descriptor : C.int := Empty_Descriptor;
+      Value      : Watch_Access := null;
+   end record;
+
+   type Watch_Array is array (Natural range <>) of Watch_Slot;
+   type Watch_Array_Access is access Watch_Array;
+   type Watch_Table is record
+      Slots   : Watch_Array_Access;
+      Count   : Natural := 0;
+      Deleted : Natural := 0;
+   end record;
+   type Watch_Table_Access is access Watch_Table;
+
+   function Table_To_Address is new Ada.Unchecked_Conversion (Watch_Table_Access, System.Address);
+   function Address_To_Table is new Ada.Unchecked_Conversion (System.Address, Watch_Table_Access);
    procedure Free_Watch is new Ada.Unchecked_Deallocation (Watch_Record, Watch_Access);
+   procedure Free_Watch_Array is new Ada.Unchecked_Deallocation (Watch_Array, Watch_Array_Access);
+   procedure Free_Watch_Table is new Ada.Unchecked_Deallocation (Watch_Table, Watch_Table_Access);
 
    function Epoll_Create1 (Flags : C.int) return C.int;
    pragma Import (C, Epoll_Create1, "epoll_create1");
@@ -78,13 +97,20 @@ package body System.Flyology.Poller is
    function Close (Descriptor : C.int) return C.int;
    pragma Import (C, Close, "close");
 
-   procedure Set_Head (Item : in out Poller; Value : Watch_Access);
+   procedure Set_Table (Item : in out Poller; Value : Watch_Table_Access);
+
+   function Ensure_Slot (Item : in out Poller) return Boolean;
+
+   function Locate
+     (Item : Poller; Descriptor : C.int; Slot : out Natural; For_Insertion : Boolean := False) return Boolean;
 
    function Find (Item : Poller; Descriptor : C.int) return Watch_Access;
 
    function Mask_For (Watch_Item : Watch_Access) return C.unsigned;
 
    procedure Remove (Item : in out Poller; Watch_Item : not null Watch_Access);
+
+   function Control (Item : Poller; Operation : C.int; Descriptor : C.int; Events : C.unsigned) return C.int;
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int;
 
@@ -95,21 +121,115 @@ package body System.Flyology.Poller is
       Limit      : Natural;
       May_Remain : out Boolean) return Boolean;
 
-   function Head (Item : Poller) return Watch_Access
-   is (Address_To_Watch (Item.State));
+   function Table (Item : Poller) return Watch_Table_Access
+   is (Address_To_Table (Item.State));
 
-   procedure Set_Head (Item : in out Poller; Value : Watch_Access) is
+   procedure Set_Table (Item : in out Poller; Value : Watch_Table_Access) is
    begin
-      Item.State := Watch_To_Address (Value);
-   end Set_Head;
+      Item.State := Table_To_Address (Value);
+   end Set_Table;
+
+   function Ensure_Slot (Item : in out Poller) return Boolean is
+      New_Length : Positive;
+      New_Slots  : Watch_Array_Access;
+      Old_Slots  : Watch_Array_Access;
+      Table_Item : Watch_Table_Access := Table (Item);
+
+      procedure Reinsert (Value : not null Watch_Access);
+
+      procedure Reinsert (Value : not null Watch_Access) is
+         Index : Natural := Natural (Value.Descriptor) mod New_Length;
+      begin
+         loop
+            exit when New_Slots (Index).Descriptor = Empty_Descriptor;
+            Index := (if Index = New_Slots'Last then New_Slots'First else Index + 1);
+         end loop;
+         New_Slots (Index) := (Descriptor => Value.Descriptor, Value => Value);
+      end Reinsert;
+   begin
+      if Table_Item = null then
+         Table_Item := new Watch_Table'(Slots => null, Count => 0, Deleted => 0);
+         Set_Table (Item, Table_Item);
+      end if;
+      if Table_Item.Slots = null then
+         Table_Item.Slots := new Watch_Array (0 .. Initial_Capacity - 1);
+         return True;
+      end if;
+
+      --  Rebuild before the next insertion would take the table past a
+      --  three-quarter load. Descriptor magnitude never determines storage:
+      --  sparse and rejected descriptors consume one bounded hash slot.
+      if Table_Item.Count + Table_Item.Deleted < Table_Item.Slots'Length - Table_Item.Slots'Length / 4 then
+         return True;
+      end if;
+
+      if Table_Item.Deleted > Table_Item.Count then
+         New_Length := Table_Item.Slots'Length;
+      elsif Table_Item.Slots'Length > Natural'Last / 2 then
+         return False;
+      else
+         New_Length := 2 * Table_Item.Slots'Length;
+      end if;
+      New_Slots := new Watch_Array (0 .. New_Length - 1);
+      for Existing of Table_Item.Slots.all loop
+         if Existing.Value /= null then
+            Reinsert (Existing.Value);
+         end if;
+      end loop;
+      Old_Slots := Table_Item.Slots;
+      Table_Item.Slots := New_Slots;
+      Table_Item.Deleted := 0;
+      Free_Watch_Array (Old_Slots);
+      return True;
+   exception
+      when Storage_Error =>
+         return False;
+   end Ensure_Slot;
+
+   function Locate
+     (Item : Poller; Descriptor : C.int; Slot : out Natural; For_Insertion : Boolean := False) return Boolean
+   is
+      Table_Item    : constant Watch_Table_Access := Table (Item);
+      First_Deleted : Natural := 0;
+      Has_Deleted   : Boolean := False;
+      Index         : Natural;
+   begin
+      Slot := 0;
+      if Descriptor < 0 or else Table_Item = null or else Table_Item.Slots = null then
+         return False;
+      end if;
+      Index := Natural (Descriptor) mod Table_Item.Slots'Length;
+      for Probe in 1 .. Table_Item.Slots'Length loop
+         pragma Unreferenced (Probe);
+         if Faults.Enabled then
+            Faults.Note (Faults.Poller_Lookup);
+         end if;
+         if Table_Item.Slots (Index).Descriptor = Descriptor then
+            Slot := Index;
+            return True;
+         elsif Table_Item.Slots (Index).Descriptor = Empty_Descriptor then
+            Slot := (if Has_Deleted then First_Deleted else Index);
+            return False;
+         elsif Table_Item.Slots (Index).Descriptor = Deleted_Descriptor and then not Has_Deleted then
+            First_Deleted := Index;
+            Has_Deleted := True;
+         end if;
+         Index := (if Index = Table_Item.Slots'Last then Table_Item.Slots'First else Index + 1);
+      end loop;
+      if For_Insertion and then Has_Deleted then
+         Slot := First_Deleted;
+      end if;
+      return False;
+   end Locate;
 
    function Find (Item : Poller; Descriptor : C.int) return Watch_Access is
-      Position : Watch_Access := Head (Item);
+      Table_Item : constant Watch_Table_Access := Table (Item);
+      Slot       : Natural;
    begin
-      while Position /= null and then Position.Descriptor /= Descriptor loop
-         Position := Position.Next;
-      end loop;
-      return Position;
+      if not Locate (Item, Descriptor, Slot) then
+         return null;
+      end if;
+      return Table_Item.Slots (Slot).Value;
    end Find;
 
    function Mask_For (Watch_Item : Watch_Access) return C.unsigned is
@@ -128,23 +248,50 @@ package body System.Flyology.Poller is
    is ((Mask and Flag) /= 0);
 
    procedure Remove (Item : in out Poller; Watch_Item : not null Watch_Access) is
-      Position : Watch_Access := Head (Item);
-      Previous : Watch_Access;
-      Victim   : Watch_Access := Watch_Item;
+      Table_Item : constant Watch_Table_Access := Table (Item);
+      Victim     : Watch_Access := Watch_Item;
+      Index      : Natural := 0;
    begin
-      while Position /= null and then Position /= Watch_Item loop
-         Previous := Position;
-         Position := Position.Next;
-      end loop;
-      if Position = null then
+      if Watch_Item.Descriptor < 0 or else Table_Item = null or else Table_Item.Slots = null then
          return;
-      elsif Previous = null then
-         Set_Head (Item, Position.Next);
-      else
-         Previous.Next := Position.Next;
+      end if;
+      if not Locate (Item, Watch_Item.Descriptor, Index) or else Table_Item.Slots (Index).Value /= Watch_Item
+      then
+         return;
+      end if;
+      Table_Item.Slots (Index) := (Descriptor => Deleted_Descriptor, Value => null);
+      Table_Item.Count := Table_Item.Count - 1;
+      Table_Item.Deleted := Table_Item.Deleted + 1;
+      if Table_Item.Count = 0 then
+         Table_Item.Slots.all := (others => <>);
+         Table_Item.Deleted := 0;
+      end if;
+      if Faults.Enabled then
+         Faults.Note (Faults.Poller_Record_Release);
       end if;
       Free_Watch (Victim);
    end Remove;
+
+   function Control (Item : Poller; Operation : C.int; Descriptor : C.int; Events : C.unsigned) return C.int
+   is
+   begin
+      if Faults.Enabled then
+         case Operation is
+            when EPOLL_CTL_ADD =>
+               Faults.Note (Faults.Poller_Control_Add);
+
+            when EPOLL_CTL_MOD =>
+               Faults.Note (Faults.Poller_Control_Modify);
+
+            when EPOLL_CTL_DEL =>
+               Faults.Note (Faults.Poller_Control_Delete);
+
+            when others        =>
+               null;
+         end case;
+      end if;
+      return Epoll_Ctl (Item.Descriptor, Operation, Descriptor, Events);
+   end Control;
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int is
       Limit : Time_ABI.Timespec;
@@ -239,15 +386,23 @@ package body System.Flyology.Poller is
    end Initialize;
 
    procedure Finalize (Item : in out Poller) is
-      Position : Watch_Access := Head (Item);
-      Victim   : Watch_Access;
-      Result   : C.int;
+      Table_Item : Watch_Table_Access := Table (Item);
+      Victim     : Watch_Access;
+      Result     : C.int;
    begin
-      while Position /= null loop
-         Victim := Position;
-         Position := Position.Next;
-         Free_Watch (Victim);
-      end loop;
+      if Table_Item /= null and then Table_Item.Slots /= null then
+         for Index in Table_Item.Slots'Range loop
+            if Table_Item.Slots (Index).Value /= null then
+               Victim := Table_Item.Slots (Index).Value;
+               if Faults.Enabled then
+                  Faults.Note (Faults.Poller_Record_Release);
+               end if;
+               Free_Watch (Victim);
+            end if;
+         end loop;
+         Free_Watch_Array (Table_Item.Slots);
+      end if;
+      Free_Watch_Table (Table_Item);
       Item.State := System.Null_Address;
 
       File_Engines.Finalize (Item.File_State);
@@ -270,7 +425,11 @@ package body System.Flyology.Poller is
    end Finalize;
 
    function Watch (Item : in out Poller; Descriptor : C.int; Condition : Interest) return Boolean is
-      Watch_Item   : Watch_Access := Find (Item, Descriptor);
+      Watch_Item   : Watch_Access := null;
+      Table_Item   : Watch_Table_Access;
+      Old_Slots    : Watch_Array_Access;
+      Slot         : Natural;
+      Found        : Boolean;
       Created      : Boolean := False;
       Was_Readable : Boolean;
       Was_Writable : Boolean;
@@ -279,10 +438,38 @@ package body System.Flyology.Poller is
       if Faults.Enabled and then Faults.Fail (Faults.Poller_Watch) then
          return False;
       end if;
-      if Watch_Item = null then
+      if Descriptor < 0 then
+         return False;
+      end if;
+      if Table (Item) = null or else Table (Item).Slots = null then
+         if not Ensure_Slot (Item) then
+            return False;
+         end if;
+      end if;
+      Found := Locate (Item, Descriptor, Slot, For_Insertion => True);
+      Table_Item := Table (Item);
+      if Found then
+         Watch_Item := Table_Item.Slots (Slot).Value;
+      else
+         Old_Slots := Table_Item.Slots;
+         if not Ensure_Slot (Item) then
+            return False;
+         end if;
+         Table_Item := Table (Item);
+         if Table_Item.Slots /= Old_Slots then
+            if Locate (Item, Descriptor, Slot, For_Insertion => True) then
+               return False;
+            end if;
+         end if;
          Watch_Item := new Watch_Record'(Descriptor => Descriptor, others => <>);
-         Watch_Item.Next := Head (Item);
-         Set_Head (Item, Watch_Item);
+         if Table_Item.Slots (Slot).Descriptor = Deleted_Descriptor then
+            Table_Item.Deleted := Table_Item.Deleted - 1;
+         end if;
+         Table_Item.Slots (Slot) := (Descriptor => Descriptor, Value => Watch_Item);
+         Table_Item.Count := Table_Item.Count + 1;
+         if Faults.Enabled then
+            Faults.Note (Faults.Poller_Record_Allocation);
+         end if;
          Created := True;
       end if;
 
@@ -295,19 +482,13 @@ package body System.Flyology.Poller is
       end if;
 
       Result :=
-        Epoll_Ctl
-          (Item.Descriptor,
-           (if Created then EPOLL_CTL_ADD else EPOLL_CTL_MOD),
-           Descriptor,
-           Mask_For (Watch_Item));
-      if Result /= 0
-        and then not Created
-        and then Integer (OSI.errno) = Poller_Policy.Interest_Absent_Error
+        Control (Item, (if Created then EPOLL_CTL_ADD else EPOLL_CTL_MOD), Descriptor, Mask_For (Watch_Item));
+      if Result /= 0 and then not Created and then Integer (OSI.errno) = Poller_Policy.Interest_Absent_Error
       then
          --  Closing a watched descriptor removes its epoll registration but
          --  leaves this process-side record until the old waiter departs. A
          --  reused descriptor therefore needs ADD after MOD reports ENOENT.
-         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_ADD, Descriptor, Mask_For (Watch_Item));
+         Result := Control (Item, EPOLL_CTL_ADD, Descriptor, Mask_For (Watch_Item));
       end if;
       if Result /= 0 then
          Watch_Item.Readable := Was_Readable;
@@ -352,9 +533,9 @@ package body System.Flyology.Poller is
 
       Retained := Watch_Item.Readable or else Watch_Item.Writable;
       if Retained then
-         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
+         Result := Control (Item, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
       else
-         Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
+         Result := Control (Item, EPOLL_CTL_DEL, Descriptor, 0);
       end if;
 
       --  EPOLL_CTL_MOD and EPOLL_CTL_DEL both answer EBADF once the owner has
@@ -581,10 +762,12 @@ package body System.Flyology.Poller is
                end if;
 
                if Watch_Item.Readable or else Watch_Item.Writable then
-                  Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
+                  Result := Control (Item, EPOLL_CTL_MOD, Descriptor, Mask_For (Watch_Item));
                else
-                  Result := Epoll_Ctl (Item.Descriptor, EPOLL_CTL_DEL, Descriptor, 0);
-                  Remove (Item, Watch_Item);
+                  --  EPOLLONESHOT has already disabled the kernel interest.
+                  --  Retain the indexed record so a later wait rearms it with
+                  --  MOD without allocator or kernel delete/add churn.
+                  Result := 0;
                end if;
                if Result /= 0 then
                   return False;
