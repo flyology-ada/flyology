@@ -281,8 +281,13 @@ private
    type Prepared_Commit_Status is (Prepared_Committed, Prepared_Commit_Closed);
    protected type Family_State is
       procedure Configure (Identity : Controller_Id; Inherited : Incident_Context);
-      procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle);
-      procedure Commit (Slot : Slot_Index; Handle : Child_Handle);
+      --  Publish caller-owned reservation evidence in the protected cut, and
+      --  disarm it in the same cut that queues the committed generation.
+      procedure Reserve
+        (Slot   : not null access Slot_Index;
+         Handle : not null access Child_Handle;
+         Active : not null access Boolean);
+      procedure Commit (Slot : Slot_Index; Handle : Child_Handle; Active : not null access Boolean);
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle);
       procedure Reserve_Prepared
         (Slot   : not null access Slot_Index;

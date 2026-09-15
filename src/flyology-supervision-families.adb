@@ -339,7 +339,11 @@ package body Flyology.Supervision.Families is
             Backoff     => Backoff);
       end Record_Event;
 
-      procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle) is
+      procedure Reserve
+        (Slot   : not null access Slot_Index;
+         Handle : not null access Child_Handle;
+         Active : not null access Boolean)
+      is
          Found      : Boolean := False;
          Has_Vacant : Boolean := False;
          Selected   : Slot_Index := Slot_Index'First;
@@ -395,14 +399,15 @@ package body Flyology.Supervision.Families is
          Last_Attempt (Selected) := Incident_Attempt'First;
          Has_Incident (Selected) := False;
          Active_Incidents (Selected) := No_Incident;
-         Slot := Selected;
-         Handle :=
+         Slot.all := Selected;
+         Handle.all :=
            (Controller => Identity,
             Id         => Logical_Id (Selected),
             Generation => Snapshots (Selected).Generation);
+         Active.all := True;
       end Reserve;
 
-      procedure Commit (Slot : Slot_Index; Handle : Child_Handle) is
+      procedure Commit (Slot : Slot_Index; Handle : Child_Handle; Active : not null access Boolean) is
       begin
          if Slots (Slot) /= Reserved
            or else not Generation_Is_Current
@@ -417,6 +422,7 @@ package body Flyology.Supervision.Families is
          Queue (Queue_Tail) := Slot;
          Queue_Tail := Next_Slot (Queue_Tail);
          Queue_Length := Queue_Length + 1;
+         Active.all := False;
       end Commit;
 
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle) is
@@ -2045,17 +2051,39 @@ package body Flyology.Supervision.Families is
    end Validate;
 
    procedure Start (Item : in out Family; Input : Request; Handle : out Child_Handle) is
-      Slot : Slot_Index;
-   begin
-      Item.State.Reserve (Slot, Handle);
+      type Reservation_Guard is new Ada.Finalization.Limited_Controlled with record
+         Slot   : aliased Slot_Index := Slot_Index'First;
+         Handle : aliased Child_Handle;
+         Active : aliased Boolean := False;
+      end record;
+
+      overriding
+      procedure Finalize (Guard : in out Reservation_Guard);
+
+      overriding
+      procedure Finalize (Guard : in out Reservation_Guard) is
       begin
-         Item.Inputs (Slot) := Input;
-         Item.State.Commit (Slot, Handle);
-      exception
-         when others =>
-            Item.State.Rollback (Slot, Handle);
-            raise;
-      end;
+         if Guard.Active then
+            Item.State.Rollback (Guard.Slot, Guard.Handle);
+         end if;
+      end Finalize;
+
+      Guard : Reservation_Guard;
+   begin
+      --  The guard exists before Reserve publishes anything. Its aliased
+      --  evidence is armed before the protected action permits pending abort.
+      Item.State.Reserve (Guard.Slot'Access, Guard.Handle'Access, Guard.Active'Access);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Family_Start_Reserved);
+      end if;
+      Item.Inputs (Guard.Slot) := Input;
+      Item.State.Commit (Guard.Slot, Guard.Handle, Guard.Active'Access);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Family_Start_Committed);
+      end if;
+      Handle := Guard.Handle;
    end Start;
 
    procedure Stop (Item : in out Family; Handle : Child_Handle) is

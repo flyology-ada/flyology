@@ -18,6 +18,8 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
       Family_Generation_Starting,
       Family_Generation_Terminated,
       Family_Before_Take_Start,
+      Family_Start_Reserved,
+      Family_Start_Committed,
       Prepared_Admission_Reserved,
       Prepared_Admission_Published,
       Prepared_Admission_Committed,
