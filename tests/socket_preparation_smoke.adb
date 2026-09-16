@@ -25,8 +25,7 @@ procedure Socket_Preparation_Smoke is
    function Creation_Flags return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_socket_creation_flags";
 
-   Expected_Accept_Setups : constant Interfaces.C.unsigned_long_long :=
-     (if Creation_Flags = 0 then 3 else 2);
+   Expected_Accept_Setups : constant Interfaces.C.unsigned_long_long := (if Creation_Flags = 0 then 3 else 2);
 
    Payload : constant Stream_Element_Array := [16#A5#, 16#5A#];
 

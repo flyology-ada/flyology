@@ -67,8 +67,7 @@ procedure Subprocess_Smoke is
    procedure Exercise_Closed_Standard_Input is
       Child  : Subprocesses.Process;
       Status : Subprocesses.Exit_Status;
-      Buffer : constant Ada.Streams.Stream_Element_Array (1 .. 4_096) :=
-        (others => 0);
+      Buffer : constant Ada.Streams.Stream_Element_Array (1 .. 4_096) := (others => 0);
       Last   : Ada.Streams.Stream_Element_Offset;
       Raised : Boolean := False;
    begin
@@ -76,8 +75,7 @@ procedure Subprocess_Smoke is
       Subprocesses.Wait (Child, Status);
       Assert (Subprocesses.Successful (Status), "closed-input child failed");
       begin
-         Subprocesses.Write_Standard_Input
-           (Child, Buffer, Last, Timeout => 2.0);
+         Subprocesses.Write_Standard_Input (Child, Buffer, Last, Timeout => 2.0);
       exception
          when Subprocesses.Pipe_Error =>
             Raised := True;
@@ -174,23 +172,14 @@ procedure Subprocess_Smoke is
       Assert (Capture.Standard_Output (Value) = "typed stdin", "stdin round trip mismatch");
 
       declare
-         Item : Subprocesses.Command :=
-           Subprocesses.To_Command ("/usr/bin/head");
+         Item : Subprocesses.Command := Subprocesses.To_Command ("/usr/bin/head");
       begin
          Subprocesses.Append_Argument (Item, "-c");
          Subprocesses.Append_Argument (Item, "10");
          Value :=
-           Capture.Run
-             (Item,
-              Standard_Input => Large_Standard_Input,
-              Maximum_Output => 32,
-              Timeout        => 10.0);
-         Assert
-           (Subprocesses.Successful (Capture.Status (Value)),
-            "prefix-input child failed");
-         Assert
-           (Capture.Standard_Output (Value) = Large_Standard_Input (1 .. 10),
-            "prefix output was lost");
+           Capture.Run (Item, Standard_Input => Large_Standard_Input, Maximum_Output => 32, Timeout => 10.0);
+         Assert (Subprocesses.Successful (Capture.Status (Value)), "prefix-input child failed");
+         Assert (Capture.Standard_Output (Value) = Large_Standard_Input (1 .. 10), "prefix output was lost");
       end;
 
       Value := Capture.Run (Fixture_Command ("nonzero"));
