@@ -2,6 +2,7 @@ with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Real_Time;
+with Ada.Strings.Unbounded;
 with Ada.Streams;
 with Flyology;
 with Flyology.Cancellation;
@@ -16,6 +17,7 @@ procedure Subprocess_Smoke is
    package Capture renames Flyology.Subprocesses.Capture;
    package Sockets renames Flyology.IO.Sockets;
    package C renames Interfaces.C;
+   package US renames Ada.Strings.Unbounded;
 
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
@@ -454,6 +456,8 @@ procedure Subprocess_Smoke is
          Parallel_Outcome.Fail;
    end Parallel_Runner;
 
+   Race_Baseline : US.Unbounded_String;
+
    protected Race_Outcome is
       procedure Complete;
       procedure Fail (Message : String);
@@ -502,10 +506,10 @@ procedure Subprocess_Smoke is
       for Iteration in 1 .. 60 loop
          declare
             Value : constant Capture.Result :=
-              Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 32, Timeout => 5.0);
+              Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 4_096, Timeout => 5.0);
          begin
             if not Subprocesses.Successful (Capture.Status (Value))
-              or else Capture.Standard_Output (Value) /= "-1"
+              or else Capture.Standard_Output (Value) /= US.To_String (Race_Baseline)
             then
                Race_Outcome.Fail ("spawn inherited unrelated descriptor: " & Capture.Standard_Output (Value));
             end if;
@@ -551,13 +555,20 @@ begin
    Parallel_Outcome.Check;
 
    declare
-      First  : Race_Spawner;
-      Second : Race_Spawner;
-      Third  : Race_Spawner;
-      Fourth : Race_Spawner;
-      Churn  : Race_Churn;
+      Baseline : constant Capture.Result :=
+        Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 4_096, Timeout => 5.0);
    begin
-      null;
+      Assert (Subprocesses.Successful (Capture.Status (Baseline)), "descriptor baseline child failed");
+      Race_Baseline := US.To_Unbounded_String (Capture.Standard_Output (Baseline));
+      declare
+         First  : Race_Spawner;
+         Second : Race_Spawner;
+         Third  : Race_Spawner;
+         Fourth : Race_Spawner;
+         Churn  : Race_Churn;
+      begin
+         null;
+      end;
    end;
    Race_Outcome.Check;
 
