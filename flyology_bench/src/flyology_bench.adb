@@ -10,6 +10,7 @@ with Ada.Unchecked_Deallocation;
 with Flyology_Bench.Host_Control;
 with Flyology_Bench.Host_Lock;
 with Flyology_Bench.Internal_Condition_Policy;
+with Flyology_Bench.Internal_Condition_Test_Hooks;
 with Flyology_Bench.Internal_Conditions;
 with Flyology_Bench.Internal_Statistics;
 with Flyology_Bench.Internal_Window_Policy;
@@ -20,6 +21,7 @@ package body Flyology_Bench is
    package Counters renames Flyology_Bench.Internal_Probes.Counters;
    package Conditions renames Flyology_Bench.Internal_Conditions;
    package Condition_Policy renames Flyology_Bench.Internal_Condition_Policy;
+   package Condition_Hooks renames Flyology_Bench.Internal_Condition_Test_Hooks;
    package Window_Policy renames Flyology_Bench.Internal_Window_Policy;
    use Flyology_Bench.Internal_Probes;
 
@@ -1520,6 +1522,23 @@ package body Flyology_Bench is
       Watch.Condition_Last := Current;
    end Record_Condition_Snapshot;
 
+   function Condition_Pause_Clock_Now return Interfaces.Unsigned_64 is
+   begin
+      if Condition_Hooks.Enabled and then Condition_Hooks.Pause_Clock_Enabled then
+         return Condition_Hooks.Pause_Clock_Now;
+      end if;
+      return Clock_Now;
+   end Condition_Pause_Clock_Now;
+
+   procedure Condition_Pause_Delay (Nanoseconds : Interfaces.Unsigned_64) is
+   begin
+      if Condition_Hooks.Enabled and then Condition_Hooks.Pause_Clock_Enabled then
+         Condition_Hooks.Advance_Pause_Clock (Nanoseconds);
+      else
+         delay Duration (Long_Float (Nanoseconds) / 1_000_000_000.0);
+      end if;
+   end Condition_Pause_Delay;
+
    procedure Await_Condition_Settle
      (Config : Configuration; Watch : in out Interference_Watch; Recovered : out Boolean)
    is
@@ -1565,7 +1584,7 @@ package body Flyology_Bench is
       end if;
       Remaining_Budget := Budget - Watch.Condition_Paused_Total;
       Watch.Report.Condition_Pauses := Watch.Report.Condition_Pauses + 1;
-      Started := Clock_Now;
+      Started := Condition_Pause_Clock_Now;
       Deadline :=
         (if Started > Interfaces.Unsigned_64'Last - Remaining_Budget
          then Interfaces.Unsigned_64'Last
@@ -1605,7 +1624,7 @@ package body Flyology_Bench is
            Watch.Throttle_Recovery_Unresolved or else Throttle_Increase > 0;
       end;
       Record_Condition_Snapshot (Watch, Previous);
-      Previous_Time := Clock_Now;
+      Previous_Time := Condition_Pause_Clock_Now;
       Previous_Acceptable :=
         not Conditions_Unacceptable
               (Config,
@@ -1618,19 +1637,19 @@ package body Flyology_Bench is
       Notify (Config, Waiting_For_Operating_Conditions, 0, 100);
       loop
          declare
-            Elapsed  : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+            Elapsed  : constant Interfaces.Unsigned_64 := Condition_Pause_Clock_Now - Started;
             Sleep_NS : Interfaces.Unsigned_64;
          begin
             exit when Elapsed >= Remaining_Budget;
             Sleep_NS := Interfaces.Unsigned_64'Min (Poll_NS, Remaining_Budget - Elapsed);
-            delay Duration (Long_Float (Sleep_NS) / 1_000_000_000.0);
+            Condition_Pause_Delay (Sleep_NS);
          end;
          --  The first pause read above force-refreshes coarse profile state.
          --  Keep live thermal state on every poll, but let macOS pmset values
          --  use their one-second cache so the observer does not launch three
          --  helper processes at every poll interval.
          Read_Conditions (Watch, Current, Deadline => Deadline, Account_Time => False);
-         Now := Clock_Now;
+         Now := Condition_Pause_Clock_Now;
          declare
             Event_Evidence : constant Condition_Policy.Counter_Evidence :=
               Condition_Policy.Compare_Counter
@@ -1700,7 +1719,7 @@ package body Flyology_Bench is
          Previous_Acceptable := Current_Acceptable;
       end loop;
       declare
-         Spent : constant Interfaces.Unsigned_64 := Clock_Now - Started;
+         Spent : constant Interfaces.Unsigned_64 := Condition_Pause_Clock_Now - Started;
       begin
          Watch.Paused_Total := Watch.Paused_Total + Spent;
          Watch.Condition_Paused_Total := Watch.Condition_Paused_Total + Spent;
