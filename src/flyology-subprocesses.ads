@@ -140,10 +140,13 @@ package Flyology.Subprocesses is
    type Process is new Ada.Finalization.Limited_Controlled with private;
 
    --  Spawn Command and transfer the parent ends of stdin, stdout, and stderr
-   --  into Child. All Flyology-created descriptors are close-on-exec. Other
-   --  descriptors opened by the application follow their own FD_CLOEXEC
-   --  policy. Spawn synchronously resets the child's signal mask to empty and
-   --  every catchable signal disposition to its default before exec. It has no
+   --  into Child. On Darwin, Spawn closes all other descriptors in the child,
+   --  including application descriptors without FD_CLOEXEC; only standard
+   --  streams and explicitly transferred bootstrap descriptors are inherited.
+   --  On Linux, descriptors follow their FD_CLOEXEC policy; Flyology-created
+   --  descriptors are atomically close-on-exec. Spawn synchronously resets the
+   --  child's signal mask to empty and every catchable signal disposition to
+   --  its default before exec. It has no
    --  deadline or cancellation parameter. A failed call leaves Child empty and
    --  retains no process or descriptor ownership.
    --  @param Item Typed executable, argv, environment, and directory policy

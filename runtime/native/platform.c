@@ -1155,8 +1155,10 @@ int flyology_structured_listener_close(int descriptor) {
 #endif
 }
 
-/* The production path remains one direct accept call.  Deterministic errno
-   injection exists only in explicitly fault-enabled test runtimes. */
+/* The production path remains one direct accept call. Linux requires accept4
+   because a plain accept followed by fcntl can leak the descriptor to a
+   concurrent spawn; ENOSYS fails closed instead of taking that path.
+   Deterministic errno injection exists only in fault-enabled test runtimes. */
 int flyology_accept(int socket, void *address, void *length) {
 #ifdef FLYOLOGY_TEST_FAULTS
     if (flyology_test_fault_hit(
@@ -1181,7 +1183,12 @@ int flyology_accept(int socket, void *address, void *length) {
         return -1;
     }
 #endif
+#if defined(__linux__)
+    return accept4(socket, (struct sockaddr *)address, (socklen_t *)length,
+                   SOCK_CLOEXEC | SOCK_NONBLOCK);
+#else
     return accept(socket, (struct sockaddr *)address, (socklen_t *)length);
+#endif
 }
 
 /* POSIX keeps an interrupted connect(2) alive: "the connection request shall

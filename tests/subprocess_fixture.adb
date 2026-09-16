@@ -42,6 +42,9 @@ procedure Subprocess_Fixture is
    function Fork_Escaped_Pipe_Holder return C.int;
    pragma Import (C, Fork_Escaped_Pipe_Holder, "flyology_test_subprocess_fork_escaped_pipe_holder");
 
+   function Descriptor_List (Buffer : System.Address; Capacity : C.size_t) return C.int;
+   pragma Import (C, Descriptor_List, "flyology_test_subprocess_descriptor_list");
+
    procedure Write_All (Descriptor : C.int; Text : String) is
       Offset : Natural := 0;
       Result : C.long;
@@ -91,6 +94,17 @@ begin
    elsif Mode = "capture" then
       Write_All (1, "stdout-value");
       Write_All (2, "stderr-value");
+   elsif Mode = "inspect-descriptors" then
+      declare
+         Buffer : aliased String (1 .. 4_096);
+         Length : constant C.int := Descriptor_List (Buffer'Address, Buffer'Length);
+      begin
+         if Length < 0 then
+            Ada.Command_Line.Set_Exit_Status (92);
+         else
+            Write_All (1, Buffer (1 .. Natural (Length)));
+         end if;
+      end;
    elsif Mode = "stdin" then
       declare
          Buffer : aliased String (1 .. 4_096);

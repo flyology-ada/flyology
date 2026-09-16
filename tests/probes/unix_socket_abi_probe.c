@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 /* Focused comparison of Flyology's pathname Unix-socket ABI leaves with the
    host sockaddr_un definition. Policy and socket operations remain in Ada. */
 
@@ -10,6 +14,7 @@
 unsigned flyology_socket_unix_path_max(void);
 int flyology_socket_pack_unix_path(const char *, unsigned,
                                    struct sockaddr_storage *, socklen_t *);
+int flyology_socket_creation_flags(void);
 
 int main(void)
 {
@@ -22,6 +27,13 @@ int main(void)
 
     if (flyology_socket_unix_path_max() != sizeof(value->sun_path) - 1U)
         return 1;
+#if defined(__linux__)
+    if (flyology_socket_creation_flags() != SOCK_CLOEXEC)
+        return 7;
+#else
+    if (flyology_socket_creation_flags() != 0)
+        return 7;
+#endif
     if (flyology_socket_pack_unix_path(
           pathname, (unsigned)(sizeof(pathname) - 1U), &storage, &length) != 0)
         return 2;

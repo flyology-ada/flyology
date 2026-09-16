@@ -1,10 +1,59 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <errno.h>
+#include <dirent.h>
+#include <limits.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t flyology_subprocess_stop_requested;
 static volatile sig_atomic_t flyology_subprocess_fail_reaper_allocation;
+
+/* Ignore the enumeration handle itself and report the complete sorted set.
+   A Linux child may legitimately inherit application-owned descriptors; the
+   parent compares this set with a clean pre-churn child. */
+int flyology_test_subprocess_descriptor_list(char *buffer, size_t capacity)
+{
+    DIR *directory = opendir("/dev/fd");
+    struct dirent *entry;
+    int descriptors[256];
+    int directory_fd;
+    size_t count = 0;
+    size_t length = 0;
+
+    if (directory == NULL) return -1;
+    directory_fd = dirfd(directory);
+    while ((entry = readdir(directory)) != NULL) {
+        char *end;
+        long value = strtol(entry->d_name, &end, 10);
+        if (*end == '\0' && value > STDERR_FILENO && value != directory_fd) {
+            if (value > INT_MAX || count == sizeof(descriptors) / sizeof(descriptors[0])) {
+                (void)closedir(directory);
+                return -1;
+            }
+            size_t position = count++;
+            while (position > 0 && descriptors[position - 1] > value) {
+                descriptors[position] = descriptors[position - 1];
+                --position;
+            }
+            descriptors[position] = (int)value;
+        }
+    }
+    (void)closedir(directory);
+    if (capacity == 0) return -1;
+    for (size_t index = 0; index < count; ++index) {
+        int written = snprintf(buffer + length, capacity - length, "%s%d",
+                               index == 0 ? "" : ",", descriptors[index]);
+        if (written < 0 || (size_t)written >= capacity - length) return -1;
+        length += (size_t)written;
+    }
+    return (int)length;
+}
 
 void flyology_test_subprocess_set_fail_reaper_allocation(int enabled)
 {

@@ -2,10 +2,12 @@ with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Exceptions;
 with Ada.Real_Time;
+with Ada.Strings.Unbounded;
 with Ada.Streams;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.IO;
+with Flyology.IO.Sockets;
 with Flyology.Subprocesses;
 with Flyology.Subprocesses.Capture;
 with Interfaces.C;
@@ -13,7 +15,9 @@ with Interfaces.C;
 procedure Subprocess_Smoke is
    package Subprocesses renames Flyology.Subprocesses;
    package Capture renames Flyology.Subprocesses.Capture;
+   package Sockets renames Flyology.IO.Sockets;
    package C renames Interfaces.C;
+   package US renames Ada.Strings.Unbounded;
 
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
@@ -63,8 +67,7 @@ procedure Subprocess_Smoke is
    procedure Exercise_Closed_Standard_Input is
       Child  : Subprocesses.Process;
       Status : Subprocesses.Exit_Status;
-      Buffer : constant Ada.Streams.Stream_Element_Array (1 .. 4_096) :=
-        (others => 0);
+      Buffer : constant Ada.Streams.Stream_Element_Array (1 .. 4_096) := (others => 0);
       Last   : Ada.Streams.Stream_Element_Offset;
       Raised : Boolean := False;
    begin
@@ -72,8 +75,7 @@ procedure Subprocess_Smoke is
       Subprocesses.Wait (Child, Status);
       Assert (Subprocesses.Successful (Status), "closed-input child failed");
       begin
-         Subprocesses.Write_Standard_Input
-           (Child, Buffer, Last, Timeout => 2.0);
+         Subprocesses.Write_Standard_Input (Child, Buffer, Last, Timeout => 2.0);
       exception
          when Subprocesses.Pipe_Error =>
             Raised := True;
@@ -170,23 +172,14 @@ procedure Subprocess_Smoke is
       Assert (Capture.Standard_Output (Value) = "typed stdin", "stdin round trip mismatch");
 
       declare
-         Item : Subprocesses.Command :=
-           Subprocesses.To_Command ("/usr/bin/head");
+         Item : Subprocesses.Command := Subprocesses.To_Command ("/usr/bin/head");
       begin
          Subprocesses.Append_Argument (Item, "-c");
          Subprocesses.Append_Argument (Item, "10");
          Value :=
-           Capture.Run
-             (Item,
-              Standard_Input => Large_Standard_Input,
-              Maximum_Output => 32,
-              Timeout        => 10.0);
-         Assert
-           (Subprocesses.Successful (Capture.Status (Value)),
-            "prefix-input child failed");
-         Assert
-           (Capture.Standard_Output (Value) = Large_Standard_Input (1 .. 10),
-            "prefix output was lost");
+           Capture.Run (Item, Standard_Input => Large_Standard_Input, Maximum_Output => 32, Timeout => 10.0);
+         Assert (Subprocesses.Successful (Capture.Status (Value)), "prefix-input child failed");
+         Assert (Capture.Standard_Output (Value) = Large_Standard_Input (1 .. 10), "prefix output was lost");
       end;
 
       Value := Capture.Run (Fixture_Command ("nonzero"));
@@ -452,6 +445,89 @@ procedure Subprocess_Smoke is
          Parallel_Outcome.Fail;
    end Parallel_Runner;
 
+   Race_Baseline : US.Unbounded_String;
+
+   protected Race_Outcome is
+      procedure Complete;
+      procedure Fail (Message : String);
+      function Stopped return Boolean;
+      procedure Check;
+   private
+      Completed : Natural := 0;
+      Length    : Natural := 0;
+      Text      : String (1 .. 128) := (others => ' ');
+   end Race_Outcome;
+
+   protected body Race_Outcome is
+      procedure Complete is
+      begin
+         Completed := Completed + 1;
+      end Complete;
+
+      procedure Fail (Message : String) is
+      begin
+         if Length = 0 then
+            Length := Natural'Min (Text'Length, Message'Length);
+            Text (1 .. Length) := Message (Message'First .. Message'First + Length - 1);
+         end if;
+      end Fail;
+
+      function Stopped return Boolean is
+      begin
+         return Completed = 4;
+      end Stopped;
+
+      procedure Check is
+      begin
+         Assert (Completed = 4, "descriptor race spawners did not complete");
+         if Length > 0 then
+            raise Program_Error with Text (1 .. Length);
+         end if;
+      end Check;
+   end Race_Outcome;
+
+   task type Race_Spawner is
+      pragma Task_Info (Flyology.Native_Task);
+   end Race_Spawner;
+
+   task body Race_Spawner is
+   begin
+      for Iteration in 1 .. 60 loop
+         declare
+            Value : constant Capture.Result :=
+              Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 4_096, Timeout => 5.0);
+         begin
+            if not Subprocesses.Successful (Capture.Status (Value))
+              or else Capture.Standard_Output (Value) /= US.To_String (Race_Baseline)
+            then
+               Race_Outcome.Fail ("spawn inherited unrelated descriptor: " & Capture.Standard_Output (Value));
+            end if;
+         end;
+      end loop;
+      Race_Outcome.Complete;
+   exception
+      when others =>
+         Race_Outcome.Fail ("descriptor race spawn failed");
+         Race_Outcome.Complete;
+   end Race_Spawner;
+
+   task type Race_Churn is
+      pragma Task_Info (Flyology.Native_Task);
+   end Race_Churn;
+
+   task body Race_Churn is
+      Left, Right : Sockets.Socket_Type;
+   begin
+      while not Race_Outcome.Stopped loop
+         Sockets.Create_Socket_Pair (Left, Right);
+         Sockets.Close_Socket (Left);
+         Sockets.Close_Socket (Right);
+      end loop;
+   exception
+      when others =>
+         Race_Outcome.Fail ("descriptor race socket-pair churn failed");
+   end Race_Churn;
+
    Before, After : C.int;
 begin
    Run_Model (Flyology.Lightweight_Task);
@@ -466,6 +542,24 @@ begin
       null;
    end;
    Parallel_Outcome.Check;
+
+   declare
+      Baseline : constant Capture.Result :=
+        Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 4_096, Timeout => 5.0);
+   begin
+      Assert (Subprocesses.Successful (Capture.Status (Baseline)), "descriptor baseline child failed");
+      Race_Baseline := US.To_Unbounded_String (Capture.Standard_Output (Baseline));
+      declare
+         First  : Race_Spawner;
+         Second : Race_Spawner;
+         Third  : Race_Spawner;
+         Fourth : Race_Spawner;
+         Churn  : Race_Churn;
+      begin
+         null;
+      end;
+   end;
+   Race_Outcome.Check;
 
    Before := Open_FD_Count;
    for Iteration in 1 .. 25 loop

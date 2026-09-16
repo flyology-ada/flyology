@@ -138,6 +138,17 @@ int flyology_socket_datagram_kind(void)
     return SOCK_DGRAM;
 }
 
+/* SOCK_CLOEXEC is a host-header flag; Ada owns creation and cleanup. Created
+   sockets remain blocking until Prepare, as the public socket contract says. */
+int flyology_socket_creation_flags(void)
+{
+#if defined(__linux__)
+    return SOCK_CLOEXEC;
+#else
+    return 0;
+#endif
+}
+
 int flyology_socket_configure_descriptor(int fd, int nonblocking)
 {
     int descriptor_flags = fcntl(fd, F_GETFD);
