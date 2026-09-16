@@ -173,6 +173,10 @@ int flyology_subprocess_spawn(pid_t *pid,
     /* Ada validates the all-disabled or four-distinct-descriptor contract. */
     int bootstrap = control_parent != -1;
 
+#if defined(__APPLE__)
+    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
+#endif
+
     result = posix_spawn_file_actions_init(&actions);
     if (result != 0) return result;
     result = posix_spawnattr_init(&attributes);
@@ -184,14 +188,26 @@ int flyology_subprocess_spawn(pid_t *pid,
 #define FLYOLOGY_ACTION(call) do { result = (call); if (result != 0) goto done; } while (0)
     FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2(&actions, stdin_read,
                                                      STDIN_FILENO));
+#if defined(__APPLE__)
+    FLYOLOGY_ACTION(posix_spawn_file_actions_addinherit_np(&actions,
+                                                           STDIN_FILENO));
+#endif
     if (stdout_write >= 0) {
         FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
           (&actions, stdout_write, STDOUT_FILENO));
     }
+#if defined(__APPLE__)
+    FLYOLOGY_ACTION(posix_spawn_file_actions_addinherit_np(&actions,
+                                                           STDOUT_FILENO));
+#endif
     if (stderr_write >= 0) {
         FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
           (&actions, stderr_write, STDERR_FILENO));
     }
+#if defined(__APPLE__)
+    FLYOLOGY_ACTION(posix_spawn_file_actions_addinherit_np(&actions,
+                                                           STDERR_FILENO));
+#endif
     FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_read));
     FLYOLOGY_ACTION(posix_spawn_file_actions_addclose(&actions, stdin_write));
     if (stdout_read >= 0) {
@@ -212,6 +228,12 @@ int flyology_subprocess_spawn(pid_t *pid,
           (&actions, control_child, control_target));
         FLYOLOGY_ACTION(posix_spawn_file_actions_adddup2
           (&actions, capability_child, capability_target));
+#if defined(__APPLE__)
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addinherit_np
+          (&actions, control_target));
+        FLYOLOGY_ACTION(posix_spawn_file_actions_addinherit_np
+          (&actions, capability_target));
+#endif
         FLYOLOGY_ACTION(posix_spawn_file_actions_addclose
           (&actions, control_parent));
         FLYOLOGY_ACTION(posix_spawn_file_actions_addclose

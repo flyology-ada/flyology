@@ -7,6 +7,7 @@ procedure Socket_Preparation_Smoke is
    package Sockets renames Flyology.IO.Sockets;
    use Ada.Streams;
    use type Sockets.Address_Family;
+   use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long_long;
 
    procedure Reset_Nonblocking_Setups
@@ -14,6 +15,12 @@ procedure Socket_Preparation_Smoke is
 
    function Nonblocking_Setup_Count return Interfaces.C.unsigned_long_long
    with Import, Convention => C, External_Name => "flyology_test_socket_nonblocking_setup_count";
+
+   function FD_Is_Nonblocking (FD : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_nonblocking";
+
+   function FD_Is_Close_On_Exec (FD : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_fd_is_close_on_exec";
 
    Payload : constant Stream_Element_Array := [16#A5#, 16#5A#];
 
@@ -43,7 +50,21 @@ procedure Socket_Preparation_Smoke is
    Server, Client, Moved          : Sockets.Socket_Type;
    Server_Address, Client_Address : Sockets.Endpoint;
 begin
+   declare
+      Left, Right : Sockets.Socket_Type;
+   begin
+      Sockets.Create_Socket_Pair (Left, Right);
+      pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Left)) = 1);
+      pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Right)) = 1);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Left)) = 0);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Right)) = 0);
+      Sockets.Close_Socket (Left);
+      Sockets.Close_Socket (Right);
+   end;
+
    Sockets.Create_Socket (Server, Sockets.IPv4, Sockets.Socket_Datagram);
+   pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Server)) = 1);
+   pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Server)) = 0);
    Sockets.Bind_Socket (Server, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
    Server_Address := Sockets.Get_Socket_Name (Server);
    Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
@@ -104,6 +125,8 @@ begin
       Sockets.Connect (Connector, Listener_Address, Timeout => 1.0);
       Sockets.Accept_Connection (Listener, Accepted, Peer_Address, Timeout => 1.0);
       pragma Assert (Peer_Address.Family = Sockets.IPv4);
+      pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Accepted)) = 1);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Accepted)) = 1);
       pragma Assert (Nonblocking_Setup_Count = 3);
 
       Sockets.Move (Accepted, Accepted_Moved);

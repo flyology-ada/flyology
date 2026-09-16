@@ -1,10 +1,38 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <errno.h>
+#include <dirent.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t flyology_subprocess_stop_requested;
 static volatile sig_atomic_t flyology_subprocess_fail_reaper_allocation;
+
+/* Ignore the enumeration handle itself; any other fd above stderr was
+   inherited by a child that receives only the three standard streams. */
+int flyology_test_subprocess_first_unexpected_fd(void)
+{
+    DIR *directory = opendir("/dev/fd");
+    struct dirent *entry;
+    int directory_fd;
+    int first = -1;
+
+    if (directory == NULL) return -2;
+    directory_fd = dirfd(directory);
+    while ((entry = readdir(directory)) != NULL) {
+        char *end;
+        long value = strtol(entry->d_name, &end, 10);
+        if (*end == '\0' && value > STDERR_FILENO && value != directory_fd &&
+            (first < 0 || value < first))
+            first = (int)value;
+    }
+    (void)closedir(directory);
+    return first;
+}
 
 void flyology_test_subprocess_set_fail_reaper_allocation(int enabled)
 {

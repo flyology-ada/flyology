@@ -42,6 +42,9 @@ procedure Subprocess_Fixture is
    function Fork_Escaped_Pipe_Holder return C.int;
    pragma Import (C, Fork_Escaped_Pipe_Holder, "flyology_test_subprocess_fork_escaped_pipe_holder");
 
+   function First_Unexpected_FD return C.int;
+   pragma Import (C, First_Unexpected_FD, "flyology_test_subprocess_first_unexpected_fd");
+
    procedure Write_All (Descriptor : C.int; Text : String) is
       Offset : Natural := 0;
       Result : C.long;
@@ -91,6 +94,8 @@ begin
    elsif Mode = "capture" then
       Write_All (1, "stdout-value");
       Write_All (2, "stderr-value");
+   elsif Mode = "inspect-descriptors" then
+      Write_All (1, C.int'Image (First_Unexpected_FD));
    elsif Mode = "stdin" then
       declare
          Buffer : aliased String (1 .. 4_096);

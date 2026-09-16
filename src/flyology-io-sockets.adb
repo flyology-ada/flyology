@@ -121,6 +121,9 @@ package body Flyology.IO.Sockets is
    function C_Datagram_Kind return Interfaces.C.int;
    pragma Import (C, C_Datagram_Kind, "flyology_socket_datagram_kind");
 
+   function C_Creation_Flags return Interfaces.C.int;
+   pragma Import (C, C_Creation_Flags, "flyology_socket_creation_flags");
+
    function C_Configure_Descriptor
      (Socket : Interfaces.C.int; Nonblocking : Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, C_Configure_Descriptor, "flyology_socket_configure_descriptor");
@@ -485,13 +488,14 @@ package body Flyology.IO.Sockets is
      (Family : Interfaces.C.int; Mode : Interfaces.C.int; Error : access Interfaces.C.int)
       return Interfaces.C.int
    is
-      Socket : constant Interfaces.C.int := C_Socket (Native_Domain (Family), Native_Kind (Mode), 0);
+      Flags  : constant Interfaces.C.int := C_Creation_Flags;
+      Socket : constant Interfaces.C.int := C_Socket (Native_Domain (Family), Native_Kind (Mode) + Flags, 0);
    begin
       if Socket < 0 then
          Error.all := Current_Errno;
          return -1;
       end if;
-      if C_Configure_Descriptor (Socket, 0) < 0
+      if (Flags = 0 and then C_Configure_Descriptor (Socket, 0) < 0)
         or else (Flyology.Socket_Policy.Should_Enable_Datagram_Metadata (Mode)
                  and then C_Enable_Datagram_Metadata_Impl (Socket) < 0)
       then
@@ -511,13 +515,15 @@ package body Flyology.IO.Sockets is
    is
       type Descriptor_Array is array (Natural range 0 .. 1) of aliased Interfaces.C.int with Convention => C;
       Descriptors : aliased Descriptor_Array := (others => -1);
+      Flags       : constant Interfaces.C.int := C_Creation_Flags;
    begin
-      if C_Socket_Pair_Raw (C_Local_Domain, Native_Kind (Mode), 0, Descriptors'Address) < 0 then
+      if C_Socket_Pair_Raw (C_Local_Domain, Native_Kind (Mode) + Flags, 0, Descriptors'Address) < 0 then
          Error.all := Current_Errno;
          return -1;
       end if;
-      if C_Configure_Descriptor (Descriptors (0), 0) < 0
-        or else C_Configure_Descriptor (Descriptors (1), 0) < 0
+      if Flags = 0
+        and then (C_Configure_Descriptor (Descriptors (0), 0) < 0
+                  or else C_Configure_Descriptor (Descriptors (1), 0) < 0)
       then
          Error.all := Current_Errno;
          Close_Ignoring_Errors (Descriptors (0));
@@ -736,7 +742,7 @@ package body Flyology.IO.Sockets is
          Port.all := 0;
          Scope.all := 0;
       end if;
-      if C_Configure_Descriptor (Accepted, 1) < 0 then
+      if C_Creation_Flags = 0 and then C_Configure_Descriptor (Accepted, 1) < 0 then
          Error.all := Current_Errno;
          Close_Ignoring_Errors (Accepted);
          return Failed_Accept_Status (Flyology.Socket_Policy.Descriptor_Configuration);

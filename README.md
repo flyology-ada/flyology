@@ -2051,6 +2051,11 @@ entries, an optional working directory, and explicit path-search selection.
 Spawn is synchronous and can occupy a lightweight caller's event-loop pthread.
 Use a native-task boundary when that latency is not acceptable. Spawn also
 resets the child signal mask and catchable signal dispositions before exec.
+On Darwin, the spawned child inherits only its standard streams and any
+explicitly transferred bootstrap descriptors; other application descriptors
+are closed even when they lack `FD_CLOEXEC`. On Linux, application descriptors
+follow their own `FD_CLOEXEC` policy, while Flyology-created descriptors are
+atomically close-on-exec.
 
 A limited `Process` owns the root process, its new process group, nonblocking
 parent pipe ends, and one native reaper task. Pipe reads and writes use the

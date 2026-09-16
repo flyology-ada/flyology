@@ -62,6 +62,7 @@ int main(int argc, char **argv)
     pid_t live_child = -1;
     char byte = 'x';
     int result = 1;
+    int application_descriptor = -1;
     int sigpipe_overridden = 0;
     struct sigaction ignored_pipe;
     struct sigaction observed_pipe;
@@ -79,6 +80,13 @@ int main(int argc, char **argv)
             write(3, &control, 1) != 1 || write(4, &capability, 1) != 1)
             return 2;
         return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--inheritance-child") == 0) {
+#if defined(__APPLE__)
+        return fcntl(100, F_GETFD) < 0 && errno == EBADF ? 0 : 2;
+#else
+        return fcntl(100, F_GETFD) >= 0 ? 0 : 2;
+#endif
     }
 
     if (flyology_subprocess_signal_interrupt() != SIGINT ||
@@ -190,6 +198,39 @@ int main(int argc, char **argv)
     }
 
     {
+        char *child_arguments[] = { argv[0], "--inheritance-child", NULL };
+        char *child_environment[] = { NULL };
+        int application_fd = open("/dev/null", O_RDONLY);
+
+        application_descriptor = application_fd;
+        if (application_fd < 0 || dup2(application_fd, 100) != 100)
+            goto cleanup;
+        if (application_fd != 100) close(application_fd);
+        application_descriptor = 100;
+        if (flyology_subprocess_pipe(input) != 0 ||
+            flyology_subprocess_pipe(output) != 0 ||
+            flyology_subprocess_pipe(error) != 0 ||
+            flyology_subprocess_spawn
+              (&child, argv[0], child_arguments, 1, child_environment,
+               NULL, 0, input[0], input[1], output[0], output[1],
+               error[0], error[1], -1, -1, -1, -1, 3, 4) != 0)
+            goto cleanup;
+        live_child = child;
+        for (int index = 0; index < 2; ++index) {
+            close(input[index]); input[index] = -1;
+            close(output[index]); output[index] = -1;
+            close(error[index]); error[index] = -1;
+        }
+        if (waitpid(child, &status, 0) != child ||
+            !flyology_subprocess_status_exited(status) ||
+            flyology_subprocess_status_exit_code(status) != 0)
+            goto cleanup;
+        live_child = -1;
+        close(application_descriptor);
+        application_descriptor = -1;
+    }
+
+    {
         struct sigaction ignored;
         struct sigaction previous_action;
         sigset_t blocked;
@@ -230,6 +271,7 @@ int main(int argc, char **argv)
     result = 0;
 
 cleanup:
+    if (application_descriptor >= 0) close(application_descriptor);
     if (sigpipe_overridden)
         (void)sigaction(SIGPIPE, &previous_pipe, NULL);
     if (live_child > 0) {
