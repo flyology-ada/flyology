@@ -225,6 +225,7 @@ package body Flyology.Subprocesses is
          Wake_Sources.Release (Wake);
          Wake_Sources.Ensure (Wake);
          Is_Done := False;
+         Exit_Observed := False;
          Has_Failed := False;
          Status_Value := 0;
          Error_Value := 0;
@@ -234,10 +235,34 @@ package body Flyology.Subprocesses is
       begin
          Wake_Sources.Release (Wake);
          Is_Done := False;
+         Exit_Observed := False;
          Has_Failed := False;
          Status_Value := 0;
          Error_Value := 0;
       end Release;
+
+      procedure Mark_Exit_Observed is
+      begin
+         Exit_Observed := True;
+      end Mark_Exit_Observed;
+
+      procedure Send_Group_Signal (Pid, Signal : C.int; Error_Code : out C.int) is
+         Result : C.int;
+      begin
+         --  Hold the exit-state lock through kill so observation cannot pass
+         --  between the liveness decision and the system call.
+         Error_Code := 0;
+         if Exit_Observed or else Is_Done then
+            return;
+         end if;
+         if Flyology.Subprocess_Test_Hooks.Enabled then
+            Flyology.Subprocess_Test_Hooks.Note_Group_Signal;
+         end if;
+         Result := C_Kill (-Pid, Signal);
+         if Result /= 0 then
+            Error_Code := C.int (GNAT.OS_Lib.Errno);
+         end if;
+      end Send_Group_Signal;
 
       procedure Complete (Raw_Status, Error_Code : C.int) is
       begin
@@ -272,6 +297,9 @@ package body Flyology.Subprocesses is
          Error_Code := C_Observe_Exit (Pid);
          exit when Error_Code = 0 or else Error_Code /= Interrupted_Error;
       end loop;
+      --  waitid(WNOWAIT) keeps the root's ID reserved until waitpid. Exclude
+      --  new group signals before that reap, including the later status gap.
+      State.Mark_Exit_Observed;
       if Error_Code = 0 then
          Result := C_Kill (-Pid, C_Signal_Kill);
          if Result /= 0
@@ -292,6 +320,9 @@ package body Flyology.Subprocesses is
                exit;
             end if;
          end loop;
+      end if;
+      if Flyology.Subprocess_Test_Hooks.Enabled then
+         Flyology.Subprocess_Test_Hooks.After_Reap;
       end if;
       State.Complete (Raw_Status, Error_Code);
    exception
@@ -776,20 +807,14 @@ package body Flyology.Subprocesses is
          when Hard_Kill            => C_Signal_Kill);
 
    procedure Send_Signal (Child : in out Process; Signal : Signal_Kind) is
-      Done, Failed           : Boolean;
-      Raw_Status, Error_Code : C.int;
-      Result                 : C.int;
+      Error_Code : C.int;
    begin
       if not Is_Open (Child) then
          raise Program_Error with "subprocess owner is closed";
       end if;
-      Child.Exit_State.Snapshot (Done, Failed, Raw_Status, Error_Code);
-      if Done then
-         return;
-      end if;
-      Result := C_Kill (-Child.Pid_Value, Native_Signal (Signal));
-      if Result /= 0 and then C.int (GNAT.OS_Lib.Errno) /= No_Process_Error then
-         raise Process_Error with "subprocess signal failed, errno=" & GNAT.OS_Lib.Errno'Image;
+      Child.Exit_State.Send_Group_Signal (Child.Pid_Value, Native_Signal (Signal), Error_Code);
+      if Error_Code /= 0 and then Error_Code /= No_Process_Error then
+         raise Process_Error with "subprocess signal failed, errno=" & Error_Code'Image;
       end if;
    end Send_Signal;
 

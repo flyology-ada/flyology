@@ -32,6 +32,15 @@ procedure Subprocess_Smoke is
    procedure Set_Fail_Reaper_Allocation (Enabled : C.int);
    pragma Import (C, Set_Fail_Reaper_Allocation, "flyology_test_subprocess_set_fail_reaper_allocation");
 
+   procedure Arm_Reap_Barrier;
+   pragma Import (C, Arm_Reap_Barrier, "flyology_test_subprocess_arm_reap_barrier");
+   procedure Await_Reap_Barrier;
+   pragma Import (C, Await_Reap_Barrier, "flyology_test_subprocess_await_reap_barrier");
+   procedure Release_Reap_Barrier;
+   pragma Import (C, Release_Reap_Barrier, "flyology_test_subprocess_release_reap_barrier");
+   function Group_Signal_Count return C.int;
+   pragma Import (C, Group_Signal_Count, "flyology_test_subprocess_group_signal_count");
+
    Fixture : constant String :=
      Ada.Directories.Compose
        (Ada.Directories.Containing_Directory (Ada.Directories.Full_Name (Ada.Command_Line.Command_Name)),
@@ -72,6 +81,32 @@ procedure Subprocess_Smoke is
       Assert (Raised, "closed child stdin did not raise Pipe_Error");
       Subprocesses.Close (Child);
    end Exercise_Closed_Standard_Input;
+
+   procedure Exercise_Reaped_Group_Signals is
+      Child  : Subprocesses.Process;
+      Status : Subprocesses.Exit_Status;
+      Count  : C.int;
+   begin
+      Arm_Reap_Barrier;
+      Subprocesses.Spawn (Subprocesses.To_Command ("/usr/bin/true"), Child);
+      Await_Reap_Barrier;
+      --  The root has been reaped, but the public exit result is still pending.
+      --  Count attempted group signals without arranging actual PID reuse.
+      Subprocesses.Send_Signal (Child, Subprocesses.Graceful_Termination);
+      Subprocesses.Kill (Child);
+      Count := Group_Signal_Count;
+      Release_Reap_Barrier;
+      Assert (Count = 0, "reaped process group was signaled before exit publication");
+      Subprocesses.Wait (Child, Status);
+      Assert (Subprocesses.Successful (Status), "reaped child status changed");
+      Subprocesses.Stop (Child, Grace => 0.0, Status => Status);
+      Subprocesses.Close (Child);
+      Assert (Group_Signal_Count = 0, "Stop or Close signaled a reaped process group");
+   exception
+      when others =>
+         Release_Reap_Barrier;
+         raise;
+   end Exercise_Reaped_Group_Signals;
 
    protected Outcome is
       procedure Reset;
@@ -124,6 +159,7 @@ procedure Subprocess_Smoke is
       end Await_Ready;
    begin
       Exercise_Closed_Standard_Input;
+      Exercise_Reaped_Group_Signals;
 
       Value := Capture.Run (Fixture_Command ("capture"));
       Assert (Subprocesses.Successful (Capture.Status (Value)), "capture child failed");

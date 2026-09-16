@@ -336,16 +336,19 @@ private
    protected type Exit_Control is
       procedure Prepare;
       procedure Release;
+      procedure Mark_Exit_Observed;
+      procedure Send_Group_Signal (Pid, Signal : Interfaces.C.int; Error_Code : out Interfaces.C.int);
       procedure Complete (Raw_Status, Error_Code : Interfaces.C.int);
       procedure Snapshot (Done, Failed : out Boolean; Raw_Status, Error_Code : out Interfaces.C.int);
       function Completed return Boolean;
       function Wait_Descriptor return Flyology.IO.Descriptor;
    private
-      Is_Done      : Boolean := False;
-      Has_Failed   : Boolean := False;
-      Status_Value : Interfaces.C.int := 0;
-      Error_Value  : Interfaces.C.int := 0;
-      Wake         : Flyology.Wake_Sources.Source;
+      Is_Done       : Boolean := False;
+      Exit_Observed : Boolean := False;
+      Has_Failed    : Boolean := False;
+      Status_Value  : Interfaces.C.int := 0;
+      Error_Value   : Interfaces.C.int := 0;
+      Wake          : Flyology.Wake_Sources.Source;
    end Exit_Control;
    type Exit_Control_Access is access all Exit_Control;
 
