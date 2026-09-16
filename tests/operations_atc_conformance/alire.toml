@@ -1,0 +1,20 @@
+name = "operations_atc_conformance"
+description = "TLA+ replay for completion-set ATC delivery"
+version = "0.1.0-dev"
+
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "tla", "conformance", "test"]
+project-files = ["operations_atc_conformance.gpr"]
+executables = ["operations_atc_conformance"]
+
+[build-switches]
+"*" = { Compile_Checks = "warnings" }
+
+[[depends-on]]
+flyology = "~0.2.0"
+
+[[depends-on]]
+flyology_tla = "~0.1.0-dev"

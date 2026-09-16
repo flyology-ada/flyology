@@ -7,7 +7,10 @@ CONSTANTS DrainMode,
           CleanupDispatchMode,
           CleanupHandoffMode,
           DriverRaiseMode,
-          InitialOtherReported
+          InitialOtherReported,
+          ATCMode,
+          ATCKind,
+          ATCReturn
 
 ASSUME DrainMode \in {"UserGate", "TargetGate"}
 ASSUME DriverCloseMode \in {"Blocking", "Deferred"}
@@ -16,6 +19,10 @@ ASSUME CleanupDispatchMode \in {"Atomic", "Split"}
 ASSUME CleanupHandoffMode \in {"Atomic", "Split"}
 ASSUME DriverRaiseMode \in {"Escape", "Terminalize"}
 ASSUME InitialOtherReported \in BOOLEAN
+\* These constants select qualification scenarios, not provider policy.
+ASSUME ATCMode \in {"Disabled", "Deferred", "Split"}
+ASSUME ATCKind \in {"Batch", "Stabilizer"}
+ASSUME ATCReturn \in {"Terminal", "Rearm"}
 
 VARIABLES targetState,
           targetReported,
@@ -37,7 +44,8 @@ VARIABLES targetState,
           terminalFailureCount,
           raisePhase,
           harnessPhase,
-          lastAction
+          lastAction,
+          atc
 
 vars ==
     <<targetState,
@@ -60,7 +68,8 @@ vars ==
       terminalFailureCount,
       raisePhase,
       harnessPhase,
-      lastAction>>
+      lastAction,
+      atc>>
 
 driverVars ==
     <<driverState,
@@ -85,6 +94,15 @@ driverRaiseVars ==
       raisePhase>>
 
 TypeOK ==
+    /\ atc \in [stage : {"Idle", "Driving", "Requested", "Returned", "Delivered", "Used", "Cancelled"},
+                  depth : 0..1, stabilizing : BOOLEAN, dirty : 0..1,
+                  source : {"Immediate", "Dependency", "None"}, deadline : BOOLEAN,
+                  child : BOOLEAN, childState : {"Vacant", "Pending", "Terminal"}, childDeadline : BOOLEAN,
+                  root : {"Pending", "Terminal"}, gate : {"Pending", "Terminal"},
+                  rootOutcome : {"None", "Succeeded", "Cancelled"}, gateOutcome : {"None", "Succeeded", "Failed"},
+                  deferral : 0..2, requested : BOOLEAN, delivered : BOOLEAN, waitFailed : BOOLEAN,
+                  action : {"Init", "ATCDrive", "ATCProtectedReturn", "ATCDriverReturn",
+                            "ATCStableDeliver", "ATCBrokenDeliver", "ATCUse", "ATCCancel"}]
     /\ targetState \in {"Pending", "Terminal", "Idle"}
     /\ targetReported \in BOOLEAN
     /\ otherState \in {"Pending", "Terminal", "Idle"}
@@ -139,6 +157,99 @@ TypeOK ==
           "DriverConsume",
           "DriverFinalize"}
 
+\* Owner-local live-set ATC extension. Legacy workflows remain unchanged.
+legacyVars ==
+    <<targetState, targetReported, otherState, otherReported, savedOtherReported,
+      cancellationRequested, phase, driverState, peerRegistered, closeRequired,
+      closePending, driverReturned, driverPhase, raiseRootState, raiseRootSource,
+      raiseRootHasChild, driverRaised, terminalFailureCount, raisePhase,
+      harnessPhase, lastAction>>
+
+ATCInitial ==
+    [stage |-> "Idle", depth |-> 0, stabilizing |-> FALSE, dirty |-> 0,
+     source |-> IF ATCKind = "Batch" THEN "Immediate" ELSE "Dependency",
+     deadline |-> FALSE, child |-> (ATCKind = "Stabilizer"),
+     childState |-> IF ATCKind = "Stabilizer" THEN "Pending" ELSE "Vacant",
+     childDeadline |-> (ATCKind = "Stabilizer"),
+     root |-> "Pending", gate |-> "Pending", rootOutcome |-> "None", gateOutcome |-> "None", deferral |-> 0,
+     requested |-> FALSE, delivered |-> FALSE, waitFailed |-> FALSE, action |-> "Init"]
+
+\* At the owner-stack driver boundary, the immediate source is cleared, or
+\* the terminal child is consumed and released. The batch/stabilizer guard is
+\* live. The stabilizer witness completes its child outside a wait batch.
+ATCDrive ==
+    /\ atc.stage = "Idle"
+    /\ atc' = [atc EXCEPT !.stage = "Driving",
+                         !.depth = IF ATCKind = "Batch" THEN 1 ELSE 0,
+                         !.stabilizing = (ATCKind = "Stabilizer"),
+                         !.source = "None", !.deadline = FALSE,
+                         !.child = FALSE, !.childState = "Vacant", !.childDeadline = FALSE,
+                         !.deferral = IF ATCMode = "Deferred" THEN 1 ELSE 0,
+                         !.action = "ATCDrive"]
+
+\* The protected entry completes a queued ATC. Its wrapper briefly adds one
+\* more deferral level, then returns to the driver at the previous level.
+ATCProtectedReturn ==
+    /\ atc.stage = "Driving"
+    /\ atc' = [atc EXCEPT !.stage = "Requested", !.requested = TRUE,
+                         !.action = "ATCProtectedReturn"]
+
+ATCDriverReturn ==
+    /\ atc.stage = "Requested"
+    /\ atc.deferral > 0
+    /\ atc' = [atc EXCEPT !.stage = "Returned",
+                         !.root = IF ATCReturn = "Terminal" THEN "Terminal" ELSE "Pending",
+                         !.rootOutcome = IF ATCReturn = "Terminal" THEN "Succeeded" ELSE "None",
+                         !.source = IF ATCReturn = "Rearm" THEN "Immediate" ELSE "None",
+                         !.dirty = IF ATCReturn = "Terminal" THEN 1 ELSE 0,
+                         !.action = "ATCDriverReturn"]
+
+\* The owner completes dependent propagation, restores both guards, then
+\* releases the final deferral. ATC is delivered at that release boundary.
+ATCStableDeliver ==
+    /\ atc.stage = "Returned"
+    /\ atc' = [atc EXCEPT !.stage = "Delivered", !.depth = 0, !.stabilizing = FALSE,
+                         !.deferral = 0, !.requested = FALSE, !.delivered = TRUE, !.dirty = 0,
+                         !.gate = IF atc.root = "Terminal" THEN "Terminal" ELSE "Pending",
+                         !.gateOutcome = IF atc.root = "Terminal" THEN "Succeeded" ELSE "None",
+                         !.action = "ATCStableDeliver"]
+
+\* Broken mode drops the protected wrapper's own deferral to zero and
+\* delivers ATC before the driver or either guard can complete.
+ATCBrokenDeliver ==
+    /\ atc.stage = "Requested" /\ atc.deferral = 0
+    /\ atc' = [atc EXCEPT !.stage = "Delivered", !.deferral = 0,
+                         !.requested = FALSE, !.delivered = TRUE,
+                         !.action = "ATCBrokenDeliver"]
+
+ATCUse ==
+    /\ atc.stage = "Delivered"
+    /\ atc' = [atc EXCEPT !.stage = "Used",
+                         !.waitFailed = (atc.root = "Pending" /\ atc.source = "None"
+                                         /\ ~atc.deadline /\ ~atc.child),
+                         !.root = IF atc.source = "Immediate" THEN "Terminal" ELSE @,
+                         !.rootOutcome = IF atc.source = "Immediate" THEN "Succeeded" ELSE @,
+                         !.source = IF atc.source = "Immediate" THEN "None" ELSE @,
+                         !.gate = IF atc.source = "Immediate" THEN "Terminal" ELSE @,
+                         !.gateOutcome = IF atc.source = "Immediate" THEN "Succeeded" ELSE @,
+                         !.action = "ATCUse"]
+
+ATCCancel ==
+    /\ atc.stage = "Used"
+    /\ atc' = [atc EXCEPT !.stage = "Cancelled", !.root = "Terminal",
+                         !.rootOutcome = IF atc.root = "Pending" THEN "Cancelled" ELSE @,
+                         !.source = "None",
+                         !.dirty = IF atc.depth > 0 \/ atc.stabilizing THEN 1 ELSE 0,
+                         !.gate = IF atc.depth = 0 /\ ~atc.stabilizing THEN "Terminal" ELSE @,
+                         !.gateOutcome = IF atc.depth = 0 /\ ~atc.stabilizing
+                                         THEN IF atc.root = "Pending" THEN "Failed" ELSE @ ELSE @,
+                         !.action = "ATCCancel"]
+
+ATCNext ==
+    \/ ATCDrive \/ ATCProtectedReturn \/ ATCDriverReturn
+    \/ ATCStableDeliver \/ ATCBrokenDeliver \/ ATCUse \/ ATCCancel
+
+
 Init ==
     /\ targetState = "Pending"
     /\ targetReported = FALSE
@@ -161,6 +272,7 @@ Init ==
     /\ raisePhase = "Ready"
     /\ harnessPhase = "Ready"
     /\ lastAction = "Init"
+    /\ atc = ATCInitial
 
 BeginFinalize ==
     /\ phase = "Ready"
@@ -519,7 +631,7 @@ DriverRaises ==
            driverPhase,
            harnessPhase>>
 
-Next ==
+LegacyNext ==
     \/ BeginFinalize
     \/ EarlyGateReturn
     \/ RestoreReported
@@ -538,22 +650,25 @@ Next ==
     \/ DriverRaises
 
 Fairness ==
-    /\ WF_vars(BeginFinalize)
-    /\ WF_vars(EarlyGateReturn)
-    /\ WF_vars(RestoreReported)
-    /\ WF_vars(WaitForTarget)
-    /\ WF_vars(DispatchTarget)
-    /\ WF_vars(FinishFinalize)
-    /\ WF_vars(FailUpgradeDriver)
-    /\ WF_vars(DrainPeer)
-    /\ WF_vars(FinishFailedUpgrade)
-    /\ WF_vars(ConsumeFailedUpgrade)
-    /\ WF_vars(FinalizeFailedUpgrade)
-    /\ WF_vars(CompleteCleanupDispatch)
-    /\ WF_vars(AbortCleanupDispatch)
-    /\ WF_vars(CompleteCleanupHandoff)
-    /\ WF_vars(AbortCleanupHandoff)
-    /\ WF_vars(DriverRaises)
+    /\ WF_legacyVars(BeginFinalize)
+    /\ WF_legacyVars(EarlyGateReturn)
+    /\ WF_legacyVars(RestoreReported)
+    /\ WF_legacyVars(WaitForTarget)
+    /\ WF_legacyVars(DispatchTarget)
+    /\ WF_legacyVars(FinishFinalize)
+    /\ WF_legacyVars(FailUpgradeDriver)
+    /\ WF_legacyVars(DrainPeer)
+    /\ WF_legacyVars(FinishFailedUpgrade)
+    /\ WF_legacyVars(ConsumeFailedUpgrade)
+    /\ WF_legacyVars(FinalizeFailedUpgrade)
+    /\ WF_legacyVars(CompleteCleanupDispatch)
+    /\ WF_legacyVars(AbortCleanupDispatch)
+    /\ WF_legacyVars(CompleteCleanupHandoff)
+    /\ WF_legacyVars(AbortCleanupHandoff)
+    /\ WF_legacyVars(DriverRaises)
+
+Next == (LegacyNext /\ UNCHANGED atc)
+        \/ (ATCMode /= "Disabled" /\ ATCNext /\ UNCHANGED legacyVars)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -736,12 +851,14 @@ DriverRaisesAtomically ==
            driverReturned,
            driverPhase>>
 
-HarnessNext ==
+LegacyHarnessNext ==
     \/ FinalizeAtomically
     \/ DriverFinishAtomically
     \/ DriverConsumeAtomically
     \/ DriverFinalizeAtomically
     \/ DriverRaisesAtomically
+
+HarnessNext == LegacyHarnessNext /\ UNCHANGED atc
 
 HarnessSpec == Init /\ [][HarnessNext]_vars
 
@@ -831,9 +948,40 @@ Alias == [
         terminalFailureCount |-> terminalFailureCount,
         raisePhase |-> raisePhase,
         harnessPhase |-> harnessPhase,
-        lastAction |-> lastAction
+        lastAction |-> lastAction,
+        atc |-> atc
     ],
     model_source |-> lastAction
 ]
+
+
+ATCSpec == Init /\ [][ATCNext /\ UNCHANGED legacyVars]_vars
+           /\ WF_vars(ATCNext /\ UNCHANGED legacyVars)
+
+ATCResumeConsistent ==
+    atc.delivered =>
+        /\ atc.depth = 0 /\ ~atc.stabilizing /\ atc.deferral = 0
+        /\ (atc.root = "Terminal" \/ atc.source /= "None" \/ atc.deadline \/ atc.child)
+
+ATCPropagationGuardLeak == atc.delivered => atc.depth = 0
+ATCStabilizerGuardLeak == atc.delivered => ~atc.stabilizing
+ATCRequestRetained == atc.stage = "Requested" => atc.requested /\ ~atc.delivered
+ATCUseHasProgress == atc.stage \in {"Used", "Cancelled"} => ~atc.waitFailed
+ATCCancellationPropagates == atc.stage = "Cancelled" => atc.gate = "Terminal" /\ atc.dirty = 0
+ATCCompletes == <> (atc.stage = "Cancelled")
+ATCWitnessIncomplete == atc.stage /= "Cancelled"
+
+ATCInputType ==
+    [event : {"ATCDrive", "ATCProtectedReturn", "ATCDriverReturn", "ATCStableDeliver",
+              "ATCBrokenDeliver", "ATCUse", "ATCCancel"}]
+ATCOutcomeType == [delivered : BOOLEAN, waitFailed : BOOLEAN]
+ATCAlias ==
+    [action |-> atc.action, role |-> "owner",
+     input |-> [event |-> atc.action],
+     outcome |-> [delivered |-> atc.delivered, waitFailed |-> atc.waitFailed],
+     state |-> atc,
+     model_source |-> atc.action]
+
+
 
 =============================================================================

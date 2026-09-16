@@ -1,4 +1,5 @@
 with Flyology.IO;
+with System.Soft_Links;
 
 package body Flyology.Operations is
    package C renames Interfaces.C;
@@ -62,7 +63,16 @@ package body Flyology.Operations is
 
    procedure Begin_Propagation_Batch (Set : in out Completion_Set) is
    begin
-      Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth + 1;
+      --  A pending ATC cannot observe a batch whose source has been cleared
+      --  while its driver and dependent gates are still being advanced.
+      System.Soft_Links.Abort_Defer.all;
+      begin
+         Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth + 1;
+      exception
+         when others =>
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
    end Begin_Propagation_Batch;
 
    procedure End_Propagation_Batch (Set : in out Completion_Set) is
@@ -70,10 +80,17 @@ package body Flyology.Operations is
       if Set.Propagation_Batch_Depth = 0 then
          raise Operation_Error with "unbalanced propagation batch";
       end if;
-      Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth - 1;
-      if Set.Propagation_Batch_Depth = 0 and then not Set.Stabilizing_Dependents then
-         Stabilize_Dependents (Set);
-      end if;
+      begin
+         Set.Propagation_Batch_Depth := Set.Propagation_Batch_Depth - 1;
+         if Set.Propagation_Batch_Depth = 0 and then not Set.Stabilizing_Dependents then
+            Stabilize_Dependents (Set);
+         end if;
+      exception
+         when others =>
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
    end End_Propagation_Batch;
 
    type Timespec is record
@@ -313,6 +330,9 @@ package body Flyology.Operations is
       if Set.Stabilizing_Dependents then
          return;
       end if;
+      --  A dependency driver may enter a protected action that makes an ATC
+      --  trigger open. Keep the guard and dirty propagation cut indivisible.
+      System.Soft_Links.Abort_Defer.all;
       Set.Stabilizing_Dependents := True;
       begin
          while Set.Dirty_Dependents /= 0 loop
@@ -332,9 +352,11 @@ package body Flyology.Operations is
       exception
          when others =>
             Set.Stabilizing_Dependents := False;
+            System.Soft_Links.Abort_Undefer.all;
             raise;
       end;
       Set.Stabilizing_Dependents := False;
+      System.Soft_Links.Abort_Undefer.all;
    end Stabilize_Dependents;
 
    procedure Configure_Gate
