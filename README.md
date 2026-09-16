@@ -1815,6 +1815,9 @@ the same set. Those references contain no Ada access value, do not extend an
 operation or set lifetime, and naturally make the construction graph acyclic.
 A member result remains retained until every observing gate terminalizes.
 Cancelling a gate detaches only that observer; it does not cancel its members.
+Batch dispatch and dependent-gate propagation defer task abort while their
+temporary guards and cleared provider sources are live. A waiting task remains
+abortable between those owner-stack scheduler cuts.
 
 Every started operation should normally reach exactly one provider-specific
 `Finish`. That call releases the set slot, commits outputs such as `Last` or a

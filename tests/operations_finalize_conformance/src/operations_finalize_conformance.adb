@@ -46,6 +46,28 @@ procedure Operations_Finalize_Conformance is
       Maximum_String_Bytes => 4_096,
       Maximum_Value_Bytes  => 32_768);
 
+   --  The legacy harness never advances the ATC lane. Its inert state is
+   --  still present in the extended model's complete state record.
+   Initial_ATC : constant Model.State_Atc_Type :=
+     (Stage          => Model.State_Atc_Stage_Idle,
+      Depth          => 0,
+      Stabilizing    => False,
+      Dirty          => 0,
+      Source         => Model.State_Atc_Source_Immediate,
+      Deadline       => False,
+      Child          => False,
+      Child_State    => Model.State_Atc_Child_State_Vacant,
+      Child_Deadline => False,
+      Root           => Model.State_Atc_Root_Pending,
+      Gate           => Model.State_Atc_Gate_Pending,
+      Root_Outcome   => Model.State_Atc_Root_Outcome_None,
+      Gate_Outcome   => Model.State_Atc_Gate_Outcome_None,
+      Deferral       => 0,
+      Requested      => False,
+      Delivered      => False,
+      Wait_Failed    => False,
+      Action         => Model.State_Atc_Action_Init);
+
    protected type Cancellation_Barrier is
       procedure Note_Cancellation;
       procedure Note_Source_Ready;
@@ -693,7 +715,8 @@ procedure Operations_Finalize_Conformance is
          Terminal_Failure_Count => 0,
          Raise_Phase            => Model.State_Raise_Phase_Ready,
          Harness_Phase          => Model.State_Harness_Phase_Ready,
-         Last_Action            => Model.State_Last_Action_Init);
+         Last_Action            => Model.State_Last_Action_Init,
+         Atc                    => Initial_ATC);
       Status := (Succeeded => True, Detail => Null_Unbounded_String);
    end Reset;
 
@@ -775,7 +798,8 @@ procedure Operations_Finalize_Conformance is
             Terminal_Failure_Count => 0,
             Raise_Phase            => Model.State_Raise_Phase_Ready,
             Harness_Phase          => Harness_Phase,
-            Last_Action            => Last_Action);
+            Last_Action            => Last_Action,
+            Atc                    => Initial_ATC);
          Status :=
            (Succeeded => Complete,
             Detail    =>
@@ -848,7 +872,8 @@ procedure Operations_Finalize_Conformance is
                Last_Action            =>
                  (if Complete
                   then Model.State_Last_Action_Finalize
-                  else Model.State_Last_Action_Begin_Finalize));
+                  else Model.State_Last_Action_Begin_Finalize),
+               Atc                    => Initial_ATC);
             Status :=
               (Succeeded => Complete,
                Detail    =>
@@ -953,8 +978,8 @@ procedure Operations_Finalize_Conformance is
                  (if Complete
                   then Model.State_Harness_Phase_Done
                   else Model.State_Harness_Phase_Disposed),
-               Last_Action            =>
-                 Model.State_Last_Action_Driver_Raises);
+               Last_Action            => Model.State_Last_Action_Driver_Raises,
+               Atc                    => Initial_ATC);
             Status :=
               (Succeeded => Complete,
                Detail    =>
