@@ -4,6 +4,7 @@ with Flyology.Buffer_Test_Hooks;
 with Flyology.Channel_Test_Hooks;
 with Flyology.DNS_Test_Observations;
 with Flyology.Dynamic_Destroy_Test_Hooks;
+with Flyology.Data_Structures.Guard_Test_Hooks;
 with Flyology.File_Watch_Test_Hooks;
 with Flyology.Structured_Server_Test_Hooks;
 with Flyology.Subprocess_Test_Hooks;
@@ -13,7 +14,7 @@ with Flyology.Wall_Clock_IO_Testing;
 with Flyology.Wall_Clock_Testing;
 with Flyology.Worker_Pool_Test_Hooks;
 
-procedure Flyology.Test_Hook_Elision_Probe is
+procedure Flyology.Data_Structures.Test_Hook_Elision_Probe is
    Observed : Boolean := False
    with Volatile;
 begin
@@ -31,6 +32,9 @@ begin
    end if;
    if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
       Flyology.Dynamic_Destroy_Test_Hooks.Reset;
+   end if;
+   if Flyology.Data_Structures.Guard_Test_Hooks.Enabled then
+      Flyology.Data_Structures.Guard_Test_Hooks.Reset;
    end if;
    if Flyology.TLS_Test_Hooks.Enabled then
       Flyology.TLS_Test_Hooks.Reset;
@@ -60,4 +64,4 @@ begin
    if Flyology.Wall_Clock_IO_Testing.Enabled then
       Flyology.Wall_Clock_IO_Testing.Reset;
    end if;
-end Flyology.Test_Hook_Elision_Probe;
+end Flyology.Data_Structures.Test_Hook_Elision_Probe;

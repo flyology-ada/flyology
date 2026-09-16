@@ -67,6 +67,10 @@ evidence.
 | `Publish*Entry` / `Commit*Count` | the actual entry-state-before-count write order in `Put_Unlocked` and `Remove` |
 | guarded attachment | current `Hash_Maps.Attach`: acquire, reread count, scan, release |
 | legacy attachment | removed header count snapshot, non-owning guard load, and scan |
+| `GuardedMapAttach.PrecheckAcquire` / `CompareExchangeGuard` / `PostcheckAcquire` | epoch validation before and after the actual guard CAS in fixed vectors/strings, dynamic leaves, and adaptive-pool `Destroy` |
+| `CheckFailedAcquire` / `ReleaseAcquire` / `CleanupStaleAcquire` | retained failed-CAS result diagnosis, release, and stale postcheck cleanup in those families |
+| `ExclusiveReinitialize` / `AttachSPSCPeer` | exclusive quiescent epoch advance and replacement of guard byte 44 by immutable SPSC Auxiliary |
+| epoch replay `HoldValid` / `CallContended` / `ReleaseHeld` | real native caller paused at the owner-stack successful-CAS hook, a distinct view's `Length`, then drain and release |
 | `SegmentRegistry.StartRequest` | persisted registry-guard CAS in `Try_Find_Or_Create` |
 | `ReturnExisting` / `ChooseCandidate` | exact-name scan and best-fitting removed reservation selection |
 | `Reserve` | generation advance, metadata writes, and release publication of `Initializing_Slot` |
@@ -154,6 +158,43 @@ the old race where attachment observes an unlocked guard, a mutator publishes
 an occupied entry, and attachment scans before the mutator updates the count.
 Modeled owner death leaves either kind of acquired guard permanently abandoned;
 no transition silently steals it.
+
+The same module's `EpochSpec` generalizes guard acquisition to retained local
+epochs and exclusive same-leaf or SPSC replacement. Its current and broken
+configurations exercise valid nonstale acquisition, failed-CAS contention,
+postcheck, release, fresh attachment after same-leaf reinitialization, and stale
+rejection. Reinitialization is allowed only when every operation is quiescent;
+therefore a valid prechecked operation cannot become stale while it is active.
+The explicit postcheck remains in both model and implementation. The broken
+guard-first configuration exposes the transient zero-to-one-to-zero write of
+SPSC's immutable Auxiliary field and the peer's configuration-mismatch
+diagnosis. It does not model permanent poison or failed restoration.
+
+The stale-view scenario intentionally tests a caller that retained a view
+across exclusive initialization, contrary to the requirement to attach again.
+It qualifies rejection before cached guard writes, not failure of ordinary
+fresh-view use. The behavioral fixture initializes empty leaves, keeps mappings
+alive, and retains an unchanged valid arena for adaptive `Destroy`; it does not
+qualify abandoned-growth recovery or payload reclamation. Adaptive allocation
+already prevalidates its outer epoch and is a negative control. Fixed
+`Hash_Maps` already prevalidates its epoch; its separately tracked failed-CAS
+live-guard diagnosis (#126) is outside this abstraction and this fix. The
+original count/table `NoFalseCorruption` model also abstracts that diagnosis;
+its success does not establish correctness of the live-guard reload branch.
+
+`scripts/check-guard-epoch.sh`, called by the complete TLA+ gate, regenerates and
+normalizes a canonical six-transition `EpochReplaySpec` witness through the
+pinned harness and compares it with the checked-in trace. The Ada adapter
+compares both outcome and actual poststate after each public-call or held-owner
+boundary. Its successful-CAS snapshot is published through a protected capture
+while the real native owner remains paused; other snapshots are quiescent.
+No asynchronous ghost state mirrors shared memory. The regression hook uses
+literal enabled/disabled private specifications selected alongside the
+adaptive-pool test hooks; disabled imported sentinels are covered by the full
+selection/optimization/archive elision gate. Replay is representative boundary
+conformance, not replay of every internal instruction or a refinement proof.
+TLC bounds do not prove unbounded safety, epoch exhaustion, external lifecycle
+corruption, or liveness. No new TLAPS theorem is claimed for this extension.
 
 `SegmentRegistry` gives every modeled name the same hash, then checks exact-name
 uniqueness, creator-claim stamping, ready/failed publication, failure codes,

@@ -1,0 +1,5 @@
+project Guard_Epoch_Conformance_Flyology extends "flyology.gpr" is
+   for Object_Dir use "build/guard-epoch/flyology/obj";
+   for Library_Dir use "build/guard-epoch/flyology/lib";
+   for Create_Missing_Dirs use "True";
+end Guard_Epoch_Conformance_Flyology;

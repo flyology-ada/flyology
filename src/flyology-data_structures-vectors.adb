@@ -1,4 +1,5 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Guard_Test_Hooks;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
 with System.Storage_Elements;
@@ -198,13 +199,18 @@ package body Flyology.Data_Structures.Vectors is
    begin
       if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached vector view";
-      elsif not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
+      end if;
+      Layouts.Require_Ready (Item.Core);
+      if not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
          Layouts.Require_Ready (Item.Core);
          if Expected = Locked then
             raise Busy_Error with "vector is busy";
          else
             raise Layout_Error with "vector guard is corrupt";
          end if;
+      end if;
+      if Guard_Test_Hooks.Enabled then
+         Guard_Test_Hooks.After_CAS (Item.Core, Item.Guard_Address);
       end if;
       begin
          Layouts.Require_Ready (Item.Core);
@@ -225,6 +231,7 @@ package body Flyology.Data_Structures.Vectors is
       end if;
       loop
          Expected := Unlocked;
+         Layouts.Require_Ready (Item.Core);
          exit when Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked);
          Layouts.Require_Ready (Item.Core);
          if Expected /= Locked then
@@ -232,6 +239,9 @@ package body Flyology.Data_Structures.Vectors is
          end if;
          Waiting.Retry (Wait);
       end loop;
+      if Guard_Test_Hooks.Enabled then
+         Guard_Test_Hooks.After_CAS (Item.Core, Item.Guard_Address);
+      end if;
       begin
          Layouts.Require_Ready (Item.Core);
       exception

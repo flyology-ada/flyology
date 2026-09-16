@@ -151,6 +151,7 @@ cd "$model_root"
 
 expect_safe MPMCActiveAttach MPMCActiveAttach.cfg mpmc-safe
 expect_safe GuardedMapAttach GuardedMapAttach.cfg map-safe
+expect_safe GuardedMapAttach GuardedMapAttach_epoch.cfg map-epoch-safe
 expect_safe SegmentRegistry SegmentRegistry.cfg registry-safe
 expect_safe \
   SupervisionLifecycle SupervisionLifecycle.cfg supervision-safe
@@ -201,6 +202,9 @@ expect_counterexample \
 expect_counterexample \
   GuardedMapAttach GuardedMapAttach_legacy.cfg \
   NoFalseCorruption map-legacy
+expect_counterexample \
+  GuardedMapAttach GuardedMapAttach_epoch_broken.cfg \
+  NoFalseAttachRejection map-epoch-broken
 expect_counterexample \
   SegmentRegistry SegmentRegistry_unlocked.cfg \
   ClaimsMatchInitializingSlot registry-unlocked
@@ -1065,4 +1069,5 @@ else
   printf '%s\n' 'Ada/TLA+ match    PollerRegistrationOwnership traces Linux-only replay deferred'
 fi
 
+"$project_root/scripts/check-guard-epoch.sh"
 printf '%s\n' "Flyology TLA+ model checks passed"

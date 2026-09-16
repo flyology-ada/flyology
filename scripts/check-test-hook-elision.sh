@@ -12,7 +12,7 @@ if [ "${FLYOLOGY_HOOK_ELISION_IN_ALIRE:-0}" != 1 ]; then
   exec "$development_alr" exec -- "$0"
 fi
 
-probe="$project_root/tests/probes/flyology-test_hook_elision_probe.adb"
+probe="$project_root/tests/probes/flyology-data_structures-test_hook_elision_probe.adb"
 temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-hook-elision.XXXXXX")
 
 cleanup () {
@@ -56,7 +56,7 @@ hook_external () {
 
 hook_members () {
   case $1 in
-    adaptive_pool) printf '%s\n' 'adaptive_pool dynamic_destroy' ;;
+    adaptive_pool) printf '%s\n' 'adaptive_pool dynamic_destroy data_guard' ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
@@ -76,6 +76,7 @@ hook_symbol () {
     channel) printf '%s\n' flyology__channel_test_hooks__before_send_barrier ;;
     adaptive_pool) printf '%s\n' flyology__adaptive_pool_test_hooks__reset ;;
     dynamic_destroy) printf '%s\n' flyology__dynamic_destroy_test_hooks__reset ;;
+    data_guard) printf '%s\n' flyology__data_structures__guard_test_hooks__reset ;;
   esac
 }
 
@@ -152,7 +153,7 @@ compile_probe () {
   work_dir="$temp_root/$mode-$combination"
   mkdir -p "$work_dir"
 
-  set -- "$@" -gnatW8 -I"$project_root/src" -I"$platform_source_dir"
+  set -- "$@" -gnatW8 -I"$project_root/src" -I"$platform_source_dir" -I"$project_root/tests/probes"
   hook_index=1
   for hook in $hook_names; do
     state=$(hook_state "$combination" "$hook_index")
@@ -161,7 +162,7 @@ compile_probe () {
     done
     hook_index=$((hook_index * 2))
   done
-  object="$work_dir/flyology-test_hook_elision_probe.o"
+  object="$work_dir/flyology-data_structures-test_hook_elision_probe.o"
   set -- "$@" -c "$probe" -o "$object"
   (
     cd "$work_dir"
@@ -247,12 +248,12 @@ check_production_archive () {
   fi
   symbols=$(undefined_symbols "$archive")
   if printf '%s\n' "$symbols" | grep -E \
-    'flyology_disabled_hook_must_be_elided|flyology__(adaptive_pool_test_hooks|dynamic_destroy_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+    'flyology_disabled_hook_must_be_elided|flyology__data_structures__guard_test_hooks__|flyology__(adaptive_pool_test_hooks|dynamic_destroy_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
     >/dev/null
   then
     printf '%s\n' "production hook reference survived in $mode" >&2
     printf '%s\n' "$symbols" | grep -E \
-      'flyology_disabled_hook_must_be_elided|flyology__(adaptive_pool_test_hooks|dynamic_destroy_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
+      'flyology_disabled_hook_must_be_elided|flyology__data_structures__guard_test_hooks__|flyology__(adaptive_pool_test_hooks|dynamic_destroy_test_hooks|buffer_test_hooks|channel_test_hooks|dns_test_observations|tls_test_hooks|connection_test_hooks|worker_pool_test_hooks|task_lifecycle_test_hooks|subprocess_test_hooks|structured_server_test_hooks|file_watch_test_hooks|wall_clock(_io)?_testing)__|flyology_test_(connection|worker|structured_server|subprocess|file_watch|tls)' \
       >&2 || true
     exit 1
   fi

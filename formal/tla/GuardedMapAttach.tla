@@ -19,7 +19,8 @@ ASSUME /\ Capacity \in Nat \ {0}
        /\ Mutators # {}
        /\ Attachers # {}
        /\ Mutators \intersect Attachers = {}
-       /\ AttachPolicy \in {"guarded", "legacy-observe-only"}
+       /\ AttachPolicy \in {"guarded", "legacy-observe-only",
+                            "epoch-validate-first", "epoch-guard-first"}
 
 NoOwner == "none"
 NoSlot == -1
@@ -32,10 +33,18 @@ AttachPhases == {"idle", "sampled", "checked", "validating",
 ASSUME NoOwner \notin Mutators \cup Attachers
 
 VARIABLES guard, entries, count, mutationPhase, mutationTarget,
-          attachPhase, sampledCount
+          attachPhase, sampledCount, epochState
 
-vars == <<guard, entries, count, mutationPhase, mutationTarget,
-          attachPhase, sampledCount>>
+mapVars == <<guard, entries, count, mutationPhase, mutationTarget,
+             attachPhase, sampledCount>>
+vars == <<mapVars, epochState>>
+
+EpochInitial ==
+  [epoch |-> 1, leaf |-> "guarded", owner |-> NoOwner,
+   views |-> [v \in Mutators |-> 1],
+   phases |-> [v \in Mutators |-> "idle"],
+   result |-> "none", peer |-> "idle", staleWrite |-> FALSE,
+   step |-> 0, action |-> "Init"]
 
 Init ==
   /\ guard = NoOwner
@@ -45,6 +54,7 @@ Init ==
   /\ mutationTarget = [m \in Mutators |-> NoSlot]
   /\ attachPhase = [a \in Attachers |-> "idle"]
   /\ sampledCount = [a \in Attachers |-> 0]
+  /\ epochState = EpochInitial
 
 PrepareInsert(m, slot) ==
   /\ mutationPhase[m] = "idle"
@@ -170,7 +180,7 @@ ResetAttach(a) ==
   /\ UNCHANGED <<guard, entries, count, mutationPhase, mutationTarget,
                   sampledCount>>
 
-Next ==
+MapNext ==
   \/ \E m \in Mutators, slot \in Slots :
        PrepareInsert(m, slot) \/ PrepareRemove(m, slot)
   \/ \E m \in Mutators :
@@ -183,6 +193,8 @@ Next ==
          \/ SampleLegacyCount(a) \/ ObserveLegacyGuard(a)
          \/ ValidateLegacyAttach(a) \/ ResetAttach(a)
 
+\* The added scenario state is immutable in every original model action.
+Next == MapNext /\ UNCHANGED epochState
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
@@ -207,5 +219,153 @@ GuardedAttachOwnsGuard ==
 
 NoFalseCorruption ==
   \A a \in Attachers : attachPhase[a] # "rejected"
+
+(***************************************************************************
+Epoch-fenced Acquire generalization (#124). The guard occupies header byte 44,
+which is immutable zero Auxiliary after SPSC replacement. Reinitialization is
+exclusive: no phase between precheck and release/cleanup may overlap it.
+Two retained views permit valid acquisition, contention, release, fresh attach
+after same-leaf reuse, and stale rejection after same/cross-leaf reuse. This
+does not model mutable-table Attach diagnosis (#126), external lifecycle
+corruption, owner death, or epoch exhaustion. Epochs 1 and 2 are qualification
+geometry. The post-CAS recheck remains explicit even though exclusivity makes
+its stale branch unreachable for a valid prechecked operation.
+***************************************************************************)
+EpochTerminal == {"idle", "done", "busy", "stale"}
+EpochValid(v) == epochState.views[v] = epochState.epoch
+EpochQuiescent ==
+  /\ epochState.owner = NoOwner
+  /\ \A v \in Mutators : epochState.phases[v] \in EpochTerminal
+
+StartAcquire(v) ==
+  /\ epochState.phases[v] \in EpochTerminal
+  /\ epochState' = [epochState EXCEPT
+       !.phases[v] = IF AttachPolicy = "epoch-validate-first" THEN "precheck" ELSE "cas",
+       !.result = "pending"]
+
+PrecheckAcquire(v) ==
+  /\ epochState.phases[v] = "precheck"
+  /\ epochState' = [epochState EXCEPT
+       !.phases[v] = IF EpochValid(v) THEN "cas" ELSE "stale",
+       !.result = IF EpochValid(v) THEN "pending" ELSE "stale"]
+
+CompareExchangeGuard(v) ==
+  /\ epochState.phases[v] = "cas"
+  /\ IF epochState.owner = NoOwner
+       THEN epochState' = [epochState EXCEPT !.owner = v,
+              !.phases[v] = "postcheck",
+              !.staleWrite = @ \/ ~EpochValid(v)]
+       ELSE epochState' = [epochState EXCEPT !.phases[v] = "failed-cas"]
+
+CheckFailedAcquire(v) ==
+  /\ epochState.phases[v] = "failed-cas"
+  /\ epochState' = [epochState EXCEPT
+       !.phases[v] = IF EpochValid(v) THEN "busy" ELSE "stale",
+       !.result = IF EpochValid(v) THEN "busy" ELSE "stale"]
+
+PostcheckAcquire(v) ==
+  /\ epochState.phases[v] = "postcheck"
+  /\ epochState.owner = v
+  /\ epochState' = [epochState EXCEPT
+       !.phases[v] = IF EpochValid(v) THEN "owned" ELSE "cleanup",
+       !.result = IF EpochValid(v) THEN "owned" ELSE "stale"]
+
+ReleaseAcquire(v) ==
+  /\ epochState.phases[v] = "owned" /\ epochState.owner = v
+  /\ epochState' = [epochState EXCEPT !.owner = NoOwner,
+       !.phases[v] = "done", !.result = "ok"]
+
+CleanupStaleAcquire(v) ==
+  /\ epochState.phases[v] = "cleanup" /\ epochState.owner = v
+  /\ epochState' = [epochState EXCEPT !.owner = NoOwner,
+       !.phases[v] = "stale", !.result = "stale"]
+
+ExclusiveReinitialize(target) ==
+  /\ EpochQuiescent /\ epochState.epoch = 1
+  /\ target \in {"guarded", "SPSC"}
+  /\ epochState' = [epochState EXCEPT !.epoch = 2, !.leaf = target,
+       !.peer = "idle", !.result = "reinitialized"]
+
+AttachFreshView(v) ==
+  /\ EpochQuiescent /\ epochState.leaf = "guarded"
+  /\ ~EpochValid(v)
+  /\ epochState' = [epochState EXCEPT !.views[v] = epochState.epoch,
+       !.phases[v] = "idle", !.result = "attached"]
+
+AttachSPSCPeer ==
+  /\ epochState.leaf = "SPSC" /\ epochState.peer = "idle"
+  /\ epochState' = [epochState EXCEPT
+       !.peer = IF epochState.owner = NoOwner THEN "attached" ELSE "configuration-mismatch"]
+
+EpochNext ==
+  /\ \/ \E v \in Mutators : StartAcquire(v) \/ PrecheckAcquire(v)
+          \/ CompareExchangeGuard(v) \/ CheckFailedAcquire(v)
+          \/ PostcheckAcquire(v) \/ ReleaseAcquire(v)
+          \/ CleanupStaleAcquire(v) \/ AttachFreshView(v)
+     \/ \E target \in {"guarded", "SPSC"} : ExclusiveReinitialize(target)
+     \/ AttachSPSCPeer
+  /\ UNCHANGED mapVars
+EpochSpec == Init /\ [][EpochNext]_vars
+
+EpochTypeOK ==
+  /\ epochState.epoch \in 1..2
+  /\ epochState.leaf \in {"guarded", "SPSC"}
+  /\ epochState.owner \in Mutators \cup {NoOwner}
+  /\ epochState.views \in [Mutators -> 1..2]
+  /\ epochState.phases \in [Mutators -> EpochTerminal \cup
+       {"precheck", "cas", "failed-cas", "postcheck", "owned", "cleanup"}]
+  /\ epochState.staleWrite \in BOOLEAN
+  /\ epochState.peer \in {"idle", "attached", "configuration-mismatch"}
+  /\ epochState.result \in {"none", "pending", "stale", "busy", "owned",
+       "ok", "reinitialized", "attached"}
+EpochGuardOwnership ==
+  \A v \in Mutators :
+    epochState.phases[v] \in {"postcheck", "owned", "cleanup"} => epochState.owner = v
+NoStaleGuardWrite == ~epochState.staleWrite
+NoFalseAttachRejection == epochState.peer # "configuration-mismatch"
+SPSCImmutableAuxiliary == epochState.leaf = "SPSC" => epochState.owner = NoOwner
+
+\* Canonical replay projection: completed public calls plus a synchronized
+\* successful-CAS owner boundary for the held valid call. The detailed EpochSpec
+\* above retains separate precheck/CAS/postcheck/cleanup instruction boundaries.
+\* This witness requires two string-named views; it does not replay arbitrary
+\* internal model steps or qualify mutable-table Attach diagnosis.
+HoldValid ==
+  /\ epochState.step = 0
+  /\ epochState' = [epochState EXCEPT !.step = 1, !.action = "HoldValid",
+       !.owner = "v1", !.phases["v1"] = "postcheck", !.result = "pending"]
+CallContended ==
+  /\ epochState.step = 1
+  /\ epochState' = [epochState EXCEPT !.step = 2, !.action = "CallContended",
+       !.phases["v2"] = "busy", !.result = "busy"]
+ReleaseHeld ==
+  /\ epochState.step = 2
+  /\ epochState' = [epochState EXCEPT !.step = 3, !.action = "ReleaseHeld",
+       !.owner = NoOwner, !.phases["v1"] = "done", !.result = "ok"]
+ReinitializeSPSC ==
+  /\ epochState.step = 3 /\ EpochQuiescent
+  /\ epochState' = [epochState EXCEPT !.step = 4, !.action = "ReinitializeSPSC",
+       !.epoch = 2, !.leaf = "SPSC", !.result = "reinitialized"]
+CallStale ==
+  /\ epochState.step = 4
+  /\ epochState' = [epochState EXCEPT !.step = 5, !.action = "CallStale",
+       !.phases["v2"] = "stale", !.result = "stale",
+       !.staleWrite = AttachPolicy = "epoch-guard-first",
+       !.peer = IF AttachPolicy = "epoch-guard-first" THEN "configuration-mismatch" ELSE @]
+AttachPeer ==
+  /\ epochState.step = 5
+  /\ epochState' = [epochState EXCEPT !.step = 6, !.action = "AttachPeer",
+       !.peer = "attached", !.result = "attached"]
+EpochReplayNext ==
+  /\ HoldValid \/ CallContended \/ ReleaseHeld \/ ReinitializeSPSC \/ CallStale \/ AttachPeer
+  /\ UNCHANGED mapVars
+EpochReplaySpec == Init /\ [][EpochReplayNext]_vars
+EpochWitnessIncomplete == epochState.step # 6
+EpochAlias ==
+  [action |-> epochState.action, role |-> "guard-call", input |-> [value |-> 0],
+   outcome |-> [status |-> epochState.result],
+   state |-> [epoch |-> epochState.epoch,
+     auxiliary |-> IF epochState.owner = NoOwner THEN 0 ELSE 1,
+     staleWrite |-> epochState.staleWrite, peer |-> epochState.peer]]
 
 =============================================================================

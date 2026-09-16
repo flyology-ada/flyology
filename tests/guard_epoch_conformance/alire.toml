@@ -1,0 +1,14 @@
+name = "guard_epoch_conformance"
+description = "TLA+ replay of guard epoch fencing at public and owned boundaries"
+version = "0.1.0-dev"
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "tla", "conformance", "test"]
+project-files = ["guard_epoch_conformance.gpr"]
+executables = ["guard-epoch-conformance"]
+[[depends-on]]
+flyology = "~0.2.0"
+[[depends-on]]
+flyology_tla = "~0.1.0-dev"
