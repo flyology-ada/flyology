@@ -2,6 +2,7 @@ with Ada.Strings.Unbounded;
 
 package body Flyology_Bench.Internal_Condition_Test_Hooks is
    package US renames Ada.Strings.Unbounded;
+   use type Interfaces.Unsigned_64;
 
    Maximum_Reads : constant := 128;
    type Rejection_Map is array (Positive range 1 .. Maximum_Reads) of Boolean;
@@ -29,11 +30,16 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
    Capture_Success        : Boolean := False;
    Capture_Output_Length  : Natural := 0;
 
+   Deterministic_Pause_Clock : Boolean := False;
+   Pause_Time_NS             : Interfaces.Unsigned_64 := 0;
+
    procedure Reset is
    begin
       Rejected_Reads := [others => False];
       Rejected_Profile_Reads := [others => False];
       Read_Delays_MS := [others => 0];
+      Deterministic_Pause_Clock := False;
+      Pause_Time_NS := 0;
       Reject_From := 0;
       Process_Profile_From := 0;
       Changed_Process_Profile := Process_Profile_Default;
@@ -100,6 +106,23 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
       end if;
       Read_Delays_MS (Index) := Milliseconds;
    end Delay_Read;
+
+   procedure Use_Deterministic_Pause_Clock is
+   begin
+      Deterministic_Pause_Clock := True;
+      Pause_Time_NS := 0;
+   end Use_Deterministic_Pause_Clock;
+
+   function Pause_Clock_Enabled return Boolean
+   is (Deterministic_Pause_Clock);
+
+   function Pause_Clock_Now return Interfaces.Unsigned_64
+   is (Pause_Time_NS);
+
+   procedure Advance_Pause_Clock (Nanoseconds : Interfaces.Unsigned_64) is
+   begin
+      Pause_Time_NS := Pause_Time_NS + Nanoseconds;
+   end Advance_Pause_Clock;
 
    procedure Use_Linux_Fixture
      (Sysfs_Root                : String;
@@ -185,7 +208,11 @@ package body Flyology_Bench.Internal_Condition_Test_Hooks is
          return;
       end if;
       if Reads <= Maximum_Reads and then Read_Delays_MS (Reads) > 0 then
-         delay Duration (Read_Delays_MS (Reads)) / 1_000.0;
+         if Deterministic_Pause_Clock then
+            Advance_Pause_Clock (Interfaces.Unsigned_64 (Read_Delays_MS (Reads)) * 1_000_000);
+         else
+            delay Duration (Read_Delays_MS (Reads)) / 1_000.0;
+         end if;
       end if;
       if Include_Profile then
          Profile_Reads := Profile_Reads + 1;

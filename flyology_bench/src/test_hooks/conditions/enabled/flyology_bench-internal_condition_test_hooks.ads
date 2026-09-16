@@ -1,4 +1,5 @@
 with Flyology_Bench.Internal_Conditions;
+with Interfaces;
 
 private package Flyology_Bench.Internal_Condition_Test_Hooks is
 
@@ -14,6 +15,10 @@ private package Flyology_Bench.Internal_Condition_Test_Hooks is
      (Index : Positive; Profile : Process_Performance_Profile);
    procedure Begin_Throttle_Event (Index : Positive);
    procedure Delay_Read (Index : Positive; Milliseconds : Positive);
+   procedure Use_Deterministic_Pause_Clock;
+   function Pause_Clock_Enabled return Boolean;
+   function Pause_Clock_Now return Interfaces.Unsigned_64;
+   procedure Advance_Pause_Clock (Nanoseconds : Interfaces.Unsigned_64);
    procedure Use_Linux_Fixture
      (Sysfs_Root                : String;
       PPD_Profile               : String;
