@@ -2059,7 +2059,8 @@ its task, while a native caller may block only its pthread. The reaper converts
 root exit into a normal Flyology wake descriptor, reaps the root, and removes
 ordinary descendants that remain in the original group. A child that
 deliberately leaves the group with `setpgid` or `setsid` is outside this
-cleanup boundary.
+cleanup boundary. The reaper stops new group signals after observing root exit
+and before reaping releases the process-group identifier for reuse.
 
 Darwin applies `F_SETNOSIGPIPE` to the parent's standard-input write end before
 spawn, so a child that closes its read end produces `EPIPE` without a
