@@ -22,6 +22,12 @@ procedure Socket_Preparation_Smoke is
    function FD_Is_Close_On_Exec (FD : Interfaces.C.int) return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_fd_is_close_on_exec";
 
+   function Creation_Flags return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_socket_creation_flags";
+
+   Expected_Accept_Setups : constant Interfaces.C.unsigned_long_long :=
+     (if Creation_Flags = 0 then 3 else 2);
+
    Payload : constant Stream_Element_Array := [16#A5#, 16#5A#];
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
@@ -127,13 +133,13 @@ begin
       pragma Assert (Peer_Address.Family = Sockets.IPv4);
       pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Accepted)) = 1);
       pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Accepted)) = 1);
-      pragma Assert (Nonblocking_Setup_Count = 3);
+      pragma Assert (Nonblocking_Setup_Count = Expected_Accept_Setups);
 
       Sockets.Move (Accepted, Accepted_Moved);
       Sockets.Send_All (Connector, Payload, Timeout => 1.0);
       Sockets.Receive_Exactly (Accepted_Moved, Incoming, Timeout => 1.0);
       pragma Assert (Incoming = Payload);
-      pragma Assert (Nonblocking_Setup_Count = 3);
+      pragma Assert (Nonblocking_Setup_Count = Expected_Accept_Setups);
 
       Sockets.Close_Socket (Accepted_Moved);
       Sockets.Close_Socket (Connector);

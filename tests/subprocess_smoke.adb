@@ -505,7 +505,7 @@ procedure Subprocess_Smoke is
               Capture.Run (Fixture_Command ("inspect-descriptors"), Maximum_Output => 32, Timeout => 5.0);
          begin
             if not Subprocesses.Successful (Capture.Status (Value))
-              or else Capture.Standard_Output (Value) /= " -1"
+              or else Capture.Standard_Output (Value) /= "-1"
             then
                Race_Outcome.Fail ("spawn inherited unrelated descriptor: " & Capture.Standard_Output (Value));
             end if;
