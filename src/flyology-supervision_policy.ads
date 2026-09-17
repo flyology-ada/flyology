@@ -157,6 +157,7 @@ is
    --  Fixed monotonic time representation supplied by the controller.
    type Tick is range 0 .. Long_Long_Integer'Last;
    subtype Attempt_Count is Natural;
+   type Attempt_Times is array (Positive range <>) of Tick;
 
    type Restart_Limits is record
       Burst_Limit    : Attempt_Count range 1 .. Attempt_Count'Last;
@@ -167,11 +168,15 @@ is
       Stability_Time : Tick range 1 .. Tick'Last;
    end record;
 
-   type Restart_Account is record
-      Total_Used     : Attempt_Count := 0;
-      Window_Used    : Attempt_Count := 0;
-      Consecutive    : Attempt_Count := 0;
-      Window_Started : Tick := 0;
+   --  The proof account is constrained by the configured burst limit. Its
+   --  retained timestamps therefore introduce no independent policy ceiling.
+   type Restart_Account (Capacity : Positive) is record
+      Total_Used  : Attempt_Count := 0;
+      --  Number of retained timestamps, including any that have aged out of
+      --  the current window; admission checks the relevant oldest timestamp.
+      Window_Used : Attempt_Count := 0;
+      Consecutive : Attempt_Count := 0;
+      Times       : Attempt_Times (1 .. Capacity) := (others => 0);
    end record;
 
    type Restart_Admission is (Restart_Admitted, Burst_Exhausted, Total_Exhausted, Deadline_Exhausted);
@@ -198,13 +203,22 @@ is
      Pre    =>
        Limits.Initial_Delay <= Limits.Maximum_Delay
        and then Account.Total_Used <= Limits.Total_Limit
-       and then Account.Window_Used <= Limits.Burst_Limit
+       and then Limits.Burst_Limit = Account.Capacity
+       and then Account.Window_Used <= Account.Capacity
        and then Account.Consecutive < Attempt_Count'Last
-       and then Account.Window_Started <= Now
+       and then (for all Index in 1 .. Account.Window_Used => Account.Times (Index) <= Now)
        and then Now <= Recovery_Deadline,
      Post   =>
        Backoff = Backoff_For (Account.Consecutive + 1, Limits.Initial_Delay, Limits.Maximum_Delay)
-       and then Backoff <= Limits.Maximum_Delay;
+       and then Backoff <= Limits.Maximum_Delay
+       and then (if Account.Total_Used >= Limits.Total_Limit
+                 then Admission = Total_Exhausted
+                 elsif Account.Window_Used >= Limits.Burst_Limit
+                   and then Now - Account.Times (Account.Window_Used - Limits.Burst_Limit + 1) < Limits.Window
+                 then Admission = Burst_Exhausted
+                 elsif Backoff > Recovery_Deadline - Now
+                 then Admission = Deadline_Exhausted
+                 else Admission = Restart_Admitted);
 
    --  Commit exactly one previously admitted restart attempt.
    procedure Record_Attempt (Limits : Restart_Limits; Now : Tick; Account : in out Restart_Account)
@@ -213,17 +227,23 @@ is
      Pre    =>
        Account.Total_Used < Limits.Total_Limit
        and then Account.Consecutive < Attempt_Count'Last
-       and then Account.Window_Started <= Now
-       and then (if Now - Account.Window_Started < Limits.Window
-                 then Account.Window_Used < Limits.Burst_Limit),
+       and then Limits.Burst_Limit = Account.Capacity
+       and then Account.Window_Used <= Account.Capacity
+       and then (for all Index in 1 .. Account.Window_Used => Account.Times (Index) <= Now)
+       and then (if Account.Window_Used >= Limits.Burst_Limit
+                 then Now - Account.Times (Account.Window_Used - Limits.Burst_Limit + 1) >= Limits.Window),
      Post   =>
        Account.Total_Used = Account.Total_Used'Old + 1
        and then Account.Consecutive = Account.Consecutive'Old + 1
-       and then (if Now - Account.Window_Started'Old >= Limits.Window
-                 then Account.Window_Started = Now and then Account.Window_Used = 1
-                 else
-                   Account.Window_Started = Account.Window_Started'Old
-                   and then Account.Window_Used = Account.Window_Used'Old + 1);
+       and then (if Account.Window_Used'Old = Account.Capacity
+                 then Account.Window_Used = Account.Capacity
+                 else Account.Window_Used = Account.Window_Used'Old + 1)
+       and then (for all Index in 1 .. Account.Window_Used - 1 =>
+                   Account.Times (Index)
+                   = (if Account.Window_Used'Old = Account.Capacity
+                      then Account.Times'Old (Index + 1)
+                      else Account.Times'Old (Index)))
+       and then Account.Times (Account.Window_Used) = Now;
 
    --  Close a recovery incident after a generation remains ready long enough.
    procedure Reset_If_Stable
@@ -237,7 +257,7 @@ is
           Account.Total_Used = 0
           and then Account.Window_Used = 0
           and then Account.Consecutive = 0
-          and then Account.Window_Started = Now
+          and then (for all Index in Account.Times'Range => Account.Times (Index) = 0)
         else Account = Account'Old);
 
    subtype Incident_Id is Interfaces.Unsigned_64 range 1 .. Interfaces.Unsigned_64'Last;

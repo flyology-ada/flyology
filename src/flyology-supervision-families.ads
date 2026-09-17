@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology.Execution_Groups;
+with Flyology.Supervision_Windows;
 with Flyology.Wake_Sources;
 with Interfaces.C;
 
@@ -200,6 +201,7 @@ private
    type Boolean_Array is array (Slot_Index) of Boolean;
    type Slot_Order is array (Slot_Index) of Slot_Index;
    type Natural_Array is array (Slot_Index) of Natural;
+   type Window_Array is array (Slot_Index) of Flyology.Supervision_Windows.History;
    type Termination_Array is array (Slot_Index) of Termination_Summary;
    type Time_Array is array (Slot_Index) of Ada.Real_Time.Time;
    type Incident_Id_Array is array (Slot_Index) of Incident_Id;
@@ -493,10 +495,9 @@ private
       Reserved_Children          : Natural := 0;
       Live_Managers              : Natural := 0;
       Total_Used                 : Natural_Array := (others => 0);
-      Window_Used                : Natural_Array := (others => 0);
+      Windows                    : Window_Array;
       Consecutive                : Natural_Array := (others => 0);
       Incident_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
-      Window_Since               : Time_Array := (others => Ada.Real_Time.Time_First);
       Ready_Since                : Time_Array := (others => Ada.Real_Time.Time_First);
       Last_Incident              : Incident_Id_Array := (others => Incident_Id'First);
       Last_Attempt               : Incident_Attempt_Array := (others => Incident_Attempt'First);
