@@ -648,6 +648,14 @@ IndependentRecoveryFailure(c) ==
   /\ childState[c] = "running"
   /\ (c # Owner \/ ~familyOpen)
 
+\* A failed prerequisite blocks an affected child's current restart.
+RelatedRecoveryFailure(c) ==
+  /\ mode \in {"recovery-stop", "recovery-backoff", "recovery-start"}
+  /\ c \in Children \ affected
+  /\ \E member \in affected : c \in Prerequisites(member)
+  /\ childState[c] = "running"
+  /\ (c # Owner \/ ~familyOpen)
+
 PendingArrivalIncident(c) ==
   IF childIncident[c] = 0 THEN incidentId + 1 ELSE childIncident[c]
 
@@ -722,6 +730,36 @@ EscalateIndependentFailure(c, impact, restart) ==
                   nestedEscalation, nestedIncident, nestedAttempt,
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+EscalateRelatedFailure(c) ==
+  /\ RelatedRecoveryFailure(c)
+  /\ (childIncident[c] # 0
+       \/ incidentId < MaxGeneration + MaxAttempts + 1)
+  /\ mode' = "terminal-stop"
+  /\ terminal' = TRUE
+  /\ result' = "failure-escalated"
+  /\ childState' = [childState EXCEPT ![c] = "terminated"]
+  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
+  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
+  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
+  /\ affected' = Children
+  /\ recoveryExpected' = Children
+  /\ trigger' = c
+  /\ incidentId' = PendingArrivalIncident(c)
+  /\ incidentAttempt' = PendingArrivalAttempt(c)
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = 3
+  /\ lastStartRank' = 0
+  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
+                  recoveryImpact, childIncident, childAttempt,
+                  familyOpen, familyController, retiredControllers,
+                  familyIncarnation, familyShutdown, familyTerminal,
+                  slotState, slotLive, slotReady, slotStop, slotRecover,
+                  slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+  /\ UNCHANGED pendingVars
 
 RecoveryReadyToFinish ==
   /\ mode = "recovery-start"
@@ -1491,22 +1529,23 @@ OuterProgressActions ==
   \/ (\E c \in Children : StartReplacement(c))
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
-IndependentFailureActions ==
-  \E c \in Children, impact \in Impacts, restart \in BOOLEAN :
-    QueueIndependentFailure(c, impact, restart)
-      \/ EscalateIndependentFailure(c, impact, restart)
+OverlappingFailureActions ==
+  \/ \E c \in Children, impact \in Impacts, restart \in BOOLEAN :
+       QueueIndependentFailure(c, impact, restart)
+         \/ EscalateIndependentFailure(c, impact, restart)
+  \/ \E c \in Children : EscalateRelatedFailure(c)
 
 PendingDispatchActions ==
   \E c \in Children : PromotePendingRecovery(c) \/ ClassifyPendingTerminal(c)
 
 Next ==
-  ((((StartupAndServiceActions \/ FailureAndCommandActions
-       \/ FamilyDrainActions \/ OuterProgressActions)
-        /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
-     \/ FamilyManagerActions)
-      /\ UNCHANGED pendingVars
-    \/ ((IndependentFailureActions \/ PendingDispatchActions)
-         /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
+  /\ (\/ ((  ((StartupAndServiceActions \/ FailureAndCommandActions
+               \/ FamilyDrainActions \/ OuterProgressActions)
+                /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+             \/ FamilyManagerActions)
+            /\ UNCHANGED pendingVars)
+      \/ ((OverlappingFailureActions \/ PendingDispatchActions)
+           /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
   /\ UNCHANGED parentRestartVars
 
 Spec == Init /\ [][Next]_vars
@@ -1540,13 +1579,13 @@ CooperativeOuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 CooperativeNext ==
-  ((((StartupAndServiceActions \/ FailureAndCommandActions
-       \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
-        /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
-     \/ FamilyManagerActions)
-      /\ UNCHANGED pendingVars
-    \/ ((IndependentFailureActions \/ PendingDispatchActions)
-         /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
+  /\ (\/ ((  ((StartupAndServiceActions \/ FailureAndCommandActions
+               \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
+                /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+             \/ FamilyManagerActions)
+            /\ UNCHANGED pendingVars)
+      \/ ((OverlappingFailureActions \/ PendingDispatchActions)
+           /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
   /\ UNCHANGED parentRestartVars
 
 CooperativeSpec ==

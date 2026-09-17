@@ -98,6 +98,7 @@ evidence.
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
 | `QueueIndependentFailure` / `PromotePendingRecovery` / `ClassifyPendingTerminal` | static `Publish_Termination` retaining an unrelated failure through recovery stop, backoff, or start, then applying that child's restart and impact policy when the active transaction finishes |
+| `EscalateRelatedFailure` | static `Publish_Termination` ending the node when a failed prerequisite is required by an affected child |
 | family `Reserve` / `Commit` / `Rollback` actions | the protected family admission transaction with an exact controller/generation handle |
 | `FailFamilySlot` / `RestartFamilySlot` | family termination classification, join, backoff, successful replacement publication, and assignment of the manager's current generation handle before it runs |
 | `CancelFamilyPending` | shutdown rejection of a pending replacement without advancing its published generation or the manager's current handle |
