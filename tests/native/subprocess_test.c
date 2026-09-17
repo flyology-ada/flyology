@@ -139,3 +139,8 @@ int flyology_test_subprocess_pid_exists(int pid)
     if (kill((pid_t)pid, 0) == 0) return 1;
     return errno == EPERM ? 1 : 0;
 }
+
+int flyology_test_subprocess_kill_group(int pid)
+{
+    return kill((pid_t)-pid, SIGKILL);
+}

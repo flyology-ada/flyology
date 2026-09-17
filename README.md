@@ -2086,9 +2086,10 @@ follow their own `FD_CLOEXEC` policy, while Flyology-created descriptors are
 atomically close-on-exec.
 
 A limited `Process` owns the root process, its new process group, nonblocking
-parent pipe ends, and one native reaper task. Pipe reads and writes use the
-same descriptor readiness path as sockets: a lightweight caller suspends only
-its task, while a native caller may block only its pthread. The reaper converts
+parent pipe ends, and a reference to one detached native reaper thread. Pipe
+reads and writes use the same descriptor readiness path as sockets: a
+lightweight caller suspends only its task, while a native caller may block only
+its pthread. The reaper converts
 root exit into a normal Flyology wake descriptor, reaps the root, and removes
 ordinary descendants that remain in the original group. A child that
 deliberately leaves the group with `setpgid` or `setsid` is outside this
@@ -2109,10 +2110,14 @@ termination and waits for the root for its grace interval. Root exit triggers
 immediate hard cleanup of remaining group members; otherwise `Stop` applies
 hard termination when the grace interval expires. `Close` and
 finalization hard-terminate an unjoined group, reap the root, close every pipe,
-and join the reaper. If hard termination fails, explicit `Close` reports the
-error promptly and retains process ownership for a later retry. Finalization
-still waits for natural root exit when hard termination remains unavailable,
-since the reaper borrows state in the finalizing process object.
+and release the reaper reference. If hard termination fails, explicit `Close`
+reports the error promptly and retains process ownership for a later retry.
+Finalization instead closes the pipes and releases its reference without
+waiting for natural root exit. The detached reaper owns its state until it
+observes and reaps the root, including after Ada library finalization. If the
+program exits first, the operating system reparents the still-live child.
+Successful hard termination can still wait for a child stuck in an
+uninterruptible kernel state.
 
 `Flyology.Subprocesses.Capture.Run` is the bounded structured layer. It
 interleaves stdin writes with stdout and stderr reads under one monotonic
@@ -2127,9 +2132,19 @@ the parent descriptors before the original exception propagates. Cleanup
 failures are suppressed in that path, and cleanup can extend delivery beyond
 the command-progress deadline.
 
-Each live process currently consumes one native reaper task and pthread. This
+Each live process currently consumes one detached native reaper pthread. Its
+opaque C state holds a signal mutex, completion descriptor, and separate owner
+and worker references. The worker must perform `waitid(WNOWAIT)`, exclude new
+group signals, remove remaining group members, and call `waitpid` without an
+Ada callback: it may continue after Ada shutdown, and the root PID must remain
+reserved through the group signal. This is the native boundary that Ada cannot
+execute safely after finalization. Spawn policy, public signal choice, deadline
+and cancellation handling, and error classification remain in Ada; no other
+subprocess policy or SPARK-suitable validation moved into C. This
 initial backend is intended for bounded subprocess populations. A shared
-high-density reaper remains a separate design boundary.
+high-density reaper remains a separate design boundary. Callers must not
+independently wait for a Flyology child or configure process-wide `SIGCHLD`
+auto-reaping; either can release the root PID before group cleanup finishes.
 
 ### TLS
 

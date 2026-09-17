@@ -189,6 +189,7 @@ project Runtime_Smoke is
       "structured_server_tls_smoke.adb",
       "structured_server_reuse_smoke.adb",
       "subprocess_fixture.adb",
+      "subprocess_shutdown_smoke.adb",
       "subprocess_smoke.adb",
       "thread_affinity_smoke.adb",
       "timer_heap_smoke.adb",

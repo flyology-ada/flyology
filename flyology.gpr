@@ -116,6 +116,7 @@ project Flyology is
    type Subprocess_Test_Hooks_Type is ("false", "true");
    Subprocess_Test_Hooks : Subprocess_Test_Hooks_Type :=
      external ("FLYOLOGY_SUBPROCESS_TEST_HOOKS", "false");
+   Subprocess_Test_Hook_Switch := "-DFLYOLOGY_SUBPROCESS_TEST_HOOKS=0";
    Subprocess_Test_Hook_Source_Dir :=
      "src/test_hooks/subprocess/disabled/";
    case Subprocess_Test_Hooks is
@@ -124,6 +125,7 @@ project Flyology is
       when "true" =>
          Subprocess_Test_Hook_Source_Dir :=
            "src/test_hooks/subprocess/enabled/";
+         Subprocess_Test_Hook_Switch := "-DFLYOLOGY_SUBPROCESS_TEST_HOOKS=1";
    end case;
 
    type Structured_Server_Test_Hooks_Type is ("false", "true");
@@ -345,7 +347,7 @@ project Flyology is
         & ("-gnatyM110", "-gnatwJ");
       for Default_Switches ("C") use
         ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
-         Socket_Test_Hook_Switch);
+         Socket_Test_Hook_Switch, Subprocess_Test_Hook_Switch);
    end Compiler;
 
    package Binder is

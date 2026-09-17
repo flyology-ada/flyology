@@ -638,6 +638,7 @@ wall_clock_hook_mains=flyology-wall_clock_testing-smoke
 socket_hook_mains=socket_preparation_smoke
 
 subprocess_hook_mains='subprocess_fixture
+subprocess_shutdown_smoke
 subprocess_smoke'
 
 file_watch_hook_mains=file_watches_recovery_smoke
@@ -850,6 +851,10 @@ link_test_mains \
   "$subprocess_test_subdir" "$project_root/build/rts" \
   "$subprocess_hook_mains"
 unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
+
+"$project_root/scripts/check-subprocess-shutdown.sh" \
+  "$subprocess_test_bin/subprocess_shutdown_smoke" \
+  "$subprocess_test_bin/subprocess_fixture"
 
 FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
 export FLYOLOGY_FILE_WATCH_TEST_HOOKS

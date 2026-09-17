@@ -14,15 +14,7 @@ private package Flyology.Subprocess_Test_Hooks is
    procedure Set_Fail_Group_Signal (Enabled : Interfaces.C.int);
    pragma Export (C, Set_Fail_Group_Signal, "flyology_test_subprocess_set_fail_group_signal");
 
-   procedure After_Reap;
    procedure Note_Group_Signal;
-
-   procedure Arm_Reap_Barrier;
-   pragma Export (C, Arm_Reap_Barrier, "flyology_test_subprocess_arm_reap_barrier");
-   procedure Await_Reap_Barrier;
-   pragma Export (C, Await_Reap_Barrier, "flyology_test_subprocess_await_reap_barrier");
-   procedure Release_Reap_Barrier;
-   pragma Export (C, Release_Reap_Barrier, "flyology_test_subprocess_release_reap_barrier");
    function Group_Signal_Count return Interfaces.C.int;
    pragma Export (C, Group_Signal_Count, "flyology_test_subprocess_group_signal_count");
 

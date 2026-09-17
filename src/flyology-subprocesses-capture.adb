@@ -173,7 +173,7 @@ package body Flyology.Subprocesses.Capture is
 
                      when 3 =>
                         if not Process_Done then
-                           Add (Child.Exit_State.Wait_Descriptor, Flyology.IO.For_Read, Exit_Slot);
+                           Add (Exit_Wait_Descriptor (Child), Flyology.IO.For_Read, Exit_Slot);
                         end if;
                   end case;
                end;

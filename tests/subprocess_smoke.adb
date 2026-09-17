@@ -33,6 +33,9 @@ procedure Subprocess_Smoke is
    function Pid_Exists (Pid : C.int) return C.int;
    pragma Import (C, Pid_Exists, "flyology_test_subprocess_pid_exists");
 
+   function Kill_Group (Pid : C.int) return C.int;
+   pragma Import (C, Kill_Group, "flyology_test_subprocess_kill_group");
+
    procedure Set_Fail_Reaper_Allocation (Enabled : C.int);
    pragma Import (C, Set_Fail_Reaper_Allocation, "flyology_test_subprocess_set_fail_reaper_allocation");
 
@@ -91,8 +94,10 @@ procedure Subprocess_Smoke is
       Child  : Subprocesses.Process;
       Status : Subprocesses.Exit_Status;
       Count  : C.int;
+      Before : C.int;
    begin
       Arm_Reap_Barrier;
+      Before := Group_Signal_Count;
       Subprocesses.Spawn (Subprocesses.To_Command ("/usr/bin/true"), Child);
       Await_Reap_Barrier;
       --  The root has been reaped, but the public exit result is still pending.
@@ -101,12 +106,12 @@ procedure Subprocess_Smoke is
       Subprocesses.Kill (Child);
       Count := Group_Signal_Count;
       Release_Reap_Barrier;
-      Assert (Count = 0, "reaped process group was signaled before exit publication");
+      Assert (Count = Before, "reaped process group was signaled before exit publication");
       Subprocesses.Wait (Child, Status);
       Assert (Subprocesses.Successful (Status), "reaped child status changed");
       Subprocesses.Stop (Child, Grace => 0.0, Status => Status);
       Subprocesses.Close (Child);
-      Assert (Group_Signal_Count = 0, "Stop or Close signaled a reaped process group");
+      Assert (Group_Signal_Count = Before, "Stop or Close signaled a reaped process group");
    exception
       when others =>
          Release_Reap_Barrier;
@@ -396,23 +401,40 @@ procedure Subprocess_Smoke is
       declare
          Before  : constant C.int := Open_FD_Count;
          Started : Ada.Real_Time.Time;
+         Pid     : C.int := -1;
       begin
          declare
             Child : Subprocesses.Process;
          begin
-            Subprocesses.Spawn (Fixture_Command ("short-sleep"), Child);
+            Subprocesses.Spawn (Fixture_Command ("resistant"), Child);
             Await_Ready (Child);
+            Pid := C.int (Subprocesses.Identifier (Child));
             Set_Fail_Group_Signal (1);
             Started := Ada.Real_Time.Clock;
          end;
          Set_Fail_Group_Signal (0);
          Assert
-           (Ada.Real_Time.Clock - Started >= Ada.Real_Time.Milliseconds (100),
-            "finalization released the reaper before natural exit");
+           (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (1),
+            "failed-kill finalization waited for a live child");
+         Assert (Pid_Exists (Pid) = 1, "finalized child did not survive failed kill");
+         Assert (Kill_Group (Pid) = 0, "cannot release failed-kill child");
+         for Attempt in 1 .. 200 loop
+            exit when Pid_Exists (Pid) = 0;
+            delay 0.01;
+         end loop;
+         Assert (Pid_Exists (Pid) = 0, "native reaper did not reap released child");
          Assert (Open_FD_Count = Before, "failed-kill finalization leaked descriptors");
       exception
          when others =>
             Set_Fail_Group_Signal (0);
+            if Pid > 0 then
+               declare
+                  Ignored : constant C.int := Kill_Group (Pid);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            end if;
             raise;
       end;
 
