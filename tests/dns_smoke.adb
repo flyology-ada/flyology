@@ -122,6 +122,7 @@ procedure DNS_Smoke is
       Bare_Name         : constant String (1 .. 60) := (others => 'b');
       NDots_Name        : constant String := "ndots-once.test";
       NDots_Mixed_Name  : constant String := "ndots-mixed.test";
+      NDots_Reverse_Name : constant String := "ndots-reverse.test";
       NDots_Suffix      : constant String := "candidate.test";
       Search_Label      : constant String (1 .. 62) := (others => 's');
       Invalid_Label     : constant String (1 .. 64) := (others => 'i');
@@ -920,6 +921,11 @@ procedure DNS_Smoke is
                elsif Name = NDots_Mixed_Name & "." & NDots_Suffix then
                   Control.NDots_Mixed_Search_Query;
                   Send_Response (Name, NXDOMAIN => True);
+               elsif Name = NDots_Reverse_Name then
+                  Send_Response (Name, NXDOMAIN => True);
+               elsif Name = NDots_Reverse_Name & "." & NDots_Suffix then
+                  Control.NDots_Mixed_Search_Query;
+                  Send_Response (Name, Server_Failure => True);
                elsif Name = Search_Name & ".valid.test" then
                   Send_Response (Name, IPv4 => "192.0.2.54");
                elsif Name = Search_Name & ".bad" then
@@ -1538,6 +1544,37 @@ procedure DNS_Smoke is
                  OK and then Server_Failed and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
             end;
 
+            Set_Stage ("scoped ndots reverse failures");
+            DNS.Clear_Cache;
+            declare
+               Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-ndots"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    NDots_Reverse_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+               Not_Found     : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Name_Not_Found =>
+                     Not_Found := True;
+               end;
+               OK := OK and then Not_Found and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+            end;
+
             Set_Stage ("scoped invalid search domains");
             DNS.Clear_Cache;
             declare
@@ -2108,6 +2145,30 @@ procedure DNS_Smoke is
                   Server_Failed := True;
             end;
             OK := OK and then Server_Failed and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+         end;
+         Set_Stage ("synchronous ndots reverse failures");
+         DNS.Clear_Cache;
+         declare
+            Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+            Not_Found     : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve
+                      (NDots_Reverse_Name,
+                       DNS.IPv4_Only,
+                       Timeout            => Operation_Timeout,
+                       Configuration_Path => Config_Path (Server, "-ndots"));
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Name_Not_Found =>
+                  Not_Found := True;
+            end;
+            OK := OK and then Not_Found and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
          end;
          Set_Stage ("remaining search candidate");
          declare

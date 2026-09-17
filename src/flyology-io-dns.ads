@@ -335,7 +335,7 @@ private
       Candidates                : Name_Buffer_Array (1 .. Max_Search_Domains + 1);
       Candidate_Count           : Natural range 0 .. Max_Search_Domains + 1 := 0;
       Candidate_Index           : Natural range 0 .. Max_Search_Domains + 1 := 0;
-      First_Bare_Server_Failed  : Boolean := False;
+      First_Bare_Failure        : Resolve_Failure := No_Failure;
       Query_Name                : Name_Buffer;
       Original_Name             : Name_Buffer;
       Family                    : Family_Preference := Any_Family;

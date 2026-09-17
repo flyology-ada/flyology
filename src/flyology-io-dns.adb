@@ -1758,7 +1758,7 @@ package body Flyology.IO.DNS is
       State.Original_Name := Bare;
       State.Candidate_Count := 0;
       State.Candidate_Index := 0;
-      State.First_Bare_Server_Failed := False;
+      State.First_Bare_Failure := No_Failure;
       if not Use_Search
         or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv4)
         or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv6)
@@ -2267,17 +2267,19 @@ package body Flyology.IO.DNS is
       begin
          if Item.State.Candidate_Index = 1
            and then Item.State.Candidates (1) = Item.State.Original_Name
-           and then Failure = Server_Failure
+           and then Failure in Not_Found_Failure | Server_Failure
          then
-            Item.State.First_Bare_Server_Failed := True;
+            Item.State.First_Bare_Failure := Failure;
          end if;
          if Failure in Not_Found_Failure | Server_Failure
            and then Item.State.Candidate_Index < Item.State.Candidate_Count
          then
             Item.State.Phase := Begin_Candidate;
             Flyology.Operations.Drivers.Reschedule (Item);
-         elsif Failure = Not_Found_Failure and then Item.State.First_Bare_Server_Failed then
-            Fail (Server_Failure);
+         elsif Failure in Not_Found_Failure | Server_Failure
+           and then Item.State.First_Bare_Failure /= No_Failure
+         then
+            Fail (Item.State.First_Bare_Failure);
          else
             Fail (Failure);
          end if;
