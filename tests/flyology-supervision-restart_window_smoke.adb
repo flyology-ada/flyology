@@ -108,6 +108,15 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
       return Result;
    end Lightweight_Static_Specification;
 
+   function Child_Burst_Specification
+     (Child : Static_Child_Kind) return Child_Specification
+   is
+      Result : Child_Specification := Static_Specification (Child);
+   begin
+      Result.Recovery := Recovery;
+      return Result;
+   end Child_Burst_Specification;
+
    function No_Static_Relationship
      (Left, Right : Static_Child_Kind) return Boolean
    is
@@ -148,6 +157,17 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
         Cohort_Member       => No_Static_Relationship,
         Run_One_Generation  => Run_Static_Generation,
         Subtree_Recovery    => Recovery);
+
+   package Child_Burst_Static_Supervisor is new
+     Static
+       (Child_Kind          => Static_Child_Kind,
+        Application_Context => Static_Context,
+        Logical_Id          => Static_Id,
+        Specification       => Child_Burst_Specification,
+        Depends_On          => No_Static_Relationship,
+        Cohort_Member       => No_Static_Relationship,
+        Run_One_Generation  => Run_Static_Generation,
+        Subtree_Recovery    => Child_Recovery);
 
    package Lightweight_Static_Supervisor is new
      Static
@@ -360,6 +380,25 @@ begin
         Assert
           (Natural
              (Family_Supervisor.Current (Item, Child_Id (16_900_002)).Attempts)
+             = 3);
+   end;
+
+   --  The subtree allows ten attempts here, so the child limit of three must
+   --  be the account that ends this recovery.
+   Flyology.Task_Lifecycle_Testing.Reset;
+   declare
+      Context : aliased Static_Context;
+      Item    : aliased Child_Burst_Static_Supervisor.Supervisor;
+      Result  : Supervisor_Result;
+   begin
+      Child_Burst_Static_Supervisor.Run (Item, Context, Result);
+      pragma Assert (Context.Starts.Current = 4);
+      pragma Assert (Result.Outcome = Recovery_Exhausted);
+      pragma Assert (Result.Termination.Kind = Policy_Exhaustion);
+      pragma
+        Assert
+          (Natural
+             (Child_Burst_Static_Supervisor.Current (Item, Service).Attempts)
              = 3);
    end;
 
