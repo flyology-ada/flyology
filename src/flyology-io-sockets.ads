@@ -222,7 +222,7 @@ package Flyology.IO.Sockets is
    function Resolve_Exception (Occurrence : Ada.Exceptions.Exception_Occurrence) return Error_Type;
 
    --  Create one blocking socket. Task-aware operations configure it as
-   --  nonblocking before use.
+   --  nonblocking before use; immediate operations do not.
    --  @param Socket Newly created socket owned by the caller
    --  @param Family Internet address family
    --  @param Mode Stream or datagram semantics
@@ -233,15 +233,18 @@ package Flyology.IO.Sockets is
    with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
    --  Create one blocking AF_UNIX SOCK_STREAM socket. Task-aware operations
-   --  configure it as nonblocking before use. Unix pathname sockets are
-   --  supported on macOS and Linux; no Windows backend is provided.
+   --  configure it as nonblocking before use; immediate operations do not.
+   --  Unix pathname sockets are supported on macOS and Linux; no Windows
+   --  backend is provided.
    --  @param Socket Newly created socket owned by the caller
    --  @exception Socket_Error Creation or descriptor configuration fails
    --  @exception Program_Error Socket is already open
    procedure Create_Unix_Stream_Socket (Socket : in out Socket_Type)
    with Pre => not Is_Open (Socket), Post => Is_Open (Socket);
 
-   --  Create a connected local socket pair for IPC and testing.
+   --  Create a connected local socket pair for IPC and testing. Both sockets
+   --  are blocking until Prepare or another descriptor control makes them
+   --  nonblocking.
    --  @param Left First socket owned by the caller
    --  @param Right Second socket owned by the caller
    --  @param Mode Stream or datagram semantics
@@ -370,15 +373,21 @@ package Flyology.IO.Sockets is
    --  task-aware streams. A signal that interrupts the attempt does not abort
    --  it: the kernel keeps establishing the connection, so this call then
    --  waits for the socket to resolve and reports the pending socket error.
-   --  That wait blocks the calling native pthread, or suspends only the
-   --  calling lightweight task, until the handshake succeeds or fails.
+   --  A lightweight caller must first call Prepare or otherwise ensure the
+   --  descriptor is nonblocking: a blocking connect syscall can occupy its
+   --  execution group's event-loop pthread. After an interrupted or in-progress
+   --  nonblocking attempt, the wait blocks a native pthread or suspends only
+   --  the calling lightweight task until the handshake succeeds or fails.
    --  @param Socket Open socket
    --  @param Server Destination endpoint
    --  @exception Socket_Error connect fails or the connection is refused
    --  @exception Device_Error Readiness polling fails
    procedure Connect_Socket (Socket : Socket_Type; Server : Endpoint);
 
-   --  Receive one immediate chunk without readiness orchestration.
+   --  Receive one immediate chunk without readiness orchestration. A lightweight
+   --  caller must first call Prepare or otherwise ensure the descriptor is
+   --  nonblocking; a blocking receive can occupy its execution group's
+   --  event-loop pthread.
    --  @param Socket Open socket
    --  @param Item Destination buffer
    --  @param Last Last element received, or Item'First - 1 on closure
@@ -388,9 +397,11 @@ package Flyology.IO.Sockets is
       Item   : out Ada.Streams.Stream_Element_Array;
       Last   : out Ada.Streams.Stream_Element_Offset);
 
-   --  Receive one datagram and its source endpoint. From is No_Endpoint when
-   --  the socket source has no Internet endpoint, including an AF_UNIX socket
-   --  pair.
+   --  Receive one datagram and its source endpoint without readiness orchestration.
+   --  A lightweight caller must first call Prepare or otherwise ensure the descriptor
+   --  is nonblocking; a blocking receive can occupy its execution group's
+   --  event-loop pthread. From is No_Endpoint when the socket source has no
+   --  Internet endpoint, including an AF_UNIX socket pair.
    --  @param Socket Open datagram socket
    --  @param Item Destination buffer
    --  @param Last Last element received
@@ -402,7 +413,10 @@ package Flyology.IO.Sockets is
       Last   : out Ada.Streams.Stream_Element_Offset;
       From   : out Endpoint);
 
-   --  Send one immediate chunk without readiness orchestration.
+   --  Send one immediate chunk without readiness orchestration. A lightweight
+   --  caller must first call Prepare or otherwise ensure the descriptor is
+   --  nonblocking; a blocking send can occupy its execution group's event-loop
+   --  pthread.
    --  @param Socket Open connected socket
    --  @param Item Source buffer
    --  @param Last Last element sent
@@ -412,7 +426,10 @@ package Flyology.IO.Sockets is
       Item   : Ada.Streams.Stream_Element_Array;
       Last   : out Ada.Streams.Stream_Element_Offset);
 
-   --  Send one datagram to a destination endpoint.
+   --  Send one datagram to a destination endpoint without readiness orchestration.
+   --  A lightweight caller must first call Prepare or otherwise ensure the descriptor
+   --  is nonblocking; a blocking send can occupy its execution group's event-loop
+   --  pthread.
    --  @param Socket Open datagram socket
    --  @param Item Source buffer
    --  @param Last Last element sent

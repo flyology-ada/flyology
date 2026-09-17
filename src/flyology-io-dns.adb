@@ -1189,11 +1189,11 @@ package body Flyology.IO.DNS is
                   Last : Streams.Stream_Element_Offset;
                begin
                   Sockets.Create_Socket (Channels (1), Selected_Server.Family, Sockets.Socket_Datagram);
+                  Flyology.IO.Sockets.Prepare (Channels (1));
                   --  A datagram connect is a local peer filter, not a network
                   --  handshake. The kernel then rejects responses from every
                   --  source except the selected numeric name server.
                   Sockets.Connect_Socket (Channels (1), Selected_Server);
-                  Flyology.IO.Sockets.Prepare (Channels (1));
                   Flyology.IO.Sockets.Send
                     (Channels (1), Query_Data, Last, Remaining (Deadline, Infinite), Interrupts);
                   if Last /= Query_Data'Last then
@@ -2287,8 +2287,8 @@ package body Flyology.IO.DNS is
             Item.State.Attempt_Deadline := Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Left);
             Close_Quietly (Item.State.UDP_Socket);
             Sockets.Create_Socket (Item.State.UDP_Socket, Server.Family, Sockets.Socket_Datagram);
-            Sockets.Connect_Socket (Item.State.UDP_Socket, Server);
             Sockets.Prepare (Item.State.UDP_Socket);
+            Sockets.Connect_Socket (Item.State.UDP_Socket, Server);
             Start_UDP_Send;
          end;
       end Begin_Attempt;
