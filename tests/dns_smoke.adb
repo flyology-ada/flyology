@@ -112,6 +112,7 @@ procedure DNS_Smoke is
       Search_Name       : constant String (1 .. 60) := (others => 'r');
       Bare_Name         : constant String (1 .. 60) := (others => 'b');
       Search_Label      : constant String (1 .. 62) := (others => 's');
+      Invalid_Label     : constant String (1 .. 64) := (others => 'i');
       Long_Search       : constant String :=
         Search_Label & "." & Search_Label & "." & Search_Label & "." & Search_Label;
 
@@ -691,6 +692,8 @@ procedure DNS_Smoke is
                   Send_Response (Name, IPv4 => "192.0.2.53");
                elsif Name = Search_Name & ".valid.test" then
                   Send_Response (Name, IPv4 => "192.0.2.54");
+               elsif Name = Search_Name & ".bad" then
+                  Send_Response (Name, IPv4 => "192.0.2.56");
                elsif Name = Bare_Name then
                   Send_Response (Name, IPv4 => "192.0.2.55");
                elsif Name = "entropy.test" then
@@ -1134,6 +1137,31 @@ procedure DNS_Smoke is
                end;
             end;
 
+            Set_Stage ("scoped invalid search domains");
+            DNS.Clear_Cache;
+            declare
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-invalid-search"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    Search_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
+               end;
+            end;
+
             Set_Stage ("scoped gates");
             declare
                Set       : aliased Operations.Completion_Set (6);
@@ -1538,6 +1566,30 @@ procedure DNS_Smoke is
          begin
             OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
          end;
+         Set_Stage ("invalid search domains before valid candidate");
+         DNS.Clear_Cache;
+         declare
+            Values : constant DNS.Address_Array :=
+              DNS.Resolve
+                (Search_Name,
+                 DNS.IPv4_Only,
+                 Timeout            => Operation_Timeout,
+                 Configuration_Path => Config_Path (Server, "-invalid-search"));
+         begin
+            OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
+         end;
+         Set_Stage ("invalid search domains before bare fallback");
+         DNS.Clear_Cache;
+         declare
+            Values : constant DNS.Address_Array :=
+              DNS.Resolve
+                (Bare_Name,
+                 DNS.IPv4_Only,
+                 Timeout            => Operation_Timeout,
+                 Configuration_Path => Config_Path (Server, "-invalid-only"));
+         begin
+            OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.55";
+         end;
          Set_Stage ("bare-name fallback");
          declare
             Values : constant DNS.Address_Array :=
@@ -1643,6 +1695,9 @@ procedure DNS_Smoke is
       Write_Config (Address);
       Write_Config (Address, Long_Search & " valid.test", Suffix => "-remaining");
       Write_Config (Address, Long_Search, Suffix => "-bare");
+      Write_Config
+        (Address, "bad.. .bad a..b " & Invalid_Label & ".test valid.test", Suffix => "-invalid-search");
+      Write_Config (Address, "bad.. .bad a..b " & Invalid_Label & ".test", Suffix => "-invalid-only");
       Control.Begin_Client;
       select
          Control.Wait_Cancel_Or_Finished (Client_Finished, Passed);
@@ -1672,6 +1727,12 @@ procedure DNS_Smoke is
       end if;
       if Ada.Directories.Exists (Config_Path (Address, "-bare")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-bare"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-invalid-search")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-invalid-search"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-invalid-only")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-invalid-only"));
       end if;
       return Passed;
    end Run;
