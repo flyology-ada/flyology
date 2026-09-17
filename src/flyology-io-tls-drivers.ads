@@ -95,7 +95,10 @@ package Flyology.IO.TLS.Drivers is
       Last   : out Ada.Streams.Stream_Element_Offset;
       Result : out Step_Result);
 
-   --  Perform one bounded encrypted send step.
+   --  Perform one bounded encrypted send step. Need_Read and Need_Write consume
+   --  no bytes and set Last to one less than Data'First. Retry either result
+   --  with the identical Data slice, including its bounds and contents; only
+   --  its address may differ. Empty Data makes progress without sending bytes.
    --  @param IO Acquired capability
    --  @param Data Source buffer for one bounded step
    --  @param Last Last element sent, or Data'First - 1 without progress

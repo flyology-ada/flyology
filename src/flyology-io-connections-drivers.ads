@@ -222,6 +222,8 @@ package Flyology.IO.Connections.Drivers is
    --  TLS provider step is made. No readiness wait occurs. Unless Result is
    --  Made_Progress with nonempty Data, Last is one less than Data'First. TLS
    --  may report Need_Read; plaintext reports Need_Write when it would block.
+   --  After TLS reports Need_Read or Need_Write, retry with the identical Data
+   --  slice, including its bounds and contents; only its address may differ.
    --  @param Item Active scoped capability
    --  @param Data Source buffer for one bounded step
    --  @param Last Last element sent, or Data'First - 1 without progress
