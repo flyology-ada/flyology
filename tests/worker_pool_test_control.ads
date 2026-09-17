@@ -22,11 +22,13 @@ package Worker_Pool_Test_Control is
 
    function Remaining_Native_Executor_Cancellation_Failures return Natural;
 
-   procedure Fail_Native_Executor_Consume_Once;
-
-   procedure Arm_Native_Executor_Completion_Wake;
-
    procedure Arm_Native_Executor_Dispatch_Barrier;
+
+   procedure Arm_Native_Executor_Abandon_Claim_Barrier;
+
+   procedure Wait_Native_Executor_Abandon_Claim_Barrier;
+
+   procedure Release_Native_Executor_Abandon_Claim_Barrier;
 
    procedure Wait_Native_Executor_Dispatch_Barrier;
 

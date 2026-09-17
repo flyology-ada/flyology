@@ -59,11 +59,16 @@ assert_patched_core () {
       printf '%s\n' "$label generated s-interr lacks native interrupt services" >&2
       exit 1
     }
+  grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
+    "$rts_root/adainclude/s-taasde.adb" >/dev/null || {
+      printf '%s\n' "$label generated s-taasde lacks a native timer service" >&2
+      exit 1
+    }
 
   mkdir "$check_root"
   (
     cd "$check_root"
-    ar -x "$archive" s-taprop.o s-interr.o s-tassta.o
+    ar -x "$archive" s-taprop.o s-interr.o s-taasde.o s-tassta.o
   )
   assert_object_symbol \
     "$check_root/s-taprop.o" \
@@ -81,6 +86,10 @@ assert_patched_core () {
     "$check_root/s-interr.o" \
     system__flyology__native_designation \
     "$label interrupt services"
+  assert_object_symbol \
+    "$check_root/s-taasde.o" \
+    system__flyology__native_designation \
+    "$label asynchronous timer service"
 }
 
 mkdir -p "$pin_root"

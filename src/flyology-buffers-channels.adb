@@ -1,8 +1,9 @@
 with Ada.Unchecked_Conversion;
+with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
+with Flyology.Wake_Sources;
 with Interfaces;
-with Interfaces.C;
 with System.Storage_Elements;
 
 package body Flyology.Buffers.Channels is
@@ -10,6 +11,7 @@ package body Flyology.Buffers.Channels is
 
    use type Flyology.Operations.Driver_Event;
    use type Interfaces.C.unsigned;
+   use type Interfaces.C.int;
    use type System.Address;
    use type System.Storage_Elements.Integer_Address;
 
@@ -31,10 +33,37 @@ package body Flyology.Buffers.Channels is
    function Source_Address (Item : not null Channel_Access) return System.Address
    is (Item.State'Address);
 
+   protected body Signal_Claim is
+      procedure Acquire is
+      begin
+         Count := Count + 1;
+      end Acquire;
+
+      procedure Release is
+      begin
+         Count := Count - 1;
+      end Release;
+
+      entry Await_Released when Count = 0 is
+      begin
+         null;
+      end Await_Released;
+   end Signal_Claim;
+
+   type Borrowed_Signal_Guard is new Ada.Finalization.Limited_Controlled with record
+      Operation  : System.Address := System.Null_Address;
+      Descriptor : Interfaces.C.int := -1;
+      Delivered  : Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Guard : in out Borrowed_Signal_Guard);
+
    protected Subscriptions is
       procedure Link (Operation : System.Address);
-      procedure Unlink (Operation : System.Address);
-      procedure Signal (Source : System.Address);
+      procedure Remove (Operation : System.Address);
+      procedure Mark (Source : System.Address);
+      procedure Claim_Next (Source : System.Address; Guard : not null access Borrowed_Signal_Guard);
    private
       Heads : Bucket_Array := (others => System.Null_Address);
    end Subscriptions;
@@ -54,7 +83,7 @@ package body Flyology.Buffers.Channels is
          Active_Subscriptions (Index) := Active_Subscriptions (Index) + 1;
       end Link;
 
-      procedure Unlink (Operation : System.Address) is
+      procedure Remove (Operation : System.Address) is
          Target           : constant Channel_Operation_Access := To_Operation (Operation);
          Index            : Bucket_Index;
          Cursor, Previous : System.Address;
@@ -78,10 +107,11 @@ package body Flyology.Buffers.Channels is
          end if;
          Target.Next := System.Null_Address;
          Target.Subscribed := False;
+         Target.Needs_Signal := False;
          Active_Subscriptions (Index) := Active_Subscriptions (Index) - 1;
-      end Unlink;
+      end Remove;
 
-      procedure Signal (Source : System.Address) is
+      procedure Mark (Source : System.Address) is
          Cursor : System.Address := Heads (Bucket (Source));
       begin
          while Cursor /= System.Null_Address loop
@@ -89,13 +119,130 @@ package body Flyology.Buffers.Channels is
                Operation : constant Channel_Operation_Access := To_Operation (Cursor);
             begin
                if Operation.Item /= null and then Source_Address (Operation.Item) = Source then
-                  Flyology.Operations.Drivers.Signal_Completion (Operation.all);
+                  Operation.Needs_Signal := True;
                end if;
                Cursor := Operation.Next;
             end;
          end loop;
-      end Signal;
+      end Mark;
+
+      procedure Claim_Next (Source : System.Address; Guard : not null access Borrowed_Signal_Guard) is
+         Cursor : System.Address := Heads (Bucket (Source));
+      begin
+         while Cursor /= System.Null_Address loop
+            declare
+               Target : constant Channel_Operation_Access := To_Operation (Cursor);
+            begin
+               if Target.Needs_Signal
+                 and then Target.Item /= null
+                 and then Source_Address (Target.Item) = Source
+               then
+                  Target.Claim.Acquire;
+                  Target.Needs_Signal := False;
+                  --  Guard exists before this protected call. Its claim is
+                  --  therefore owned even if abort lands at the return cut.
+                  Guard.Operation := Cursor;
+                  Guard.Descriptor := Target.Signal_Descriptor;
+                  return;
+               end if;
+               Cursor := Target.Next;
+            end;
+         end loop;
+      end Claim_Next;
    end Subscriptions;
+
+   overriding
+   procedure Finalize (Guard : in out Borrowed_Signal_Guard) is
+   begin
+      if Guard.Operation = System.Null_Address then
+         return;
+      end if;
+      if not Guard.Delivered then
+         begin
+            Flyology.Wake_Sources.Signal_Borrowed (Guard.Descriptor);
+         exception
+            when others =>
+               null;
+         end;
+      end if;
+      To_Operation (Guard.Operation).Claim.Release;
+   end Finalize;
+
+   procedure Unlink_Subscription (Operation : System.Address) is
+      Target : constant Channel_Operation_Access := To_Operation (Operation);
+
+      type Claim_Drain_Guard is new Ada.Finalization.Limited_Controlled with null record;
+
+      overriding
+      procedure Finalize (Guard : in out Claim_Drain_Guard);
+
+      overriding
+      procedure Finalize (Guard : in out Claim_Drain_Guard) is
+         pragma Unreferenced (Guard);
+      begin
+         --  Abort after Remove must not reclaim the operation or its set
+         --  while a producer still holds its borrowed write descriptor.
+         Target.Claim.Await_Released;
+      end Finalize;
+
+      Guard : Claim_Drain_Guard;
+      pragma Unreferenced (Guard);
+   begin
+      Subscriptions.Remove (Operation);
+      Target.Claim.Await_Released;
+   end Unlink_Subscription;
+
+   procedure Flush_Signals (Source : System.Address) is
+   begin
+      loop
+         declare
+            Guard : aliased Borrowed_Signal_Guard;
+         begin
+            Subscriptions.Claim_Next (Source, Guard'Access);
+            exit when Guard.Operation = System.Null_Address;
+            if Flyology.Channel_Test_Hooks.Enabled then
+               Flyology.Channel_Test_Hooks.After_Signal_Claim_Barrier;
+            end if;
+            begin
+               if Flyology.Channel_Test_Hooks.Enabled
+                 and then Flyology.Channel_Test_Hooks.Fail_Next_Buffer_Signal
+               then
+                  raise Program_Error with "injected buffer channel signal failure";
+               end if;
+               Flyology.Wake_Sources.Signal_Borrowed (Guard.Descriptor);
+               Guard.Delivered := True;
+            exception
+               --  One damaged source must not interrupt a committed channel
+               --  transition or prevent the other subscribers from waking.
+               when others =>
+                  Guard.Delivered := True;
+            end;
+         end;
+      end loop;
+   end Flush_Signals;
+
+   type Notification_Guard is new Ada.Finalization.Limited_Controlled with record
+      Source : System.Address := System.Null_Address;
+   end record;
+
+   overriding
+   procedure Finalize (Guard : in out Notification_Guard) is
+   begin
+      if Guard.Source /= System.Null_Address then
+         begin
+            Flush_Signals (Guard.Source);
+         exception
+            when others =>
+               null;
+         end;
+      end if;
+   end Finalize;
+
+   procedure Flush (Guard : in out Notification_Guard) is
+   begin
+      Flush_Signals (Guard.Source);
+      Guard.Source := System.Null_Address;
+   end Flush;
 
    function To_Stored_Metadata (Value : Transfer_Metadata) return Interfaces.Unsigned_64
    is (Interfaces.Unsigned_64 (Value));
@@ -109,7 +256,7 @@ package body Flyology.Buffers.Channels is
          Index  : constant Bucket_Index := Bucket (Source);
       begin
          if Active_Subscriptions (Index) /= 0 then
-            Subscriptions.Signal (Source);
+            Subscriptions.Mark (Source);
          end if;
       end Signal_Scoped;
 
@@ -320,12 +467,15 @@ package body Flyology.Buffers.Channels is
      (Item : in out Channel; Value : in out Unique_Buffer; Metadata : Transfer_Metadata := No_Metadata)
    is
       Accepted : Boolean;
+      Notice   : Notification_Guard;
    begin
       Validate_Pools (Item, Value);
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
+      Notice.Source := Item.State'Address;
       Item.State.Send (Value, Metadata, Accepted);
+      Flush (Notice);
       if not Accepted then
          raise Channel_Closed with "send on closed buffer channel";
       end if;
@@ -341,13 +491,16 @@ package body Flyology.Buffers.Channels is
      (Item : in out Channel; Target : in out Unique_Buffer; Metadata : out Transfer_Metadata)
    is
       Available : Boolean;
+      Notice    : Notification_Guard;
    begin
       Metadata := No_Metadata;
       Validate_Pools (Item, Target);
       if Has_Buffer (Target) then
          raise Program_Error with "receive into an occupied buffer";
       end if;
+      Notice.Source := Item.State'Address;
       Item.State.Receive (Target, Metadata, Available);
+      Flush (Notice);
       if not Available then
          raise Channel_Closed with "receive from drained buffer channel";
       end if;
@@ -357,13 +510,20 @@ package body Flyology.Buffers.Channels is
      (Item     : in out Channel;
       Value    : in out Unique_Buffer;
       Result   : out Try_Send_Result;
-      Metadata : Transfer_Metadata := No_Metadata) is
+      Metadata : Transfer_Metadata := No_Metadata)
+   is
+      Notice : Notification_Guard;
    begin
       Validate_Pools (Item, Value);
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
+      Notice.Source := Item.State'Address;
       Item.State.Try_Send (Value, Metadata, Result);
+      if Flyology.Channel_Test_Hooks.Enabled and then Result = Item_Sent then
+         Flyology.Channel_Test_Hooks.After_Buffer_Commit_Barrier;
+      end if;
+      Flush (Notice);
    end Try_Send_Move;
 
    procedure Try_Receive_Move
@@ -378,14 +538,18 @@ package body Flyology.Buffers.Channels is
      (Item     : in out Channel;
       Target   : in out Unique_Buffer;
       Result   : out Try_Receive_Result;
-      Metadata : out Transfer_Metadata) is
+      Metadata : out Transfer_Metadata)
+   is
+      Notice : Notification_Guard;
    begin
       Metadata := No_Metadata;
       Validate_Pools (Item, Target);
       if Has_Buffer (Target) then
          raise Program_Error with "receive into an occupied buffer";
       end if;
+      Notice.Source := Item.State'Address;
       Item.State.Try_Receive (Target, Metadata, Result);
+      Flush (Notice);
    end Try_Receive_Move;
 
    procedure Timed_Send_Move
@@ -396,6 +560,7 @@ package body Flyology.Buffers.Channels is
    is
       Accepted : Boolean;
       Result   : Try_Send_Result;
+      Notice   : Notification_Guard;
    begin
       if Timeout < 0.0 then
          Send_Move (Item, Value, Metadata);
@@ -418,8 +583,10 @@ package body Flyology.Buffers.Channels is
       if not Has_Buffer (Value) then
          raise Program_Error with "send of a vacant buffer";
       end if;
+      Notice.Source := Item.State'Address;
       select
          Item.State.Send (Value, Metadata, Accepted);
+         Flush (Notice);
          if not Accepted then
             raise Channel_Closed with "send on closed buffer channel";
          end if;
@@ -454,6 +621,7 @@ package body Flyology.Buffers.Channels is
    is
       Available : Boolean;
       Result    : Try_Receive_Result;
+      Notice    : Notification_Guard;
    begin
       Metadata := No_Metadata;
       if Timeout < 0.0 then
@@ -477,8 +645,10 @@ package body Flyology.Buffers.Channels is
       if Has_Buffer (Target) then
          raise Program_Error with "receive into an occupied buffer";
       end if;
+      Notice.Source := Item.State'Address;
       select
          Item.State.Receive (Target, Metadata, Available);
+         Flush (Notice);
          if not Available then
             raise Channel_Closed with "receive from drained buffer channel";
          end if;
@@ -511,7 +681,9 @@ package body Flyology.Buffers.Channels is
    end Timed_Receive_Move;
 
    procedure Try_Scoped (Operation : in out Channel_Operation; Result : out Try_Receive_Result) is
+      Notice : Notification_Guard;
    begin
+      Notice.Source := Source_Address (Operation.Item);
       case Operation.Kind is
          when Scoped_Send    =>
             declare
@@ -537,6 +709,7 @@ package body Flyology.Buffers.Channels is
                Operation.Failure := Channel_Closed_Failure;
             end if;
       end case;
+      Flush (Notice);
    end Try_Scoped;
 
    procedure Prepare_Scoped
@@ -554,8 +727,11 @@ package body Flyology.Buffers.Channels is
       Operation.Metadata := No_Metadata;
       Operation.Next := System.Null_Address;
       Operation.Subscribed := False;
+      Operation.Needs_Signal := False;
+      Operation.Signal_Descriptor := -1;
       Operation.Failure := No_Failure;
       Flyology.Operations.Drivers.Completion_Source (Operation, Descriptor, Signal_Descriptor);
+      Operation.Signal_Descriptor := Signal_Descriptor;
       if Timeout > 0.0 then
          Flyology.Operations.Drivers.Arm_Deadline (Operation, Timeout);
       end if;
@@ -571,7 +747,7 @@ package body Flyology.Buffers.Channels is
          Subscriptions.Link (Operation'Address);
          Try_Scoped (Operation, Result);
          if Result /= Channel_Empty then
-            Subscriptions.Unlink (Operation'Address);
+            Unlink_Subscription (Operation'Address);
          end if;
       end if;
       case Result is
@@ -611,7 +787,7 @@ package body Flyology.Buffers.Channels is
    exception
       when others =>
          if Operation.Subscribed then
-            Subscriptions.Unlink (Operation'Address);
+            Unlink_Subscription (Operation'Address);
          end if;
          if Flyology.Buffers.Drivers.Has_Buffer (Operation.Owned) and then not Has_Buffer (Value) then
             Flyology.Buffers.Drivers.Move_To (Operation.Owned, Value);
@@ -645,7 +821,7 @@ package body Flyology.Buffers.Channels is
    exception
       when others =>
          if Operation.Subscribed then
-            Subscriptions.Unlink (Operation'Address);
+            Unlink_Subscription (Operation'Address);
          end if;
          Operation.Item := null;
          if Flyology.Operations.Is_Active (Operation) then
@@ -676,11 +852,11 @@ package body Flyology.Buffers.Channels is
          when Flyology.Operations.Source_Ready                                                =>
             Try_Scoped (Item, Result);
             if Result /= Channel_Empty then
-               Subscriptions.Unlink (Item'Address);
+               Unlink_Subscription (Item'Address);
             end if;
 
          when Flyology.Operations.Deadline_Reached                                            =>
-            Subscriptions.Unlink (Item'Address);
+            Unlink_Subscription (Item'Address);
             Try_Scoped (Item, Result);
             if Result = Channel_Empty then
                Item.Failure := Timeout_Failure;
@@ -708,7 +884,7 @@ package body Flyology.Buffers.Channels is
    exception
       when others =>
          if Item.Subscribed then
-            Subscriptions.Unlink (Item'Address);
+            Unlink_Subscription (Item'Address);
          end if;
          Item.Failure := Driver_Failure;
          Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Failed);
@@ -718,7 +894,7 @@ package body Flyology.Buffers.Channels is
    procedure Request_Cancellation (Item : in out Channel_Operation) is
    begin
       if Item.Subscribed then
-         Subscriptions.Unlink (Item'Address);
+         Unlink_Subscription (Item'Address);
       end if;
       Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Cancelled);
    end Request_Cancellation;
@@ -729,6 +905,8 @@ package body Flyology.Buffers.Channels is
       Operation.Metadata := No_Metadata;
       Operation.Next := System.Null_Address;
       Operation.Subscribed := False;
+      Operation.Needs_Signal := False;
+      Operation.Signal_Descriptor := -1;
       Operation.Failure := No_Failure;
    end Reset;
 
@@ -815,8 +993,11 @@ package body Flyology.Buffers.Channels is
    end Finish;
 
    procedure Close (Item : in out Channel) is
+      Notice : Notification_Guard;
    begin
+      Notice.Source := Item.State'Address;
       Item.State.Close;
+      Flush (Notice);
    end Close;
 
    procedure Await_Drained (Item : in out Channel) is
@@ -831,10 +1012,15 @@ package body Flyology.Buffers.Channels is
    procedure Finalize (Item : in out Channel) is
       Undelivered : Flyology.Buffers.Drivers.Detached_Buffer;
       Result      : Try_Receive_Result;
+      Notice      : Notification_Guard;
    begin
+      Notice.Source := Item.State'Address;
       Item.State.Close;
+      Flush (Notice);
       loop
+         Notice.Source := Item.State'Address;
          Item.State.Take_Undelivered (Undelivered, Result);
+         Flush (Notice);
          exit when Result /= Item_Received;
          Flyology.Buffers.Drivers.Release (Undelivered);
       end loop;

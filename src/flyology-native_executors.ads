@@ -3,8 +3,6 @@ with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Strings.Unbounded;
 with Flyology.Cancellation;
-with Flyology.IO;
-with Flyology.Wake_Sources;
 private with Flyology.Native_Executor_Policy;
 with Interfaces;
 with System;
@@ -20,7 +18,7 @@ with System;
 --  An Operation_Handle is declared for one aliased Executor and may be reused
 --  only after Await or Abandon consumes its accepted operation. Await keeps
 --  ordinary synchronous Ada semantics: lightweight callers suspend on the
---  completion descriptor while native callers block only their pthread.
+--  protected entry while native callers block only their pthread.
 --  @formal Input_Type Immutable operation input
 --  @formal Result_Type Operation result
 --  @formal Execute Native operation implementation
@@ -147,9 +145,7 @@ package Flyology.Native_Executors is
    --     requested before the result is consumed
    --  @exception Timeout_Error Flyology.IO.Timeout_Error is raised when
    --     Deadline expires before the result is consumed
-   --  @exception Device_Error Flyology.IO.Device_Error is raised when
-   --     completion readiness polling fails
-   --  @exception Program_Error A completion or cancellation wake source fails
+   --  @exception Program_Error A cancellation wake source fails
    procedure Await
      (Item     : aliased in out Executor;
       Handle   : in out Operation_Handle;
@@ -198,7 +194,6 @@ private
    --  heavily reused slot from becoming permanently unavailable.
    subtype Generation_Number is Interfaces.Unsigned_64;
    type Generation_Array is array (Positive range <>) of Generation_Number;
-   type Wake_Array is array (Positive range <>) of Flyology.Wake_Sources.Source;
    type Time_Array is array (Positive range <>) of Ada.Real_Time.Time;
    type Natural_Array is array (Positive range <>) of Natural;
    type Boolean_Array is array (Positive range <>) of Boolean;
@@ -207,6 +202,14 @@ private
    type Worker_Status_Array is array (Positive range <>) of Worker_Status;
    type Exception_Id_Array is array (Positive range <>) of Ada.Exceptions.Exception_Id;
    type Message_Array is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
+
+   protected type Completion_Gate is
+      procedure Signal;
+      entry Wait;
+   private
+      Pending : Boolean := False;
+   end Completion_Gate;
+   type Gate_Array is array (Positive range <>) of Completion_Gate;
 
    protected type Shared_State (Capacity, Workers : Positive) is
       procedure Submit
@@ -245,17 +248,14 @@ private
          Error_Id   : out Ada.Exceptions.Exception_Id;
          Message    : out Ada.Strings.Unbounded.Unbounded_String;
          Ready      : out Boolean);
-      procedure Wait_Source
-        (Slot       : Positive;
-         Generation : Generation_Number;
-         FD         : out Flyology.IO.Descriptor;
-         Ready      : out Boolean);
-      procedure Abandon (Slot : Positive; Generation : Generation_Number);
+      procedure Claim_Abandon
+        (Slot : Positive; Generation : Generation_Number; Token : out Token_Access; Claimed : out Boolean);
+      procedure Release_Token_Claim (Slot : Positive);
+      entry Begin_Token_Cleanup;
       --  Elect one cleanup owner; later callers wait for Complete_Shutdown.
       procedure Begin_Shutdown (Owner : out Boolean);
       entry Await_Dispatch_Resolution;
-      procedure Signal_Shutdown_Completion (Slot : Positive);
-      procedure Request_Cancellation (Slot : Positive);
+      procedure Borrow_Cancellation (Slot : Positive; Token : out Token_Access);
       procedure Set_Expected_Workers (Count : Natural);
       function Needs_Stop (Worker : Positive) return Boolean;
       procedure Worker_Stopped (Worker : Positive; Selected_Terminate : Boolean);
@@ -274,11 +274,9 @@ private
       Generations             : Generation_Array (1 .. Capacity) := (others => 0);
       Status                  : Status_Array (1 .. Capacity) := (others => Free);
       Detached                : Boolean_Array (1 .. Capacity) := (others => False);
+      Token_Claimed           : Boolean_Array (1 .. Capacity) := (others => False);
       Error_Ids               : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
       Messages                : Message_Array (1 .. Capacity);
-      Wakes                   : Wake_Array (1 .. Capacity);
-      Wake_Armed              : Boolean_Array (1 .. Capacity) := (others => False);
-      Wake_Pending            : Boolean_Array (1 .. Capacity) := (others => False);
       Queue                   : Natural_Array (1 .. Capacity) := (others => 0);
       Head                    : Positive := 1;
       Tail                    : Positive := 1;
@@ -287,6 +285,8 @@ private
       Pending_Dispatch_Worker : Natural := 0;
       Worker_States           : Worker_Status_Array (1 .. Workers) := (others => Worker_Starting);
       Stopping                : Boolean := False;
+      Active_Token_Claims     : Natural := 0;
+      Token_Cleanup_Begun     : Boolean := False;
       Stopped_Workers         : Natural := 0;
       Master_Terminations     : Natural := 0;
       Expected_Workers        : Natural := 0;
@@ -314,7 +314,7 @@ private
 
    task type Worker is
       pragma Task_Info (Flyology.Native_Task);
-      entry Start (State : System.Address; Index : Positive);
+      entry Start (State, Owner : System.Address; Index : Positive);
       entry Dispatch;
       entry Stop;
    end Worker;
@@ -326,6 +326,7 @@ private
       Capacity : Positive)
    is limited new Ada.Finalization.Limited_Controlled with record
       State             : aliased Shared_State (Capacity, Workers);
+      Gates             : aliased Gate_Array (1 .. Capacity);
       Pool              : Worker_Array_Access;
       Started           : Boolean := False;
       Activated_Workers : Natural := 0;

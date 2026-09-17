@@ -78,6 +78,11 @@ procedure Concurrency_Primitives_Smoke is
             Active_Native_Work.Mark_Cancellation_Observed;
          end;
          raise Flyology.Cancellation.Operation_Cancelled;
+      elsif Input = 98 then
+         --  Keep a lightweight Await queued until the native worker reports.
+         delay 0.02;
+         Result := Input * 2;
+         return;
       end if;
 
       --  Completed-operation abandonment tests also need an existing token
@@ -449,34 +454,19 @@ procedure Concurrency_Primitives_Smoke is
          pragma Assert (Result = 6);
       end;
 
-      declare
-         Handle : Native_Executors.Operation_Handle (Item'Access);
-         Failed : Boolean := False;
-      begin
-         Worker_Pool_Test_Control.Arm_Native_Executor_Completion_Wake;
-         Native_Executors.Submit
-           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
-         pragma Assert (Accepted);
-         Wait_For_Success (4);
-         Worker_Pool_Test_Control.Fail_Native_Executor_Consume_Once;
-         begin
-            Native_Executors.Abandon (Item, Handle);
-         exception
-            when Program_Error =>
-               Failed := True;
-         end;
-         pragma Assert (Failed);
-         pragma
-           Assert
-             (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
-      end;
-
-      --  A failed wake consumption must not retain capacity or leave the
-      --  recycled completion descriptor spuriously readable.
+      --  A completed result can be abandoned and its slot reused.
       declare
          Handle : Native_Executors.Operation_Handle (Item'Access);
          Result : Integer;
       begin
+         Native_Executors.Submit
+           (Item, 4, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+         pragma Assert (Accepted);
+         Wait_For_Success (4);
+         Native_Executors.Abandon (Item, Handle);
+         pragma
+           Assert
+             (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
          Native_Executors.Submit
            (Item, 5, null, Ada.Real_Time.Time_Last, Handle, Accepted);
          pragma Assert (Accepted);
@@ -486,6 +476,126 @@ procedure Concurrency_Primitives_Smoke is
       Worker_Pool_Test_Control.Reset;
       Native_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Abandon_Failure;
+
+   procedure Exercise_Native_Executor_Lightweight_Await is
+      use type Ada.Real_Time.Time;
+
+      Item      :
+        aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
+      Outcome   : Boolean_Result;
+      Succeeded : Boolean;
+   begin
+      Native_Executors.Start (Item);
+      declare
+         task Waiter
+           with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Waiter;
+
+         task body Waiter is
+            Handle    : Native_Executors.Operation_Handle (Item'Access);
+            Accepted  : Boolean;
+            Result    : Integer;
+            Completed : Boolean := False;
+            Expired   : Boolean := False;
+         begin
+            Native_Executors.Submit
+              (Item, 98, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+            if Accepted then
+               Native_Executors.Await (Item, Handle, Result);
+               Completed := Result = 196;
+            end if;
+            Native_Executors.Submit
+              (Item, 99, null, Ada.Real_Time.Time_Last, Handle, Accepted);
+            if Accepted then
+               begin
+                  Native_Executors.Await
+                    (Item,
+                     Handle,
+                     Result,
+                     Deadline =>
+                       Ada.Real_Time.Clock + Ada.Real_Time.Milliseconds (10));
+               exception
+                  when Flyology.IO.Timeout_Error =>
+                     Expired := True;
+               end;
+            end if;
+            Outcome.Set (Completed and then Accepted and then Expired);
+         exception
+            when others =>
+               Outcome.Set (False);
+         end Waiter;
+      begin
+         Outcome.Wait (Succeeded);
+         pragma Assert (Succeeded);
+      end;
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Lightweight_Await;
+
+   procedure Exercise_Native_Executor_Abandon_Claim is
+      Item     :
+        aliased Native_Executors.Executor (Workers => 1, Capacity => 1);
+      Accepted : Boolean;
+      Result   : Integer;
+   begin
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Start (Item);
+      declare
+         Old_Handle : Native_Executors.Operation_Handle (Item'Access);
+         New_Handle : Native_Executors.Operation_Handle (Item'Access);
+      begin
+         Native_Executors.Submit
+           (Item, 6, null, Ada.Real_Time.Time_Last, Old_Handle, Accepted);
+         pragma Assert (Accepted);
+         for Attempt in 1 .. 100 loop
+            exit when
+              Native_Executors.Statistics (Item).Successful_Executions = 1;
+            delay 0.001;
+         end loop;
+         pragma
+           Assert
+             (Native_Executors.Statistics (Item).Successful_Executions = 1);
+         Worker_Pool_Test_Control.Arm_Native_Executor_Abandon_Claim_Barrier;
+         declare
+            task Abandoner;
+
+            task body Abandoner is
+            begin
+               Native_Executors.Abandon (Item, Old_Handle);
+            end Abandoner;
+         begin
+            begin
+               Worker_Pool_Test_Control
+                 .Wait_Native_Executor_Abandon_Claim_Barrier;
+               Native_Executors.Submit
+                 (Item,
+                  7,
+                  null,
+                  Ada.Real_Time.Time_Last,
+                  New_Handle,
+                  Accepted);
+               pragma Assert (not Accepted);
+               abort Abandoner;
+               Worker_Pool_Test_Control
+                 .Release_Native_Executor_Abandon_Claim_Barrier;
+            exception
+               when others =>
+                  Worker_Pool_Test_Control
+                    .Release_Native_Executor_Abandon_Claim_Barrier;
+                  raise;
+            end;
+         end;
+         Native_Executors.Submit
+           (Item, 7, null, Ada.Real_Time.Time_Last, New_Handle, Accepted);
+         pragma Assert (Accepted);
+         Native_Executors.Await (Item, New_Handle, Result);
+         pragma Assert (Result = 14);
+      end;
+      pragma
+        Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      Worker_Pool_Test_Control.Reset;
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Abandon_Claim;
 
    procedure Exercise_Native_Executor_Result_Copy_Failure is
       use type Ada.Real_Time.Time;
@@ -1356,6 +1466,8 @@ begin
    Exercise_Native_Executor_Shutdown_During_Dispatch;
    Exercise_Native_Executor_Parallel_Dispatch;
    Exercise_Native_Executor_Abandon_Failure;
+   Exercise_Native_Executor_Lightweight_Await;
+   Exercise_Native_Executor_Abandon_Claim;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;
    Exercise_Native_Executor_Token_Cleanup_Abort;

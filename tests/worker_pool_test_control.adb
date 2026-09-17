@@ -65,17 +65,6 @@ package body Worker_Pool_Test_Control is
      Convention    => C,
      External_Name =>
        "flyology_test_worker_native_executor_cancellation_failures_remaining";
-   procedure C_Fail_Native_Executor_Consume_Once
-   with
-     Import,
-     Convention    => C,
-     External_Name => "flyology_test_worker_native_executor_consume_fail_once";
-   procedure C_Arm_Native_Executor_Completion_Wake
-   with
-     Import,
-     Convention    => C,
-     External_Name =>
-       "flyology_test_worker_native_executor_completion_wake_once";
    procedure C_Arm_Native_Executor_Dispatch_Barrier
    with
      Import,
@@ -94,6 +83,22 @@ package body Worker_Pool_Test_Control is
      Convention    => C,
      External_Name =>
        "flyology_test_worker_native_executor_dispatch_barrier_release";
+   procedure C_Arm_Native_Executor_Abandon_Claim_Barrier
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_worker_executor_abandon_claim_arm";
+   function C_Native_Executor_Abandon_Claim_Barrier_Reached
+      return Interfaces.C.int
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_worker_executor_abandon_claim_reached";
+   procedure C_Release_Native_Executor_Abandon_Claim_Barrier
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_worker_executor_abandon_claim_release";
    procedure C_Arm_Native_Executor_Idle_Barrier
    with
      Import,
@@ -216,16 +221,6 @@ package body Worker_Pool_Test_Control is
    function Remaining_Native_Executor_Cancellation_Failures return Natural
    is (Natural (C_Remaining_Native_Executor_Cancellation_Failures));
 
-   procedure Fail_Native_Executor_Consume_Once is
-   begin
-      C_Fail_Native_Executor_Consume_Once;
-   end Fail_Native_Executor_Consume_Once;
-
-   procedure Arm_Native_Executor_Completion_Wake is
-   begin
-      C_Arm_Native_Executor_Completion_Wake;
-   end Arm_Native_Executor_Completion_Wake;
-
    procedure Arm_Native_Executor_Dispatch_Barrier is
    begin
       C_Arm_Native_Executor_Dispatch_Barrier;
@@ -248,6 +243,29 @@ package body Worker_Pool_Test_Control is
    begin
       C_Release_Native_Executor_Dispatch_Barrier;
    end Release_Native_Executor_Dispatch_Barrier;
+
+   procedure Arm_Native_Executor_Abandon_Claim_Barrier is
+   begin
+      C_Arm_Native_Executor_Abandon_Claim_Barrier;
+   end Arm_Native_Executor_Abandon_Claim_Barrier;
+
+   procedure Wait_Native_Executor_Abandon_Claim_Barrier is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while C_Native_Executor_Abandon_Claim_Barrier_Reached = 0 loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error
+              with "native executor abandon claim barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_Native_Executor_Abandon_Claim_Barrier;
+
+   procedure Release_Native_Executor_Abandon_Claim_Barrier is
+   begin
+      C_Release_Native_Executor_Abandon_Claim_Barrier;
+   end Release_Native_Executor_Abandon_Claim_Barrier;
 
    procedure Arm_Native_Executor_Idle_Barrier is
    begin

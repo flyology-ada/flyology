@@ -5,10 +5,6 @@ package body Flyology.Worker_Pool_Test_Hooks is
 
    function Test_Activation_Failure return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_worker_activation_failure";
-   function Test_Consume_Failure return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_consume_failure";
-   function Test_Completion_Wake return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_completion_wake";
    function Test_Cancellation_Failure return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_cancellation_failure";
    function Test_Native_Executor_Dispatch_Barrier_Arrive return Interfaces.C.int
@@ -21,6 +17,10 @@ package body Flyology.Worker_Pool_Test_Hooks is
      Import,
      Convention    => C,
      External_Name => "flyology_test_worker_native_executor_dispatch_barrier_released";
+   function Test_Native_Executor_Abandon_Claim_Barrier_Arrive return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_worker_executor_abandon_claim_arrive";
+   function Test_Native_Executor_Abandon_Claim_Barrier_Released return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_worker_executor_abandon_claim_released";
    function Test_Native_Executor_Idle_Barrier_Arrive return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_worker_native_executor_idle_barrier_arrive";
    function Test_Native_Executor_Idle_Barrier_Released return Interfaces.C.int
@@ -60,12 +60,6 @@ package body Flyology.Worker_Pool_Test_Hooks is
    function Cancellation_Failure return Boolean
    is (Test_Cancellation_Failure /= 0);
 
-   function Consume_Failure return Boolean
-   is (Test_Consume_Failure /= 0);
-
-   function Completion_Wake return Boolean
-   is (Test_Completion_Wake /= 0);
-
    procedure Native_Executor_Dispatch_Barrier is
    begin
       if Test_Native_Executor_Dispatch_Barrier_Arrive /= 0 then
@@ -74,6 +68,15 @@ package body Flyology.Worker_Pool_Test_Hooks is
          end loop;
       end if;
    end Native_Executor_Dispatch_Barrier;
+
+   procedure Native_Executor_Abandon_Claim_Barrier is
+   begin
+      if Test_Native_Executor_Abandon_Claim_Barrier_Arrive /= 0 then
+         while Test_Native_Executor_Abandon_Claim_Barrier_Released = 0 loop
+            delay 0.0;
+         end loop;
+      end if;
+   end Native_Executor_Abandon_Claim_Barrier;
 
    procedure Native_Executor_Idle_Barrier is
    begin

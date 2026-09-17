@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-taasde.adb
++++ b/s-taasde.adb
+@@ -40,0 +41,3 @@ with System.Interrupt_Management.Operations;
++with System.Flyology;
++
++pragma Elaborate_All (System.Flyology);
+@@ -56,1 +59,2 @@ package body System.Tasking.Async_Delays is
+    task Timer_Server is
++      pragma Task_Info (System.Flyology.Native_Designation);

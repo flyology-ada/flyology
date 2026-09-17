@@ -2,6 +2,7 @@ with Ada.Finalization;
 with Flyology.Cancellation;
 with Flyology.Operations;
 private with Flyology.Buffers.Drivers;
+private with Interfaces.C;
 private with System;
 
 --  Supplies bounded closeable channels that transfer unique buffer ownership
@@ -372,14 +373,25 @@ private
    type Scoped_Kind is (Scoped_Send, Scoped_Receive);
    type Scoped_Failure is (No_Failure, Channel_Closed_Failure, Timeout_Failure, Driver_Failure);
 
+   protected type Signal_Claim is
+      procedure Acquire;
+      procedure Release;
+      entry Await_Released;
+   private
+      Count : Natural := 0;
+   end Signal_Claim;
+
    type Channel_Operation is abstract new Flyology.Operations.Operation with record
-      Item       : Channel_Access := null;
-      Kind       : Scoped_Kind := Scoped_Receive;
-      Owned      : Flyology.Buffers.Drivers.Detached_Buffer;
-      Metadata   : Transfer_Metadata := No_Metadata;
-      Next       : System.Address := System.Null_Address;
-      Subscribed : Boolean := False;
-      Failure    : Scoped_Failure := No_Failure;
+      Item              : Channel_Access := null;
+      Kind              : Scoped_Kind := Scoped_Receive;
+      Owned             : Flyology.Buffers.Drivers.Detached_Buffer;
+      Metadata          : Transfer_Metadata := No_Metadata;
+      Next              : System.Address := System.Null_Address;
+      Subscribed        : Boolean := False;
+      Needs_Signal      : Boolean := False;
+      Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Claim             : Signal_Claim;
+      Failure           : Scoped_Failure := No_Failure;
    end record;
 
    --  @exclude

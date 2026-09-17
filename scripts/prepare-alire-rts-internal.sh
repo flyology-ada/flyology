@@ -240,7 +240,8 @@ runtime_artifacts_valid () {
     && [ -f "$include/s-taskin.ads" ] \
     && [ -f "$include/s-taskin.adb" ] \
     && [ -f "$include/s-tporft.adb" ] \
-    && [ -f "$include/s-interr.adb" ] || return 1
+    && [ -f "$include/s-interr.adb" ] \
+    && [ -f "$include/s-taasde.adb" ] || return 1
   if [ "$(uname -s)" = Linux ]; then
     [ -f "$include/s-mudido.adb" ] || return 1
   fi
@@ -256,7 +257,7 @@ runtime_artifacts_valid () {
   fi
   validation_root=$(mktemp -d \
     "$project_root/build/.flyology-rts-validation.XXXXXX")
-  set -- s-taprop.o s-interr.o s-taskin.o s-tassta.o
+  set -- s-taprop.o s-interr.o s-taasde.o s-taskin.o s-tassta.o
   if [ "$(uname -s)" = Linux ]; then
     set -- "$@" s-mudido.o
   fi
@@ -285,6 +286,8 @@ runtime_artifacts_valid () {
     "$include/s-tporft.adb"
   record_patched_core source adainclude/s-interr.adb \
     "$include/s-interr.adb"
+  record_patched_core source adainclude/s-taasde.adb \
+    "$include/s-taasde.adb"
   if [ "$(uname -s)" = Linux ]; then
     record_patched_core source adainclude/s-mudido.adb \
       "$include/s-mudido.adb"
@@ -309,6 +312,8 @@ runtime_artifacts_valid () {
     "$validation_root/s-taskin.o"
   record_patched_core archive adalib/libgnarl.a:s-interr.o \
     "$validation_root/s-interr.o"
+  record_patched_core archive adalib/libgnarl.a:s-taasde.o \
+    "$validation_root/s-taasde.o"
   if [ "$(uname -s)" = Linux ]; then
     record_patched_core archive adalib/libgnarl.a:s-mudido.o \
       "$validation_root/s-mudido.o"
@@ -335,6 +340,8 @@ runtime_artifacts_valid () {
     "$include/s-tporft.adb" >/dev/null || return 1
   grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
     "$include/s-interr.adb" >/dev/null || return 1
+  grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
+    "$include/s-taasde.adb" >/dev/null || return 1
   archive_member_has_symbol \
     s-taprop.o system__flyology__scheduler__create || return 1
   archive_member_has_symbol \
@@ -347,6 +354,8 @@ runtime_artifacts_valid () {
     s-taskin.o system__flyology__scheduler__current_task || return 1
   archive_member_has_symbol \
     s-interr.o system__flyology__native_designation || return 1
+  archive_member_has_symbol \
+    s-taasde.o system__flyology__native_designation || return 1
 
   case "$(uname -s)" in
     Darwin)

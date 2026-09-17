@@ -9,11 +9,12 @@ static _Atomic int shutdown_barrier_armed;
 static _Atomic int shutdown_barrier_reached;
 static _Atomic int shutdown_barrier_released;
 static _Atomic int native_executor_cancellation_failure;
-static _Atomic int native_executor_consume_failure;
-static _Atomic int native_executor_completion_wake;
 static _Atomic int native_executor_dispatch_barrier_armed;
 static _Atomic int native_executor_dispatch_barrier_reached;
 static _Atomic int native_executor_dispatch_barrier_released;
+static _Atomic int executor_abandon_claim_barrier_armed;
+static _Atomic int executor_abandon_claim_barrier_reached;
+static _Atomic int executor_abandon_claim_barrier_released;
 static _Atomic int native_executor_idle_barrier_armed;
 static _Atomic int native_executor_idle_barrier_reached;
 static _Atomic int native_executor_idle_barrier_released;
@@ -42,15 +43,17 @@ void flyology_test_worker_pool_reset(void)
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_cancellation_failure, 0,
                          memory_order_seq_cst);
-   atomic_store_explicit(&native_executor_consume_failure, 0,
-                         memory_order_seq_cst);
-   atomic_store_explicit(&native_executor_completion_wake, 0,
-                         memory_order_seq_cst);
    atomic_store_explicit(&native_executor_dispatch_barrier_armed, 0,
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_dispatch_barrier_reached, 0,
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_dispatch_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_armed, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_released, 1,
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_idle_barrier_armed, 0,
                          memory_order_seq_cst);
@@ -202,30 +205,6 @@ int flyology_test_worker_native_executor_cancellation_failures_remaining(void)
                                memory_order_seq_cst);
 }
 
-void flyology_test_worker_native_executor_consume_fail_once(void)
-{
-   atomic_store_explicit(&native_executor_consume_failure, 1,
-                         memory_order_seq_cst);
-}
-
-int flyology_test_worker_native_executor_consume_failure(void)
-{
-   return atomic_exchange_explicit(&native_executor_consume_failure, 0,
-                                   memory_order_seq_cst);
-}
-
-void flyology_test_worker_native_executor_completion_wake_once(void)
-{
-   atomic_store_explicit(&native_executor_completion_wake, 1,
-                         memory_order_seq_cst);
-}
-
-int flyology_test_worker_native_executor_completion_wake(void)
-{
-   return atomic_exchange_explicit(&native_executor_completion_wake, 0,
-                                   memory_order_seq_cst);
-}
-
 void flyology_test_worker_native_executor_dispatch_barrier_arm(void)
 {
    atomic_store_explicit(&native_executor_dispatch_barrier_reached, 0,
@@ -263,6 +242,46 @@ void flyology_test_worker_native_executor_dispatch_barrier_release(void)
    atomic_store_explicit(&native_executor_dispatch_barrier_released, 1,
                          memory_order_seq_cst);
    atomic_store_explicit(&native_executor_dispatch_barrier_armed, 0,
+                         memory_order_seq_cst);
+}
+
+void flyology_test_worker_executor_abandon_claim_arm(void)
+{
+   atomic_store_explicit(&executor_abandon_claim_barrier_reached, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_released, 0,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_armed, 1,
+                         memory_order_seq_cst);
+}
+
+int flyology_test_worker_executor_abandon_claim_arrive(void)
+{
+   if (atomic_exchange_explicit(&executor_abandon_claim_barrier_armed, 0,
+                                memory_order_seq_cst) == 0)
+      return 0;
+   atomic_store_explicit(&executor_abandon_claim_barrier_reached, 1,
+                         memory_order_seq_cst);
+   return 1;
+}
+
+int flyology_test_worker_executor_abandon_claim_reached(void)
+{
+   return atomic_load_explicit(&executor_abandon_claim_barrier_reached,
+                               memory_order_seq_cst);
+}
+
+int flyology_test_worker_executor_abandon_claim_released(void)
+{
+   return atomic_load_explicit(&executor_abandon_claim_barrier_released,
+                               memory_order_seq_cst);
+}
+
+void flyology_test_worker_executor_abandon_claim_release(void)
+{
+   atomic_store_explicit(&executor_abandon_claim_barrier_released, 1,
+                         memory_order_seq_cst);
+   atomic_store_explicit(&executor_abandon_claim_barrier_armed, 0,
                          memory_order_seq_cst);
 }
 
