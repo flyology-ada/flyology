@@ -455,6 +455,7 @@ connection_driver_tls_smoke
 connection_lifecycle_smoke
 managed_connection_connect_smoke
 connection_operations_smoke
+scoped_connect_readiness_smoke
 connection_state_model
 connection_tls_upgrade_smoke
 concurrency_primitives_smoke

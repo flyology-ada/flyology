@@ -2500,6 +2500,28 @@ package body Flyology.IO.Sockets is
          return;
       end if;
 
+      if Item.Retry_Due then
+         --  A Unix backlog retry has no connect attempt outstanding. A
+         --  consumed interrupt cannot resolve it before the retry timer.
+         Arm_Retry_Interrupts;
+         return;
+      end if;
+
+      declare
+         Requests : constant Wait_Request_Array := (1 => (FD => Item.Socket.Value, Condition => For_Write));
+      begin
+         --  A shared interrupt may have been consumed by an earlier
+         --  operation. SO_ERROR alone is zero while a connect is pending.
+         if Wait_Any (Requests, Timeout => 0.0) = 0 then
+            Arm_Connection_Sources;
+            return;
+         end if;
+      exception
+         when Device_Error =>
+            Fail (Device_Failure);
+            return;
+      end;
+
       Result := C_Pending_Error (Item.Socket.Value, Pending'Access, Error'Access);
       if Result /= 0 then
          Fail (Socket_Failure, Error);
