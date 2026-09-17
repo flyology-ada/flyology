@@ -3320,6 +3320,7 @@ package body Flyology.IO.Sockets is
       Decode_Address : Boolean)
    is
       Started          : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Socket_Was_Open  : constant Boolean := Is_Open (Socket);
       Pressure_Backoff : Duration := 0.001;
       Bridge           : Accept_Return_Bridge;
 
@@ -3355,7 +3356,7 @@ package body Flyology.IO.Sockets is
          end if;
       end Pause_Before_Retry;
    begin
-      if Is_Open (Socket) then
+      if Socket_Was_Open then
          raise Program_Error with "accept target is open";
       end if;
       Socket.Value := -1;
@@ -3431,8 +3432,13 @@ package body Flyology.IO.Sockets is
       end loop;
    exception
       when others =>
-         if Is_Open (Socket) then
-            Close_Socket (Socket);
+         if not Socket_Was_Open and then Is_Open (Socket) then
+            begin
+               Close_Socket (Socket);
+            exception
+               when others =>
+                  null;
+            end;
          end if;
          raise;
    end Accept_Internal;
