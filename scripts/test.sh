@@ -642,7 +642,8 @@ subprocess_smoke'
 
 file_watch_hook_mains=file_watches_recovery_smoke
 
-destroy_contention_hook_mains=data_structures_destroy_contention_smoke
+destroy_contention_hook_mains='data_structures_destroy_contention_smoke
+flyology-data_structures-guard_epoch_smoke'
 
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
@@ -868,6 +869,9 @@ unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 "$socket_test_bin/socket_preparation_smoke"
 "$destroy_contention_test_bin/data_structures_destroy_contention_smoke"
+for mode in vector vector-timed vector-reattach bytes bytes-timed dynamic-vector dynamic-bytes dynamic-map adaptive-destroy map-control adaptive-allocate-control; do
+  "$destroy_contention_test_bin/flyology-data_structures-guard_epoch_smoke" "$mode"
+done
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
