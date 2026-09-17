@@ -45,3 +45,7 @@ if [ "$child_pid" -le 0 ]; then
   printf '%s\n' "shutdown test reported an invalid child PID" >&2
   exit 1
 fi
+if ! kill -0 "$child_pid" 2>/dev/null; then
+  printf '%s\n' "shutdown test child did not survive failed finalization kill" >&2
+  exit 1
+fi

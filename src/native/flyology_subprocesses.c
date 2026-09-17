@@ -451,10 +451,18 @@ int flyology_subprocess_reaper_start(int pid, void **result)
         error = pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
         if (error == 0) {
             (void)sigfillset(&blocked);
-            error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
+            (void)sigdelset(&blocked, SIGBUS);
+            (void)sigdelset(&blocked, SIGFPE);
+            (void)sigdelset(&blocked, SIGILL);
+            (void)sigdelset(&blocked, SIGSEGV);
+            error = pthread_sigmask(SIG_SETMASK, &blocked, &previous);
             if (error == 0) {
+                int restore_error;
                 error = pthread_create(&thread, &attributes, flyology_reaper_worker, state);
-                (void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
+                restore_error = pthread_sigmask(SIG_SETMASK, &previous, NULL);
+                /* A failed restore leaves the caller's signal state unknown.
+                   The worker may already own state, so it cannot be freed. */
+                if (restore_error != 0) abort();
             }
         }
         (void)pthread_attr_destroy(&attributes);
