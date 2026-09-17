@@ -1137,6 +1137,8 @@ package body Flyology.IO.DNS is
          raise Malformed_Response with "DNS CNAME chain too deep";
       elsif Per_Attempt <= 0.0 then
          raise Resolution_Failed with "DNS retry interval must be positive";
+      elsif Attempts > Natural'Last / Name_Servers'Length then
+         raise Resolution_Failed with "DNS attempt count is too large";
       end if;
 
       --  Attempts is a round count. Each round visits every configured server
