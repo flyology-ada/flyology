@@ -317,8 +317,6 @@ begin
       Flyology.Task_Lifecycle_Testing.Reset;
       begin
          Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
-         Flyology.Task_Lifecycle_Testing.Wait_Reached
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Prepared.Prepare_Start (Item'Access, 2, Reused_Claim, P_Result);
          Prepared.Commit_Start (Reused_Claim, Reused_Admission, C_Result);
          Prepared.Reserve_Observation (Reused_Admission, Reused_Monitor, O_Result);
@@ -334,6 +332,8 @@ begin
          if R_Result /= Prepared.Admission_Released then
             raise Program_Error with "queued cancellation reuse did not release";
          end if;
+         Flyology.Task_Lifecycle_Testing.Wait_Reached
+           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Prepared.Request_Cancellation (Admission, Current_Generation (Reused), Applied'Access);
          if Applied then
             raise Program_Error with "inactive admission crossed slot reuse";
@@ -379,8 +379,6 @@ begin
 
       begin
          Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
-         Flyology.Task_Lifecycle_Testing.Wait_Reached
-           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Prepared.Prepare_Start (Item'Access, 3, Shutdown_Claim, P_Result);
          Prepared.Commit_Start (Shutdown_Claim, Shutdown_Admission, C_Result);
          Prepared.Reserve_Observation (Shutdown_Admission, Shutdown_Monitor, O_Result);
@@ -396,6 +394,8 @@ begin
          if R_Result /= Prepared.Admission_Released then
             raise Program_Error with "queued shutdown admission did not release";
          end if;
+         Flyology.Task_Lifecycle_Testing.Wait_Reached
+           (Flyology.Task_Lifecycle_Testing.Family_Before_Take_Start);
          Attempts_Before_Shutdown := State.State.Attempts;
          Prepared.Activate_Exact
            (Shutdown_Monitor, Current_Generation (Shutdown_Handle), -1.0, Shutdown_Wait);

@@ -279,8 +279,17 @@ private
       Prepared_Capacity_Exhausted,
       Prepared_Generation_Exhausted);
    type Prepared_Commit_Status is (Prepared_Committed, Prepared_Commit_Closed);
+   type Signal_Array is array (Slot_Index) of aliased Change_Signal;
+   --  Family_State borrows the sibling signal array until Run_Internal joins
+   --  every manager. The enclosing Family owns both for the same lifetime.
+   type Signal_Array_Access is access all Signal_Array;
+
    protected type Family_State is
-      procedure Configure (Identity : Controller_Id; Inherited : Incident_Context);
+      procedure Configure
+        (Identity  : Controller_Id;
+         Inherited : Incident_Context;
+         Signals   : Signal_Array_Access;
+         Dispatch  : Signal_Access);
       --  Publish caller-owned reservation evidence in the protected cut, and
       --  disarm it in the same cut that queues the committed generation.
       procedure Reserve
@@ -328,6 +337,7 @@ private
          Slot      : out Slot_Index;
          Handle    : out Child_Handle;
          Incident  : out Incident_Context);
+      entry Await_Start_Or_Finished;
       procedure Stop_One (Handle : Child_Handle; Applied : not null access Boolean);
       procedure Stop_Status
         (Slot     : Slot_Index;
@@ -344,6 +354,7 @@ private
          Signals  : not null access Monitor_Signal_Guard;
          Accepted : out Boolean);
       function Replacement_Wait_Allowed (Slot : Slot_Index) return Boolean;
+      entry Await_Replacement_Cancel (Slot_Index);
       procedure Publish_Ready (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time);
       procedure Publish_Stuck (Slot : Slot_Index; Handle : Child_Handle);
       procedure Publish_Termination
@@ -359,6 +370,7 @@ private
          Signals     : not null access Monitor_Signal_Guard);
       function Incident_Can_Close
         (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time) return Boolean;
+      function Incident_Close_Due (Slot : Slot_Index) return Ada.Real_Time.Time;
       procedure Manager_Done
         (Slot : Slot_Index; Handle : Child_Handle; Signals : not null access Monitor_Signal_Guard);
       procedure Manager_Failed
@@ -483,6 +495,8 @@ private
          Status  : Generation_Observation_Status;
          Signals : not null access Monitor_Signal_Guard);
       Configured                 : Boolean := False;
+      Signals                    : Signal_Array_Access := null;
+      Dispatch                   : Signal_Access := null;
       Identity                   : Controller_Id := Controller_Id'First;
       Run_Used                   : Boolean := False;
       Shutdown                   : Boolean := False;
@@ -542,8 +556,10 @@ private
    procedure Finalize (Item : in out Monitor_Guard);
 
    type Family is limited record
-      State  : aliased Family_State;
-      Inputs : Request_Array;
+      State    : aliased Family_State;
+      Inputs   : Request_Array;
+      Signals  : aliased Signal_Array;
+      Dispatch : aliased Change_Signal;
    end record;
 
 end Flyology.Supervision.Families;

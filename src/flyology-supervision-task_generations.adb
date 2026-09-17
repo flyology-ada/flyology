@@ -45,7 +45,6 @@ package body Flyology.Supervision.Task_Generations is
       Identity           : constant Ada.Task_Identification.Task_Id := Task_Identity (Subject);
       Reported           : Boolean := False;
       Summary            : Termination_Summary;
-      Aborted            : Boolean := False;
       Initialize_Failed  : Boolean := False;
       Initialize_Summary : Termination_Summary;
       Automatic_Result   : Flyology.Task_Results.Task_Result;
@@ -58,20 +57,29 @@ package body Flyology.Supervision.Task_Generations is
             Initialize_Summary := Exception_Summary (Occurrence, Identity);
             Request_Stop (Control, Shutdown => False);
       end;
-      loop
-         declare
-            Observation : constant Flyology.Task_Results.Task_Observation :=
-              Flyology.Task_Results.Wait (Identity, Timeout => 0.001);
-         begin
-            if Observation.Status = Flyology.Task_Results.Terminal then
-               Automatic_Result := Observation.Result;
-               exit;
-            elsif Abort_Requested (Control) and then not Aborted then
+      declare
+         Observation     : Flyology.Task_Results.Task_Observation;
+         Abort_Triggered : Boolean := False;
+      begin
+         --  The protected entry and task-result wait are both abortable GNARL
+         --  waits. No descriptor wake failure can strand the abort request.
+         select
+            Control.State.Await_Abort;
+            Abort_Triggered := True;
+         then abort
+            Observation := Flyology.Task_Results.Wait (Identity);
+         end select;
+         if Abort_Triggered then
+            --  Completion wins a race with abort, as it did in the former
+            --  result-first observation loop.
+            Observation := Flyology.Task_Results.Wait (Identity, Timeout => 0.0);
+            if Observation.Status /= Flyology.Task_Results.Terminal then
                Abort_Task (Subject);
-               Aborted := True;
+               Observation := Flyology.Task_Results.Wait (Identity);
             end if;
-         end;
-      end loop;
+         end if;
+         Automatic_Result := Observation.Result;
+      end;
 
       Read_Termination (Control, Reported, Summary);
       if Initialize_Failed then

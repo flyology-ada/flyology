@@ -222,6 +222,12 @@ private
       Finished);
    type Intervention_Result is (Intervention_Accepted, Intervention_Stale, Intervention_Unsupported);
 
+   type Signal_Array is array (Child_Kind) of aliased Change_Signal;
+   --  State borrows its sibling Signals component. Both belong to one
+   --  Supervisor, and Run_Internal joins every manager before that owner can
+   --  leave scope; the access value never escapes the protected state.
+   type Signal_Array_Access is access all Signal_Array;
+
    protected type Lifecycle is
       procedure Configure
         (Identity     : Controller_Id;
@@ -231,7 +237,9 @@ private
          Cohorts      : Cohort_Matrix;
          Start_Order  : Child_Order;
          Stop_Order   : Child_Order;
-         Inherited    : Incident_Context);
+         Inherited    : Incident_Context;
+         Signals      : Signal_Array_Access;
+         Dispatch     : Signal_Access);
       procedure Try_Start
         (Child    : Child_Kind;
          Now      : Ada.Real_Time.Time;
@@ -261,6 +269,8 @@ private
          Now         : Ada.Real_Time.Time);
       function Incident_Can_Close
         (Child : Child_Kind; Value : Child_Handle; Now : Ada.Real_Time.Time) return Boolean;
+      function Incident_Close_Due (Child : Child_Kind) return Ada.Real_Time.Time;
+      function Next_Start_Due return Ada.Real_Time.Time;
       procedure Request_Stop;
       function Manager_Should_Exit return Boolean;
       procedure Manager_Failed (Child : Child_Kind; Termination : Termination_Summary);
@@ -338,6 +348,8 @@ private
       procedure Complete_Monitors (Child : Child_Kind; Status : Generation_Observation_Status);
 
       Phase                    : Lifecycle_Phase := Unconfigured;
+      Signals                  : Signal_Array_Access := null;
+      Dispatch                 : Signal_Access := null;
       Configured               : Boolean := False;
       Identity                 : Controller_Id := Controller_Id'First;
       Run_Used                 : Boolean := False;
@@ -405,7 +417,9 @@ private
    procedure Finalize (Item : in out Monitor_Guard);
 
    type Supervisor is limited record
-      State : aliased Lifecycle;
+      State    : aliased Lifecycle;
+      Signals  : aliased Signal_Array;
+      Dispatch : aliased Change_Signal;
    end record;
 
 end Flyology.Supervision.Static;
