@@ -45,7 +45,6 @@ package body Flyology.Supervision.Task_Generations is
       Identity           : constant Ada.Task_Identification.Task_Id := Task_Identity (Subject);
       Reported           : Boolean := False;
       Summary            : Termination_Summary;
-      Aborted            : Boolean := False;
       Initialize_Failed  : Boolean := False;
       Initialize_Summary : Termination_Summary;
       Automatic_Result   : Flyology.Task_Results.Task_Result;
@@ -76,7 +75,6 @@ package body Flyology.Supervision.Task_Generations is
             Observation := Flyology.Task_Results.Wait (Identity, Timeout => 0.0);
             if Observation.Status /= Flyology.Task_Results.Terminal then
                Abort_Task (Subject);
-               Aborted := True;
                Observation := Flyology.Task_Results.Wait (Identity);
             end if;
          end if;
