@@ -5,6 +5,15 @@ package System.Flyology.Faults is
 
    Enabled : constant Boolean := False;
 
+   type Registry_Lookup_Kind is (Lane_Predicate, Task_Thread, Wake, Set_Priority, Destroy, Fiber_Required);
+   --  Keep this declaration identical to the enabled test-hook variant.
+
+   for Registry_Lookup_Kind use
+     (Lane_Predicate => 0, Task_Thread => 1, Wake => 2, Set_Priority => 3, Destroy => 4, Fiber_Required => 5);
+
+   procedure Note_Registry_Lookup (Kind : Registry_Lookup_Kind);
+   pragma Import (C, Note_Registry_Lookup, "flyology_disabled_hook_must_be_elided_registry_lookup");
+
    type Fault_Point is
      (Fiber_Allocation,
       Stack_Mapping,

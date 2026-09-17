@@ -5,6 +5,16 @@ package System.Flyology.Faults is
 
    Enabled : constant Boolean := True;
 
+   type Registry_Lookup_Kind is (Lane_Predicate, Task_Thread, Wake, Set_Priority, Destroy, Fiber_Required);
+   --  Every scheduler registry Find identifies why the Fiber record is
+   --  required. Lane_Predicate is the regression sentinel and stays unused
+   --  while lane identity comes directly from the ATCB.
+
+   for Registry_Lookup_Kind use
+     (Lane_Predicate => 0, Task_Thread => 1, Wake => 2, Set_Priority => 3, Destroy => 4, Fiber_Required => 5);
+
+   procedure Note_Registry_Lookup (Kind : Registry_Lookup_Kind);
+
    type Fault_Point is
      (Fiber_Allocation,
       Stack_Mapping,

@@ -43,6 +43,7 @@ package body System.Flyology.Scheduler is
    use type Scheduling.Reduction_Phase;
    use type SSE.Integer_Address;
    use type SSE.Storage_Offset;
+   use type System.Tasking.Task_States;
 
    Timer_Check_Interval : constant := 64;
    Poll_Event_Budget    : constant := 64;
@@ -554,7 +555,7 @@ package body System.Flyology.Scheduler is
    --  from this registry: only lightweight tasks become fibers.
    function Registry_Bucket_For (T : System.Address) return Registry_Bucket_Index;
    function Registry_Shard_For (T : System.Address) return Registry_Shard_Index;
-   function Find (T : System.Address) return Fiber_Access;
+   function Find (T : System.Address; Kind : Faults.Registry_Lookup_Kind) return Fiber_Access;
    procedure Register_Locked (Item : not null Fiber_Access);
    procedure Unregister_Locked (Item : not null Fiber_Access);
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index;
@@ -1218,9 +1219,13 @@ package body System.Flyology.Scheduler is
       return Registry_Shard_Index (Registry_Bucket_For (T) mod Registry_Shard_Count);
    end Registry_Shard_For;
 
-   function Find (T : System.Address) return Fiber_Access is
+   function Find (T : System.Address; Kind : Faults.Registry_Lookup_Kind) return Fiber_Access is
       Item : Fiber_Access;
    begin
+      if Faults.Enabled then
+         Faults.Note_Registry_Lookup (Kind);
+      end if;
+
       if T = System.Null_Address then
          return null;
       end if;
@@ -2790,7 +2795,8 @@ package body System.Flyology.Scheduler is
       --  the finalizing state before it acquires any shard, so a creator that
       --  passed the unlocked guard and then lost the race must refuse rather
       --  than register into a group Finalize has already stopped.
-      if not Scheduling.Creation_Admitted (Lifecycle_State) or else Find (T) /= null then
+      if not Scheduling.Creation_Admitted (Lifecycle_State) or else Find (T, Faults.Fiber_Required) /= null
+      then
          if Automatic_Claimed then
             Release_Automatic_Placement_Claim (Group_Id);
             Automatic_Claimed := False;
@@ -2840,19 +2846,8 @@ package body System.Flyology.Scheduler is
       return 0;
    end Create;
 
-   function Is_Lightweight_Task (T : System.Address) return C.int is
-      Result : C.int;
-      Shard  : Registry_Shard_Index;
-   begin
-      if Event_Runtime_Active = 0 or else T = System.Null_Address then
-         return 0;
-      end if;
-      Shard := Registry_Shard_For (T);
-      Lock_Registry_Shard (Shard);
-      Result := (if Find (T) = null then 0 else 1);
-      Unlock_Registry_Shard (Shard);
-      return Result;
-   end Is_Lightweight_Task;
+   function Is_Lightweight_Task (T : System.Address) return C.int
+   is (if T /= System.Null_Address and then Address_To_Task_Id (T).Common.Is_Lightweight then 1 else 0);
 
    function Is_Event_Thread return Boolean
    is (Initialized and then Thread_Group /= null and then OSI.pthread_self = Thread_Group.Event_Thread);
@@ -2885,7 +2880,7 @@ package body System.Flyology.Scheduler is
       Shard  : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
       Lock_Registry_Shard (Shard);
-      Item := Find (T);
+      Item := Find (T, Faults.Task_Thread);
       Result := (if Item = null then OSI.pthread_self else Item.Group.Event_Thread);
       Unlock_Registry_Shard (Shard);
       return Result;
@@ -3344,7 +3339,7 @@ package body System.Flyology.Scheduler is
       for Attempt in 1 .. Natural (Maximum_Group_Id - Dedicated_First_Id + 1) loop
          Lock_Registry_Shard (Shard);
          Lock_Topology;
-         Item := Find (Current);
+         Item := Find (Current, Faults.Fiber_Required);
          if Item = null or else not Item.Can_Migrate or else Item.Reserved_Group /= null then
             Unlock_Topology;
             Unlock_Registry_Shard (Shard);
@@ -3689,7 +3684,7 @@ package body System.Flyology.Scheduler is
       Item := Source.Current_Fiber;
       if Item = null
         or else Item.Group /= Source
-        or else Find (Current) /= Item
+        or else Find (Current, Faults.Fiber_Required) /= Item
         or else Item.Thread_Pin_Count /= 0
         or else Item.Active_Async_Files /= 0
         or else not Scheduling.Migration_Allowed
@@ -4157,9 +4152,16 @@ package body System.Flyology.Scheduler is
          return -1;
       end if;
 
+      --  GNARL has already updated the ATCB priority. Before activation there
+      --  is no Fiber record to update; Create receives that retained priority.
+      --  Its caller holds the target task lock, and Common.State is atomic.
+      if Address_To_Task_Id (T).Common.State = System.Tasking.Unactivated then
+         return 0;
+      end if;
+
       Shard := Registry_Shard_For (T);
       Lock_Registry_Shard (Shard);
-      Item := Find (T);
+      Item := Find (T, Faults.Set_Priority);
       if Item = null then
          Unlock_Registry_Shard (Shard);
          return -1;
@@ -4253,7 +4255,7 @@ package body System.Flyology.Scheduler is
       Shard     : constant Registry_Shard_Index := Registry_Shard_For (T);
    begin
       Lock_Registry_Shard (Shard);
-      Item := Find (T);
+      Item := Find (T, Faults.Wake);
       if Item = null then
          Unlock_Registry_Shard (Shard);
          return -1;
@@ -4303,10 +4305,20 @@ package body System.Flyology.Scheduler is
 
       Shard := Registry_Shard_For (T);
       Lock_Registry_Shard (Shard);
-      Item := Find (T);
+      Item := Find (T, Faults.Destroy);
       if Item = null then
          Unlock_Registry_Shard (Shard);
-         return -1;
+         --  A finished fiber may already be reaped, and failed creation is
+         --  marked Terminated by GNARL. Allocator cleanup can also expunge an
+         --  Unactivated ATCB. Immutable lane identity still routes those
+         --  finalizations here; a missing record for a live task is an error.
+         --  Common.State is GNARL's atomic field. Finalize_TCB's caller retains
+         --  exclusive finalization/expunge ownership of the ATCB through this
+         --  call, so activation or ATCB reclamation cannot race this snapshot.
+         return
+           (if Address_To_Task_Id (T).Common.State in System.Tasking.Unactivated | System.Tasking.Terminated
+            then 0
+            else -1);
       end if;
       Has_Reservation := Item.Reserved_Group /= null;
       if Has_Reservation then
