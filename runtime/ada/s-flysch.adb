@@ -1,6 +1,7 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
 with System.Address_To_Access_Conversions;
+with System.Atomic_Operations.Integer_Arithmetic;
 with System.Flyology.Contexts;
 with System.Flyology.File_Engine;
 with System.Flyology.Faults;
@@ -409,7 +410,9 @@ package body System.Flyology.Scheduler is
    end record;
 
    type Group_Array is array (Group_Index) of Loop_Group_Access;
-   type Automatic_Claim_Array is array (Group_Index) of Natural;
+   type Automatic_Claim_Count is range 0 .. Natural'Last with Atomic;
+   package Claim_Arithmetic is new System.Atomic_Operations.Integer_Arithmetic (Automatic_Claim_Count);
+   type Automatic_Claim_Array is array (Group_Index) of aliased Automatic_Claim_Count;
    type Registry_Bucket_Array is array (Registry_Bucket_Index) of Fiber_Access;
    type Registry_Shard_Lock_Array is array (Registry_Shard_Index) of Scheduler_Mutex;
    type Registry_Instance_Array is array (Registry_Shard_Index) of C.unsigned_long_long;
@@ -436,9 +439,11 @@ package body System.Flyology.Scheduler is
 
    --  Each registry shard protects its hash chains, fiber lifetime, and the
    --  Fiber.Group ownership pointer. Topology_Lock protects the group table,
-   --  startup state, and dedicated reservations. A group lock protects that
-   --  group's membership count, fiber list, ready queue, timers, I/O state,
-   --  and current fiber. Code needing all three takes shard, topology, group.
+   --  startup state, dedicated reservations, and automatic placement tickets.
+   --  Atomic placement claims span group startup and registration, allowing
+   --  release without reacquiring the topology lock. A group lock protects
+   --  membership count, fiber list, ready queue, timers, I/O state, and current
+   --  fiber. Code needing all three takes shard, topology, group.
    --  Hot Wake and Set_Priority paths take only one shard and one group.
    Topology_Lock              : Scheduler_Mutex;
    Registry_Shard_Locks       : Registry_Shard_Lock_Array;
@@ -533,7 +538,7 @@ package body System.Flyology.Scheduler is
    pragma No_Return (Fatal);
    function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
    function Ensure_Placement_Platform return C.int;
-   function Select_Automatic_Group return C.int;
+   procedure Select_Automatic_Group (Selected : out C.int; Started_Group : out Loop_Group_Access);
    procedure Release_Automatic_Placement_Claim (Group : C.int);
    procedure Count_Pool_Reduction_Population_Locked
      (Target_Size      : C.int;
@@ -1161,26 +1166,26 @@ package body System.Flyology.Scheduler is
          raise;
    end Ensure_Group;
 
-   function Select_Automatic_Group return C.int is
-      Selected : C.int;
+   procedure Select_Automatic_Group (Selected : out C.int; Started_Group : out Loop_Group_Access) is
    begin
-      --  Serialize only the ticket allocation.  Group construction remains
-      --  lazy, and Ensure_Group takes the topology lock independently after
-      --  this function returns.  The modular counter can wrap indefinitely
-      --  without changing the round-robin sequence.
+      --  A started group can be used while the creator's registry claim keeps
+      --  it live. A cold group still goes through Ensure_Group's startup path.
+      --  The modular ticket can wrap without changing the round-robin sequence.
       Lock_Topology;
       Selected := C.int (Next_Automatic_Group mod C.unsigned_long_long (Automatic_Pool_Size));
       Next_Automatic_Group := Next_Automatic_Group + 1;
-      if Automatic_Placement_Claims (Group_Index (Selected)) = Natural'Last then
+      if Automatic_Placement_Claims (Group_Index (Selected)) = Automatic_Claim_Count'Last then
          Fatal;
       end if;
-      Automatic_Placement_Claims (Group_Index (Selected)) :=
-        Automatic_Placement_Claims (Group_Index (Selected)) + 1;
+      Claim_Arithmetic.Atomic_Add (Automatic_Placement_Claims (Group_Index (Selected)), 1);
+      Started_Group := Groups (Group_Index (Selected));
+      if Started_Group /= null and then not Started_Group.Started then
+         Started_Group := null;
+      end if;
       if Faults.Enabled then
          Faults.Note_Automatic_Placement_Claim (Selected);
       end if;
       Unlock_Topology;
-      return Selected;
    exception
       when others =>
          Fatal;
@@ -1191,13 +1196,10 @@ package body System.Flyology.Scheduler is
       if not Scheduling.Shared_Group (Group) then
          Fatal;
       end if;
-      Lock_Topology;
-      if Automatic_Placement_Claims (Group_Index (Group)) = 0 then
+      if Claim_Arithmetic.Atomic_Fetch_And_Subtract (Automatic_Placement_Claims (Group_Index (Group)), 1) = 0
+      then
          Fatal;
       end if;
-      Automatic_Placement_Claims (Group_Index (Group)) :=
-        Automatic_Placement_Claims (Group_Index (Group)) - 1;
-      Unlock_Topology;
    exception
       when others =>
          Fatal;
@@ -2081,6 +2083,8 @@ package body System.Flyology.Scheduler is
       Contexts.Destroy (Item.Context);
    end Release_Execution_Locked;
 
+   --  The caller holds the shard and group locks, plus topology when the
+   --  fiber owns a dedicated reservation.
    procedure Reap_Locked (Item : not null Fiber_Access) is
       Victim : Fiber_Access := Item;
       Group  : constant Loop_Group_Access := Item.Group;
@@ -2120,7 +2124,8 @@ package body System.Flyology.Scheduler is
    end Reap_Locked;
 
    procedure Reap_From_Scheduler (Group : not null Loop_Group_Access; Item : not null Fiber_Access) is
-      Shard : constant Registry_Shard_Index := Item.Registry_Shard;
+      Shard           : constant Registry_Shard_Index := Item.Registry_Shard;
+      Has_Reservation : Boolean;
    begin
       Item.Reaping := True;
       Unlock_Group (Group);
@@ -2129,10 +2134,17 @@ package body System.Flyology.Scheduler is
          Fatal;
       end if;
       Lock_Registry_Shard (Shard);
-      Lock_Topology;
+      --  A finished fiber cannot acquire a new reservation. The shard keeps
+      --  its reservation stable while deciding whether topology is needed.
+      Has_Reservation := Item.Reserved_Group /= null;
+      if Has_Reservation then
+         Lock_Topology;
+      end if;
       Lock_Group (Group);
       Reap_Locked (Item);
-      Unlock_Topology;
+      if Has_Reservation then
+         Unlock_Topology;
+      end if;
       Unlock_Registry_Shard (Shard);
    end Reap_From_Scheduler;
 
@@ -2637,7 +2649,7 @@ package body System.Flyology.Scheduler is
       return C.int
    is
       Item              : Fiber_Access := null;
-      Target            : Loop_Group_Access;
+      Target            : Loop_Group_Access := null;
       Shard             : constant Registry_Shard_Index := Registry_Shard_For (T);
       Group_Id          : C.int := Group;
       Automatic         : constant Boolean := Group < 0;
@@ -2687,7 +2699,7 @@ package body System.Flyology.Scheduler is
          --  Select only after the lifecycle claim is visible. A reduction
          --  that wins before this point changes the modulus; one that wins
          --  afterward observes the per-group placement claim below.
-         Group_Id := Select_Automatic_Group;
+         Select_Automatic_Group (Group_Id, Target);
          Automatic_Claimed := True;
          if Faults.Enabled
            and then Faults.Fail (Faults.Automatic_Placement_Window)
@@ -2700,7 +2712,9 @@ package body System.Flyology.Scheduler is
       end if;
 
       begin
-         Target := Ensure_Group (Group_Id, Dedicated => False);
+         if Target = null then
+            Target := Ensure_Group (Group_Id, Dedicated => False);
+         end if;
          if Target = null then
             if Automatic_Claimed then
                Release_Automatic_Placement_Claim (Group_Id);
@@ -2964,7 +2978,7 @@ package body System.Flyology.Scheduler is
       Placement_Claims := 0;
 
       for Index in Group_Index range Natural (Target_Size) .. Natural (Dedicated_First_Id - 1) loop
-         Placement_Claims := Placement_Claims + Automatic_Placement_Claims (Index);
+         Placement_Claims := Placement_Claims + Natural (Automatic_Placement_Claims (Index));
          Group := Groups (Index);
          if Group /= null then
             Lock_Group (Group);
@@ -4279,8 +4293,9 @@ package body System.Flyology.Scheduler is
    end Wake;
 
    function Destroy (T : System.Address) return C.int is
-      Item  : Fiber_Access;
-      Shard : Registry_Shard_Index;
+      Item            : Fiber_Access;
+      Shard           : Registry_Shard_Index;
+      Has_Reservation : Boolean;
    begin
       if not Initialized or else T = System.Null_Address then
          return -1;
@@ -4288,18 +4303,22 @@ package body System.Flyology.Scheduler is
 
       Shard := Registry_Shard_For (T);
       Lock_Registry_Shard (Shard);
-      Lock_Topology;
       Item := Find (T);
       if Item = null then
-         Unlock_Topology;
          Unlock_Registry_Shard (Shard);
          return -1;
+      end if;
+      Has_Reservation := Item.Reserved_Group /= null;
+      if Has_Reservation then
+         Lock_Topology;
       end if;
       Lock_Group (Item.Group);
 
       if Item.Reaping then
          Unlock_Group (Item.Group);
-         Unlock_Topology;
+         if Has_Reservation then
+            Unlock_Topology;
+         end if;
          Unlock_Registry_Shard (Shard);
          return 0;
       end if;
@@ -4310,7 +4329,9 @@ package body System.Flyology.Scheduler is
       case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
          when Scheduling.Defer    =>
             Unlock_Group (Item.Group);
-            Unlock_Topology;
+            if Has_Reservation then
+               Unlock_Topology;
+            end if;
             Unlock_Registry_Shard (Shard);
             return 0;
 
@@ -4321,7 +4342,9 @@ package body System.Flyology.Scheduler is
                Reap_Locked (Item);
                Unlock_Group (Group);
             end;
-            Unlock_Topology;
+            if Has_Reservation then
+               Unlock_Topology;
+            end if;
             Unlock_Registry_Shard (Shard);
             return 0;
       end case;
