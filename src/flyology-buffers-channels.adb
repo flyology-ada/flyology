@@ -50,12 +50,20 @@ package body Flyology.Buffers.Channels is
       end Await_Released;
    end Signal_Claim;
 
+   type Borrowed_Signal_Guard is new Ada.Finalization.Limited_Controlled with record
+      Operation  : System.Address := System.Null_Address;
+      Descriptor : Interfaces.C.int := -1;
+      Delivered  : Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Guard : in out Borrowed_Signal_Guard);
+
    protected Subscriptions is
       procedure Link (Operation : System.Address);
       procedure Remove (Operation : System.Address);
       procedure Mark (Source : System.Address);
-      procedure Claim_Next
-        (Source : System.Address; Operation : out System.Address; Descriptor : out Interfaces.C.int);
+      procedure Claim_Next (Source : System.Address; Guard : not null access Borrowed_Signal_Guard);
    private
       Heads : Bucket_Array := (others => System.Null_Address);
    end Subscriptions;
@@ -118,13 +126,9 @@ package body Flyology.Buffers.Channels is
          end loop;
       end Mark;
 
-      procedure Claim_Next
-        (Source : System.Address; Operation : out System.Address; Descriptor : out Interfaces.C.int)
-      is
+      procedure Claim_Next (Source : System.Address; Guard : not null access Borrowed_Signal_Guard) is
          Cursor : System.Address := Heads (Bucket (Source));
       begin
-         Operation := System.Null_Address;
-         Descriptor := -1;
          while Cursor /= System.Null_Address loop
             declare
                Target : constant Channel_Operation_Access := To_Operation (Cursor);
@@ -133,10 +137,12 @@ package body Flyology.Buffers.Channels is
                  and then Target.Item /= null
                  and then Source_Address (Target.Item) = Source
                then
-                  Target.Needs_Signal := False;
                   Target.Claim.Acquire;
-                  Operation := Cursor;
-                  Descriptor := Target.Signal_Descriptor;
+                  Target.Needs_Signal := False;
+                  --  Guard exists before this protected call. Its claim is
+                  --  therefore owned even if abort lands at the return cut.
+                  Guard.Operation := Cursor;
+                  Guard.Descriptor := Target.Signal_Descriptor;
                   return;
                end if;
                Cursor := Target.Next;
@@ -144,6 +150,23 @@ package body Flyology.Buffers.Channels is
          end loop;
       end Claim_Next;
    end Subscriptions;
+
+   overriding
+   procedure Finalize (Guard : in out Borrowed_Signal_Guard) is
+   begin
+      if Guard.Operation = System.Null_Address then
+         return;
+      end if;
+      if not Guard.Delivered then
+         begin
+            Flyology.Wake_Sources.Signal_Borrowed (Guard.Descriptor);
+         exception
+            when others =>
+               null;
+         end;
+      end if;
+      To_Operation (Guard.Operation).Claim.Release;
+   end Finalize;
 
    procedure Unlink_Subscription (Operation : System.Address) is
       Target : constant Channel_Operation_Access := To_Operation (Operation);
@@ -170,37 +193,13 @@ package body Flyology.Buffers.Channels is
    end Unlink_Subscription;
 
    procedure Flush_Signals (Source : System.Address) is
-      Operation  : System.Address;
-      Descriptor : Interfaces.C.int;
    begin
       loop
-         Subscriptions.Claim_Next (Source, Operation, Descriptor);
-         exit when Operation = System.Null_Address;
          declare
-            type Claim_Guard is new Ada.Finalization.Limited_Controlled with record
-               Delivered : Boolean := False;
-            end record;
-
-            overriding
-            procedure Finalize (Guard : in out Claim_Guard);
-
-            overriding
-            procedure Finalize (Guard : in out Claim_Guard) is
-            begin
-               if not Guard.Delivered then
-                  begin
-                     Flyology.Wake_Sources.Signal_Borrowed (Descriptor);
-                  exception
-                     when others =>
-                        null;
-                  end;
-               end if;
-               To_Operation (Operation).Claim.Release;
-            end Finalize;
-
-            Guard : Claim_Guard;
-            pragma Unreferenced (Guard);
+            Guard : aliased Borrowed_Signal_Guard;
          begin
+            Subscriptions.Claim_Next (Source, Guard'Access);
+            exit when Guard.Operation = System.Null_Address;
             if Flyology.Channel_Test_Hooks.Enabled then
                Flyology.Channel_Test_Hooks.After_Signal_Claim_Barrier;
             end if;
@@ -210,7 +209,7 @@ package body Flyology.Buffers.Channels is
                then
                   raise Program_Error with "injected buffer channel signal failure";
                end if;
-               Flyology.Wake_Sources.Signal_Borrowed (Descriptor);
+               Flyology.Wake_Sources.Signal_Borrowed (Guard.Descriptor);
                Guard.Delivered := True;
             exception
                --  One damaged source must not interrupt a committed channel

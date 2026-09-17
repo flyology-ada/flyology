@@ -173,6 +173,57 @@ procedure Buffer_Channel_Signal_Smoke is
             raise;
       end;
 
+      --  The claim guard is live before Claim_Next publishes the descriptor;
+      --  abort at the return boundary must signal and release that claim.
+      declare
+         Queue    : aliased Channels.Channel (Storage'Access, Capacity => 1);
+         Set      : aliased Flyology.Operations.Completion_Set (1);
+         Get      : Channels.Receive_Operation :=
+           Channels.Receive_Move (Set'Access, Queue'Unchecked_Access, 1.0);
+         Outgoing : Buffers.Unique_Buffer (Storage'Access);
+         Incoming : Buffers.Unique_Buffer (Storage'Access);
+         Result   : Channels.Try_Send_Result;
+
+         function Prepare return Boolean is
+         begin
+            Flyology.Channel_Testing.Reset;
+            Buffers.Acquire (Outgoing);
+            Buffers.Set_Tag (Outgoing, 94);
+            Flyology.Channel_Testing.Arm_After_Signal_Claim;
+            return True;
+         end Prepare;
+
+         Armed : constant Boolean := Prepare;
+         pragma Unreferenced (Armed);
+
+         task Sender;
+
+         task body Sender is
+         begin
+            Channels.Try_Send_Move (Queue, Outgoing, Result);
+         end Sender;
+      begin
+         Flyology.Channel_Testing.Wait_After_Signal_Claim;
+         abort Sender;
+         Flyology.Channel_Testing.Release_After_Signal_Claim;
+         while not Sender'Terminated loop
+            delay 0.0;
+         end loop;
+         Flyology.Operations.Wait_All (Set);
+         Channels.Finish (Get, Incoming);
+         Check
+           (Buffers.Tag (Incoming) = 94,
+            "aborted signal claim lost the receiver wake");
+         Buffers.Release (Incoming);
+         Flyology.Channel_Testing.Reset;
+      exception
+         when others =>
+            Flyology.Channel_Testing.Release_After_Signal_Claim;
+            abort Sender;
+            Flyology.Channel_Testing.Reset;
+            raise;
+      end;
+
       --  A failed write for the newest subscriber cannot stop delivery to
       --  an older subscriber or raise after the buffer has been enqueued.
       declare
