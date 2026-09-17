@@ -2,7 +2,11 @@
 # Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
 --- a/s-taskin.ads
 +++ b/s-taskin.ads
-@@ -682,0 +683,8 @@
+@@ -665,5 +665,13 @@
+       Task_Info : System.Task_Info.Task_Info_Type;
+       --  System-specific attributes of the task as specified by the
+       --  Task_Info pragma.
+
 +      Is_Lightweight : Boolean;
 +      --  Immutable execution-lane identity. Ordinary task creation sets
 +      --  this before publishing the ATCB; environment and foreign ATCBs
@@ -11,3 +15,4 @@
 +      --
 +      --  Protection: Constant after ATCB initialization
 +
+       Analyzer : System.Stack_Usage.Stack_Analyzer;
