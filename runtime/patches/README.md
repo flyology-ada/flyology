@@ -97,6 +97,12 @@ that designation as `System_Scope`, while Linux represents it with native
 thread attributes, so the shared GNARL patch obtains the value through the
 platform-specific private `System.Flyology` body rather than a common literal.
 
+The common asynchronous-delay patch likewise designates GNARL's library-level
+`Timer_Server` as native. Abortable delay selects elaborate this task before
+the application main begins; under a lightweight project default, an
+undesignated server would start an event loop during elaboration. The server
+also performs its own blocking timed wait, which requires a native thread.
+
 The patched region of `s-taskin.adb` is byte-identical in the eight Alire
 toolchains this repository installs, which are the Darwin builds of every
 release the family advertises, including `gnat_flyology_native`

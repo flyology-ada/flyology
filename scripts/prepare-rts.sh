@@ -487,6 +487,7 @@ fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 blocking_detection_patch="$patch_root/common/s-taskin.adb.patch"
 interrupt_service_patch="$patch_root/common/s-interr.adb.patch"
+async_delay_patch="$patch_root/common/s-taasde.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
 case "$compiler_release" in
   13.2.2|14.1.3|14.2.1)
@@ -573,6 +574,7 @@ fi
 apply_runtime_patch "$task_state_patch"
 apply_runtime_patch "$blocking_detection_patch"
 apply_runtime_patch "$interrupt_service_patch"
+apply_runtime_patch "$async_delay_patch"
 if [ "$compat_family" = gnat-legacy ]; then
   apply_runtime_patch "$legacy_suspension_spec_patch"
   apply_runtime_patch "$legacy_suspension_body_patch"
@@ -598,6 +600,10 @@ require_generated_text \
   "$generated_include/s-interr.adb" \
   "pragma Task_Info (System.Flyology.Native_Designation);" \
   "native interrupt service"
+require_generated_text \
+  "$generated_include/s-taasde.adb" \
+  "pragma Task_Info (System.Flyology.Native_Designation);" \
+  "native asynchronous timer service"
 if [ "$platform" = linux ]; then
   require_generated_text \
     "$generated_include/s-mudido.adb" \
@@ -666,10 +672,10 @@ compile_upstream_runtime_ada () {
   fi
 }
 
-#  The explicit Task_Info pragmas in the patched interrupt service are the
+#  The explicit Task_Info pragmas in the patched GNARL services are the
 #  supported designation mechanism, but current GNAT diagnoses that mechanism
-#  as obsolete. Suppress only that warning for this one patched unit.
-compile_interrupt_runtime_ada () {
+#  as obsolete. Suppress only that warning for these patched units.
+compile_native_service_runtime_ada () {
   if [ -n "$runtime_warnings" ]; then
     "$compiler" -c -gnatpg -gnatyM110 -gnatwJ -gnat2022 -O2 -fPIC \
       "-gnatec=$runtime_warnings" -gnateb "$@"
@@ -713,9 +719,10 @@ if [ "$platform" = linux ]; then
     -I "$generated_include" \
     "$generated_include/s-mudido.adb"
 fi
-compile_interrupt_runtime_ada \
+compile_native_service_runtime_ada \
   -I "$generated_include" \
-  "$generated_include/s-interr.adb"
+  "$generated_include/s-interr.adb" \
+  "$generated_include/s-taasde.adb"
 if [ "$compat_family" = gnat-legacy ]; then
   compile_upstream_runtime_ada \
     -I "$generated_include" \
@@ -727,7 +734,7 @@ cp \
   s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
   s-flyfau.ali s-flfien.ali s-flpopo.ali s-flypol.ali \
-  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-interr.ali \
+  s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-interr.ali s-taasde.ali \
   s-taskin.ali s-tassta.ali \
   "$generated_lib/"
 if [ "$platform" = linux ]; then
@@ -759,6 +766,7 @@ ar -r "$generated_lib/libgnarl.a" \
   s-flysch.o \
   s-taprop.o \
   s-interr.o \
+  s-taasde.o \
   s-taskin.o \
   s-tassta.o \
   context_switch.o \
@@ -821,7 +829,7 @@ mkdir "$verification_root"
 (
   cd "$verification_root"
   ar -x "$generated_lib/libgnarl.a" \
-    s-taprop.o s-interr.o s-taskin.o s-tassta.o
+    s-taprop.o s-interr.o s-taasde.o s-taskin.o s-tassta.o
   if [ "$platform" = linux ]; then
     ar -x "$generated_lib/libgnarl.a" s-mudido.o
   fi
@@ -853,6 +861,10 @@ require_archived_symbol \
   "$verification_root/s-interr.o" \
   system__flyology__native_designation \
   "native interrupt service"
+require_archived_symbol \
+  "$verification_root/s-taasde.o" \
+  system__flyology__native_designation \
+  "native asynchronous timer service"
 if [ "$platform" = linux ]; then
   require_archived_symbol \
     "$verification_root/s-mudido.o" \
@@ -891,6 +903,8 @@ record_patched_core source adainclude/s-taskin.adb \
   "$generated_include/s-taskin.adb"
 record_patched_core source adainclude/s-interr.adb \
   "$generated_include/s-interr.adb"
+record_patched_core source adainclude/s-taasde.adb \
+  "$generated_include/s-taasde.adb"
 if [ "$platform" = linux ]; then
   record_patched_core source adainclude/s-mudido.adb \
     "$generated_include/s-mudido.adb"
@@ -913,6 +927,8 @@ record_patched_core archive adalib/libgnarl.a:s-taskin.o \
   "$verification_root/s-taskin.o"
 record_patched_core archive adalib/libgnarl.a:s-interr.o \
   "$verification_root/s-interr.o"
+record_patched_core archive adalib/libgnarl.a:s-taasde.o \
+  "$verification_root/s-taasde.o"
 if [ "$platform" = linux ]; then
   record_patched_core archive adalib/libgnarl.a:s-mudido.o \
     "$verification_root/s-mudido.o"
