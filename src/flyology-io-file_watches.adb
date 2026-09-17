@@ -100,6 +100,24 @@ package body Flyology.IO.File_Watches is
          Operation.Outcome := Ready;
          Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
       elsif Timeout = 0.0 then
+         begin
+            --  A zero-timeout wait must inspect the native queue as well as
+            --  hints already pumped into the watcher. Stale native records
+            --  may precede a live registration, so keep probing without
+            --  suspending until a hint is found or the queue is empty.
+            while Wait_Interruptibly (Item.Native_Source, For_Read, 0.0) = Ready loop
+               Pump (Item.all);
+               if Take_Pending (Item.all, Operation.Result) then
+                  Operation.Outcome := Ready;
+                  exit;
+               end if;
+            end loop;
+         exception
+            when others =>
+               Operation.Failure := Drain_Failure;
+               Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Failed);
+               return;
+         end;
          Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
       else
          if Timeout > 0.0 then
