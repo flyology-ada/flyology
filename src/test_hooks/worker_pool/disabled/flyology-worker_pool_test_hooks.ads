@@ -14,12 +14,10 @@ private package Flyology.Worker_Pool_Test_Hooks is
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_activation";
    function Cancellation_Failure return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_cancellation";
-   function Consume_Failure return Boolean
-   with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_consume";
-   function Completion_Wake return Boolean
-   with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_completion_wake";
    procedure Native_Executor_Dispatch_Barrier
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_executor_dispatch";
+   procedure Native_Executor_Abandon_Claim_Barrier
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_executor_abandon_claim";
    procedure Native_Executor_Idle_Barrier
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_worker_executor_idle";
    procedure Run_Claim_Barrier
