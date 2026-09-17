@@ -552,6 +552,7 @@ stack_guard_smoke
 stack_overflow_child
 stack_overflow_smoke
 stack_pool_smoke
+finished_fiber_stack_smoke
 stack_size_limits_child
 stack_size_limits_smoke
 stack_size_parity_smoke

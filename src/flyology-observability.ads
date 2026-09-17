@@ -60,7 +60,7 @@ is
    --  @field State Scheduler state at the group snapshot instant
    --  @field Base_Priority Current GNARL base priority
    --  @field Flags Pinned, wait, pending-file, and deferred-reap flags
-   --  @field Stack_Usable_Bytes Usable bytes in the guarded fiber stack
+   --  @field Stack_Usable_Bytes Usable guarded-stack bytes, or zero after the finished stack is released
    type Task_Snapshot is record
       Instance           : Task_Instance_Id := No_Task_Instance;
       State              : Task_State := Task_Waiting;

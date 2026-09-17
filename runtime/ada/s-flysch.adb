@@ -785,6 +785,7 @@ package body System.Flyology.Scheduler is
    procedure Remove_From_Ready (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
    function Ready_Present (Group : not null Loop_Group_Access) return Boolean;
    function Dequeue (Group : not null Loop_Group_Access) return Fiber_Access;
+   procedure Release_Execution_Locked (Item : not null Fiber_Access);
    procedure Reap_Locked (Item : not null Fiber_Access);
    procedure Link_Group_Head_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
    procedure Unlink_Group_Locked (Group : not null Loop_Group_Access; Item : not null Fiber_Access);
@@ -2070,6 +2071,16 @@ package body System.Flyology.Scheduler is
       Item.Next_Group := null;
    end Unlink_Group_Locked;
 
+   procedure Release_Execution_Locked (Item : not null Fiber_Access) is
+   begin
+      --  The scheduler has left this fiber's stack, or the fiber is being
+      --  reaped while not running. GNARL may retain its task control block,
+      --  but neither it nor the registry needs execution storage afterward.
+      Release_Heap_Trampolines (Item.Trampoline_Control);
+      Item.Trampoline_Control := System.Null_Address;
+      Contexts.Destroy (Item.Context);
+   end Release_Execution_Locked;
+
    procedure Reap_Locked (Item : not null Fiber_Access) is
       Victim : Fiber_Access := Item;
       Group  : constant Loop_Group_Access := Item.Group;
@@ -2101,11 +2112,7 @@ package body System.Flyology.Scheduler is
          Item.Reserved_Group.Reserved_For := System.Null_Address;
          Item.Reserved_Group := null;
       end if;
-      --  Execution left this fiber's stack before the scheduler reached its
-      --  final reap, so no trampoline it owns can still be in use.
-      Release_Heap_Trampolines (Item.Trampoline_Control);
-      Item.Trampoline_Control := System.Null_Address;
-      Contexts.Destroy (Item.Context);
+      Release_Execution_Locked (Item);
       Free_Fiber (Victim);
    exception
       when others =>
@@ -4566,8 +4573,11 @@ package body System.Flyology.Scheduler is
 
                if Next.Migration_Target /= null then
                   Transfer (Next, Group);
-               elsif Scheduling.Should_Reap_After_Switch (Phase_Of (Next.State), Next.Destroy_Requested) then
-                  Reap_From_Scheduler (Group, Next);
+               elsif Next.State = Finished then
+                  Release_Execution_Locked (Next);
+                  if Scheduling.Should_Reap_After_Switch (Phase_Of (Next.State), Next.Destroy_Requested) then
+                     Reap_From_Scheduler (Group, Next);
+                  end if;
                end if;
             end if;
          else

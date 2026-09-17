@@ -597,6 +597,9 @@ lanes:
   before reuse and receives best-effort page-discard advice; a completely empty
   arena is unlinked directly and unmapped instead of becoming an
   historical-peak cache.
+- After a lightweight task finishes and the scheduler leaves its stack, the
+  scheduler releases the stack, context, and trampoline storage. A library-level
+  task's fiber record can remain registered until GNARL finalization.
 - Synchronization between the lanes still passes through GNARL. A native task
   wakes the event-loop scheduler through `EVFILT_USER` on macOS or `eventfd` on
   Linux.
