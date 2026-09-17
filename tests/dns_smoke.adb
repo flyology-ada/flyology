@@ -1798,6 +1798,49 @@ procedure DNS_Smoke is
             OK :=
               OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "198.51.100.77";
          end;
+         Set_Stage ("synchronous attempt count boundary");
+         declare
+            Pair   : constant DNS.Name_Server_Array := [Server, Secondary];
+            Raised : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve_Using
+                      ("attempt-boundary.test",
+                       Pair,
+                       DNS.IPv4_Only,
+                       Timeout  => 0.0,
+                       Attempts => Positive'Last / 2);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Raised := True;
+            end;
+            OK := OK and then Raised;
+            Raised := False;
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve_Using
+                      ("attempt-boundary.test",
+                       Pair,
+                       DNS.IPv4_Only,
+                       Timeout  => 0.0,
+                       Attempts => Positive'Last / 2 + 1);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Resolution_Failed =>
+                  Raised := True;
+            end;
+            OK := OK and then Raised;
+         end;
          Set_Stage ("dual-family fallback");
          declare
             Values : constant DNS.Address_Array :=
