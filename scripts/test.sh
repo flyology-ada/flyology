@@ -599,6 +599,7 @@ create_finalize_race_smoke
 library_finalize_exception_runtime_smoke
 library_finalize_runtime_smoke
 pool_reduction_claim_smoke
+pool_reduction_cross_to_shard_smoke
 structured_server_reuse_smoke
 task_result_publication_smoke
 fault_injection_smoke'
@@ -1108,6 +1109,13 @@ esac
 #  reduction must retain that claim until the released task drains to group 0.
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/pool_reduction_claim_smoke"
+#  Reduce below a shard target both before migration commits and after it
+#  commits but before physical transfer. Neither ordering may move the task
+#  outside the reduced pool or discard its automatic placement.
+for crossing_window in precommit postcommit; do
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/pool_reduction_cross_to_shard_smoke" "$crossing_window"
+done
 #  Allocation failure after automatic placement must not retain the creation
 #  or placement claims that keep later pool reduction and growth coherent.
 for allocation_case in group-storage-allocation fiber-storage-allocation context-storage-allocation; do

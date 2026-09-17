@@ -55,7 +55,8 @@ package System.Flyology.Faults is
       Poller_Record_Release,
       Poller_Control_Add,
       Poller_Control_Modify,
-      Poller_Control_Delete);
+      Poller_Control_Delete,
+      Cross_To_Shard_Window);
 
    for Fault_Point use
      (Fiber_Allocation               => 1,
@@ -107,7 +108,8 @@ package System.Flyology.Faults is
       Poller_Record_Release          => 48,
       Poller_Control_Add             => 49,
       Poller_Control_Modify          => 50,
-      Poller_Control_Delete          => 51);
+      Poller_Control_Delete          => 51,
+      Cross_To_Shard_Window          => 52);
 
    function Fail (Point : Fault_Point) return Boolean;
    pragma Inline_Always (Fail);

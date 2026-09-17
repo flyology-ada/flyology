@@ -133,6 +133,7 @@ project Runtime_Smoke is
       "poller_policy_smoke.adb",
       "pool_growth_smoke.adb",
       "pool_reduction_claim_smoke.adb",
+      "pool_reduction_cross_to_shard_smoke.adb",
       "pool_reduction_inert_smoke.adb",
       "pool_reduction_smoke.adb",
       "priority_semantics_smoke.adb",

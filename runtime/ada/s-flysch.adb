@@ -318,6 +318,8 @@ package body System.Flyology.Scheduler is
       Enqueue_At_Head          : Boolean := False;
       Group                    : Loop_Group_Access;
       Migration_Target         : Loop_Group_Access;
+      Configured_Migration     : Boolean := False;
+      Migration_Result         : C.int := 0;
       Reserved_Group           : Loop_Group_Access;
       Previous_Ready           : Fiber_Access;
       Next_Ready               : Fiber_Access;
@@ -536,7 +538,9 @@ package body System.Flyology.Scheduler is
 
    procedure Fatal (Context : C.int := Scheduler_Invariant);
    pragma No_Return (Fatal);
-   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access;
+   function Ensure_Group
+     (Id : C.int; Dedicated : Boolean; Require_Configured : Boolean := False) return Loop_Group_Access;
+   function Migrate_Internal (Group : C.int; Require_Configured : Boolean) return C.int;
    function Ensure_Placement_Platform return C.int;
    procedure Select_Automatic_Group (Selected : out C.int; Started_Group : out Loop_Group_Access);
    procedure Release_Automatic_Placement_Claim (Group : C.int);
@@ -1004,7 +1008,9 @@ package body System.Flyology.Scheduler is
       return System.Null_Address;
    end Group_Thread;
 
-   function Ensure_Group (Id : C.int; Dedicated : Boolean) return Loop_Group_Access is
+   function Ensure_Group
+     (Id : C.int; Dedicated : Boolean; Require_Configured : Boolean := False) return Loop_Group_Access
+   is
       Group                  : Loop_Group_Access := null;
       Result                 : C.int;
       Ready                  : Boolean;
@@ -1069,6 +1075,10 @@ package body System.Flyology.Scheduler is
       --  the group table, so finalization cannot be restarted into by a
       --  caller that passed the unlocked guard above.
       if not Scheduling.Creation_Admitted (Lifecycle_State) then
+         Release_Topology_Lock;
+         return null;
+      end if;
+      if Require_Configured and then Id >= C.int (Automatic_Pool_Size) then
          Release_Topology_Lock;
          return null;
       end if;
@@ -2157,9 +2167,47 @@ package body System.Flyology.Scheduler is
          Fatal;
       end if;
 
-      --  A priority update while running does not retain queue placement. If
-      --  the fiber later migrates, the target loop therefore enqueues it at
-      --  the normal FIFO tail.
+      Unlock_Group (Source);
+
+      --  This second test window holds a committed crossing before physical
+      --  transfer, with neither the source lock nor topology lock held.
+      if Item.Configured_Migration and then Faults.Enabled and then Faults.Fail (Faults.Cross_To_Shard_Window)
+      then
+         while Faults.Fail (Faults.Cross_To_Shard_Window) loop
+            if Micro_Sleep (1_000) /= 0 then
+               Fatal;
+            end if;
+         end loop;
+      end if;
+
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
+      Lock_Group (Source);
+      if Item.Configured_Migration and then Target.Id >= C.int (Automatic_Pool_Size) then
+         --  Reduction won after the fiber committed but before it moved.
+         --  Retain its prior placement ownership in Source and resume it
+         --  with a rejection, or drain it on the next dispatch if automatic.
+         Item.Migration_Target := null;
+         Item.Configured_Migration := False;
+         Item.Migration_Result := -3;
+         if Item.Destroy_Requested then
+            Item.State := Finished;
+            Reap_Locked (Item);
+         else
+            Enqueue (Source, Item);
+         end if;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
+         return;
+      end if;
+
+      --  Keep the physical move and the explicit-placement transition in
+      --  one topology-locked transaction with pool reduction's population
+      --  check and cutover.
+      if Item.Configured_Migration then
+         Item.Automatic_Placement := False;
+      end if;
+      Item.Configured_Migration := False;
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlink_Group_Locked (Source, Item);
@@ -2167,9 +2215,6 @@ package body System.Flyology.Scheduler is
       Source.Member_Count := Source.Member_Count - 1;
       Source.Migrations_Out := Source.Migrations_Out + 1;
       Unlock_Group (Source);
-
-      Lock_Registry_Shard (Shard);
-      Lock_Topology;
       Lock_Group (Target);
       if Source.Dedicated then
          Source.Reserved_For := System.Null_Address;
@@ -3628,7 +3673,7 @@ package body System.Flyology.Scheduler is
    function Observe_Created_Groups return C.int
    is (if In_Fork_Child then 0 else Created_Group_Count);
 
-   function Migrate (Group : C.int) return C.int is
+   function Migrate_Internal (Group : C.int; Require_Configured : Boolean) return C.int is
       Item                : Fiber_Access;
       Source              : Loop_Group_Access;
       Target              : Loop_Group_Access;
@@ -3636,6 +3681,7 @@ package body System.Flyology.Scheduler is
       Shard               : constant Registry_Shard_Index := Registry_Shard_For (Current);
       Target_Member_Count : Natural := 0;
       Reservation_Matches : Boolean := False;
+      Target_Configured   : Boolean;
    begin
       if Current = System.Null_Address then
          return -1;
@@ -3652,7 +3698,18 @@ package body System.Flyology.Scheduler is
       if not Scheduling.Valid_Group (Group) then
          return -1;
       end if;
-      if Source.Id = Group then
+      if Require_Configured then
+         Lock_Topology;
+         Target_Configured := Group < C.int (Automatic_Pool_Size);
+         if Target_Configured and then Source.Id = Group then
+            Unlock_Topology;
+            return 0;
+         end if;
+         Unlock_Topology;
+         if not Target_Configured then
+            return -3;
+         end if;
+      elsif Source.Id = Group then
          return 0;
       end if;
 
@@ -3667,18 +3724,39 @@ package body System.Flyology.Scheduler is
       Unlock_Group (Source);
 
       if Scheduling.Shared_Group (Group) then
-         Target := Ensure_Group (Group, Dedicated => False);
+         Target := Ensure_Group (Group, Dedicated => False, Require_Configured => Require_Configured);
       else
          Lock_Topology;
          Target := Groups (Group_Index (Group));
          Unlock_Topology;
       end if;
       if Target = null then
+         if Require_Configured then
+            Lock_Topology;
+            Target_Configured := Group < C.int (Automatic_Pool_Size);
+            Unlock_Topology;
+            if not Target_Configured then
+               return -3;
+            end if;
+         end if;
          return -1;
+      end if;
+
+      if Faults.Enabled and then Faults.Fail (Faults.Cross_To_Shard_Window) then
+         while Faults.Fail (Faults.Cross_To_Shard_Window) loop
+            if Micro_Sleep (1_000) /= 0 then
+               Fatal;
+            end if;
+         end loop;
       end if;
 
       Lock_Registry_Shard (Shard);
       Lock_Topology;
+      if Require_Configured and then Group >= C.int (Automatic_Pool_Size) then
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
+         return -3;
+      end if;
       if Target.Dedicated then
          Lock_Group (Target);
          Target_Member_Count := Target.Member_Count;
@@ -3706,15 +3784,26 @@ package body System.Flyology.Scheduler is
 
       Item.Migration_Target := Target;
       --  An explicit migration transfers placement ownership to the caller.
-      --  Later automatic-pool reductions must not undo that choice.
-      Item.Automatic_Placement := False;
+      --  A configured crossing defers this change until physical transfer,
+      --  so a concurrent reduction can still observe the automatic source.
+      Item.Configured_Migration := Require_Configured;
+      Item.Migration_Result := 0;
+      if not Require_Configured then
+         Item.Automatic_Placement := False;
+      end if;
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlock_Topology;
       Unlock_Registry_Shard (Shard);
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
-      return 0;
-   end Migrate;
+      return Item.Migration_Result;
+   end Migrate_Internal;
+
+   function Migrate (Group : C.int) return C.int
+   is (Migrate_Internal (Group, Require_Configured => False));
+
+   function Migrate_Configured (Group : C.int) return C.int
+   is (Migrate_Internal (Group, Require_Configured => True));
 
    function Pin_Current_Thread (Owner : access System.Address) return C.int is
       Group   : constant Loop_Group_Access := Thread_Group;
