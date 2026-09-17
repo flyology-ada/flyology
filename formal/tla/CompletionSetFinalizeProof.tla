@@ -119,25 +119,58 @@ THEOREM NextPreservesSafety ==
                 DriverRaiseHasProgress,
                 DriverRaiseTerminalExactlyOnce
 
+ATCRecordType ==
+    atc \in [stage : {"Idle", "Driving", "Requested", "Returned", "Delivered", "Used", "Cancelled"},
+             depth : 0..1, stabilizing : BOOLEAN, dirty : 0..1,
+             source : {"Immediate", "Dependency", "None"}, deadline : BOOLEAN,
+             child : BOOLEAN, childState : {"Vacant", "Pending", "Terminal"}, childDeadline : BOOLEAN,
+             root : {"Pending", "Terminal"}, gate : {"Pending", "Terminal"},
+             rootOutcome : {"None", "Succeeded", "Cancelled"}, gateOutcome : {"None", "Succeeded", "Failed"},
+             deferral : 0..2, requested : BOOLEAN, delivered : BOOLEAN, waitFailed : BOOLEAN,
+             action : {"Init", "ATCDrive", "ATCProtectedReturn", "ATCDriverReturn",
+                       "ATCStableDeliver", "ATCBrokenDeliver", "ATCUse", "ATCCancel"}]
+
 ATCDeferredSafety ==
+    /\ ATCRecordType
     /\ ATCResumeConsistent
     /\ ATCUseHasProgress
     /\ ATCCancellationPropagates
+    /\ (atc.stage \in {"Idle", "Driving", "Requested", "Returned"} => ~atc.delivered)
     /\ (atc.stage \in {"Driving", "Requested", "Returned"} => atc.deferral = 1)
     /\ (atc.stage = "Returned" => atc.root = "Terminal" \/ atc.source = "Immediate")
     /\ (atc.stage \in {"Delivered", "Used", "Cancelled"} => atc.delivered)
 
 THEOREM ATCInitIsSafe ==
     ATCMode = "Deferred" /\ Init => ATCDeferredSafety
-<1>. QED BY DEF Init, ATCInitial, ATCDeferredSafety,
+<1>. QED BY DEF Init, ATCInitial, ATCDeferredSafety, ATCRecordType,
                 ATCResumeConsistent, ATCUseHasProgress,
                 ATCCancellationPropagates
 
 THEOREM ATCNextPreservesSafety ==
-    ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCNext => ATCDeferredSafety'
-<1>. QED BY DEF ATCDeferredSafety, ATCResumeConsistent,
-                ATCUseHasProgress, ATCCancellationPropagates,
-                ATCNext, ATCDrive, ATCProtectedReturn, ATCDriverReturn,
-                ATCStableDeliver, ATCBrokenDeliver, ATCUse, ATCCancel
+    ATCReturn \in {"Terminal", "Rearm"} /\ ATCMode = "Deferred"
+    /\ ATCDeferredSafety /\ ATCNext => ATCDeferredSafety'
+<1>1. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCDrive => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCDrive
+<1>2. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCProtectedReturn => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCProtectedReturn
+<1>3. ATCReturn \in {"Terminal", "Rearm"} /\ ATCMode = "Deferred"
+       /\ ATCDeferredSafety /\ ATCDriverReturn => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCDriverReturn
+<1>4. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCStableDeliver => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCStableDeliver
+<1>5. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCBrokenDeliver => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCBrokenDeliver
+<1>6. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCUse => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCUse
+<1>7. ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCCancel => ATCDeferredSafety'
+<2>. QED BY DEF ATCDeferredSafety, ATCRecordType, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates, ATCCancel
+<1>. QED BY <1>1, <1>2, <1>3, <1>4, <1>5, <1>6, <1>7 DEF ATCNext
 
 =============================================================================
