@@ -10,6 +10,9 @@ private package Flyology.Subprocess_Test_Hooks is
    Enabled : constant Boolean := True;
 
    function Fail_Reaper_Allocation return Boolean;
+   function Fail_Group_Signal return Boolean;
+   procedure Set_Fail_Group_Signal (Enabled : Interfaces.C.int);
+   pragma Export (C, Set_Fail_Group_Signal, "flyology_test_subprocess_set_fail_group_signal");
 
    procedure After_Reap;
    procedure Note_Group_Signal;

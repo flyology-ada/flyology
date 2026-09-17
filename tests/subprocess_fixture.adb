@@ -124,6 +124,9 @@ begin
       Ada.Command_Line.Set_Exit_Status (23);
    elsif Mode = "sleep" then
       delay 60.0;
+   elsif Mode = "short-sleep" then
+      Write_All (1, "ready");
+      delay 0.2;
    elsif Mode = "large" then
       declare
          Output_Chunk : constant String (1 .. 4_096) := (others => 'O');

@@ -2093,8 +2093,10 @@ termination and waits for the root for its grace interval. Root exit triggers
 immediate hard cleanup of remaining group members; otherwise `Stop` applies
 hard termination when the grace interval expires. `Close` and
 finalization hard-terminate an unjoined group, reap the root, close every pipe,
-and join the reaper. Finalization can wait indefinitely if the kernel cannot
-complete hard termination.
+and join the reaper. If hard termination fails, explicit `Close` reports the
+error promptly and retains process ownership for a later retry. Finalization
+still waits for natural root exit when hard termination remains unavailable,
+since the reaper borrows state in the finalizing process object.
 
 `Flyology.Subprocesses.Capture.Run` is the bounded structured layer. It
 interleaves stdin writes with stdout and stderr reads under one monotonic

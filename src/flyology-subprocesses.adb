@@ -256,6 +256,10 @@ package body Flyology.Subprocesses is
             return;
          end if;
          if Flyology.Subprocess_Test_Hooks.Enabled then
+            if Flyology.Subprocess_Test_Hooks.Fail_Group_Signal then
+               Error_Code := Permission_Error;
+               return;
+            end if;
             Flyology.Subprocess_Test_Hooks.Note_Group_Signal;
          end if;
          Result := C_Kill (-Pid, Signal);
@@ -835,6 +839,23 @@ package body Flyology.Subprocesses is
       end;
    end Stop;
 
+   procedure Release_Process (Child : in out Process) is
+   begin
+      Close_Standard_Output (Child);
+      Close_Standard_Error (Child);
+      if Child.Reaper /= null then
+         --  Publication precedes task termination. Deallocation must wait for
+         --  both, including when the exit readiness wait failed early. A timed
+         --  suspension avoids occupying the caller's thread during that join.
+         while not Child.Reaper'Terminated loop
+            delay 0.01;
+         end loop;
+         Free_Reaper (Child.Reaper);
+      end if;
+      Child.Exit_State.Release;
+      Child.Pid_Value := -1;
+   end Release_Process;
+
    procedure Close (Child : in out Process) is
       Status : Exit_Status;
       Saved  : Ada.Exceptions.Exception_Occurrence;
@@ -844,24 +865,17 @@ package body Flyology.Subprocesses is
          return;
       end if;
       Close_Standard_Input (Child);
+      --  A failed signal gives no reason to expect the reaper to finish.
+      --  Keep its borrowed exit state and the process owner live for a retry.
+      Kill (Child);
       begin
-         Kill (Child);
          Wait (Child, Status);
       exception
          when Occurrence : others =>
             Failed := True;
             Ada.Exceptions.Save_Occurrence (Saved, Occurrence);
       end;
-      Close_Standard_Output (Child);
-      Close_Standard_Error (Child);
-      if Child.Reaper /= null then
-         while not Child.Reaper'Terminated loop
-            delay 0.0;
-         end loop;
-         Free_Reaper (Child.Reaper);
-      end if;
-      Child.Exit_State.Release;
-      Child.Pid_Value := -1;
+      Release_Process (Child);
       if Failed then
          Ada.Exceptions.Reraise_Occurrence (Saved);
       end if;
@@ -874,7 +888,18 @@ package body Flyology.Subprocesses is
          Close (Child);
       exception
          when others =>
-            null;
+            --  Finalization cannot leave a reaper borrowing this object's
+            --  exit state. If signaling failed, join even when exit readiness
+            --  itself is unusable; natural exit may take an unlimited time.
+            if Is_Open (Child) then
+               begin
+                  Close_Standard_Input (Child);
+                  Release_Process (Child);
+               exception
+                  when others =>
+                     null;
+               end;
+            end if;
       end;
    end Finalize;
 
