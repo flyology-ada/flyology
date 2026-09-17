@@ -16,6 +16,7 @@ package body Flyology.IO.DNS is
    use type Ada.Real_Time.Time;
    use type Descriptor;
    use type U8.Unsigned_32;
+   use type U8.Unsigned_64;
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
    use type Sockets.Address_Family;
@@ -25,7 +26,8 @@ package body Flyology.IO.DNS is
 
    Max_Packet_Length    : constant := 4_096;
    Max_Config_Length    : constant := 16_384;
-   Max_Records          : constant := 32;
+   --  Even a root-name resource record occupies eleven wire bytes.
+   Max_Wire_Records     : constant := Max_TCP_Packet_Length / 11;
    Max_Cache_Entries    : constant := 64;
    Max_Cache_Key_Length : constant := 512;
    DNS_Port             : constant Sockets.Port := 53;
@@ -37,15 +39,6 @@ package body Flyology.IO.DNS is
 
    subtype Byte is U8.Unsigned_8;
    type Byte_Array is array (Natural range <>) of Byte;
-
-   type Parsed_Record is record
-      Owner   : Name_Buffer;
-      Kind    : Natural := 0;
-      TTL     : Natural := 0;
-      Target  : Name_Buffer;
-      Address : Raw_Address;
-   end record;
-   type Parsed_Record_Array is array (Positive range <>) of Parsed_Record;
 
    type Parse_Outcome is (Answer, No_Data, Not_Found, Truncated, Server_Failure);
    type Parse_Result is record
@@ -324,6 +317,15 @@ package body Flyology.IO.DNS is
    function Same_Name (Left, Right : Name_Buffer) return Boolean
    is (Left.Length = Right.Length and then Left.Data (1 .. Left.Length) = Right.Data (1 .. Right.Length));
 
+   function Name_Hash (Value : Name_Buffer) return U8.Unsigned_64 is
+      Hash : U8.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
+   begin
+      for Index in 1 .. Value.Length loop
+         Hash := (Hash xor U8.Unsigned_64 (Character'Pos (Value.Data (Index)))) * 16#100_0000_01B3#;
+      end loop;
+      return Hash;
+   end Name_Hash;
+
    function U16_At (Packet : Byte_Array; Position : Natural) return Natural is
    begin
       if Position + 1 > Packet'Last then
@@ -484,6 +486,9 @@ package body Flyology.IO.DNS is
      (Packet : Byte_Array; Expected_ID : Natural; Expected_Name : Name_Buffer; Expected_Kind : Natural)
       return Parse_Result
    is
+      type Hash_Array is array (Positive range 1 .. Max_Wire_Records) of U8.Unsigned_64;
+      type Offset_Array is array (Positive range 1 .. Max_Wire_Records) of Natural;
+
       Result           : Parse_Result;
       Position         : Natural := 12;
       Flags            : Natural;
@@ -491,8 +496,9 @@ package body Flyology.IO.DNS is
       Answer_Count     : Natural;
       Authority_Count  : Natural;
       Additional_Count : Natural;
-      Records          : Parsed_Record_Array (1 .. Max_Records);
-      Record_Count     : Natural := 0;
+      Answer_Hashes    : Hash_Array;
+      Answer_Offsets   : Offset_Array;
+      Current_Hash     : U8.Unsigned_64;
       Question_Name    : Name_Buffer;
       Next             : Natural;
       Owner            : Name_Buffer;
@@ -505,9 +511,35 @@ package body Flyology.IO.DNS is
       Current          : Name_Buffer := Expected_Name;
       Minimum_TTL      : Natural := Natural'Last;
       Advanced         : Boolean;
+      Alias_Target     : Name_Buffer;
+      Alias_TTL        : Natural := 0;
+
+      procedure Read_Record is
+         After_Name : Natural;
+      begin
+         Owner := Decode_Name (Packet, Position, After_Name);
+         Position := After_Name;
+         if Position + 9 > Packet'Last then
+            raise Malformed_Response with "truncated DNS resource record";
+         end if;
+         Kind := U16_At (Packet, Position);
+         Class := U16_At (Packet, Position + 2);
+         TTL := U32_At (Packet, Position + 4);
+         Data_Length := U16_At (Packet, Position + 8);
+         Data_Start := Position + 10;
+         if Data_Length > Packet'Length
+           or else Data_Start > Packet'Last + 1
+           or else Data_Start + Data_Length > Packet'Last + 1
+         then
+            raise Malformed_Response with "DNS record data exceeds packet";
+         end if;
+         Position := Data_Start + Data_Length;
+      end Read_Record;
    begin
       if Packet'Length < 12 or else Packet'First /= 0 then
          raise Malformed_Response with "short DNS response";
+      elsif Packet'Length > Max_TCP_Packet_Length then
+         raise Resolution_Failed with "DNS response exceeds parser packet capacity";
       elsif U16_At (Packet, 0) /= Expected_ID then
          raise Malformed_Response with "unexpected DNS transaction ID";
       end if;
@@ -547,72 +579,32 @@ package body Flyology.IO.DNS is
             Result.Outcome := Server_Failure;
       end case;
 
-      if Answer_Count > Max_Records
-        or else Authority_Count > Max_Records
-        or else Additional_Count > Max_Records
-        or else Answer_Count + Authority_Count + Additional_Count > 3 * Max_Records
-      then
-         raise Malformed_Response with "DNS response has too many records";
-      end if;
+      --  Validate every declared record before selecting answers. Wire counts
+      --  may exceed the number of addresses returned, but the packet bounds
+      --  every record and its data.
       Total_Records := Answer_Count + Authority_Count + Additional_Count;
       for Record_Index in 1 .. Total_Records loop
-         Owner := Decode_Name (Packet, Position, Next);
-         Position := Next;
-         if Position + 9 > Packet'Last then
-            raise Malformed_Response with "truncated DNS resource record";
+         if Record_Index <= Answer_Count then
+            if Record_Index > Max_Wire_Records or else Position > Max_TCP_Packet_Length then
+               raise Resolution_Failed with "DNS response exceeds parser record capacity";
+            end if;
+            Answer_Offsets (Record_Index) := Position;
          end if;
-         Kind := U16_At (Packet, Position);
-         Class := U16_At (Packet, Position + 2);
-         TTL := U32_At (Packet, Position + 4);
-         Data_Length := U16_At (Packet, Position + 8);
-         Data_Start := Position + 10;
-         if Data_Length > Packet'Length
-           or else Data_Start > Packet'Last + 1
-           or else Data_Start + Data_Length > Packet'Last + 1
-         then
-            raise Malformed_Response with "DNS record data exceeds packet";
+         Read_Record;
+         if Record_Index <= Answer_Count then
+            Answer_Hashes (Record_Index) := Name_Hash (Owner);
          end if;
 
-         if Record_Index <= Answer_Count and then Class = Class_IN then
-            if Kind = Type_A and then Data_Length = 4 then
-               if Record_Count < Max_Records then
-                  Record_Count := Record_Count + 1;
-                  Records (Record_Count).Owner := Owner;
-                  Records (Record_Count).Kind := Kind;
-                  Records (Record_Count).TTL := TTL;
-                  Records (Record_Count).Address.Family := Sockets.IPv4;
-                  for Index in 1 .. 4 loop
-                     Records (Record_Count).Address.Bytes (Index) := Packet (Data_Start + Index - 1);
-                  end loop;
+         if Record_Index <= Answer_Count and then Class = Class_IN and then Kind = Type_CNAME then
+            declare
+               Ignored : Natural;
+               Target  : constant Name_Buffer := Decode_Name (Packet, Data_Start, Ignored);
+               pragma Unreferenced (Target);
+            begin
+               if Ignored > Data_Start + Data_Length then
+                  raise Malformed_Response with "CNAME data exceeds resource record";
                end if;
-            elsif Kind = Type_AAAA and then Data_Length = 16 then
-               if Record_Count < Max_Records then
-                  Record_Count := Record_Count + 1;
-                  Records (Record_Count).Owner := Owner;
-                  Records (Record_Count).Kind := Kind;
-                  Records (Record_Count).TTL := TTL;
-                  Records (Record_Count).Address.Family := Sockets.IPv6;
-                  for Index in 1 .. 16 loop
-                     Records (Record_Count).Address.Bytes (Index) := Packet (Data_Start + Index - 1);
-                  end loop;
-               end if;
-            elsif Kind = Type_CNAME then
-               if Record_Count < Max_Records then
-                  declare
-                     Ignored : Natural;
-                     Target  : constant Name_Buffer := Decode_Name (Packet, Data_Start, Ignored);
-                  begin
-                     if Ignored > Data_Start + Data_Length then
-                        raise Malformed_Response with "CNAME data exceeds resource record";
-                     end if;
-                     Record_Count := Record_Count + 1;
-                     Records (Record_Count).Owner := Owner;
-                     Records (Record_Count).Kind := Kind;
-                     Records (Record_Count).TTL := TTL;
-                     Records (Record_Count).Target := Target;
-                  end;
-               end if;
-            end if;
+            end;
          elsif Record_Index > Answer_Count
            and then Record_Index <= Answer_Count + Authority_Count
            and then Kind = Type_SOA
@@ -636,24 +628,42 @@ package body Flyology.IO.DNS is
                end if;
             end;
          end if;
-         Position := Data_Start + Data_Length;
       end loop;
 
       if Result.Outcome in Not_Found | Server_Failure then
          return Result;
       end if;
 
-      --  Follow only owner-matching CNAMEs and cap the walk independently of
-      --  packet compression hops. This rejects cyclic alias graphs without
-      --  allowing unrelated additional records to influence the result.
+      --  An answer may precede the CNAME that makes its owner relevant, or
+      --  follow many unrelated records. Revisit only candidate owner hashes
+      --  on each alias hop, then verify the full name before using a record.
       for Hop in 0 .. 15 loop
          Advanced := False;
-         for Index in 1 .. Record_Count loop
-            if Records (Index).Kind = Expected_Kind and then Same_Name (Records (Index).Owner, Current) then
-               if Result.Address_Count < Max_Addresses then
-                  Result.Address_Count := Result.Address_Count + 1;
-                  Result.Addresses (Result.Address_Count) := Records (Index).Address;
-                  Minimum_TTL := Natural'Min (Minimum_TTL, Records (Index).TTL);
+         Current_Hash := Name_Hash (Current);
+         for Record_Index in 1 .. Answer_Count loop
+            if Answer_Hashes (Record_Index) = Current_Hash then
+               Position := Answer_Offsets (Record_Index);
+               Read_Record;
+               if Class = Class_IN and then Same_Name (Owner, Current) then
+                  if Kind = Expected_Kind
+                    and then ((Kind = Type_A and then Data_Length = 4)
+                              or else (Kind = Type_AAAA and then Data_Length = 16))
+                  then
+                     if Result.Address_Count < Max_Addresses then
+                        Result.Address_Count := Result.Address_Count + 1;
+                        Result.Addresses (Result.Address_Count).Family :=
+                          (if Kind = Type_A then Sockets.IPv4 else Sockets.IPv6);
+                        for Index in 1 .. Data_Length loop
+                           Result.Addresses (Result.Address_Count).Bytes (Index) :=
+                             Packet (Data_Start + Index - 1);
+                        end loop;
+                        Minimum_TTL := Natural'Min (Minimum_TTL, TTL);
+                     end if;
+                  elsif Kind = Type_CNAME and then not Advanced then
+                     Alias_Target := Decode_Name (Packet, Data_Start, Next);
+                     Alias_TTL := TTL;
+                     Advanced := True;
+                  end if;
                end if;
             end if;
          end loop;
@@ -663,15 +673,9 @@ package body Flyology.IO.DNS is
             Result.TTL := (if Minimum_TTL = Natural'Last then 0 else Minimum_TTL);
             return Result;
          end if;
-         for Index in 1 .. Record_Count loop
-            if Records (Index).Kind = Type_CNAME and then Same_Name (Records (Index).Owner, Current) then
-               Current := Records (Index).Target;
-               Minimum_TTL := Natural'Min (Minimum_TTL, Records (Index).TTL);
-               Advanced := True;
-               exit;
-            end if;
-         end loop;
          exit when not Advanced;
+         Current := Alias_Target;
+         Minimum_TTL := Natural'Min (Minimum_TTL, Alias_TTL);
          if Hop = 15 then
             raise Malformed_Response with "DNS CNAME loop or chain too deep";
          end if;

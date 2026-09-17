@@ -448,23 +448,67 @@ procedure DNS_Smoke is
          end Put_Name;
 
          procedure Send_Response
-           (Name      : String;
-            IPv4      : String := "";
-            IPv6      : String := "";
-            CNAME     : String := "";
-            NXDOMAIN  : Boolean := False;
-            Truncated : Boolean := False;
-            Malformed : Boolean := False;
-            TTL       : Natural := 60;
-            Socket    : access Sockets.Socket_Type := null;
-            Datagram  : access Sockets.Socket_Type := null)
+           (Name             : String;
+            IPv4             : String := "";
+            IPv6             : String := "";
+            CNAME            : String := "";
+            NXDOMAIN         : Boolean := False;
+            Truncated        : Boolean := False;
+            Malformed        : Boolean := False;
+            Extra_Answers    : Natural := 0;
+            Bad_Extra_Length : Boolean := False;
+            Bad_Extra_CNAME  : Boolean := False;
+            Late_CNAME       : String := "";
+            TTL              : Natural := 60;
+            Socket           : access Sockets.Socket_Type := null;
+            Datagram         : access Sockets.Socket_Type := null)
          is
-            Response      : Streams.Stream_Element_Array (1 .. 512) := (others => 0);
+            Response      : Streams.Stream_Element_Array (1 .. 2_048) := (others => 0);
             Position      : Streams.Stream_Element_Offset := 1;
             Question_Last : Streams.Stream_Element_Offset := 13;
             Sent_Last     : Streams.Stream_Element_Offset;
             Address       : Sockets.IP_Address;
             Destination   : constant Sockets.Endpoint := Peer;
+
+            procedure Append_Answers is
+               Length_Position : Streams.Stream_Element_Offset;
+               Data_Start      : Streams.Stream_Element_Offset;
+            begin
+               for Index in 1 .. Extra_Answers loop
+                  if Late_CNAME'Length > 0 and then Index < Extra_Answers then
+                     Put_Name (Response, Position, Late_CNAME);
+                  else
+                     Response (Position) := 16#C0#;
+                     Response (Position + 1) := 12;
+                     Position := Position + 2;
+                  end if;
+                  if (Late_CNAME'Length > 0 or else Bad_Extra_CNAME) and then Index = Extra_Answers then
+                     Put_U16 (Response, Position, 5);
+                  else
+                     Put_U16 (Response, Position, 1);
+                  end if;
+                  Put_U16 (Response, Position, 1);
+                  Put_U32 (Response, Position, TTL);
+                  if Late_CNAME'Length > 0 and then Index = Extra_Answers then
+                     Length_Position := Position;
+                     Position := Position + 2;
+                     Data_Start := Position;
+                     Put_Name (Response, Position, Late_CNAME);
+                     Response (Length_Position) := 0;
+                     Response (Length_Position + 1) := Streams.Stream_Element (Position - Data_Start);
+                  elsif Bad_Extra_CNAME and then Index = Extra_Answers then
+                     Put_U16 (Response, Position, 2);
+                     Response (Position .. Position + 1) := (16#FF#, 16#FF#);
+                     Position := Position + 2;
+                  else
+                     Put_U16
+                       (Response, Position,
+                        (if Bad_Extra_Length and then Index = Extra_Answers then 16 else 4));
+                     Response (Position .. Position + 3) := (192, 0, 2, 200);
+                     Position := Position + 4;
+                  end if;
+               end loop;
+            end Append_Answers;
          begin
             while Query (Question_Last) /= 0 loop
                Question_Last := Question_Last + 1 + Streams.Stream_Element_Offset (Query (Question_Last));
@@ -475,13 +519,15 @@ procedure DNS_Smoke is
             Put_U16
               (Response, Position, (if Truncated then 16#8380# elsif NXDOMAIN then 16#8183# else 16#8180#));
             Put_U16 (Response, Position, 1);
-            Put_U16 (Response, Position, (if Truncated or else NXDOMAIN then 0 else 1));
+            Put_U16 (Response, Position, (if Truncated or else NXDOMAIN then 0 else 1 + Extra_Answers));
             Put_U16 (Response, Position, 0);
             Put_U16 (Response, Position, 0);
             Response (Position .. Position + Question_Last - 13) := Query (13 .. Question_Last);
             Position := Position + Question_Last - 12;
             if not Truncated and then not NXDOMAIN then
-               if Malformed then
+               if Late_CNAME'Length > 0 then
+                  Put_Name (Response, Position, Late_CNAME);
+               elsif Malformed then
                   Response (Position) := 16#C0#;
                   Response (Position + 1) := Streams.Stream_Element (Position - 1);
                   Position := Position + 2;
@@ -525,6 +571,7 @@ procedure DNS_Smoke is
                   end if;
                end if;
             end if;
+            Append_Answers;
             if Socket = null then
                if Datagram = null then
                   Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent_Last, Destination);
@@ -560,6 +607,17 @@ procedure DNS_Smoke is
                if Name = "a.test" then
                   Control.A_Query;
                   Send_Response (Name, IPv4 => "192.0.2.1");
+               elsif Name = "many-answers.test" then
+                  Send_Response (Name, IPv4 => "192.0.2.10", Extra_Answers => 32);
+               elsif Name = "bad-surplus.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.13", Extra_Answers => 32, Bad_Extra_Length => True);
+               elsif Name = "late-alias.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.25", Extra_Answers => 32, Late_CNAME => "target-late.test");
+               elsif Name = "bad-surplus-cname.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.14", Extra_Answers => 32, Bad_Extra_CNAME => True);
                elsif Name = "default-deadline.test" then
                   delay 0.05;
                   Send_Response (Name, IPv4 => "192.0.2.179");
@@ -604,7 +662,7 @@ procedure DNS_Smoke is
                   if Scoped_Retry_Count > 1 then
                      Send_Response (Name, IPv4 => "198.51.100.178");
                   end if;
-               elsif Name = "tcp.test" then
+               elsif Name in "tcp.test" | "many-tcp.test" then
                   Send_Response (Name, Truncated => True);
                   declare
                      Connection : aliased Sockets.Socket_Type;
@@ -625,7 +683,11 @@ procedure DNS_Smoke is
                         Sockets.Receive_Socket
                           (Connection, Query (1 .. Streams.Stream_Element_Offset (Length)), TCP_Last);
                         Last := Streams.Stream_Element_Offset (Length);
-                        Send_Response (Name, IPv4 => "198.51.100.9", Socket => Connection'Access);
+                        Send_Response
+                          (Name,
+                           IPv4          => "198.51.100.9",
+                           Extra_Answers => (if Name = "many-tcp.test" then 32 else 0),
+                           Socket        => Connection'Access);
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
@@ -872,6 +934,26 @@ procedure DNS_Smoke is
             end;
          end Expect;
 
+         procedure Expect_Many (Name, First_Address : String) is
+         begin
+            Set_Stage ("many records " & Name);
+            declare
+               Values : constant DNS.Address_Array :=
+                 DNS.Resolve_Using
+                   (Name,
+                    Servers,
+                    DNS.IPv4_Only,
+                    Timeout        => Operation_Timeout,
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               OK :=
+                 OK
+                 and then Values'Length = 16
+                 and then Sockets.Image (Values (Values'First)) = First_Address;
+            end;
+         end Expect_Many;
+
          procedure Expect_IPv6 (Name, Address : String) is
          begin
             Set_Stage ("IPv6 " & Name);
@@ -942,6 +1024,59 @@ procedure DNS_Smoke is
                     and then Values'Length = 1
                     and then Sockets.Image (Values (Values'First)) = "192.0.2.179";
                end;
+            end;
+
+            Set_Stage ("scoped many UDP answers");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "many-answers.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts => 1);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 16
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.10";
+               end;
+            end;
+
+            Set_Stage ("scoped malformed surplus");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "bad-surplus.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts => 1);
+               Raised    : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Malformed_Response =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
             end;
 
             Set_Stage ("scoped UDP and hidden child");
@@ -1454,6 +1589,11 @@ procedure DNS_Smoke is
          Expect ("a.test", "192.0.2.1");
          Expect ("a.test", "192.0.2.1");
          OK := OK and then Control.A_Queries = 1;
+         Expect_Many ("many-answers.test", "192.0.2.10");
+         Expect_Many ("late-alias.test", "192.0.2.25");
+         Expect_Malformed ("bad-surplus.test");
+         Expect_Malformed ("bad-surplus-cname.test");
+         Expect_Many ("many-tcp.test", "198.51.100.9");
          Expect_IPv6 ("v6.test", "2001:db8::5");
          Expect ("target.test", "203.0.113.7");
          Expect ("alias.test", "203.0.113.7");

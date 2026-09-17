@@ -385,6 +385,42 @@ procedure DNS_Parser_Matrix is
       Check (Value_Of (Buffer, Last), Malformed, "CNAME target label is a bare name separator");
    end Check_Record_Boundaries;
 
+   procedure Check_Surplus_Records is
+      Buffer : Wire_Buffer := (others => 0);
+      Last   : Natural;
+      Count  : Natural;
+   begin
+      for Section in 1 .. 3 loop
+         Start_Response
+           (Buffer,
+            Last,
+            Answers     => (if Section = 1 then 33 else 1),
+            Authorities => (if Section = 2 then 33 else 0),
+            Additionals => (if Section = 3 then 33 else 0));
+         Count := (if Section = 1 then 33 else 34);
+         for Index in 1 .. Count loop
+            Put_Record_Header (Buffer, Last, Kind => 1, Data_Length => 4);
+            for Octet of Packet'[192, 0, 2, 1] loop
+               Put (Buffer, Last, Natural (Octet));
+            end loop;
+         end loop;
+         Check (Value_Of (Buffer, Last), Accepted, "surplus records" & Section'Image);
+         Buffer (Last - 4) := 16;
+         Check (Value_Of (Buffer, Last), Malformed, "bad surplus length" & Section'Image);
+      end loop;
+
+      Start_Response (Buffer, Last, Answers => 33);
+      for Index in 1 .. 32 loop
+         Put_Record_Header (Buffer, Last, Kind => 1, Data_Length => 4);
+         for Octet of Packet'[192, 0, 2, 1] loop
+            Put (Buffer, Last, Natural (Octet));
+         end loop;
+      end loop;
+      Put_Record_Header (Buffer, Last, Kind => 5, Data_Length => 2);
+      Put_U16 (Buffer, Last, 16#FFFF#);
+      Check (Value_Of (Buffer, Last), Malformed, "bad surplus CNAME target");
+   end Check_Surplus_Records;
+
    procedure Check_Compression_And_Name_Boundaries is
       Buffer   : Wire_Buffer := (others => 0);
       Last     : Natural;
@@ -517,6 +553,7 @@ begin
    Check (Base, Accepted, "base A response");
    Check_Header_And_Question_Boundaries;
    Check_Record_Boundaries;
+   Check_Surplus_Records;
    Check_Compression_And_Name_Boundaries;
    Check_CNAME_Depth;
    Check_Deterministic_Perturbations;
