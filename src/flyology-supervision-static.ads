@@ -198,6 +198,7 @@ private
    type Snapshot_Array is array (Child_Kind) of Child_Snapshot;
    type Boolean_Array is array (Child_Kind) of Boolean;
    type Time_Array is array (Child_Kind) of Ada.Real_Time.Time;
+   type Incident_Context_Array is array (Child_Kind) of Incident_Context;
    type Natural_Array is array (Child_Kind) of Natural;
    type Window_Array is array (Child_Kind) of Flyology.Supervision_Windows.History;
    type Termination_Array is array (Child_Kind) of Termination_Summary;
@@ -298,19 +299,28 @@ private
       procedure Advance_Stop_Order;
       procedure Advance_Recovery_Stop_Order;
       procedure Advance_Recovery_Start_Order;
+      procedure Dispatch_Pending_Failure;
+      procedure Advance_Repeated_Attempt (Context : in out Incident_Context; Exhausted : out Boolean);
+      procedure Dispatch_Failure
+        (Child     : Child_Kind;
+         Incident  : Incident_Context;
+         Now       : Ada.Real_Time.Time;
+         Failed_At : Ada.Real_Time.Time;
+         Queued    : Boolean);
       procedure Compute_Affected (Trigger : Child_Kind; Impact : Restart_Impact; Result : out Boolean_Array);
       procedure Begin_Recovery
         (Trigger     : Child_Kind;
          Termination : Termination_Summary;
          Incident    : Incident_Context;
-         Now         : Ada.Real_Time.Time);
+         Now         : Ada.Real_Time.Time;
+         Failed_At   : Ada.Real_Time.Time);
       procedure Classify_Restart
-        (Child           : Child_Kind;
-         Incident        : Incident_Context;
-         Now             : Ada.Real_Time.Time;
-         Minimum_Backoff : Ada.Real_Time.Time_Span;
-         Admitted        : out Boolean;
-         Backoff         : out Ada.Real_Time.Time_Span);
+        (Child     : Child_Kind;
+         Incident  : Incident_Context;
+         Now       : Ada.Real_Time.Time;
+         Failed_At : Ada.Real_Time.Time;
+         Admitted  : out Boolean;
+         Backoff   : out Ada.Real_Time.Time_Span);
       procedure Record_Restart
         (Child    : Child_Kind;
          Incident : Incident_Context;
@@ -349,6 +359,9 @@ private
       Total_Used               : Natural_Array := (others => 0);
       Consecutive              : Natural_Array := (others => 0);
       Recovery_Affected        : Boolean_Array := (others => False);
+      Pending_Failure          : Boolean_Array := (others => False);
+      Pending_Incident         : Incident_Context_Array;
+      Pending_At               : Time_Array := (others => Ada.Real_Time.Time_First);
       Recovery_Trigger         : Child_Kind := Child_Kind'First;
       Recovery_Stop_Position   : Natural := 0;
       Recovery_Start_Position  : Natural := 0;

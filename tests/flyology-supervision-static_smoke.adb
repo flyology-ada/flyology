@@ -1027,11 +1027,13 @@ begin
 
       Deadline         : constant Ada.Real_Time.Time :=
         Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
-      Events           : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Events           : Flyology.Supervision.Supervisor_Event_Array (1 .. 128);
       Cursor           : Flyology.Supervision.Event_Sequence := 0;
       Count            : Natural;
       Dropped          : Flyology.Supervision.Event_Sequence;
       Pending_Incident : Flyology.Supervision.Incident_Id :=
+        Flyology.Supervision.Incident_Id'First;
+      Second_Incident  : Flyology.Supervision.Incident_Id :=
         Flyology.Supervision.Incident_Id'First;
       Saw_Pending      : Boolean := False;
    begin
@@ -1076,10 +1078,19 @@ begin
         (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
       Flyology.Task_Lifecycle_Testing.Release
         (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
-      Owner.Join;
-      pragma Assert (Result.Outcome = Flyology.Supervision.Failure_Escalated);
-      pragma Assert (Result.Child = Backoff_Id (Backoff_Second));
-      pragma Assert (Flyology.Supervision.Active (Result.Incident));
+      loop
+         exit when
+           Backoff_Escalating_Supervisors.Current (Item, Backoff_First).Ready
+           and then Backoff_Escalating_Supervisors.Current (Item, Backoff_Second).Ready
+           and then Backoff_Escalating_Supervisors.Current (Item, Backoff_First).Generation = 2
+           and then Backoff_Escalating_Supervisors.Current (Item, Backoff_Second).Generation = 2;
+         if Ada.Real_Time.Clock >= Deadline then
+            Backoff_Escalating_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error with "non-isolated pending child did not recover";
+         end if;
+         delay 0.001;
+      end loop;
       Backoff_Escalating_Supervisors.Read_Events
         (Item, Cursor, Events, Count, Dropped);
       pragma Assert (Dropped = 0);
@@ -1090,13 +1101,19 @@ begin
             Pending_Incident :=
               Flyology.Supervision.Incident (Events (Index).Incident);
             Saw_Pending := True;
+         elsif Events (Index).Kind = Flyology.Supervision.Restart_Admitted
+           and then Events (Index).Child = Backoff_Id (Backoff_Second)
+         then
+            Second_Incident :=
+              Flyology.Supervision.Incident (Events (Index).Incident);
          end if;
       end loop;
       pragma Assert (Saw_Pending);
-      pragma
-        Assert
-          (Flyology.Supervision.Incident (Result.Incident)
-             /= Pending_Incident);
+      pragma Assert (Second_Incident /= Flyology.Supervision.Incident_Id'First);
+      pragma Assert (Second_Incident /= Pending_Incident);
+      Backoff_Escalating_Supervisors.Request_Shutdown (Item);
+      Owner.Join;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
    end;
 
    declare
@@ -1390,7 +1407,7 @@ begin
       pragma
         Assert
           (Backoff_Incident_Supervisors.Current (Item, Backoff_Second).State
-             = Flyology.Supervision.Backing_Off);
+             = Flyology.Supervision.Terminated);
       Flyology.Task_Lifecycle_Testing.Release
         (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
 
@@ -1536,7 +1553,7 @@ begin
       pragma
         Assert
           (Backoff_Supervisors.Current (Item, Backoff_Second).State
-             = Flyology.Supervision.Backing_Off);
+             = Flyology.Supervision.Terminated);
       Flyology.Task_Lifecycle_Testing.Release
         (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
       loop
@@ -1662,11 +1679,11 @@ begin
       select
          Owner.Join;
       or
-         delay 0.500;
+         delay 2.000;
          Backoff_Deadline_Supervisors.Request_Shutdown (Item);
          Owner.Join;
          raise Program_Error
-           with "merged backoff bypassed child recovery deadline";
+           with "queued backoff bypassed child recovery deadline";
       end select;
       pragma Assert (Result.Outcome = Flyology.Supervision.Recovery_Exhausted);
       pragma Assert (Result.Child = Backoff_Id (Backoff_Second));

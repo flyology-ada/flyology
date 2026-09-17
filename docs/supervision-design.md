@@ -594,6 +594,15 @@ own termination. Once another child's incident selects it as a cohort member
 or dependent, the coordinated transaction reconstructs it and therefore
 requires `Restart_Safe`.
 
+If an unrelated child terminates while a recovery is stopping or starting,
+the static supervisor retains its termination and incident in a bounded
+per-child pending slot. Once the active transaction finishes, it considers
+pending children in topological start order and applies each child's own
+restart kind and impact. A new recovery excludes other pending children until
+their decisions are made. The same rule covers recovery backoff. A failing
+prerequisite of an affected child still escalates: that dependent cannot
+finish its current restart while the prerequisite is down.
+
 `Restart` and `Report_Unhealthy` are exact-generation commands. They are
 accepted only for a live ready generation owned by that controller. Manual
 restart additionally requires a restart-safe local impact and a policy other
