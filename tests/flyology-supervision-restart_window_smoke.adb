@@ -30,7 +30,10 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
       Starts : Generation_Counter;
    end record;
 
-   procedure Execute_Static (Context : in out Static_Context; Control : not null access Generation_Control) is
+   procedure Execute_Static
+     (Context : in out Static_Context;
+      Control : not null access Generation_Control)
+   is
       Attempt : Positive;
    begin
       Context.Starts.Begin_Generation (Attempt);
@@ -42,7 +45,16 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
    end Execute_Static;
 
    package Static_Child is new
-     Children (Application_Context => Static_Context, Execute => Execute_Static, Task_Model => Native_Task);
+     Children
+       (Application_Context => Static_Context,
+        Execute             => Execute_Static,
+        Task_Model          => Native_Task);
+
+   package Lightweight_Static_Child is new
+     Children
+       (Application_Context => Static_Context,
+        Execute             => Execute_Static,
+        Task_Model          => Lightweight_Task);
 
    type Static_Child_Kind is (Service);
 
@@ -70,7 +82,9 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
       return 16_900_001;
    end Static_Id;
 
-   function Static_Specification (Child : Static_Child_Kind) return Child_Specification is
+   function Static_Specification
+     (Child : Static_Child_Kind) return Child_Specification
+   is
       pragma Unreferenced (Child);
    begin
       return
@@ -85,7 +99,27 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
          Group             => 0);
    end Static_Specification;
 
-   function No_Static_Relationship (Left, Right : Static_Child_Kind) return Boolean is
+   function Lightweight_Static_Specification
+     (Child : Static_Child_Kind) return Child_Specification
+   is
+      Result : Child_Specification := Static_Specification (Child);
+   begin
+      Result.Task_Model := Lightweight_Task;
+      return Result;
+   end Lightweight_Static_Specification;
+
+   function Child_Burst_Specification
+     (Child : Static_Child_Kind) return Child_Specification
+   is
+      Result : Child_Specification := Static_Specification (Child);
+   begin
+      Result.Recovery := Recovery;
+      return Result;
+   end Child_Burst_Specification;
+
+   function No_Static_Relationship
+     (Left, Right : Static_Child_Kind) return Boolean
+   is
       pragma Unreferenced (Left, Right);
    begin
       return False;
@@ -102,6 +136,17 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
       Static_Child.Run (Context, Control, Result);
    end Run_Static_Generation;
 
+   procedure Run_Lightweight_Static_Generation
+     (Context : aliased in out Static_Context;
+      Child   : Static_Child_Kind;
+      Control : aliased in out Generation_Control;
+      Result  : out Generation_Result)
+   is
+      pragma Unreferenced (Child);
+   begin
+      Lightweight_Static_Child.Run (Context, Control, Result);
+   end Run_Lightweight_Static_Generation;
+
    package Static_Supervisor is new
      Static
        (Child_Kind          => Static_Child_Kind,
@@ -113,6 +158,28 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
         Run_One_Generation  => Run_Static_Generation,
         Subtree_Recovery    => Recovery);
 
+   package Child_Burst_Static_Supervisor is new
+     Static
+       (Child_Kind          => Static_Child_Kind,
+        Application_Context => Static_Context,
+        Logical_Id          => Static_Id,
+        Specification       => Child_Burst_Specification,
+        Depends_On          => No_Static_Relationship,
+        Cohort_Member       => No_Static_Relationship,
+        Run_One_Generation  => Run_Static_Generation,
+        Subtree_Recovery    => Child_Recovery);
+
+   package Lightweight_Static_Supervisor is new
+     Static
+       (Child_Kind          => Static_Child_Kind,
+        Application_Context => Static_Context,
+        Logical_Id          => Static_Id,
+        Specification       => Lightweight_Static_Specification,
+        Depends_On          => No_Static_Relationship,
+        Cohort_Member       => No_Static_Relationship,
+        Run_One_Generation  => Run_Lightweight_Static_Generation,
+        Subtree_Recovery    => Recovery);
+
    type Family_Context is limited record
       Starts : Generation_Counter;
    end record;
@@ -120,7 +187,9 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
    type Family_Request is (Only_Child);
 
    procedure Execute_Family
-     (Context : in out Family_Context; Input : Family_Request; Control : not null access Generation_Control)
+     (Context : in out Family_Context;
+      Input   : Family_Request;
+      Control : not null access Generation_Control)
    is
       pragma Unreferenced (Input);
       Attempt : Positive;
@@ -139,6 +208,13 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
         Application_Context => Family_Context,
         Execute             => Execute_Family,
         Task_Model          => Native_Task);
+
+   package Lightweight_Family_Child is new
+     Input_Children
+       (Input_Type          => Family_Request,
+        Application_Context => Family_Context,
+        Execute             => Execute_Family,
+        Task_Model          => Lightweight_Task);
 
    Family_Recovery : constant Recovery_Limits :=
      (Burst_Attempts    => 3,
@@ -160,6 +236,9 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
       Has_Group         => False,
       Group             => 0);
 
+   Lightweight_Family_Specification : constant Child_Specification :=
+     (Family_Specification with delta Task_Model => Lightweight_Task);
+
    package Family_Supervisor is new
      Families
        (Request             => Family_Request,
@@ -167,6 +246,15 @@ procedure Flyology.Supervision.Restart_Window_Smoke is
         Run_One_Generation  => Family_Child.Run,
         Policy              => Family_Specification,
         First_Child_Id      => 16_900_002,
+        Maximum_Children    => 1);
+
+   package Lightweight_Family_Supervisor is new
+     Families
+       (Request             => Family_Request,
+        Application_Context => Family_Context,
+        Run_One_Generation  => Lightweight_Family_Child.Run,
+        Policy              => Lightweight_Family_Specification,
+        First_Child_Id      => 16_900_003,
         Maximum_Children    => 1);
 
 begin
@@ -189,13 +277,15 @@ begin
          accept Join;
       end Owner;
    begin
-      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Static_Generation_Starting);
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Static_Generation_Starting);
       Owner.Start;
       for Expected in 1 .. 4 loop
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Static_Generation_Starting);
          declare
-            Snapshot : constant Child_Snapshot := Static_Supervisor.Current (Item, Service);
+            Snapshot : constant Child_Snapshot :=
+              Static_Supervisor.Current (Item, Service);
          begin
             Flyology.Task_Lifecycle_Testing.Arm
               (Flyology.Task_Lifecycle_Testing.Static_Generation_Terminated);
@@ -221,7 +311,9 @@ begin
       pragma Assert (Context.Starts.Current = 4);
       pragma Assert (Result.Outcome = Recovery_Exhausted);
       pragma Assert (Result.Termination.Kind = Policy_Exhaustion);
-      pragma Assert (Natural (Static_Supervisor.Current (Item, Service).Attempts) = 3);
+      pragma
+        Assert
+          (Natural (Static_Supervisor.Current (Item, Service).Attempts) = 3);
    end;
 
    Flyology.Task_Lifecycle_Testing.Reset;
@@ -245,7 +337,8 @@ begin
 
       Handle : Child_Handle;
    begin
-      Flyology.Task_Lifecycle_Testing.Arm (Flyology.Task_Lifecycle_Testing.Family_Generation_Starting);
+      Flyology.Task_Lifecycle_Testing.Arm
+        (Flyology.Task_Lifecycle_Testing.Family_Generation_Starting);
       Owner.Start;
       loop
          exit when Family_Supervisor.Accepting (Item);
@@ -256,7 +349,8 @@ begin
          Flyology.Task_Lifecycle_Testing.Wait_Reached
            (Flyology.Task_Lifecycle_Testing.Family_Generation_Starting);
          declare
-            Snapshot : constant Child_Snapshot := Family_Supervisor.Current (Item, Child_Id (16_900_002));
+            Snapshot : constant Child_Snapshot :=
+              Family_Supervisor.Current (Item, Child_Id (16_900_002));
          begin
             Flyology.Task_Lifecycle_Testing.Arm
               (Flyology.Task_Lifecycle_Testing.Family_Generation_Terminated);
@@ -282,6 +376,82 @@ begin
       pragma Assert (Context.Starts.Current = 4);
       pragma Assert (Result.Outcome = Recovery_Exhausted);
       pragma Assert (Result.Termination.Kind = Policy_Exhaustion);
-      pragma Assert (Natural (Family_Supervisor.Current (Item, Child_Id (16_900_002)).Attempts) = 3);
+      pragma
+        Assert
+          (Natural
+             (Family_Supervisor.Current (Item, Child_Id (16_900_002)).Attempts)
+             = 3);
+   end;
+
+   --  The subtree allows ten attempts here, so the child limit of three must
+   --  be the account that ends this recovery.
+   Flyology.Task_Lifecycle_Testing.Reset;
+   declare
+      Context : aliased Static_Context;
+      Item    : aliased Child_Burst_Static_Supervisor.Supervisor;
+      Result  : Supervisor_Result;
+   begin
+      Child_Burst_Static_Supervisor.Run (Item, Context, Result);
+      pragma Assert (Context.Starts.Current = 4);
+      pragma Assert (Result.Outcome = Recovery_Exhausted);
+      pragma Assert (Result.Termination.Kind = Policy_Exhaustion);
+      pragma
+        Assert
+          (Natural
+             (Child_Burst_Static_Supervisor.Current (Item, Service).Attempts)
+             = 3);
+   end;
+
+   Flyology.Task_Lifecycle_Testing.Reset;
+   declare
+      Context : aliased Static_Context;
+      Item    : aliased Lightweight_Static_Supervisor.Supervisor;
+      Result  : Supervisor_Result;
+   begin
+      Lightweight_Static_Supervisor.Run (Item, Context, Result);
+      pragma Assert (Context.Starts.Current = 4);
+      pragma Assert (Result.Outcome = Recovery_Exhausted);
+      pragma
+        Assert
+          (Natural
+             (Lightweight_Static_Supervisor.Current (Item, Service).Attempts)
+             = 3);
+   end;
+
+   Flyology.Task_Lifecycle_Testing.Reset;
+   declare
+      Context : aliased Family_Context;
+      Item    : aliased Lightweight_Family_Supervisor.Family;
+      Result  : Supervisor_Result;
+      Handle  : Child_Handle;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Lightweight_Family_Supervisor.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+   begin
+      Owner.Start;
+      loop
+         exit when Lightweight_Family_Supervisor.Accepting (Item);
+         delay 0.001;
+      end loop;
+      Lightweight_Family_Supervisor.Start (Item, Only_Child, Handle);
+      Owner.Join;
+      pragma Assert (Context.Starts.Current = 4);
+      pragma Assert (Result.Outcome = Recovery_Exhausted);
+      pragma
+        Assert
+          (Natural
+             (Lightweight_Family_Supervisor.Current
+                (Item, Child_Id (16_900_003))
+                .Attempts)
+             = 3);
    end;
 end Flyology.Supervision.Restart_Window_Smoke;

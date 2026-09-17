@@ -617,6 +617,10 @@ Each node has fixed per-child and subtree accounts:
   state; and
 - an absolute recovery deadline inherited by descendants.
 
+Each account retains the most recent `Burst_Attempts` admission times. The
+storage bound comes from its configured recovery policy; an attempt expires
+from the burst decision exactly when its age reaches `Window`.
+
 One failure creates an `Incident_Id`. `Begin_Attempt` increments the shared
 attempt ordinal exactly once. The active `(Incident_Id, Attempt)` is passed into
 every cohort member and nested supervisor. Each node records that pair at most

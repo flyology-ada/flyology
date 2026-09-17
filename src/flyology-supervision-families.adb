@@ -259,6 +259,9 @@ package body Flyology.Supervision.Families is
          if Run_Used then
             raise Program_Error with "supervision family is one-shot";
          end if;
+         for Slot in Slot_Index loop
+            Flyology.Supervision_Windows.Initialize (Windows (Slot), Policy.Recovery.Burst_Attempts);
+         end loop;
          Run_Used := True;
          Configured := True;
          Family_State.Identity := Identity;
@@ -384,10 +387,9 @@ package body Flyology.Supervision.Families is
          Snapshots (Selected).Attempts := 0;
          Snapshots (Selected).Backoff := Ada.Real_Time.Time_Span_Zero;
          Total_Used (Selected) := 0;
-         Window_Used (Selected) := 0;
+         Flyology.Supervision_Windows.Reset (Windows (Selected));
          Consecutive (Selected) := 0;
          Incident_Since (Selected) := Ada.Real_Time.Time_First;
-         Window_Since (Selected) := Ada.Real_Time.Time_First;
          Ready_Since (Selected) := Ada.Real_Time.Time_First;
          Last_Incident (Selected) := Incident_Id'First;
          Last_Attempt (Selected) := Incident_Attempt'First;
@@ -488,10 +490,9 @@ package body Flyology.Supervision.Families is
          Snapshots (Selected).Attempts := 0;
          Snapshots (Selected).Backoff := Ada.Real_Time.Time_Span_Zero;
          Total_Used (Selected) := 0;
-         Window_Used (Selected) := 0;
+         Flyology.Supervision_Windows.Reset (Windows (Selected));
          Consecutive (Selected) := 0;
          Incident_Since (Selected) := Ada.Real_Time.Time_First;
-         Window_Since (Selected) := Ada.Real_Time.Time_First;
          Ready_Since (Selected) := Ada.Real_Time.Time_First;
          Last_Incident (Selected) := Incident_Id'First;
          Last_Attempt (Selected) := Incident_Attempt'First;
@@ -1004,21 +1005,17 @@ package body Flyology.Supervision.Families is
            and then Now - Ready_Since (Slot) >= Policy.Recovery.Stability_Reset
          then
             Total_Used (Slot) := 0;
-            Window_Used (Slot) := 0;
+            Flyology.Supervision_Windows.Reset (Windows (Slot));
             Consecutive (Slot) := 0;
-            Window_Since (Slot) := Now;
             Incident_Since (Slot) := Now;
          end if;
          if not Has_Incident (Slot) or else Last_Incident (Slot) /= Flyology.Supervision.Incident (Cascade)
          then
             Incident_Since (Slot) := Now;
          end if;
-         if Window_Used (Slot) = 0 or else Now - Window_Since (Slot) >= Policy.Recovery.Window then
-            Window_Since (Slot) := Now;
-            Window_Used (Slot) := 0;
-         end if;
          if Total_Used (Slot) >= Policy.Recovery.Total_Attempts
-           or else Window_Used (Slot) >= Policy.Recovery.Burst_Attempts
+           or else not Flyology.Supervision_Windows.Has_Capacity
+                         (Windows (Slot), Now, Policy.Recovery.Window, Policy.Recovery.Burst_Attempts)
            or else Now > Recovery_Deadline (Cascade)
          then
             Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
@@ -1050,7 +1047,7 @@ package body Flyology.Supervision.Families is
          end if;
 
          Total_Used (Slot) := Total_Used (Slot) + 1;
-         Window_Used (Slot) := Window_Used (Slot) + 1;
+         Flyology.Supervision_Windows.Record_Attempt (Windows (Slot), Now);
          Consecutive (Slot) := Consecutive (Slot) + 1;
          Last_Incident (Slot) := Flyology.Supervision.Incident (Cascade);
          Last_Attempt (Slot) := Attempt (Cascade);
