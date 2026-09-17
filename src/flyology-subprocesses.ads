@@ -309,7 +309,10 @@ package Flyology.Subprocesses is
 
    --  End ownership. Close first closes stdin, hard-terminates a running
    --  group, reaps the root, closes output pipes, and joins the native reaper.
-   --  Repeated calls are harmless.
+   --  If hard termination fails, Close raises promptly and retains the open
+   --  process owner and reaper so the caller can retry after the failure is
+   --  resolved. Repeated successful calls are harmless. Finalization still
+   --  waits for natural root exit when hard termination remains unavailable.
    --  @param Child Process owner to release
    --  @exception Process_Error Process cleanup or observation fails
    procedure Close (Child : in out Process);

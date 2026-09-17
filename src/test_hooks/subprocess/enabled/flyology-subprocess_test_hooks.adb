@@ -2,6 +2,8 @@ package body Flyology.Subprocess_Test_Hooks is
    use type Interfaces.C.int;
 
    protected Reap_Barrier is
+      procedure Set_Signal_Failure (Enabled : Boolean);
+      function Signal_Failure return Boolean;
       procedure Arm;
       procedure Reaped;
       entry Await_Reaped;
@@ -10,13 +12,22 @@ package body Flyology.Subprocess_Test_Hooks is
       procedure Note_Signal;
       function Signal_Count return Interfaces.C.int;
    private
-      Armed    : Boolean := False;
-      Observed : Boolean := False;
-      Unlocked : Boolean := False;
-      Count    : Interfaces.C.int := 0;
+      Armed       : Boolean := False;
+      Observed    : Boolean := False;
+      Unlocked    : Boolean := False;
+      Count       : Interfaces.C.int := 0;
+      Fail_Signal : Boolean := False;
    end Reap_Barrier;
 
    protected body Reap_Barrier is
+      procedure Set_Signal_Failure (Enabled : Boolean) is
+      begin
+         Fail_Signal := Enabled;
+      end Set_Signal_Failure;
+
+      function Signal_Failure return Boolean
+      is (Fail_Signal);
+
       procedure Arm is
       begin
          Armed := True;
@@ -61,6 +72,14 @@ package body Flyology.Subprocess_Test_Hooks is
 
    function Fail_Reaper_Allocation return Boolean
    is (Test_Fail_Reaper_Allocation /= 0);
+
+   function Fail_Group_Signal return Boolean
+   is (Reap_Barrier.Signal_Failure);
+
+   procedure Set_Fail_Group_Signal (Enabled : Interfaces.C.int) is
+   begin
+      Reap_Barrier.Set_Signal_Failure (Enabled /= 0);
+   end Set_Fail_Group_Signal;
 
    procedure After_Reap is
    begin

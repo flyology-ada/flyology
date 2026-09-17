@@ -36,6 +36,9 @@ procedure Subprocess_Smoke is
    procedure Set_Fail_Reaper_Allocation (Enabled : C.int);
    pragma Import (C, Set_Fail_Reaper_Allocation, "flyology_test_subprocess_set_fail_reaper_allocation");
 
+   procedure Set_Fail_Group_Signal (Enabled : C.int);
+   pragma Import (C, Set_Fail_Group_Signal, "flyology_test_subprocess_set_fail_group_signal");
+
    procedure Arm_Reap_Barrier;
    pragma Import (C, Arm_Reap_Barrier, "flyology_test_subprocess_arm_reap_barrier");
    procedure Await_Reap_Barrier;
@@ -357,6 +360,60 @@ procedure Subprocess_Smoke is
            (Status.Kind = Subprocesses.Signaled and then Status.Signal > 0,
             "hard stop was not signal-classified");
          Subprocesses.Close (Child);
+      end;
+
+      declare
+         Child   : Subprocesses.Process;
+         Before  : constant C.int := Open_FD_Count;
+         Raised  : Boolean := False;
+         Started : Ada.Real_Time.Time;
+      begin
+         Subprocesses.Spawn (Fixture_Command ("resistant"), Child);
+         Await_Ready (Child);
+         Set_Fail_Group_Signal (1);
+         Started := Ada.Real_Time.Clock;
+         begin
+            Subprocesses.Close (Child);
+         exception
+            when Subprocesses.Process_Error =>
+               Raised := True;
+         end;
+         Set_Fail_Group_Signal (0);
+         Assert (Raised, "Close did not report a failed hard kill");
+         Assert (Subprocesses.Is_Open (Child), "failed Close discarded a live reaper owner");
+         Assert
+           (Ada.Real_Time.Clock - Started < Ada.Real_Time.Seconds (1),
+            "failed Close waited for a still-running child");
+         Subprocesses.Close (Child);
+         Assert (not Subprocesses.Is_Open (Child), "Close retry retained process ownership");
+         Assert (Open_FD_Count = Before, "Close retry leaked process descriptors");
+      exception
+         when others =>
+            Set_Fail_Group_Signal (0);
+            raise;
+      end;
+
+      declare
+         Before  : constant C.int := Open_FD_Count;
+         Started : Ada.Real_Time.Time;
+      begin
+         declare
+            Child : Subprocesses.Process;
+         begin
+            Subprocesses.Spawn (Fixture_Command ("short-sleep"), Child);
+            Await_Ready (Child);
+            Set_Fail_Group_Signal (1);
+            Started := Ada.Real_Time.Clock;
+         end;
+         Set_Fail_Group_Signal (0);
+         Assert
+           (Ada.Real_Time.Clock - Started >= Ada.Real_Time.Milliseconds (100),
+            "finalization released the reaper before natural exit");
+         Assert (Open_FD_Count = Before, "failed-kill finalization leaked descriptors");
+      exception
+         when others =>
+            Set_Fail_Group_Signal (0);
+            raise;
       end;
 
       declare

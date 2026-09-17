@@ -12,6 +12,9 @@ private package Flyology.Subprocess_Test_Hooks is
    function Fail_Reaper_Allocation return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_subprocess_reaper";
 
+   function Fail_Group_Signal return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_subprocess_signal";
+
    procedure After_Reap
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_subprocess_after_reap";
    procedure Note_Group_Signal
