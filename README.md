@@ -2218,8 +2218,10 @@ search domains, `ndots`, attempt counts, timeouts, and rotation read from
 the kernel-completion backend reads the configuration. `Resolve` accepts an
 alternate configuration path for isolated deployments and tests; numeric
 IPv4 `address:port` and bracketed IPv6 `[address]:port` server entries are a
-Flyology extension. `Resolve_Using` accepts explicit numeric endpoints for
-split-DNS applications and deterministic tests.
+Flyology extension. IPv6 name servers may include a numeric scope or interface
+name, such as `fe80::1%en0` or `[fe80::1%en0]:5353`; invalid scopes are skipped
+like other invalid name-server entries. `Resolve_Using` accepts explicit numeric
+endpoints for split-DNS applications and deterministic tests.
 
 Scoped `Resolve` separates resolver configuration I/O from asynchronous name
 resolution. `Load_Configuration` synchronously reads and validates one bounded,

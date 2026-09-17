@@ -20,6 +20,7 @@ package body Flyology.IO.DNS is
    use type Streams.Stream_Element_Offset;
    use type Streams.Stream_Element;
    use type Sockets.Address_Family;
+   use type Sockets.Scope_ID;
    use type Flyology.IO.Files.File_Descriptor;
    use type Flyology.Operations.Driver_Event;
    use type Flyology.Operations.Terminal_Outcome;
@@ -36,6 +37,10 @@ package body Flyology.IO.DNS is
    Type_SOA             : constant Natural := 6;
    Type_AAAA            : constant Natural := 28;
    Class_IN             : constant Natural := 1;
+
+   --  if_nametoindex has the same fixed signature on Darwin and Linux.
+   function Interface_Index (Name : C.char_array) return C.unsigned
+   with Import, Convention => C, External_Name => "if_nametoindex";
 
    subtype Byte is U8.Unsigned_8;
    type Byte_Array is array (Natural range <>) of Byte;
@@ -823,6 +828,8 @@ package body Flyology.IO.DNS is
          Address_Last  : Natural := Text'Last;
          Port_First    : Natural := 0;
          Port          : Sockets.Port := DNS_Port;
+         Scope         : Sockets.Scope_ID := 0;
+         Zone_Marker   : Natural := 0;
       begin
          --  Bracketed IPv6 and IPv4 address:port are accepted as a Flyology
          --  extension so deterministic tests and isolated deployments need
@@ -850,13 +857,53 @@ package body Flyology.IO.DNS is
          if Port_First /= 0 then
             Port := Sockets.Port'Value (Text (Port_First .. Text'Last));
          end if;
+         for Index in Address_First .. Address_Last loop
+            if Text (Index) = '%' then
+               Zone_Marker := Index;
+               exit;
+            end if;
+         end loop;
+         if Zone_Marker /= 0 then
+            declare
+               Zone : constant String := Text (Zone_Marker + 1 .. Address_Last);
+            begin
+               if Zone'Length = 0
+                 or else Ada.Strings.Fixed.Count (Zone, "%") /= 0
+                 or else Ada.Strings.Fixed.Count (Zone, (1 => ASCII.NUL)) /= 0
+               then
+                  raise Constraint_Error;
+               end if;
+               if (for all Character_Of of Zone => Character_Of in '0' .. '9') then
+                  for Digit_Of of Zone loop
+                     declare
+                        Digit : constant Sockets.Scope_ID :=
+                          Sockets.Scope_ID (Character'Pos (Digit_Of) - Character'Pos ('0'));
+                     begin
+                        if Scope > (Sockets.Scope_ID'Last - Digit) / 10 then
+                           raise Constraint_Error;
+                        end if;
+                        Scope := Scope * 10 + Digit;
+                     end;
+                  end loop;
+               else
+                  Scope := Sockets.Scope_ID (Interface_Index (C.To_C (Zone)));
+               end if;
+               if Scope = 0 then
+                  raise Constraint_Error;
+               end if;
+            end;
+            Address_Last := Zone_Marker - 1;
+         end if;
          declare
             Address : constant Sockets.IP_Address :=
               Sockets.Parse_IP_Address (Text (Address_First .. Address_Last));
          begin
+            if Zone_Marker /= 0 and then Address.Family /= Sockets.IPv6 then
+               raise Constraint_Error;
+            end if;
             if Config.Server_Count < Max_Name_Servers then
                Config.Server_Count := Config.Server_Count + 1;
-               Config.Servers (Config.Server_Count) := Sockets.Network_Endpoint (Address, Port);
+               Config.Servers (Config.Server_Count) := Sockets.Network_Endpoint (Address, Port, Scope);
             end if;
          end;
       exception

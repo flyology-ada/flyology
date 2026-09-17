@@ -15,8 +15,12 @@ with Flyology.IO.Sockets;
 with Flyology.Operations;
 with Flyology.Operations.Drivers;
 with Flyology.Wake_Sources;
+with Interfaces.C;
 
 procedure DNS_Smoke is
+   function Interface_Index (Name : Interfaces.C.char_array) return Interfaces.C.unsigned
+   with Import, Convention => C, External_Name => "if_nametoindex";
+
    package DNS renames Flyology.IO.DNS;
    package Sockets renames Flyology.IO.Sockets;
    package Streams renames Ada.Streams;
@@ -31,6 +35,10 @@ procedure DNS_Smoke is
    use type Flyology.IO.Files.File_Descriptor;
    use type Operations.Driver_Event;
    use type Operations.Terminal_Outcome;
+   use type Interfaces.C.unsigned;
+   use type Sockets.Scope_ID;
+   use type Sockets.Address_Family;
+   use type Sockets.Port;
 
    type Parent_Phase is (Starting_DNS, Waiting_For_DNS, Cancelling_DNS);
    type DNS_Parent (Owner : not null access Operations.Completion_Set'Class) is
@@ -186,7 +194,11 @@ procedure DNS_Smoke is
             null;
       end Close_Quietly;
 
-      procedure Write_Config (Server : Sockets.Endpoint; Search : String := ""; Suffix : String := "") is
+      procedure Write_Config
+        (Server      : Sockets.Endpoint;
+         Search      : String := "";
+         Suffix      : String := "";
+         Server_Text : String := "") is
          File             : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
          Search_Directive : constant String :=
            (if Search'Length = 0 then "" else "search " & Search & ASCII.LF);
@@ -194,7 +206,7 @@ procedure DNS_Smoke is
            ASCII.HT
            & "nameserver"
            & ASCII.HT
-           & Sockets.Image (Server)
+           & (if Server_Text'Length = 0 then Sockets.Image (Server) else Server_Text)
            & ASCII.HT
            & ASCII.LF
            & Search_Directive
@@ -1878,6 +1890,58 @@ procedure DNS_Smoke is
          begin
             OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.53";
          end;
+         Set_Stage ("IPv6 nameserver scope");
+         declare
+            Interface_Name : constant String :=
+              (if Interface_Index (Interfaces.C.To_C ("lo0")) /= 0 then "lo0" else "lo");
+            Index          : constant Interfaces.C.unsigned :=
+              Interface_Index (Interfaces.C.To_C (Interface_Name));
+         begin
+            if Index = 0 then
+               raise Program_Error with "no loopback interface for DNS scope test";
+            end if;
+            Write_Config
+              (Server, Suffix => "-scope-name", Server_Text => "[fe80::1%" & Interface_Name & "]:5353");
+            Write_Config
+              (Server, Suffix => "-scope-bare", Server_Text => "fe80::1%" & Interface_Name);
+            Write_Config (Server, Suffix => "-scope-number", Server_Text => "[fe80::1%7]:5353");
+            Write_Config (Server, Suffix => "-scope-invalid", Server_Text => "[fe80::1%4294967296]:5353");
+            declare
+               Named  : constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-scope-name"));
+               Bare   : constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-scope-bare"));
+               Number : constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-scope-number"));
+               First  : constant Sockets.Endpoint := DNS.Testing.Configured_Server (Named, 1);
+               Plain  : constant Sockets.Endpoint := DNS.Testing.Configured_Server (Bare, 1);
+               Second : constant Sockets.Endpoint := DNS.Testing.Configured_Server (Number, 1);
+            begin
+               OK :=
+                 OK
+                 and then First.Family = Sockets.IPv6
+                 and then Sockets.Image (First.Address) = "fe80::1"
+                 and then First.Port = 5353
+                 and then First.Scope = Sockets.Scope_ID (Index)
+                 and then Plain.Family = Sockets.IPv6
+                 and then Plain.Port = 53
+                 and then Plain.Scope = Sockets.Scope_ID (Index)
+                 and then Second.Family = Sockets.IPv6
+                 and then Second.Scope = 7;
+            end;
+            begin
+               declare
+                  Ignored : constant DNS.Resolver_Configuration :=
+                    DNS.Load_Configuration (Config_Path (Server, "-scope-invalid"));
+                  pragma Unreferenced (Ignored);
+               begin
+                  OK := False;
+               end;
+            exception
+               when DNS.Resolution_Failed =>
+                  null;
+            end;
+         end;
          Set_Stage ("remaining search candidate");
          declare
             Values : constant DNS.Address_Array :=
@@ -2056,6 +2120,18 @@ procedure DNS_Smoke is
       end if;
       if Ada.Directories.Exists (Config_Path (Address, "-invalid-only")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-invalid-only"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-scope-name")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-scope-name"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-scope-bare")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-scope-bare"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-scope-number")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-scope-number"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-scope-invalid")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-scope-invalid"));
       end if;
       return Passed;
    end Run;
