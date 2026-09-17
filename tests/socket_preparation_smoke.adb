@@ -7,6 +7,7 @@ procedure Socket_Preparation_Smoke is
    package Sockets renames Flyology.IO.Sockets;
    use Ada.Streams;
    use type Sockets.Address_Family;
+   use type Sockets.Error_Type;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long_long;
 
@@ -57,14 +58,52 @@ procedure Socket_Preparation_Smoke is
 begin
    declare
       Left, Right : Sockets.Socket_Type;
+      Incoming    : Stream_Element_Array (Payload'Range);
+      Last        : Stream_Element_Offset;
+      Would_Block : Boolean := False;
    begin
       Sockets.Create_Socket_Pair (Left, Right);
       pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Left)) = 1);
       pragma Assert (FD_Is_Close_On_Exec (Sockets.Native_Descriptor (Right)) = 1);
       pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Left)) = 0);
       pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Right)) = 0);
+      Reset_Nonblocking_Setups;
+      Sockets.Send_Socket (Right, Payload, Last);
+      pragma Assert (Last = Payload'Last);
+      Sockets.Receive_Socket (Left, Incoming, Last);
+      pragma Assert (Last = Incoming'Last and then Incoming = Payload);
+      pragma Assert (Nonblocking_Setup_Count = 0);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Left)) = 0);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Right)) = 0);
+
+      Sockets.Prepare (Left);
+      begin
+         Sockets.Receive_Socket (Left, Incoming, Last);
+      exception
+         when E : Sockets.Socket_Error =>
+            Would_Block := Sockets.Resolve_Exception (E) = Sockets.Resource_Temporarily_Unavailable;
+      end;
+      pragma Assert (Would_Block);
+      pragma Assert (Nonblocking_Setup_Count = 1);
       Sockets.Close_Socket (Left);
       Sockets.Close_Socket (Right);
+   end;
+
+   declare
+      Listener, Connector : Sockets.Socket_Type;
+      Address             : Sockets.Endpoint;
+   begin
+      Sockets.Create_Socket (Listener, Sockets.IPv4, Sockets.Socket_Stream);
+      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Listen_Socket (Listener);
+      Address := Sockets.Get_Socket_Name (Listener);
+      Sockets.Create_Socket (Connector, Sockets.IPv4, Sockets.Socket_Stream);
+      Reset_Nonblocking_Setups;
+      Sockets.Connect_Socket (Connector, Address);
+      pragma Assert (Nonblocking_Setup_Count = 0);
+      pragma Assert (FD_Is_Nonblocking (Sockets.Native_Descriptor (Connector)) = 0);
+      Sockets.Close_Socket (Connector);
+      Sockets.Close_Socket (Listener);
    end;
 
    Sockets.Create_Socket (Server, Sockets.IPv4, Sockets.Socket_Datagram);

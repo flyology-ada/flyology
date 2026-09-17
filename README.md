@@ -1699,6 +1699,17 @@ uses host headers for address conversion, socket constants, variadic descriptor
 configuration, and `errno` capture; retry, timeout, cancellation, and exception
 policy remain in Ada.
 
+`Connect_Socket`, `Receive_Socket`, and `Send_Socket` issue their first syscall
+without preparing the descriptor. A lightweight task must call `Prepare` first,
+or otherwise ensure the descriptor is nonblocking. A blocking syscall can
+occupy its execution group's event-loop pthread and stall other lightweight
+tasks in that group. The receive and send forms do not wait for readiness and
+report would-block as `Socket_Error`. `Connect_Socket` waits only after the
+initial connect reports an interrupted or in-progress attempt. Use the
+task-aware `Connect`, `Receive`, and `Send` operations when a readiness wait is
+needed. Native setup code may use a blocking socket intentionally. `Prepare`
+changes the descriptor's blocking mode, including for an adopted descriptor.
+
 `Reuse_Address` and `Reuse_Port` remain separate socket options. On Darwin and
 Linux, `Reuse_Port` permits multiple sockets that all enable it before
 `Bind_Socket` to bind the same concrete IPv4 or IPv6 endpoint. Kernel policy
