@@ -318,6 +318,8 @@ package body System.Flyology.Scheduler is
       Enqueue_At_Head          : Boolean := False;
       Group                    : Loop_Group_Access;
       Migration_Target         : Loop_Group_Access;
+      Configured_Migration     : Boolean := False;
+      Migration_Result         : C.int := 0;
       Reserved_Group           : Loop_Group_Access;
       Previous_Ready           : Fiber_Access;
       Next_Ready               : Fiber_Access;
@@ -2165,9 +2167,47 @@ package body System.Flyology.Scheduler is
          Fatal;
       end if;
 
-      --  A priority update while running does not retain queue placement. If
-      --  the fiber later migrates, the target loop therefore enqueues it at
-      --  the normal FIFO tail.
+      Unlock_Group (Source);
+
+      --  This second test window holds a committed crossing before physical
+      --  transfer, with neither the source lock nor topology lock held.
+      if Item.Configured_Migration and then Faults.Enabled and then Faults.Fail (Faults.Cross_To_Shard_Window)
+      then
+         while Faults.Fail (Faults.Cross_To_Shard_Window) loop
+            if Micro_Sleep (1_000) /= 0 then
+               Fatal;
+            end if;
+         end loop;
+      end if;
+
+      Lock_Registry_Shard (Shard);
+      Lock_Topology;
+      Lock_Group (Source);
+      if Item.Configured_Migration and then Target.Id >= C.int (Automatic_Pool_Size) then
+         --  Reduction won after the fiber committed but before it moved.
+         --  Retain its prior placement ownership in Source and resume it
+         --  with a rejection, or drain it on the next dispatch if automatic.
+         Item.Migration_Target := null;
+         Item.Configured_Migration := False;
+         Item.Migration_Result := -3;
+         if Item.Destroy_Requested then
+            Item.State := Finished;
+            Reap_Locked (Item);
+         else
+            Enqueue (Source, Item);
+         end if;
+         Unlock_Topology;
+         Unlock_Registry_Shard (Shard);
+         return;
+      end if;
+
+      --  Keep the physical move and the explicit-placement transition in
+      --  one topology-locked transaction with pool reduction's population
+      --  check and cutover.
+      if Item.Configured_Migration then
+         Item.Automatic_Placement := False;
+      end if;
+      Item.Configured_Migration := False;
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlink_Group_Locked (Source, Item);
@@ -2175,9 +2215,6 @@ package body System.Flyology.Scheduler is
       Source.Member_Count := Source.Member_Count - 1;
       Source.Migrations_Out := Source.Migrations_Out + 1;
       Unlock_Group (Source);
-
-      Lock_Registry_Shard (Shard);
-      Lock_Topology;
       Lock_Group (Target);
       if Source.Dedicated then
          Source.Reserved_For := System.Null_Address;
@@ -3747,14 +3784,19 @@ package body System.Flyology.Scheduler is
 
       Item.Migration_Target := Target;
       --  An explicit migration transfers placement ownership to the caller.
-      --  Later automatic-pool reductions must not undo that choice.
-      Item.Automatic_Placement := False;
+      --  A configured crossing defers this change until physical transfer,
+      --  so a concurrent reduction can still observe the automatic source.
+      Item.Configured_Migration := Require_Configured;
+      Item.Migration_Result := 0;
+      if not Require_Configured then
+         Item.Automatic_Placement := False;
+      end if;
       Item.Enqueue_At_Head := False;
       Item.State := Migrating;
       Unlock_Topology;
       Unlock_Registry_Shard (Shard);
       Contexts.Switch (Item.Context, Source.Scheduler_Context);
-      return 0;
+      return Item.Migration_Result;
    end Migrate_Internal;
 
    function Migrate (Group : C.int) return C.int
