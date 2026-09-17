@@ -710,7 +710,7 @@ for tasking_ali in "$source_lib"/*.ali; do
   tasking_stem=${tasking_ali##*/}
   tasking_stem=${tasking_stem%.ali}
   case "$tasking_stem" in
-    s-taskin|s-taprop|s-tassta|s-interr) continue ;;
+    s-taskin|s-taprop|s-tassta|s-interr|s-taasde) continue ;;
     s-mudido)
       [ "$platform" = linux ] && continue
       ;;
