@@ -793,7 +793,12 @@ package body Flyology.Supervision.Families is
          if Kernel.Family_Stop_Command_Allowed
               (Current =>
                  Generation_Is_Current (Handle, Identity, Snapshots (Slot).Id, Snapshots (Slot).Generation),
-               Queued  => Slots (Slot) in Queued | Released_Queued,
+               --  A dispatched slot remains stoppable until its manager
+               --  publishes Starting. It has not activated a child yet.
+               Queued  =>
+                 Slots (Slot) in Queued | Released_Queued
+                 or else (Slots (Slot) in Managed | Released_Managed
+                          and then Snapshots (Slot).State = Flyology.Supervision.Configured),
                Managed => Slots (Slot) in Managed | Released_Managed,
                Live    => Snapshots (Slot).Live)
          then
