@@ -97,7 +97,7 @@ evidence.
 | `SupervisionLifecycle.StartInitial` / `StartReplacement` | static `Try_Start`, generation construction, and publish-ready sequencing |
 | `AffectedFor` / `BeginRecoverableFailure` | `Supervision_Policy.Affected_Children` and static `Begin_Recovery` |
 | `IssueOuterStop` / `BeginRecoveryBackoff` | static reverse recovery-stop order, termination publication, join, and backoff |
-| `TerminateRecoverableIsolateDuringBackoff` / `TerminateExhaustedIsolateDuringBackoff` / `TerminateNonIsolateDuringBackoff` | static `Publish_Termination` merging a recoverable isolated child into the exact accumulated recovery set while advancing an exact or stale pending incident, preserving a newer nested context, or opening a fresh incident; exhausted isolate recovery preserves the active context, and other impacts immediately escalate with the manager-normalized terminating context |
+| `QueueIndependentFailure` / `PromotePendingRecovery` / `ClassifyPendingTerminal` | static `Publish_Termination` retaining an unrelated failure through recovery stop, backoff, or start, then applying that child's restart and impact policy when the active transaction finishes |
 | family `Reserve` / `Commit` / `Rollback` actions | the protected family admission transaction with an exact controller/generation handle |
 | `FailFamilySlot` / `RestartFamilySlot` | family termination classification, join, backoff, successful replacement publication, and assignment of the manager's current generation handle before it runs |
 | `CancelFamilyPending` | shutdown rejection of a pending replacement without advancing its published generation or the manager's current handle |
@@ -248,10 +248,11 @@ may finish. A separate weak-fairness configuration checks that a requested
 shutdown eventually finishes when children cooperate. There is deliberately
 no liveness claim for a child that does not terminate.
 
-Seven broken supervision configurations are required to fail. They respectively
+Eight broken supervision configurations are required to fail. They respectively
 remove controller identity from command validation, permit a replacement after
 termination but before join, drop an unaffected child that terminates during
-recovery backoff, retain the previous family-manager generation handle while a
+recovery backoff, escalate an unrelated failure during recovery instead of
+queuing it, retain the previous family-manager generation handle while a
 replacement runs, mint a new incident while propagating a nested escalation,
 publish owner readiness before desired-child readmission, and omit forwarding
 the parent stop request. The backoff configuration violates the requirement

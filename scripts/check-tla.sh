@@ -217,6 +217,9 @@ expect_counterexample \
   SupervisionLifecycle SupervisionLifecycle_backoff_termination_drop.cfg \
   RecoveryBackoffKeepsTerminationsManaged supervision-backoff-termination-drop
 expect_counterexample \
+  SupervisionLifecycle SupervisionLifecycle_overlap_escalation.cfg \
+  IndependentFailurePreservesPolicy supervision-overlap-escalation
+expect_counterexample \
   SupervisionLifecycle SupervisionLifecycle_stale_family_manager.cfg \
   FamilyManagerFailureReleasesSlot supervision-stale-family-manager
 expect_counterexample \

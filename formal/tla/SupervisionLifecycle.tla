@@ -14,13 +14,14 @@ dependent-closure, and escalation decisions over that topology.
 LifecyclePolicy selects the current implementation or one deliberately broken
 boundary.  Broken variants admit a controller-stale command, construct a
 replacement before the old generation joins, drop an unaffected child that
-terminates during recovery backoff, mint a new incident while propagating
-nested escalation, publish an owner before desired-child readmission, omit
-nested parent-stop forwarding, or retain readiness from the previous generation
-across replacement start.  The family-manager variant retains the previous
-generation handle while a replacement is running, so a manager failure cannot
-retire that replacement.  The checked configurations require a concrete
-counterexample for each removed guarantee.
+terminates during recovery backoff, escalate an unrelated child that fails
+during recovery instead of queuing it, mint a new incident while
+propagating nested escalation, publish an owner before desired-child
+readmission, omit nested parent-stop forwarding, or retain readiness from the
+previous generation across replacement start.  The family-manager variant
+retains the previous generation handle while a replacement is running, so a
+manager failure cannot retire that replacement.  The checked configurations
+require a concrete counterexample for each removed guarantee.
 
 Exception payloads and event-ring storage are abstracted at their proved
 policy boundary.  The full topology still uses MaxAttempts for the combined
@@ -50,6 +51,7 @@ ASSUME /\ Children = {Prerequisite, Owner}
              "nested-incident-mint-broken",
              "owner-ready-before-readmission-broken",
              "backoff-termination-drop-broken",
+             "overlap-escalation-broken",
              "stale-family-manager-handle-broken",
              "restart-window-stale-broken"}
 
@@ -94,6 +96,9 @@ VARIABLES mode, shutdown, terminal, result,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
           ownerPublishedWithoutReplay, nestedIncidentMinted,
+          pendingFailure, pendingImpact, pendingRestart,
+          pendingIncident, pendingAttempt,
+          overlapEscalated,
           restartPhase, restartNow,
           restartStaticReadySince, restartSubtreeReadySince,
           restartFamilyReadySince,
@@ -114,7 +119,13 @@ lifecycleVars == <<mode, shutdown, terminal, result,
           familyManagerFailureDropped,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
-          ownerPublishedWithoutReplay, nestedIncidentMinted>>
+          ownerPublishedWithoutReplay, nestedIncidentMinted,
+          pendingFailure, pendingImpact, pendingRestart,
+          pendingIncident, pendingAttempt,
+          overlapEscalated>>
+
+pendingVars == <<pendingFailure, pendingImpact, pendingRestart, pendingIncident,
+                 pendingAttempt, overlapEscalated>>
 
 (***************************************************************************
 The restart projection is excluded from lifecycleVars so its actions can
@@ -144,6 +155,9 @@ vars == <<mode, shutdown, terminal, result,
           nestedEscalation, nestedIncident, nestedAttempt,
           staleCommandAccepted, replacementBeforeJoin,
           ownerPublishedWithoutReplay, nestedIncidentMinted,
+          pendingFailure, pendingImpact, pendingRestart,
+          pendingIncident, pendingAttempt,
+          overlapEscalated,
           restartPhase, restartNow,
           restartStaticReadySince, restartSubtreeReadySince,
           restartFamilyReadySince,
@@ -260,6 +274,12 @@ Init ==
   /\ replacementBeforeJoin = FALSE
   /\ ownerPublishedWithoutReplay = FALSE
   /\ nestedIncidentMinted = FALSE
+  /\ pendingFailure = {}
+  /\ pendingImpact = [c \in Children |-> NoImpact]
+  /\ pendingRestart = [c \in Children |-> FALSE]
+  /\ pendingIncident = [c \in Children |-> 0]
+  /\ pendingAttempt = [c \in Children |-> 0]
+  /\ overlapEscalated = FALSE
   /\ RestartWindowInit
 
 Configure ==
@@ -578,44 +598,14 @@ BeginTerminalFailure(c, impact) ==
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
 (***************************************************************************
-An unaffected running child may carry no incident, the exact pending attempt,
-an older attempt from a previous multi-child recovery, or a genuinely newer
-nested incident.  A fresh child opens a new incident; an exact or stale child
-advances the pending attempt; a newer context is preserved.  Recoverable
-isolated failures join the accumulated start set.  Exhausted isolated failures
-preserve the active incident and terminate recovery.  Every non-isolated
-failure escalates immediately with the terminating child's context.  The
-broken policy exposes only the original isolated-child drop.
+The broken backoff policy drops a termination outside the active recovery set.
+The current policy queues that child through QueueIndependentFailure below.
 ***************************************************************************)
 UnaffectedBackoffFailure(c) ==
   /\ mode = "recovery-backoff"
   /\ c \in Children \ affected
   /\ childState[c] = "running"
   /\ (c # Owner \/ ~familyOpen)
-
-BackoffHasContext(c) == childIncident[c] # 0
-
-BackoffUsesCurrent(c) ==
-  /\ BackoffHasContext(c)
-  /\ (childIncident[c] < incidentId
-        \/ (childIncident[c] = incidentId
-              /\ childAttempt[c] <= incidentAttempt))
-
-BackoffNextIncident(c) ==
-  IF BackoffUsesCurrent(c) THEN incidentId
-  ELSE IF ~BackoffHasContext(c) THEN incidentId + 1
-  ELSE childIncident[c]
-
-BackoffNextAttempt(c) ==
-  IF BackoffUsesCurrent(c) THEN incidentAttempt + 1
-  ELSE IF ~BackoffHasContext(c) THEN 1
-  ELSE childAttempt[c]
-
-BackoffEscalationIncident(c) ==
-  IF BackoffHasContext(c) THEN childIncident[c] ELSE incidentId + 1
-
-BackoffEscalationAttempt(c) ==
-  IF BackoffHasContext(c) THEN childAttempt[c] ELSE 1
 
 DropUnaffectedDuringBackoff(c) ==
   /\ UnaffectedBackoffFailure(c)
@@ -640,73 +630,68 @@ DropUnaffectedDuringBackoff(c) ==
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
-TerminateRecoverableIsolateDuringBackoff(c) ==
-  /\ UnaffectedBackoffFailure(c)
-  /\ LifecyclePolicy # "backoff-termination-drop-broken"
-  /\ IF BackoffUsesCurrent(c) THEN incidentAttempt < MaxAttempts
-       ELSE IF ~BackoffHasContext(c)
-            THEN incidentId < MaxGeneration + MaxAttempts + 1
-            ELSE TRUE
-  /\ mode' = mode
-  /\ terminal' = terminal
-  /\ result' = result
+(***************************************************************************
+Failures outside the exact recovery set remain independently owned.  The
+current policy records one pending fact per terminated child while recovery
+stop, backoff, or start is active.  The stored impact represents the child's stable
+configuration in this bounded model; the Ada implementation rereads that
+configuration and retains the termination, incident, and failure time. The
+model abstracts real-time stability and backoff calculations.
+Once the active recovery is ready to finish, pending children are selected in
+the existing topological start order and their own policy is applied.  The
+broken policy models the former unconditional escalation.
+***************************************************************************)
+IndependentRecoveryFailure(c) ==
+  /\ mode \in {"recovery-stop", "recovery-backoff", "recovery-start"}
+  /\ c \in Children \ affected
+  /\ \A member \in affected : c \notin Prerequisites(member)
+  /\ childState[c] = "running"
+  /\ (c # Owner \/ ~familyOpen)
+
+PendingArrivalIncident(c) ==
+  IF childIncident[c] = 0 THEN incidentId + 1 ELSE childIncident[c]
+
+PendingArrivalAttempt(c) ==
+  IF childIncident[c] = 0 THEN 1 ELSE childAttempt[c]
+
+QueueIndependentFailure(c, impact, restart) ==
+  /\ LifecyclePolicy # "overlap-escalation-broken"
+  /\ IndependentRecoveryFailure(c)
+  /\ impact \in Impacts
+  /\ restart \in BOOLEAN
+  /\ (childIncident[c] # 0
+       \/ incidentId < MaxGeneration + MaxAttempts + 1)
   /\ childState' = [childState EXCEPT ![c] = "terminated"]
   /\ childLive' = [childLive EXCEPT ![c] = FALSE]
   /\ childReady' = [childReady EXCEPT ![c] = FALSE]
   /\ childStop' = [childStop EXCEPT ![c] = FALSE]
-  /\ affected' = affected \cup {c}
-  /\ recoveryExpected' = recoveryExpected \cup {c}
-  /\ trigger' = c
-  /\ recoveryImpact' = "isolate"
-  /\ incidentId' = BackoffNextIncident(c)
-  /\ incidentAttempt' = BackoffNextAttempt(c)
-  /\ incidentActive' = TRUE
-  /\ lastStopRank' = lastStopRank
-  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
-                  childIncident, childAttempt, lastStartRank,
-                  familyOpen, familyController, retiredControllers,
-                  familyIncarnation, familyShutdown, familyTerminal,
-                  slotState, slotLive, slotReady, slotStop, slotRecover,
-                  slotGeneration, slotJoinedGeneration,
+  /\ pendingFailure' = pendingFailure \cup {c}
+  /\ pendingImpact' = [pendingImpact EXCEPT ![c] = impact]
+  /\ pendingRestart' = [pendingRestart EXCEPT ![c] = restart]
+  /\ pendingIncident' =
+       [pendingIncident EXCEPT ![c] = PendingArrivalIncident(c)]
+  /\ pendingAttempt' =
+       [pendingAttempt EXCEPT ![c] = PendingArrivalAttempt(c)]
+  /\ overlapEscalated' = overlapEscalated
+  /\ UNCHANGED <<mode, shutdown, terminal, result, childStuck,
+                  generation, joinedGeneration, affected, recoveryExpected,
+                  trigger, recoveryImpact, incidentId, incidentAttempt,
+                  incidentActive, childIncident, childAttempt, lastStopRank,
+                  lastStartRank, familyOpen, familyController,
+                  retiredControllers, familyIncarnation, familyShutdown,
+                  familyTerminal, slotState, slotLive, slotReady, slotStop,
+                  slotRecover, slotGeneration, slotJoinedGeneration,
                   nestedEscalation, nestedIncident, nestedAttempt,
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
-TerminateExhaustedIsolateDuringBackoff(c) ==
-  /\ UnaffectedBackoffFailure(c)
-  /\ LifecyclePolicy # "backoff-termination-drop-broken"
-  /\ BackoffUsesCurrent(c)
-  /\ incidentAttempt = MaxAttempts
-  /\ mode' = "terminal-stop"
-  /\ terminal' = TRUE
-  /\ result' = "recovery-exhausted"
-  /\ childState' = [childState EXCEPT ![c] = "terminated"]
-  /\ childLive' = [childLive EXCEPT ![c] = FALSE]
-  /\ childReady' = [childReady EXCEPT ![c] = FALSE]
-  /\ childStop' = [childStop EXCEPT ![c] = FALSE]
-  /\ affected' = Children
-  /\ recoveryExpected' = Children
-  /\ trigger' = c
-  /\ recoveryImpact' = "isolate"
-  /\ incidentId' = incidentId
-  /\ incidentAttempt' = incidentAttempt
-  /\ incidentActive' = TRUE
-  /\ lastStopRank' = 3
-  /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
-                  childIncident, childAttempt, lastStartRank,
-                  familyOpen, familyController, retiredControllers,
-                  familyIncarnation, familyShutdown, familyTerminal,
-                  slotState, slotLive, slotReady, slotStop, slotRecover,
-                  slotGeneration, slotJoinedGeneration,
-                  nestedEscalation, nestedIncident, nestedAttempt,
-                  staleCommandAccepted, replacementBeforeJoin,
-                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
-
-TerminateNonIsolateDuringBackoff(c, impact) ==
-  /\ UnaffectedBackoffFailure(c)
-  /\ impact \in Impacts \ {"isolate"}
-  /\ (BackoffHasContext(c)
-        \/ incidentId < MaxGeneration + MaxAttempts + 1)
+EscalateIndependentFailure(c, impact, restart) ==
+  /\ LifecyclePolicy = "overlap-escalation-broken"
+  /\ IndependentRecoveryFailure(c)
+  /\ impact \in Impacts
+  /\ restart \in BOOLEAN
+  /\ (childIncident[c] # 0
+       \/ incidentId < MaxGeneration + MaxAttempts + 1)
   /\ mode' = "terminal-stop"
   /\ terminal' = TRUE
   /\ result' = "failure-escalated"
@@ -718,12 +703,78 @@ TerminateNonIsolateDuringBackoff(c, impact) ==
   /\ recoveryExpected' = Children
   /\ trigger' = c
   /\ recoveryImpact' = impact
-  /\ incidentId' = BackoffEscalationIncident(c)
-  /\ incidentAttempt' = BackoffEscalationAttempt(c)
+  /\ incidentId' = PendingArrivalIncident(c)
+  /\ incidentAttempt' = PendingArrivalAttempt(c)
   /\ incidentActive' = TRUE
   /\ lastStopRank' = 3
+  /\ lastStartRank' = 0
+  /\ pendingFailure' = {}
+  /\ pendingImpact' = [member \in Children |-> NoImpact]
+  /\ pendingRestart' = [member \in Children |-> FALSE]
+  /\ pendingIncident' = [member \in Children |-> 0]
+  /\ pendingAttempt' = [member \in Children |-> 0]
+  /\ overlapEscalated' = TRUE
   /\ UNCHANGED <<shutdown, childStuck, generation, joinedGeneration,
-                  childIncident, childAttempt, lastStartRank,
+                  childIncident, childAttempt, familyOpen, familyController,
+                  retiredControllers, familyIncarnation, familyShutdown,
+                  familyTerminal, slotState, slotLive, slotReady, slotStop,
+                  slotRecover, slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
+
+RecoveryReadyToFinish ==
+  /\ mode = "recovery-start"
+  /\ \A c \in affected : childState[c] = "running"
+
+FirstPending(c) ==
+  /\ c \in pendingFailure
+  /\ \A other \in pendingFailure : Rank(c) <= Rank(other)
+
+PendingUsesCurrent(c) ==
+  /\ incidentActive
+  /\ (pendingIncident[c] < incidentId
+       \/ (pendingIncident[c] = incidentId
+            /\ pendingAttempt[c] <= incidentAttempt))
+
+PendingDispatchIncident(c) ==
+  IF PendingUsesCurrent(c) THEN incidentId ELSE pendingIncident[c]
+
+PendingDispatchAttempt(c) ==
+  IF PendingUsesCurrent(c) THEN incidentAttempt + 1
+  ELSE pendingAttempt[c]
+
+PendingCanRecover(c) ==
+  /\ pendingImpact[c] # "escalate"
+  /\ pendingRestart[c]
+  /\ PendingDispatchAttempt(c) <= MaxAttempts
+  /\ \A member \in AffectedFor(c, pendingImpact[c]) \ (pendingFailure \ {c}) :
+       generation[member] < MaxGeneration
+
+PromotePendingRecovery(c) ==
+  /\ LifecyclePolicy # "overlap-escalation-broken"
+  /\ RecoveryReadyToFinish
+  /\ FirstPending(c)
+  /\ PendingCanRecover(c)
+  /\ mode' = "recovery-stop"
+  /\ affected' = AffectedFor(c, pendingImpact[c]) \ (pendingFailure \ {c})
+  /\ recoveryExpected' = AffectedFor(c, pendingImpact[c]) \ (pendingFailure \ {c})
+  /\ trigger' = c
+  /\ recoveryImpact' = pendingImpact[c]
+  /\ incidentId' = PendingDispatchIncident(c)
+  /\ incidentAttempt' = PendingDispatchAttempt(c)
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = 3
+  /\ lastStartRank' = 0
+  /\ pendingFailure' = pendingFailure \ {c}
+  /\ pendingImpact' = [pendingImpact EXCEPT ![c] = NoImpact]
+  /\ pendingRestart' = [pendingRestart EXCEPT ![c] = FALSE]
+  /\ pendingIncident' = [pendingIncident EXCEPT ![c] = 0]
+  /\ pendingAttempt' = [pendingAttempt EXCEPT ![c] = 0]
+  /\ overlapEscalated' = overlapEscalated
+  /\ UNCHANGED <<shutdown, terminal, result,
+                  childState, childLive, childReady, childStop, childStuck,
+                  generation, joinedGeneration, childIncident, childAttempt,
                   familyOpen, familyController, retiredControllers,
                   familyIncarnation, familyShutdown, familyTerminal,
                   slotState, slotLive, slotReady, slotStop, slotRecover,
@@ -732,24 +783,47 @@ TerminateNonIsolateDuringBackoff(c, impact) ==
                   staleCommandAccepted, replacementBeforeJoin,
                   ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
-BackoffIncidentProgresses ==
-  [][
-    /\ \A c \in Children :
-         TerminateRecoverableIsolateDuringBackoff(c) =>
-           \/ incidentId' > incidentId
-           \/ (incidentId' = incidentId
-                 /\ incidentAttempt' > incidentAttempt)
-    /\ \A c \in Children :
-         TerminateExhaustedIsolateDuringBackoff(c) =>
-           /\ result' = "recovery-exhausted"
-           /\ incidentId' = incidentId
-           /\ incidentAttempt' = MaxAttempts
-    /\ \A c \in Children, impact \in Impacts \ {"isolate"} :
-         TerminateNonIsolateDuringBackoff(c, impact) =>
-           /\ result' = "failure-escalated"
-           /\ incidentId' = BackoffEscalationIncident(c)
-           /\ incidentAttempt' = BackoffEscalationAttempt(c)
-           /\ incidentActive']_vars
+ClassifyPendingTerminal(c) ==
+  /\ LifecyclePolicy # "overlap-escalation-broken"
+  /\ RecoveryReadyToFinish
+  /\ FirstPending(c)
+  /\ ~PendingCanRecover(c)
+  /\ mode' = "terminal-stop"
+  /\ terminal' = TRUE
+  /\ result' =
+       IF pendingImpact[c] = "escalate" \/ ~pendingRestart[c]
+       THEN "failure-escalated"
+       ELSE "recovery-exhausted"
+  /\ affected' = Children
+  /\ recoveryExpected' = Children
+  /\ trigger' = c
+  /\ recoveryImpact' = pendingImpact[c]
+  /\ incidentId' =
+       IF pendingImpact[c] = "escalate" \/ ~pendingRestart[c]
+       THEN pendingIncident[c] ELSE PendingDispatchIncident(c)
+  /\ incidentAttempt' =
+       IF pendingImpact[c] = "escalate" \/ ~pendingRestart[c]
+       THEN pendingAttempt[c]
+       ELSE IF PendingUsesCurrent(c) THEN incidentAttempt
+       ELSE pendingAttempt[c]
+  /\ incidentActive' = TRUE
+  /\ lastStopRank' = 3
+  /\ lastStartRank' = 0
+  /\ pendingFailure' = {}
+  /\ pendingImpact' = [member \in Children |-> NoImpact]
+  /\ pendingRestart' = [member \in Children |-> FALSE]
+  /\ pendingIncident' = [member \in Children |-> 0]
+  /\ pendingAttempt' = [member \in Children |-> 0]
+  /\ overlapEscalated' = overlapEscalated
+  /\ UNCHANGED <<shutdown, childState, childLive, childReady, childStop,
+                  childStuck, generation, joinedGeneration, childIncident,
+                  childAttempt, familyOpen, familyController,
+                  retiredControllers, familyIncarnation, familyShutdown,
+                  familyTerminal, slotState, slotLive, slotReady, slotStop,
+                  slotRecover, slotGeneration, slotJoinedGeneration,
+                  nestedEscalation, nestedIncident, nestedAttempt,
+                  staleCommandAccepted, replacementBeforeJoin,
+                  ownerPublishedWithoutReplay, nestedIncidentMinted>>
 
 OuterCommandAllowed(c, controller, gen) ==
   IF LifecyclePolicy = "stale-authority-broken"
@@ -1288,6 +1362,7 @@ StartReplacement(c) ==
 FinishRecovery ==
   /\ mode = "recovery-start"
   /\ \A c \in affected : childState[c] = "running"
+  /\ pendingFailure = {}
   /\ mode' = "running"
   /\ affected' = {}
   /\ recoveryExpected' = {}
@@ -1391,11 +1466,8 @@ FamilyManagerActions ==
 FailureAndCommandActions ==
   \/ \E c \in Children, impact \in Impacts :
        BeginRecoverableFailure(c, impact) \/ BeginTerminalFailure(c, impact)
-         \/ TerminateNonIsolateDuringBackoff(c, impact)
   \/ \E c \in Children :
        DropUnaffectedDuringBackoff(c)
-         \/ TerminateRecoverableIsolateDuringBackoff(c)
-         \/ TerminateExhaustedIsolateDuringBackoff(c)
   \/ \E c \in Children, controller \in 0 .. MaxController,
         gen \in 0 .. MaxGeneration, impact \in Impacts \ {"escalate"} :
        ManualRestart(c, controller, gen, impact)
@@ -1419,11 +1491,22 @@ OuterProgressActions ==
   \/ (\E c \in Children : StartReplacement(c))
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
+IndependentFailureActions ==
+  \E c \in Children, impact \in Impacts, restart \in BOOLEAN :
+    QueueIndependentFailure(c, impact, restart)
+      \/ EscalateIndependentFailure(c, impact, restart)
+
+PendingDispatchActions ==
+  \E c \in Children : PromotePendingRecovery(c) \/ ClassifyPendingTerminal(c)
+
 Next ==
-  (((StartupAndServiceActions \/ FailureAndCommandActions
-      \/ FamilyDrainActions \/ OuterProgressActions)
-       /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
-    \/ FamilyManagerActions)
+  ((((StartupAndServiceActions \/ FailureAndCommandActions
+       \/ FamilyDrainActions \/ OuterProgressActions)
+        /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+     \/ FamilyManagerActions)
+      /\ UNCHANGED pendingVars
+    \/ ((IndependentFailureActions \/ PendingDispatchActions)
+         /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
   /\ UNCHANGED parentRestartVars
 
 Spec == Init /\ [][Next]_vars
@@ -1445,6 +1528,7 @@ ShutdownProgress ==
           \/ TerminateFamilySlot(slot) \/ JoinFamilySlot(slot))
    \/ CloseNestedFamily \/ FinishRun)
   /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>
+  /\ UNCHANGED pendingVars
   /\ UNCHANGED parentRestartVars
 
 CooperativeOuterProgressActions ==
@@ -1456,10 +1540,13 @@ CooperativeOuterProgressActions ==
   \/ FinishRecovery \/ CloseStableIncident \/ FinishRun
 
 CooperativeNext ==
-  (((StartupAndServiceActions \/ FailureAndCommandActions
-      \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
-       /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
-    \/ FamilyManagerActions)
+  ((((StartupAndServiceActions \/ FailureAndCommandActions
+       \/ FamilyDrainActions \/ CooperativeOuterProgressActions)
+        /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>)
+     \/ FamilyManagerActions)
+      /\ UNCHANGED pendingVars
+    \/ ((IndependentFailureActions \/ PendingDispatchActions)
+         /\ UNCHANGED <<familyManager, familyManagerFailureDropped>>))
   /\ UNCHANGED parentRestartVars
 
 CooperativeSpec ==
@@ -1513,6 +1600,13 @@ TypeOK ==
   /\ replacementBeforeJoin \in BOOLEAN
   /\ ownerPublishedWithoutReplay \in BOOLEAN
   /\ nestedIncidentMinted \in BOOLEAN
+  /\ pendingFailure \subseteq Children
+  /\ pendingImpact \in [Children -> Impacts \cup {NoImpact}]
+  /\ pendingRestart \in [Children -> BOOLEAN]
+  /\ pendingIncident \in
+       [Children -> 0 .. (MaxGeneration + MaxAttempts + 1)]
+  /\ pendingAttempt \in [Children -> 0 .. MaxAttempts]
+  /\ overlapEscalated \in BOOLEAN
   /\ RestartWindowTypeOK
 
 ReadyImpliesLive ==
@@ -1567,7 +1661,28 @@ AffectedSetIsExact ==
 
 RecoveryBackoffKeepsTerminationsManaged ==
   mode = "recovery-backoff" =>
-    \A c \in Children : childState[c] \in {"terminated", "joined"} => c \in affected
+    \A c \in Children : childState[c] \in {"terminated", "joined"} =>
+      c \in affected \cup pendingFailure
+
+PendingFailuresAreIndependent ==
+  mode \in {"recovery-stop", "recovery-backoff", "recovery-start"} =>
+    pendingFailure \cap affected = {}
+
+PendingFailuresKeepTheirFact ==
+  \A c \in Children :
+    IF c \in pendingFailure
+    THEN /\ childState[c] \in {"terminated", "joined"}
+         /\ ~childLive[c]
+         /\ pendingImpact[c] \in Impacts
+         /\ pendingRestart[c] \in BOOLEAN
+         /\ pendingIncident[c] # 0
+         /\ pendingAttempt[c] # 0
+    ELSE /\ pendingImpact[c] = NoImpact
+         /\ ~pendingRestart[c]
+         /\ pendingIncident[c] = 0
+         /\ pendingAttempt[c] = 0
+
+IndependentFailurePreservesPolicy == ~overlapEscalated
 
 AttemptIsBounded ==
   /\ incidentAttempt <= MaxAttempts
