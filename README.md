@@ -1092,9 +1092,11 @@ power-of-two capacities for masked slot selection. MPMC capacity is at least
 two so a slot's ready and free sequence phases cannot alias. MPMC `Try`
 operations report bounded contention rather than waiting; `Push` and `Pop`
 retry full, empty, or contended observations through an explicit timeout. A
-producer or consumer that terminates after
-claiming an MPMC slot but before publishing its sequence can prevent later
-progress. Core does not detect that death; an external recovery authority can
+consumer whose bound observer raises loses only its claimed element: the ring
+releases that slot before propagating the exception, so other elements remain
+available. A producer or consumer that terminates after claiming an MPMC slot
+but before publishing its sequence can prevent later progress. Core does not
+detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
 then restores an empty ring. A distinct local MPMC view may attach while
 transfers are active: attachment validates only the published immutable
