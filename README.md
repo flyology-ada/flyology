@@ -422,7 +422,9 @@ different pool size or calling `Grow_Configured_Pool` can remap keys.
 The overload taking an explicit `Shard_Count` is available when an application
 must keep a stored partitioning scheme independent of loop configuration.
 Crossing targets are limited to configured shared-pool ids; dedicated groups
-are not shards in this policy.
+are not shards in this policy. A concurrent pool reduction may make a target
+stale; `Cross_To_Shard` then raises `Migration_Error` without changing the
+calling task's placement.
 
 Migration alone does not make arbitrary data share-nothing. The application
 must assign each mutable object to a shard and arrange that only its owner
