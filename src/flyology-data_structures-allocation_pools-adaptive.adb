@@ -1,5 +1,6 @@
 with Flyology.Adaptive_Pool_Test_Hooks;
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Guard_Test_Hooks;
 with Flyology.Data_Structures.Regions;
 with Flyology.Data_Structures.Slab_Pools.Validation;
 with Flyology.Data_Structures.Storage;
@@ -328,7 +329,9 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    begin
       if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached adaptive-pool view";
-      elsif not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
+      end if;
+      Layouts.Require_Ready (Item.Core);
+      if not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
          Layouts.Require_Ready (Item.Core);
          if Expected = Locked then
             raise Busy_Error with "adaptive-pool chunk creation is busy";
@@ -336,6 +339,9 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
          raise Layout_Error with "adaptive-pool guard is corrupt";
       end if;
       begin
+         if Guard_Test_Hooks.Enabled then
+            Guard_Test_Hooks.After_CAS (Item.Core, Item.Guard_Address);
+         end if;
          Layouts.Require_Ready (Item.Core);
       exception
          when others =>
