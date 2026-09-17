@@ -154,14 +154,18 @@ package body Flyology.Data_Structures.Vectors is
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
         or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
         or else Header.Alignment /= Interfaces.Unsigned_32 (Element.Alignment)
-        or else Header.Auxiliary /= Unlocked
         or else Header.Word_2 /= Element.Signature
-        or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
         or else Core.Extent /= Extent
       then
          raise Layout_Error with "vector capacity or immutable element contract does not match";
       end if;
       Set_View (Item, Core, Header.Capacity, Stride);
+      --  Auxiliary is the live guard and Word_1 is the live length.  The
+      --  snapshot above is unsynchronized, so validate the length through
+      --  the same guard used by ordinary vector operations.
+      if Length (Item) > Capacity then
+         raise Layout_Error with "vector length is corrupt";
+      end if;
    exception
       when others =>
          if Item.Core.Attached then

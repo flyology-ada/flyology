@@ -2033,6 +2033,22 @@ begin
          "create-or-attach overwrote an incompatible ready vector");
 
       declare
+         Saved_Length : constant Interfaces.Unsigned_64 :=
+           Read_U64 (Base_B, Raw_Offset (Vector_Location, 48));
+      begin
+         Write_U64 (Base_B, Raw_Offset (Vector_Location, 48), 17);
+         Failed := False;
+         begin
+            Vectors.Attach (Wrong, Region_B, Vector_Location, 16);
+         exception
+            when DS.Layout_Error =>
+               Failed := True;
+         end;
+         Write_U64 (Base_B, Raw_Offset (Vector_Location, 48), Saved_Length);
+         Assert (Failed and then not Vectors.Is_Attached (Wrong), "vector accepted a corrupt length");
+      end;
+
+      declare
          Wrong_Element : Wrong_Vectors.View;
          Wrong_Version : Wrong_Version_Vectors.View;
       begin
