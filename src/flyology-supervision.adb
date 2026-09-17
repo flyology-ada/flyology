@@ -2,6 +2,7 @@ package body Flyology.Supervision is
    use type Ada.Real_Time.Time;
    use type Interfaces.Unsigned_64;
    use type Flyology.Task_Results.Exit_Cause;
+   use type Interfaces.C.int;
 
    protected Controller_Source is
       procedure Next (Value : out Controller_Id);
@@ -36,6 +37,35 @@ package body Flyology.Supervision is
          Value := Incident_Id (Last);
       end Next;
    end Incident_Source;
+
+   protected body Change_Signal is
+      procedure Arm (Descriptor : out Interfaces.C.int) is
+      begin
+         Flyology.Wake_Sources.Ensure (Wake);
+         if Pending then
+            Flyology.Wake_Sources.Signal (Wake);
+         end if;
+         Descriptor := Flyology.Wake_Sources.Descriptor (Wake);
+      end Arm;
+
+      procedure Notify is
+      begin
+         if not Pending then
+            if Flyology.Wake_Sources.Descriptor (Wake) /= Interfaces.C.int (-1) then
+               Flyology.Wake_Sources.Signal (Wake);
+            end if;
+            Pending := True;
+         end if;
+      end Notify;
+
+      procedure Consume is
+      begin
+         if Pending then
+            Flyology.Wake_Sources.Consume_All (Wake);
+            Pending := False;
+         end if;
+      end Consume;
+   end Change_Signal;
 
    protected body Generation_Control_State is
       procedure Open (Value : Child_Handle; Incident : Incident_Context) is
@@ -266,6 +296,9 @@ package body Flyology.Supervision is
    procedure Mark_Ready (Control : in out Generation_Control) is
    begin
       Control.State.Publish_Ready;
+      if Control.Change /= null then
+         Control.Change.Notify;
+      end if;
    end Mark_Ready;
 
    function Stop_Requested (Control : Generation_Control) return Boolean
@@ -326,10 +359,13 @@ package body Flyology.Supervision is
    end Report_Exception;
 
    procedure Open
-     (Control : in out Generation_Control; Value : Child_Handle; Incident : Incident_Context := No_Incident)
-   is
+     (Control  : in out Generation_Control;
+      Value    : Child_Handle;
+      Incident : Incident_Context := No_Incident;
+      Change   : Signal_Access := null) is
    begin
       Control.State.Open (Value, Incident);
+      Control.Change := Change;
    end Open;
 
    function New_Incident (Now : Ada.Real_Time.Time; Deadline : Ada.Real_Time.Time) return Incident_Context is
@@ -370,6 +406,7 @@ package body Flyology.Supervision is
    procedure Request_Abort (Control : in out Generation_Control) is
    begin
       Control.State.Publish_Abort;
+      Control.Abort_Token.Request;
    end Request_Abort;
 
    function Is_Ready (Control : Generation_Control) return Boolean

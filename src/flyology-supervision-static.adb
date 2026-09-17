@@ -1,6 +1,7 @@
 with Ada.Exceptions;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
+with Flyology.IO;
 with Flyology.Supervision_Policy;
 with Flyology.Task_Lifecycle_Test_Hooks;
 with Interfaces;
@@ -13,6 +14,32 @@ package body Flyology.Supervision.Static is
    use type Interfaces.Unsigned_64;
 
    package Policy renames Flyology.Supervision_Policy;
+
+   function Deadline_After
+     (Start : Ada.Real_Time.Time; Span : Ada.Real_Time.Time_Span) return Ada.Real_Time.Time
+   is (if Span > Ada.Real_Time.Time_Last - Start then Ada.Real_Time.Time_Last else Start + Span);
+
+   function Earlier (Left, Right : Ada.Real_Time.Time) return Ada.Real_Time.Time
+   is (if Left < Right then Left else Right);
+
+   function Wait_Seconds (Due : Ada.Real_Time.Time) return Duration is
+      Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
+      if Due = Ada.Real_Time.Time_Last then
+         return Flyology.IO.Infinite;
+      elsif Due <= Now then
+         return 0.0;
+      else
+         return Ada.Real_Time.To_Duration (Due - Now);
+      end if;
+   end Wait_Seconds;
+
+   procedure Wait_Change (FD : Flyology.IO.Descriptor; Due : Ada.Real_Time.Time) is
+      Ready : constant Boolean := Flyology.IO.Wait (FD, Flyology.IO.For_Read, Wait_Seconds (Due));
+      pragma Unreferenced (Ready);
+   begin
+      null;
+   end Wait_Change;
 
    function Generation_Is_Current
      (Handle : Child_Handle; Owner : Controller_Id; Id : Child_Id; Value : Generation) return Boolean
@@ -95,12 +122,16 @@ package body Flyology.Supervision.Static is
          Cohorts      : Cohort_Matrix;
          Start_Order  : Child_Order;
          Stop_Order   : Child_Order;
-         Inherited    : Incident_Context) is
+         Inherited    : Incident_Context;
+         Signals      : Signal_Array_Access;
+         Dispatch     : Signal_Access) is
       begin
          if Run_Used then
             raise Program_Error with "supervisor is one-shot";
          end if;
          Lifecycle.Identity := Identity;
+         Lifecycle.Signals := Signals;
+         Lifecycle.Dispatch := Dispatch;
          Child_Specs := Specs;
          for Child in Child_Kind loop
             Flyology.Supervision_Windows.Initialize (Windows (Child), Specs (Child).Recovery.Burst_Attempts);
@@ -178,6 +209,14 @@ package body Flyology.Supervision.Static is
       begin
          if not Policy.Recorded_Transition_Allowed (Kind, Before, After) then
             raise Program_Error with "illegal static supervision lifecycle transition";
+         end if;
+         if Signals /= null then
+            for Candidate in Child_Kind loop
+               Signals (Candidate).Notify;
+            end loop;
+         end if;
+         if Dispatch /= null then
+            Dispatch.Notify;
          end if;
          if Event_Sequence_Exhausted then
             return;
@@ -597,6 +636,7 @@ package body Flyology.Supervision.Static is
          Intervention (Child) := Termination;
          Intervention_Pending (Child) := True;
          Result := Intervention_Accepted;
+         Signals (Child).Notify;
       end Request_Intervention;
 
       procedure Classify_Restart
@@ -868,6 +908,30 @@ package body Flyology.Supervision.Static is
           and then Subtree_Ready_Since /= Ada.Real_Time.Time_First
           and then Now - Ready_Since (Child) >= Child_Specs (Child).Recovery.Stability_Reset
           and then Now - Subtree_Ready_Since >= Subtree_Recovery.Stability_Reset);
+
+      function Incident_Close_Due (Child : Child_Kind) return Ada.Real_Time.Time is
+         Child_Due   : Ada.Real_Time.Time;
+         Subtree_Due : Ada.Real_Time.Time;
+      begin
+         if Phase /= Running_Children
+           or else Ready_Since (Child) = Ada.Real_Time.Time_First
+           or else Subtree_Ready_Since = Ada.Real_Time.Time_First
+         then
+            return Ada.Real_Time.Time_Last;
+         end if;
+         Child_Due :=
+           (if Child_Specs (Child).Recovery.Stability_Reset > Ada.Real_Time.Time_Last - Ready_Since (Child)
+            then Ada.Real_Time.Time_Last
+            else Ready_Since (Child) + Child_Specs (Child).Recovery.Stability_Reset);
+         Subtree_Due :=
+           (if Subtree_Recovery.Stability_Reset > Ada.Real_Time.Time_Last - Subtree_Ready_Since
+            then Ada.Real_Time.Time_Last
+            else Subtree_Ready_Since + Subtree_Recovery.Stability_Reset);
+         return (if Child_Due > Subtree_Due then Child_Due else Subtree_Due);
+      end Incident_Close_Due;
+
+      function Next_Start_Due return Ada.Real_Time.Time
+      is (if Phase = Recovery_Backing_Off then Recovery_Due else Ada.Real_Time.Time_Last);
 
       procedure Publish_Stuck (Child : Child_Kind; Value : Child_Handle) is
       begin
@@ -1407,7 +1471,17 @@ package body Flyology.Supervision.Static is
    begin
       Validate_Configuration (Specs, Ids, Dependencies, Cohorts, Start_Order, Stop_Order);
       Identity := New_Controller;
-      Item.State.Configure (Identity, Specs, Ids, Dependencies, Cohorts, Start_Order, Stop_Order, Inherited);
+      Item.State.Configure
+        (Identity,
+         Specs,
+         Ids,
+         Dependencies,
+         Cohorts,
+         Start_Order,
+         Stop_Order,
+         Inherited,
+         Item.Signals'Unchecked_Access,
+         Item.Dispatch'Unchecked_Access);
 
       if Item.State.Manager_Should_Exit then
          Result := Item.State.Read_Result;
@@ -1454,7 +1528,7 @@ package body Flyology.Supervision.Static is
                Control      : aliased Generation_Control;
                Result_Value : Generation_Result;
             begin
-               Open (Control, Value, Incident);
+               Open (Control, Value, Incident, Item.Signals (Managed_Child)'Unchecked_Access);
                declare
                   Completion : aliased Runner_Completion;
 
@@ -1481,6 +1555,7 @@ package body Flyology.Supervision.Static is
                               Incident       => Recovery_Incident (Control));
                      end;
                      Completion.Store (Generation);
+                     Item.Signals (Managed_Child).Notify;
                   end Runner;
 
                   Started_At        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
@@ -1491,14 +1566,19 @@ package body Flyology.Supervision.Static is
                   Abort_Published   : Boolean := False;
                   Stuck_Published   : Boolean := False;
                   Incident_Closed   : Boolean := not Active (Incident);
+                  Grace_Expired     : Boolean := False;
                   Stop_Now          : Boolean;
                   Shutdown_Stop     : Boolean;
                   Stop_Config       : Stop_Policy;
                   Override          : Termination_Summary := Empty_Summary (No_Termination);
                   Decision_Override : Termination_Summary;
                   Now               : Ada.Real_Time.Time;
+                  Next_Due          : Ada.Real_Time.Time;
+                  Signal_FD         : Flyology.IO.Descriptor;
                begin
+                  Item.Signals (Managed_Child).Arm (Signal_FD);
                   loop
+                     Item.Signals (Managed_Child).Consume;
                      Completion.Read (Done, Result_Value);
                      Now := Ada.Real_Time.Clock;
 
@@ -1537,6 +1617,7 @@ package body Flyology.Supervision.Static is
                      end if;
 
                      if Stop_Published and then Now - Stop_At >= Stop_Config.Grace then
+                        Grace_Expired := True;
                         if not Shutdown_Stop and then Override.Kind = No_Termination then
                            Override := Empty_Summary (Stop_Timeout);
                         end if;
@@ -1556,7 +1637,27 @@ package body Flyology.Supervision.Static is
                            Item.State.Publish_Stuck (Managed_Child, Value);
                         end if;
                      end if;
-                     delay 0.001;
+                     Next_Due := Ada.Real_Time.Time_Last;
+                     if not Ready_Published and then not Stop_Published then
+                        Next_Due := Earlier (Next_Due, Deadline_After (Started_At, Spec.Readiness_Timeout));
+                     end if;
+                     if not Incident_Closed then
+                        Next_Due := Earlier (Next_Due, Item.State.Incident_Close_Due (Managed_Child));
+                     end if;
+                     if Stop_Published then
+                        if not Grace_Expired then
+                           Next_Due := Earlier (Next_Due, Deadline_After (Stop_At, Stop_Config.Grace));
+                        end if;
+                        if not Stuck_Published then
+                           Next_Due :=
+                             Earlier
+                               (Next_Due,
+                                Deadline_After
+                                  (Deadline_After (Stop_At, Stop_Config.Grace),
+                                   Stop_Config.Abort_Observation));
+                        end if;
+                     end if;
+                     Wait_Change (Signal_FD, Next_Due);
                   end loop;
 
                   Result_Value.Incident := Recovery_Incident (Control);
@@ -1662,18 +1763,27 @@ package body Flyology.Supervision.Static is
                terminate;
             end select;
 
-            while Activated and then not Item.State.Manager_Should_Exit loop
-               Item.State.Try_Start (Managed_Child, Ada.Real_Time.Clock, Started, Value, Spec, Incident);
-               if Started then
-                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
-                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
-                       (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Starting);
+            declare
+               Signal_FD : Flyology.IO.Descriptor;
+               Due       : Ada.Real_Time.Time;
+            begin
+               Item.Signals (Managed_Child).Arm (Signal_FD);
+
+               while Activated and then not Item.State.Manager_Should_Exit loop
+                  Item.Signals (Managed_Child).Consume;
+                  Item.State.Try_Start (Managed_Child, Ada.Real_Time.Clock, Started, Value, Spec, Incident);
+                  if Started then
+                     if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                        Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                          (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Starting);
+                     end if;
+                     Run_Generation (Value, Spec, Incident);
+                  else
+                     Due := Item.State.Next_Start_Due;
+                     Wait_Change (Signal_FD, Due);
                   end if;
-                  Run_Generation (Value, Spec, Incident);
-               else
-                  delay 0.001;
-               end if;
-            end loop;
+               end loop;
+            end;
             Item.State.Manager_Finished;
          exception
             when Occurrence : others =>
@@ -1690,12 +1800,38 @@ package body Flyology.Supervision.Static is
          if Parent_Stop = null then
             Item.State.Await_Finished;
          else
-            while not Item.State.Manager_Should_Exit loop
-               if Parent_Stop.Requested then
-                  Item.State.Request_Stop;
-               end if;
-               delay 0.001;
-            end loop;
+            declare
+               Dispatch_FD : Flyology.IO.Descriptor;
+               Stop_FD     : Flyology.IO.Descriptor;
+               Stop_Sent   : Boolean;
+            begin
+               Item.Dispatch.Arm (Dispatch_FD);
+               Parent_Stop.Wait_Source (Stop_FD, Stop_Sent);
+               loop
+                  Item.Dispatch.Consume;
+                  if Parent_Stop.Requested and then not Stop_Sent then
+                     Stop_Sent := True;
+                  end if;
+                  if Stop_Sent then
+                     Item.State.Request_Stop;
+                  end if;
+                  exit when Item.State.Manager_Should_Exit;
+                  if Stop_Sent then
+                     Wait_Change (Dispatch_FD, Ada.Real_Time.Time_Last);
+                  else
+                     declare
+                        Woken : constant Natural :=
+                          Flyology.IO.Wait_Any
+                            (Flyology.IO.Wait_Request_Array'
+                               (1 => (FD => Dispatch_FD, Condition => Flyology.IO.For_Read),
+                                2 => (FD => Stop_FD, Condition => Flyology.IO.For_Read)));
+                        pragma Unreferenced (Woken);
+                     begin
+                        null;
+                     end;
+                  end if;
+               end loop;
+            end;
          end if;
          Item.State.Await_Managers;
          Result := Item.State.Read_Result;

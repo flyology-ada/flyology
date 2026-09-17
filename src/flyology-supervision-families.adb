@@ -2,6 +2,8 @@ with Ada.Exceptions;
 with Ada.Task_Identification;
 with Ada.Unchecked_Deallocation;
 with Flyology.Cancellation;
+with Flyology.IO;
+with Flyology.Task_Results;
 with Flyology.Supervision_Policy;
 with Flyology.Task_Lifecycle_Test_Hooks;
 with Interfaces;
@@ -15,6 +17,32 @@ package body Flyology.Supervision.Families is
    use type Interfaces.C.int;
 
    package Kernel renames Flyology.Supervision_Policy;
+
+   function Deadline_After
+     (Start : Ada.Real_Time.Time; Span : Ada.Real_Time.Time_Span) return Ada.Real_Time.Time
+   is (if Span > Ada.Real_Time.Time_Last - Start then Ada.Real_Time.Time_Last else Start + Span);
+
+   function Earlier (Left, Right : Ada.Real_Time.Time) return Ada.Real_Time.Time
+   is (if Left < Right then Left else Right);
+
+   function Wait_Seconds (Due : Ada.Real_Time.Time) return Duration is
+      Now : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+   begin
+      if Due = Ada.Real_Time.Time_Last then
+         return Flyology.IO.Infinite;
+      elsif Due <= Now then
+         return 0.0;
+      else
+         return Ada.Real_Time.To_Duration (Due - Now);
+      end if;
+   end Wait_Seconds;
+
+   procedure Wait_Change (FD : Flyology.IO.Descriptor; Due : Ada.Real_Time.Time) is
+      Ready : constant Boolean := Flyology.IO.Wait (FD, Flyology.IO.For_Read, Wait_Seconds (Due));
+      pragma Unreferenced (Ready);
+   begin
+      null;
+   end Wait_Change;
 
    function Generation_Is_Current
      (Handle : Child_Handle; Owner : Controller_Id; Id : Child_Id; Value : Generation) return Boolean
@@ -254,7 +282,11 @@ package body Flyology.Supervision.Families is
          end loop;
       end Complete_Monitors;
 
-      procedure Configure (Identity : Controller_Id; Inherited : Incident_Context) is
+      procedure Configure
+        (Identity  : Controller_Id;
+         Inherited : Incident_Context;
+         Signals   : Signal_Array_Access;
+         Dispatch  : Signal_Access) is
       begin
          if Run_Used then
             raise Program_Error with "supervision family is one-shot";
@@ -265,6 +297,8 @@ package body Flyology.Supervision.Families is
          Run_Used := True;
          Configured := True;
          Family_State.Identity := Identity;
+         Family_State.Signals := Signals;
+         Family_State.Dispatch := Dispatch;
          Inherited_Incident := Inherited;
          Result :=
            (Outcome     => Shutdown_Completed,
@@ -305,6 +339,14 @@ package body Flyology.Supervision.Families is
       begin
          if not Kernel.Recorded_Transition_Allowed (Kind, Before, After) then
             raise Program_Error with "illegal family supervision lifecycle transition";
+         end if;
+         if Signals /= null then
+            for Candidate in Slot_Index loop
+               Signals (Candidate).Notify;
+            end loop;
+         end if;
+         if Dispatch /= null then
+            Dispatch.Notify;
          end if;
          if Event_Sequence_Exhausted then
             return;
@@ -423,6 +465,7 @@ package body Flyology.Supervision.Families is
          Queue_Tail := Next_Slot (Queue_Tail);
          Queue_Length := Queue_Length + 1;
          Active.all := False;
+         Dispatch.Notify;
       end Commit;
 
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle) is
@@ -432,6 +475,7 @@ package body Flyology.Supervision.Families is
          then
             Reserved_Children := Reserved_Children - 1;
             Slots (Slot) := Free;
+            Dispatch.Notify;
          end if;
       end Rollback;
 
@@ -533,6 +577,7 @@ package body Flyology.Supervision.Families is
          then
             Reserved_Children := Reserved_Children - 1;
             Slots (Slot) := Free;
+            Dispatch.Notify;
          end if;
          Active.all := False;
       end Rollback_Prepared;
@@ -598,6 +643,7 @@ package body Flyology.Supervision.Families is
          Queue_Length := Queue_Length + 1;
          Released.all := True;
          Succeeded.all := True;
+         Dispatch.Notify;
          Completed.all := True;
       end Release_Prepared;
 
@@ -639,11 +685,13 @@ package body Flyology.Supervision.Families is
 
             when Released_Queued | Released_Managed =>
                Stop_Requested (Slot) := True;
+               Family_State.Signals (Slot).Notify;
                Completed := False;
 
             when Released_Reapable                  =>
                Slots (Slot) := Reapable;
                Live_Managers := Live_Managers - 1;
+               Dispatch.Notify;
                Released.all := False;
                Active.all := False;
 
@@ -690,6 +738,7 @@ package body Flyology.Supervision.Families is
          then
             Slots (Slot) := Reapable;
             Live_Managers := Live_Managers - 1;
+            Dispatch.Notify;
             Released.all := False;
             Active.all := False;
          end if;
@@ -721,6 +770,14 @@ package body Flyology.Supervision.Families is
          Incident := Inherited_Incident;
       end Take_Start;
 
+      entry Await_Start_Or_Finished
+        when Queue_Length > 0
+        or else Kernel.Family_Finished (Shutdown, Terminal, Reserved_Children, Queue_Length, Live_Managers)
+      is
+      begin
+         null;
+      end Await_Start_Or_Finished;
+
       procedure Stop_One (Handle : Child_Handle; Applied : not null access Boolean) is
          Slot : Slot_Index;
       begin
@@ -742,6 +799,7 @@ package body Flyology.Supervision.Families is
          then
             Stop_Requested (Slot) := True;
             Applied.all := True;
+            Signals (Slot).Notify;
          end if;
       end Stop_One;
 
@@ -804,6 +862,7 @@ package body Flyology.Supervision.Families is
          if Valid then
             Intervention (Slot) := Termination;
             Recovery_Requested (Slot) := True;
+            Signals (Slot).Notify;
          end if;
       end Request_Intervention;
 
@@ -861,6 +920,18 @@ package body Flyology.Supervision.Families is
              Stop_Pending => Stop_Requested (Slot),
              Shutdown     => Family_State.Shutdown,
              Terminal     => Family_State.Terminal));
+
+      entry Await_Replacement_Cancel (for Slot in Slot_Index)
+        when not Kernel.Family_Replacement_Wait_Allowed
+                   (Managed      => Slots (Slot) in Managed | Released_Managed,
+                    Backing_Off  => Snapshots (Slot).State = Backing_Off,
+                    Stop_Pending => Stop_Requested (Slot),
+                    Shutdown     => Family_State.Shutdown,
+                    Terminal     => Family_State.Terminal)
+      is
+      begin
+         null;
+      end Await_Replacement_Cancel;
 
       procedure Publish_Ready (Slot : Slot_Index; Handle : Child_Handle; Now : Ada.Real_Time.Time) is
       begin
@@ -1078,6 +1149,18 @@ package body Flyology.Supervision.Families is
           and then Snapshots (Slot).Ready
           and then Ready_Since (Slot) /= Ada.Real_Time.Time_First
           and then Now - Ready_Since (Slot) >= Policy.Recovery.Stability_Reset);
+
+      function Incident_Close_Due (Slot : Slot_Index) return Ada.Real_Time.Time is
+      begin
+         if Ready_Since (Slot) = Ada.Real_Time.Time_First
+           or else Slots (Slot) not in Managed | Released_Managed
+           or else not Snapshots (Slot).Live
+           or else not Snapshots (Slot).Ready
+         then
+            return Ada.Real_Time.Time_Last;
+         end if;
+         return Deadline_After (Ready_Since (Slot), Policy.Recovery.Stability_Reset);
+      end Incident_Close_Due;
 
       procedure Manager_Done
         (Slot : Slot_Index; Handle : Child_Handle; Signals : not null access Monitor_Signal_Guard) is
@@ -2243,7 +2326,8 @@ package body Flyology.Supervision.Families is
    begin
       Validate;
       Identity := New_Controller;
-      Item.State.Configure (Identity, Inherited);
+      Item.State.Configure
+        (Identity, Inherited, Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
       declare
          task type Manager with CPU => Control_Group is
             pragma Task_Info (Flyology.Lightweight_Task);
@@ -2269,9 +2353,13 @@ package body Flyology.Supervision.Families is
             end loop;
             for Candidate in Slot_Index loop
                if Managers (Candidate) /= null then
-                  while not Ada.Task_Identification.Is_Terminated (Managers (Candidate).all'Identity) loop
-                     delay 0.001;
-                  end loop;
+                  declare
+                     Observation : constant Flyology.Task_Results.Task_Observation :=
+                       Flyology.Task_Results.Wait (Managers (Candidate).all'Identity);
+                     pragma Unreferenced (Observation);
+                  begin
+                     null;
+                  end;
                   Free_Manager (Managers (Candidate));
                end if;
             end loop;
@@ -2317,7 +2405,7 @@ package body Flyology.Supervision.Families is
                if not Started then
                   return;
                end if;
-               Open (Control, Current, Incident);
+               Open (Control, Current, Incident, Item.Signals (Managed_Slot)'Unchecked_Access);
                declare
                   protected type Completion_State is
                      procedure Store (Value : Generation_Result);
@@ -2366,6 +2454,7 @@ package body Flyology.Supervision.Families is
                               Incident       => Recovery_Incident (Control));
                      end;
                      Completion.Store (Value);
+                     Item.Signals (Managed_Slot).Notify;
                   end Runner;
 
                   Started_At        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
@@ -2376,13 +2465,18 @@ package body Flyology.Supervision.Families is
                   Abort_Published   : Boolean := False;
                   Stuck_Published   : Boolean := False;
                   Incident_Closed   : Boolean := not Active (Incident);
+                  Grace_Expired     : Boolean := False;
                   Stop_Now          : Boolean;
                   Shutdown          : Boolean;
                   Override          : Termination_Summary := Empty_Summary (No_Termination);
                   Decision_Override : Termination_Summary;
                   Now               : Ada.Real_Time.Time;
+                  Next_Due          : Ada.Real_Time.Time;
+                  Signal_FD         : Flyology.IO.Descriptor;
                begin
+                  Item.Signals (Managed_Slot).Arm (Signal_FD);
                   loop
+                     Item.Signals (Managed_Slot).Consume;
                      Completion.Read (Done, Generation_Value);
                      Now := Ada.Real_Time.Clock;
                      if not Ready and then Is_Ready (Control) then
@@ -2411,6 +2505,7 @@ package body Flyology.Supervision.Families is
                         Request_Stop (Control, Shutdown);
                      end if;
                      if Stop_Published and then Now - Stop_At >= Policy.Stopping.Grace then
+                        Grace_Expired := True;
                         if not Shutdown and then Override.Kind = No_Termination then
                            Override := Empty_Summary (Stop_Timeout);
                         end if;
@@ -2425,7 +2520,27 @@ package body Flyology.Supervision.Families is
                            Item.State.Publish_Stuck (Managed_Slot, Current);
                         end if;
                      end if;
-                     delay 0.001;
+                     Next_Due := Ada.Real_Time.Time_Last;
+                     if not Ready and then not Stop_Published then
+                        Next_Due := Earlier (Next_Due, Deadline_After (Started_At, Policy.Readiness_Timeout));
+                     end if;
+                     if not Incident_Closed then
+                        Next_Due := Earlier (Next_Due, Item.State.Incident_Close_Due (Managed_Slot));
+                     end if;
+                     if Stop_Published then
+                        if not Grace_Expired then
+                           Next_Due := Earlier (Next_Due, Deadline_After (Stop_At, Policy.Stopping.Grace));
+                        end if;
+                        if not Stuck_Published then
+                           Next_Due :=
+                             Earlier
+                               (Next_Due,
+                                Deadline_After
+                                  (Deadline_After (Stop_At, Policy.Stopping.Grace),
+                                   Policy.Stopping.Abort_Observation));
+                        end if;
+                     end if;
+                     Wait_Change (Signal_FD, Next_Due);
                   end loop;
                   Generation_Value.Incident := Recovery_Incident (Control);
                   if Generation_Value.Termination.Kind = No_Termination then
@@ -2524,11 +2639,13 @@ package body Flyology.Supervision.Families is
                               then Ada.Real_Time.Time_Last
                               else Now + Backoff);
                         begin
-                           while Ada.Real_Time.Clock < Due
-                             and then Item.State.Replacement_Wait_Allowed (Managed_Slot)
-                           loop
-                              delay 0.001;
-                           end loop;
+                           if Item.State.Replacement_Wait_Allowed (Managed_Slot) then
+                              select
+                                 Item.State.Await_Replacement_Cancel (Managed_Slot);
+                              or
+                                 delay until Due;
+                              end select;
+                           end if;
                         end;
                         exit when not Item.State.Replacement_Wait_Allowed (Managed_Slot);
                         if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
@@ -2562,14 +2679,24 @@ package body Flyology.Supervision.Families is
             end loop;
          end Manager;
 
-         Available : Boolean;
-         Slot      : Slot_Index;
-         Handle    : Child_Handle;
-         Incident  : Incident_Context;
+         Available      : Boolean;
+         Slot           : Slot_Index;
+         Handle         : Child_Handle;
+         Incident       : Incident_Context;
+         Dispatch_FD    : Flyology.IO.Descriptor;
+         Parent_FD      : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+         Parent_Already : Boolean := False;
+         Stop_Sent      : Boolean := False;
       begin
+         Item.Dispatch.Arm (Dispatch_FD);
+         if Parent_Stop /= null then
+            Parent_Stop.Wait_Source (Parent_FD, Parent_Already);
+         end if;
          loop
-            if Parent_Stop /= null and then Parent_Stop.Requested then
+            Item.Dispatch.Consume;
+            if Parent_Stop /= null and then Parent_Stop.Requested and then not Stop_Sent then
                Item.State.Request_Stop;
+               Stop_Sent := True;
             end if;
             if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                Flyology.Task_Lifecycle_Test_Hooks.Barrier
@@ -2595,7 +2722,22 @@ package body Flyology.Supervision.Families is
             end if;
 
             exit when Item.State.Is_Finished;
-            delay 0.001;
+            if Parent_Stop = null then
+               Item.State.Await_Start_Or_Finished;
+            elsif Stop_Sent or else Parent_Already then
+               Wait_Change (Dispatch_FD, Ada.Real_Time.Time_Last);
+            else
+               declare
+                  Woken : constant Natural :=
+                    Flyology.IO.Wait_Any
+                      (Flyology.IO.Wait_Request_Array'
+                         (1 => (FD => Dispatch_FD, Condition => Flyology.IO.For_Read),
+                          2 => (FD => Parent_FD, Condition => Flyology.IO.For_Read)));
+                  pragma Unreferenced (Woken);
+               begin
+                  null;
+               end;
+            end if;
          end loop;
          Finish_Managers;
          Result := Item.State.Read_Result;

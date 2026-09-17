@@ -1,8 +1,9 @@
 with Ada.Exceptions;
+with Flyology.IO;
+with Flyology.Operations;
 with Flyology.Task_Results;
 
 package body Flyology.Supervision.Input_Task_Generations is
-   use type Flyology.Task_Results.Observation_Status;
 
    function Exception_Summary
      (Occurrence : Ada.Exceptions.Exception_Occurrence; Task_Id : Ada.Task_Identification.Task_Id)
@@ -59,20 +60,43 @@ package body Flyology.Supervision.Input_Task_Generations is
             Initialize_Summary := Exception_Summary (Occurrence, Identity);
             Request_Stop (Control, Shutdown => False);
       end;
-      loop
-         declare
-            Observation : constant Flyology.Task_Results.Task_Observation :=
-              Flyology.Task_Results.Wait (Identity, Timeout => 0.001);
-         begin
-            if Observation.Status = Flyology.Task_Results.Terminal then
+      declare
+         Abort_FD          : Flyology.IO.Descriptor;
+         Already_Requested : Boolean;
+      begin
+         Control.Abort_Token.Wait_Source (Abort_FD, Already_Requested);
+         if Already_Requested then
+            Abort_Task (Subject);
+            Aborted := True;
+            Automatic_Result := Flyology.Task_Results.Wait (Identity).Result;
+         else
+            declare
+               Set         : aliased Flyology.Operations.Completion_Set (2);
+               Task_Wait   : Flyology.Task_Results.Wait_Operation :=
+                 Flyology.Task_Results.Wait (Set'Access, Identity);
+               Abort_Wait  : Flyology.IO.Readiness_Operation :=
+                 Flyology.IO.Wait (Set'Access, Abort_FD, Flyology.IO.For_Read);
+               Batch       : Flyology.Operations.Completion_Batch (Set.Capacity);
+               Observation : Flyology.Task_Results.Task_Observation;
+            begin
+               loop
+                  Flyology.Operations.Wait_Some (Set, Batch);
+                  exit when Batch.Count > 0 and then Flyology.Operations.Is_Terminal (Task_Wait);
+                  if Flyology.Operations.Is_Terminal (Abort_Wait) and then not Aborted then
+                     Abort_Task (Subject);
+                     Aborted := True;
+                  end if;
+               end loop;
+               Flyology.Task_Results.Finish (Task_Wait, Observation);
                Automatic_Result := Observation.Result;
-               exit;
-            elsif Abort_Requested (Control) and then not Aborted then
-               Abort_Task (Subject);
-               Aborted := True;
-            end if;
-         end;
-      end loop;
+               if Flyology.Operations.Is_Active (Abort_Wait) then
+                  Flyology.Operations.Cancel (Abort_Wait);
+                  Flyology.Operations.Wait_All (Set);
+               end if;
+               Flyology.Operations.Consume (Abort_Wait);
+            end;
+         end if;
+      end;
 
       Read_Termination (Control, Reported, Summary);
       if Initialize_Failed then

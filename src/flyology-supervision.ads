@@ -4,7 +4,9 @@ with Ada.Task_Identification;
 with Flyology.Cancellation;
 with Flyology.Execution_Groups;
 with Flyology.Task_Results;
+with Flyology.Wake_Sources;
 with Interfaces;
+with Interfaces.C;
 
 --  Defines the bounded, generation-safe vocabulary for structured task
 --  supervision. Task-generation generics own application-defined Ada task
@@ -588,9 +590,22 @@ private
       Termination          : Termination_Summary;
    end Generation_Control_State;
 
+   protected type Change_Signal is
+      procedure Arm (Descriptor : out Interfaces.C.int);
+      procedure Notify;
+      procedure Consume;
+   private
+      Wake    : Flyology.Wake_Sources.Source;
+      Pending : Boolean := False;
+   end Change_Signal;
+
+   type Signal_Access is access all Change_Signal;
+
    type Generation_Control is limited record
-      State      : Generation_Control_State;
-      Stop_Token : aliased Flyology.Cancellation.Token;
+      State       : Generation_Control_State;
+      Stop_Token  : aliased Flyology.Cancellation.Token;
+      Abort_Token : aliased Flyology.Cancellation.Token;
+      Change      : Signal_Access := null;
    end record;
 
    --  @exclude
@@ -598,7 +613,10 @@ private
    --  @param Value Internal generation handle
    --  @param Incident Internal inherited recovery context
    procedure Open
-     (Control : in out Generation_Control; Value : Child_Handle; Incident : Incident_Context := No_Incident);
+     (Control  : in out Generation_Control;
+      Value    : Child_Handle;
+      Incident : Incident_Context := No_Incident;
+      Change   : Signal_Access := null);
 
    --  @exclude
    --  @param Now Monotonic incident start
