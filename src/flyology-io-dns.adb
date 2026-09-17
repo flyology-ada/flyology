@@ -1585,11 +1585,12 @@ package body Flyology.IO.DNS is
       Interrupts         : Interrupt_Set := No_Interrupts;
       Configuration_Path : String := "/etc/resolv.conf") return Address_Array
    is
-      Config   : Resolver_Config;
-      Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Absolute : constant Boolean := Name'Length > 0 and then Name (Name'Last) = '.';
-      Dots     : Natural := 0;
-      Rotation : Natural := 0;
+      Config             : Resolver_Config;
+      Started            : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Absolute           : constant Boolean := Name'Length > 0 and then Name (Name'Last) = '.';
+      Dots               : Natural := 0;
+      Rotation           : Natural := 0;
+      Bare_Server_Failed : Boolean := False;
 
       function Try_Name (Candidate : String) return Address_Array is
       begin
@@ -1642,10 +1643,15 @@ package body Flyology.IO.DNS is
             --  A negative answer and a server-failure response code are both
             --  answers about this candidate only. Neither may suppress the
             --  remaining search domains of a relative name.
-            when Name_Not_Found | Name_Server_Failure =>
+            when Name_Not_Found =>
                if Absolute then
                   raise;
                end if;
+            when Name_Server_Failure =>
+               if Absolute then
+                  raise;
+               end if;
+               Bare_Server_Failed := True;
          end;
       end if;
       for Index in 1 .. Config.Search_Count loop
@@ -1668,7 +1674,13 @@ package body Flyology.IO.DNS is
             end if;
          end;
       end loop;
-      return Try_Name (Name);
+      if Dots < Config.NDots then
+         return Try_Name (Name);
+      elsif Bare_Server_Failed then
+         raise Name_Server_Failure with Name;
+      else
+         raise Name_Not_Found with Name;
+      end if;
    end Resolve;
 
    function Load_Configuration
@@ -1777,7 +1789,9 @@ package body Flyology.IO.DNS is
             end if;
          end;
       end loop;
-      Append (Bare);
+      if Dots < State.Configuration.NDots then
+         Append (Bare);
+      end if;
    end Build_Candidates;
 
    procedure Start_Scoped
