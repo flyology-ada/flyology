@@ -758,7 +758,7 @@ package body Flyology.Subprocesses is
       end if;
       Close_Standard_Input (Child);
       --  A failed signal gives no reason to expect the reaper to finish.
-      --  Keep its borrowed exit state and the process owner live for a retry.
+      --  Keep the process owner live for a retry.
       Kill (Child);
       begin
          Wait (Child, Status);

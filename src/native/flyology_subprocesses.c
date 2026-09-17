@@ -365,10 +365,20 @@ static void flyology_reaper_drop_worker(struct flyology_subprocess_reaper *state
 static void *flyology_reaper_worker(void *argument)
 {
     struct flyology_subprocess_reaper *state = argument;
+    sigset_t synchronous;
     int error;
     int group_error = 0;
     int status = 0;
     pid_t result;
+
+    (void)sigemptyset(&synchronous);
+    (void)sigaddset(&synchronous, SIGBUS);
+    (void)sigaddset(&synchronous, SIGFPE);
+    (void)sigaddset(&synchronous, SIGILL);
+    (void)sigaddset(&synchronous, SIGSEGV);
+    /* The creator only adds asynchronous blocks. If it already blocked a
+       synchronous fault, unblock that signal on the worker before waiting. */
+    if (pthread_sigmask(SIG_UNBLOCK, &synchronous, NULL) != 0) abort();
 
     do {
         error = flyology_subprocess_observe_exit(state->pid);
@@ -455,7 +465,7 @@ int flyology_subprocess_reaper_start(int pid, void **result)
             (void)sigdelset(&blocked, SIGFPE);
             (void)sigdelset(&blocked, SIGILL);
             (void)sigdelset(&blocked, SIGSEGV);
-            error = pthread_sigmask(SIG_SETMASK, &blocked, &previous);
+            error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
             if (error == 0) {
                 int restore_error;
                 error = pthread_create(&thread, &attributes, flyology_reaper_worker, state);
