@@ -70,13 +70,15 @@ package Flyology.Data_Structures.Vectors is
       Capacity : Positive;
       Result   : out Open_Result);
 
-   --  Attach to a quiescent vector with the expected capacity and immutable
-   --  element contract.
+   --  Attach to a vector with the expected capacity and immutable element
+   --  contract. A held guard raises Busy_Error; attachment validates the live
+   --  length while holding that guard.
    --  @param Item View attached on success
    --  @param Region Independently attached backing region
    --  @param Location Stored vector offset
    --  @param Capacity Expected maximum element count
    --  @exception Layout_Error Identity, geometry, or length is incompatible
+   --  @exception Busy_Error Another view holds the vector guard
    procedure Attach (Item : out View; Region : Region_View; Location : Region_Offset; Capacity : Positive);
 
    --  Detach Item without modifying stored bytes.
