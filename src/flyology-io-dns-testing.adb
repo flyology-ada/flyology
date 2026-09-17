@@ -2,6 +2,15 @@ with Flyology.DNS_Test_Observations;
 
 package body Flyology.IO.DNS.Testing is
 
+   function Configured_Server
+     (Configuration : Resolver_Configuration; Index : Positive) return Flyology.IO.Sockets.Endpoint is
+   begin
+      if Index > Configuration.Value.Server_Count then
+         raise Constraint_Error with "name-server index is outside the loaded configuration";
+      end if;
+      return Configuration.Value.Servers (Index);
+   end Configured_Server;
+
    procedure Use_Deterministic_Transaction_IDs (First : Natural) is
    begin
       Flyology.IO.DNS.Use_Deterministic_Transaction_IDs (First);

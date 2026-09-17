@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Flyology.IO.Sockets;
 
 --  Exposes deterministic hooks for DNS protocol tests, not application use.
 --
@@ -7,6 +8,14 @@ with Ada.Streams;
 --     Flyology.IO.DNS.Testing.Use_Deterministic_Transaction_IDs (16#1234#);
 
 package Flyology.IO.DNS.Testing is
+
+   --  Inspect the parsed endpoint without sending a DNS query.
+   --  @param Configuration Loaded resolver configuration
+   --  @param Index One-based name-server position
+   --  @return Stored numeric endpoint, including IPv6 scope
+   --  @exception Constraint_Error Index is outside the loaded server list
+   function Configured_Server
+     (Configuration : Resolver_Configuration; Index : Positive) return Flyology.IO.Sockets.Endpoint;
 
    --  Select a process-global deterministic transaction-ID sequence.
    --  Concurrent resolver calls must be stopped while changing this test mode.
