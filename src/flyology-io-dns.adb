@@ -1585,11 +1585,12 @@ package body Flyology.IO.DNS is
       Interrupts         : Interrupt_Set := No_Interrupts;
       Configuration_Path : String := "/etc/resolv.conf") return Address_Array
    is
-      Config   : Resolver_Config;
-      Started  : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
-      Absolute : constant Boolean := Name'Length > 0 and then Name (Name'Last) = '.';
-      Dots     : Natural := 0;
-      Rotation : Natural := 0;
+      Config             : Resolver_Config;
+      Started            : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Absolute           : constant Boolean := Name'Length > 0 and then Name (Name'Last) = '.';
+      Dots               : Natural := 0;
+      Rotation           : Natural := 0;
+      Bare_Server_Failed : Boolean := False;
 
       function Try_Name (Candidate : String) return Address_Array is
       begin
@@ -1642,10 +1643,15 @@ package body Flyology.IO.DNS is
             --  A negative answer and a server-failure response code are both
             --  answers about this candidate only. Neither may suppress the
             --  remaining search domains of a relative name.
-            when Name_Not_Found | Name_Server_Failure =>
+            when Name_Not_Found =>
                if Absolute then
                   raise;
                end if;
+            when Name_Server_Failure =>
+               if Absolute then
+                  raise;
+               end if;
+               Bare_Server_Failed := True;
          end;
       end if;
       for Index in 1 .. Config.Search_Count loop
@@ -1668,7 +1674,13 @@ package body Flyology.IO.DNS is
             end if;
          end;
       end loop;
-      return Try_Name (Name);
+      if Dots < Config.NDots then
+         return Try_Name (Name);
+      elsif Bare_Server_Failed then
+         raise Name_Server_Failure with Name;
+      else
+         raise Name_Not_Found with Name;
+      end if;
    end Resolve;
 
    function Load_Configuration
@@ -1746,6 +1758,7 @@ package body Flyology.IO.DNS is
       State.Original_Name := Bare;
       State.Candidate_Count := 0;
       State.Candidate_Index := 0;
+      State.First_Bare_Failure := No_Failure;
       if not Use_Search
         or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv4)
         or else Sockets.Is_IP_Address (Image (Bare), Sockets.IPv6)
@@ -1777,7 +1790,9 @@ package body Flyology.IO.DNS is
             end if;
          end;
       end loop;
-      Append (Bare);
+      if Dots < State.Configuration.NDots then
+         Append (Bare);
+      end if;
    end Build_Candidates;
 
    procedure Start_Scoped
@@ -2250,11 +2265,21 @@ package body Flyology.IO.DNS is
 
       procedure End_Candidate (Failure : Resolve_Failure) is
       begin
+         if Item.State.Candidate_Index = 1
+           and then Item.State.Candidates (1) = Item.State.Original_Name
+           and then Failure in Not_Found_Failure | Server_Failure
+         then
+            Item.State.First_Bare_Failure := Failure;
+         end if;
          if Failure in Not_Found_Failure | Server_Failure
            and then Item.State.Candidate_Index < Item.State.Candidate_Count
          then
             Item.State.Phase := Begin_Candidate;
             Flyology.Operations.Drivers.Reschedule (Item);
+         elsif Failure in Not_Found_Failure | Server_Failure
+           and then Item.State.First_Bare_Failure /= No_Failure
+         then
+            Fail (Item.State.First_Bare_Failure);
          else
             Fail (Failure);
          end if;

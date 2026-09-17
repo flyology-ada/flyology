@@ -120,6 +120,10 @@ procedure DNS_Smoke is
       Attempt_Interval  : constant Duration := 0.5;
       Search_Name       : constant String (1 .. 60) := (others => 'r');
       Bare_Name         : constant String (1 .. 60) := (others => 'b');
+      NDots_Name        : constant String := "ndots-once.test";
+      NDots_Mixed_Name  : constant String := "ndots-mixed.test";
+      NDots_Reverse_Name : constant String := "ndots-reverse.test";
+      NDots_Suffix      : constant String := "candidate.test";
       Search_Label      : constant String (1 .. 62) := (others => 's');
       Invalid_Label     : constant String (1 .. 64) := (others => 'i');
       Long_Search       : constant String :=
@@ -138,6 +142,11 @@ procedure DNS_Smoke is
          entry Wait_Cancel_Or_Finished (Client_Finished : out Boolean; Passed : out Boolean);
          procedure Missing_Query;
          function Missing_Queries return Natural;
+         procedure NDots_Query (Bare : Boolean);
+         function NDots_Bare_Queries return Natural;
+         function NDots_Search_Queries return Natural;
+         procedure NDots_Mixed_Search_Query;
+         function NDots_Mixed_Search_Queries return Natural;
          procedure A_Query;
          function A_Queries return Natural;
          procedure Alias_Query;
@@ -163,6 +172,9 @@ procedure DNS_Smoke is
          Secondary               : Sockets.Endpoint;
          Cancel_Seen             : Boolean := False;
          Missing_Count           : Natural := 0;
+         NDots_Bare_Count        : Natural := 0;
+         NDots_Search_Count      : Natural := 0;
+         NDots_Mixed_Search_Count : Natural := 0;
          A_Count                 : Natural := 0;
          Alias_Count             : Natural := 0;
          Chain_Count             : Natural := 0;
@@ -296,6 +308,24 @@ procedure DNS_Smoke is
          end Missing_Query;
          function Missing_Queries return Natural
          is (Missing_Count);
+         procedure NDots_Query (Bare : Boolean) is
+         begin
+            if Bare then
+               NDots_Bare_Count := NDots_Bare_Count + 1;
+            else
+               NDots_Search_Count := NDots_Search_Count + 1;
+            end if;
+         end NDots_Query;
+         function NDots_Bare_Queries return Natural
+         is (NDots_Bare_Count);
+         function NDots_Search_Queries return Natural
+         is (NDots_Search_Count);
+         procedure NDots_Mixed_Search_Query is
+         begin
+            NDots_Mixed_Search_Count := NDots_Mixed_Search_Count + 1;
+         end NDots_Mixed_Search_Query;
+         function NDots_Mixed_Search_Queries return Natural
+         is (NDots_Mixed_Search_Count);
          procedure A_Query is
          begin
             A_Count := A_Count + 1;
@@ -497,6 +527,7 @@ procedure DNS_Smoke is
             IPv6             : String := "";
             CNAME            : String := "";
             NXDOMAIN         : Boolean := False;
+            Server_Failure   : Boolean := False;
             Truncated        : Boolean := False;
             Malformed        : Boolean := False;
             Extra_Answers    : Natural := 0;
@@ -561,14 +592,22 @@ procedure DNS_Smoke is
             Response (1 .. 2) := Query (1 .. 2);
             Position := 3;
             Put_U16
-              (Response, Position, (if Truncated then 16#8380# elsif NXDOMAIN then 16#8183# else 16#8180#));
+              (Response,
+               Position,
+               (if Truncated then 16#8380#
+                elsif NXDOMAIN then 16#8183#
+                elsif Server_Failure then 16#8182#
+                else 16#8180#));
             Put_U16 (Response, Position, 1);
-            Put_U16 (Response, Position, (if Truncated or else NXDOMAIN then 0 else 1 + Extra_Answers));
+            Put_U16
+              (Response,
+               Position,
+               (if Truncated or else NXDOMAIN or else Server_Failure then 0 else 1 + Extra_Answers));
             Put_U16 (Response, Position, 0);
             Put_U16 (Response, Position, 0);
             Response (Position .. Position + Question_Last - 13) := Query (13 .. Question_Last);
             Position := Position + Question_Last - 12;
-            if not Truncated and then not NXDOMAIN then
+            if not Truncated and then not NXDOMAIN and then not Server_Failure then
                if Late_CNAME'Length > 0 then
                   Put_Name (Response, Position, Late_CNAME);
                elsif Malformed then
@@ -874,6 +913,19 @@ procedure DNS_Smoke is
                   Send_Response (Name, IPv4 => "192.0.2.20");
                elsif Name = "config.test" then
                   Send_Response (Name, IPv4 => "192.0.2.53");
+               elsif Name = NDots_Name or else Name = NDots_Name & "." & NDots_Suffix then
+                  Control.NDots_Query (Bare => Name = NDots_Name);
+                  Send_Response (Name, Server_Failure => True);
+               elsif Name = NDots_Mixed_Name then
+                  Send_Response (Name, Server_Failure => True);
+               elsif Name = NDots_Mixed_Name & "." & NDots_Suffix then
+                  Control.NDots_Mixed_Search_Query;
+                  Send_Response (Name, NXDOMAIN => True);
+               elsif Name = NDots_Reverse_Name then
+                  Send_Response (Name, NXDOMAIN => True);
+               elsif Name = NDots_Reverse_Name & "." & NDots_Suffix then
+                  Control.NDots_Mixed_Search_Query;
+                  Send_Response (Name, Server_Failure => True);
                elsif Name = Search_Name & ".valid.test" then
                   Send_Response (Name, IPv4 => "192.0.2.54");
                elsif Name = Search_Name & ".bad" then
@@ -1424,6 +1476,105 @@ procedure DNS_Smoke is
                end;
             end;
 
+            Set_Stage ("scoped ndots candidate order");
+            DNS.Clear_Cache;
+            declare
+               Bare_Before   : constant Natural := Control.NDots_Bare_Queries;
+               Search_Before : constant Natural := Control.NDots_Search_Queries;
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-ndots"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    NDots_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+               Server_Failed : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Name_Server_Failure =>
+                     Server_Failed := True;
+               end;
+               OK :=
+                 OK
+                 and then Server_Failed
+                 and then Control.NDots_Bare_Queries = Bare_Before + 1
+                 and then Control.NDots_Search_Queries = Search_Before + 1;
+            end;
+
+            Set_Stage ("scoped ndots mixed failures");
+            DNS.Clear_Cache;
+            declare
+               Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-ndots"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    NDots_Mixed_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+               Server_Failed : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Name_Server_Failure =>
+                     Server_Failed := True;
+               end;
+               OK :=
+                 OK and then Server_Failed and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+            end;
+
+            Set_Stage ("scoped ndots reverse failures");
+            DNS.Clear_Cache;
+            declare
+               Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-ndots"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    NDots_Reverse_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+               Not_Found     : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Name_Not_Found =>
+                     Not_Found := True;
+               end;
+               OK := OK and then Not_Found and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+            end;
+
             Set_Stage ("scoped invalid search domains");
             DNS.Clear_Cache;
             declare
@@ -1942,6 +2093,83 @@ procedure DNS_Smoke is
                   null;
             end;
          end;
+         Set_Stage ("synchronous ndots candidate order");
+         DNS.Clear_Cache;
+         declare
+            Bare_Before   : constant Natural := Control.NDots_Bare_Queries;
+            Search_Before : constant Natural := Control.NDots_Search_Queries;
+            Server_Failed : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve
+                      (NDots_Name,
+                       DNS.IPv4_Only,
+                       Timeout            => Operation_Timeout,
+                       Configuration_Path => Config_Path (Server, "-ndots"));
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Name_Server_Failure =>
+                  Server_Failed := True;
+            end;
+            OK :=
+              OK
+              and then Server_Failed
+              and then Control.NDots_Bare_Queries = Bare_Before + 1
+              and then Control.NDots_Search_Queries = Search_Before + 1;
+         end;
+         Set_Stage ("synchronous ndots mixed failures");
+         DNS.Clear_Cache;
+         declare
+            Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+            Server_Failed : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve
+                      (NDots_Mixed_Name,
+                       DNS.IPv4_Only,
+                       Timeout            => Operation_Timeout,
+                       Configuration_Path => Config_Path (Server, "-ndots"));
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Name_Server_Failure =>
+                  Server_Failed := True;
+            end;
+            OK := OK and then Server_Failed and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+         end;
+         Set_Stage ("synchronous ndots reverse failures");
+         DNS.Clear_Cache;
+         declare
+            Search_Before : constant Natural := Control.NDots_Mixed_Search_Queries;
+            Not_Found     : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve
+                      (NDots_Reverse_Name,
+                       DNS.IPv4_Only,
+                       Timeout            => Operation_Timeout,
+                       Configuration_Path => Config_Path (Server, "-ndots"));
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Name_Not_Found =>
+                  Not_Found := True;
+            end;
+            OK := OK and then Not_Found and then Control.NDots_Mixed_Search_Queries = Search_Before + 1;
+         end;
          Set_Stage ("remaining search candidate");
          declare
             Values : constant DNS.Address_Array :=
@@ -2082,6 +2310,7 @@ procedure DNS_Smoke is
       Write_Config (Address);
       Write_Config (Address, Long_Search & " valid.test", Suffix => "-remaining");
       Write_Config (Address, Long_Search, Suffix => "-bare");
+      Write_Config (Address, NDots_Suffix, Suffix => "-ndots");
       Write_Config
         (Address, "bad.. .bad a..b " & Invalid_Label & ".test valid.test", Suffix => "-invalid-search");
       Write_Config (Address, "bad.. .bad a..b " & Invalid_Label & ".test", Suffix => "-invalid-only");
@@ -2114,6 +2343,9 @@ procedure DNS_Smoke is
       end if;
       if Ada.Directories.Exists (Config_Path (Address, "-bare")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-bare"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-ndots")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-ndots"));
       end if;
       if Ada.Directories.Exists (Config_Path (Address, "-invalid-search")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-invalid-search"));

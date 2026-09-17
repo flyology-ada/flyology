@@ -332,9 +332,10 @@ private
    type Resolve_Operation_State (Owner : not null access Flyology.Operations.Completion_Set'Class) is
    limited record
       Configuration             : Resolver_Config;
-      Candidates                : Name_Buffer_Array (1 .. Max_Search_Domains + 2);
-      Candidate_Count           : Natural range 0 .. Max_Search_Domains + 2 := 0;
-      Candidate_Index           : Natural range 0 .. Max_Search_Domains + 2 := 0;
+      Candidates                : Name_Buffer_Array (1 .. Max_Search_Domains + 1);
+      Candidate_Count           : Natural range 0 .. Max_Search_Domains + 1 := 0;
+      Candidate_Index           : Natural range 0 .. Max_Search_Domains + 1 := 0;
+      First_Bare_Failure        : Resolve_Failure := No_Failure;
       Query_Name                : Name_Buffer;
       Original_Name             : Name_Buffer;
       Family                    : Family_Preference := Any_Family;
