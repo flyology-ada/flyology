@@ -1,8 +1,7 @@
 --------------------- MODULE CompletionSetFinalizeProof ---------------------
 EXTENDS CompletionSetFinalize
 
-\* The original proof concerns legacy finalization state. The expanded
-\* TypeOK, including ATC state, is checked by finite model configurations.
+\* Legacy finalization and owner-local ATC use separate preservation proofs.
 LegacyInit ==
     /\ targetState = "Pending"
     /\ targetReported = FALSE
@@ -119,5 +118,26 @@ THEOREM NextPreservesSafety ==
                 DriverCleanupIsOrdered,
                 DriverRaiseHasProgress,
                 DriverRaiseTerminalExactlyOnce
+
+ATCDeferredSafety ==
+    /\ ATCResumeConsistent
+    /\ ATCUseHasProgress
+    /\ ATCCancellationPropagates
+    /\ (atc.stage \in {"Driving", "Requested", "Returned"} => atc.deferral = 1)
+    /\ (atc.stage = "Returned" => atc.root = "Terminal" \/ atc.source = "Immediate")
+    /\ (atc.stage \in {"Delivered", "Used", "Cancelled"} => atc.delivered)
+
+THEOREM ATCInitIsSafe ==
+    ATCMode = "Deferred" /\ Init => ATCDeferredSafety
+<1>. QED BY DEF Init, ATCInitial, ATCDeferredSafety,
+                ATCResumeConsistent, ATCUseHasProgress,
+                ATCCancellationPropagates
+
+THEOREM ATCNextPreservesSafety ==
+    ATCMode = "Deferred" /\ ATCDeferredSafety /\ ATCNext => ATCDeferredSafety'
+<1>. QED BY DEF ATCDeferredSafety, ATCResumeConsistent,
+                ATCUseHasProgress, ATCCancellationPropagates,
+                ATCNext, ATCDrive, ATCProtectedReturn, ATCDriverReturn,
+                ATCStableDeliver, ATCBrokenDeliver, ATCUse, ATCCancel
 
 =============================================================================

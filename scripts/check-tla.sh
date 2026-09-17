@@ -425,12 +425,12 @@ then
   cat "$proof_log" >&2
   exit 1
 fi
-if ! grep -Fq 'All 2 obligations proved' "$proof_log"; then
+if ! grep -Fq 'All 4 obligations proved' "$proof_log"; then
   cat "$proof_log" >&2
-  printf '%s\n' 'completion-finalization proof did not discharge both obligations' >&2
+  printf '%s\n' 'completion-finalization and ATC proof obligations did not all discharge' >&2
   exit 1
 fi
-printf '%s\n' 'TLAPS proved       CompletionSetFinalizeProof    2 obligations'
+printf '%s\n' 'TLAPS proved       CompletionSetFinalizeProof    4 obligations'
 
 adaptive_proof_log="$run_root/adaptive-pool-lifecycle-proof.log"
 if ! "$FLYOLOGY_TLAPM" \
