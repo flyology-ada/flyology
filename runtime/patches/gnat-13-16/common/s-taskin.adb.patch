@@ -34,3 +34,11 @@
 +      return GL_Detect_Blocking = 1
 +        or else System.Flyology.Scheduler.Current_Task /= System.Null_Address;
    end Detect_Blocking;
+@@ -162,3 +162,7 @@
+       end if;
+
++      T.Common.Is_Lightweight :=
++        Parent /= Null_Task
++        and then System.Flyology.Is_Lightweight_Designation (Task_Info);
++
+       --  Link the task into the list of all tasks

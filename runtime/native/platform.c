@@ -384,6 +384,7 @@ int flyology_in_fork_child(void) {
 #define FLYOLOGY_FAULT_POINT_COUNT 52
 #define FLYOLOGY_FILE_CANCEL_BACKENDS 3
 #define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
+#define FLYOLOGY_REGISTRY_LOOKUP_KINDS 6
 
 struct flyology_fault_plan {
     atomic_uint calls;
@@ -393,6 +394,8 @@ struct flyology_fault_plan {
 
 static struct flyology_fault_plan
     flyology_faults[FLYOLOGY_FAULT_POINT_COUNT + 1];
+static atomic_uint
+    flyology_registry_lookup_counts[FLYOLOGY_REGISTRY_LOOKUP_KINDS];
 static atomic_uint flyology_final_reap_state;
 /* 0 idle, 1 creator parked, 2 creator released, 3 creator holds its shard. */
 static atomic_uint flyology_create_race_state;
@@ -603,6 +606,11 @@ void flyology_test_fault_reset(void) {
     unsigned backend;
     unsigned disposition;
 
+    for (unsigned kind = 0; kind < FLYOLOGY_REGISTRY_LOOKUP_KINDS; ++kind) {
+        atomic_store_explicit(&flyology_registry_lookup_counts[kind], 0,
+                              memory_order_relaxed);
+    }
+
     for (point = 1; point <= FLYOLOGY_FAULT_POINT_COUNT; ++point) {
         atomic_store_explicit(&flyology_faults[point].calls, 0,
                               memory_order_relaxed);
@@ -655,6 +663,22 @@ void flyology_test_fault_reset(void) {
         atomic_store_explicit(&flyology_atomic_store_models[slot], 0,
                               memory_order_relaxed);
     }
+}
+
+void flyology_test_note_registry_lookup(int kind) {
+    if (kind < 0 || kind >= FLYOLOGY_REGISTRY_LOOKUP_KINDS) {
+        return;
+    }
+    atomic_fetch_add_explicit(&flyology_registry_lookup_counts[kind], 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_registry_lookup_count(int kind) {
+    if (kind < 0 || kind >= FLYOLOGY_REGISTRY_LOOKUP_KINDS) {
+        return 0;
+    }
+    return atomic_load_explicit(&flyology_registry_lookup_counts[kind],
+                                memory_order_relaxed);
 }
 
 int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
@@ -1077,6 +1101,15 @@ int flyology_test_faults_enabled(void) {
 }
 
 void flyology_test_fault_reset(void) {
+}
+
+void flyology_test_note_registry_lookup(int kind) {
+    (void)kind;
+}
+
+unsigned flyology_test_registry_lookup_count(int kind) {
+    (void)kind;
+    return 0;
 }
 
 int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
