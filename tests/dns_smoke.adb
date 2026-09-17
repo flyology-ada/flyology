@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Streams;
@@ -137,6 +138,9 @@ procedure DNS_Smoke is
          function Chain_Queries return Natural;
          procedure TCP_Truncated_Query;
          function TCP_Truncated_Queries return Natural;
+         procedure TCP_Restart_Checked (Closed : Boolean);
+         function TCP_Restart_Checks return Natural;
+         function TCP_Restarts_Closed return Boolean;
          procedure Recursive_Failure_Query;
          function Recursive_Failure_Queries return Natural;
          procedure Finished (Passed : Boolean);
@@ -155,6 +159,8 @@ procedure DNS_Smoke is
          Alias_Count             : Natural := 0;
          Chain_Count             : Natural := 0;
          TCP_Truncated_Count     : Natural := 0;
+         TCP_Restart_Count       : Natural := 0;
+         TCP_Restart_Closed      : Boolean := True;
          Recursive_Failure_Count : Natural := 0;
          Is_Finished             : Boolean := False;
          All_OK                  : Boolean := False;
@@ -163,7 +169,8 @@ procedure DNS_Smoke is
       function Config_Path (Server : Sockets.Endpoint; Suffix : String := "") return String is
       begin
          return
-           "/tmp/flyology-dns-smoke-"
+           Ada.Environment_Variables.Value ("TMPDIR", "/tmp")
+           & "/flyology-dns-smoke-"
            & Ada.Strings.Fixed.Trim (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
            & Suffix
            & ".conf";
@@ -301,6 +308,15 @@ procedure DNS_Smoke is
          end TCP_Truncated_Query;
          function TCP_Truncated_Queries return Natural
          is (TCP_Truncated_Count);
+         procedure TCP_Restart_Checked (Closed : Boolean) is
+         begin
+            TCP_Restart_Count := TCP_Restart_Count + 1;
+            TCP_Restart_Closed := TCP_Restart_Closed and Closed;
+         end TCP_Restart_Checked;
+         function TCP_Restart_Checks return Natural
+         is (TCP_Restart_Count);
+         function TCP_Restarts_Closed return Boolean
+         is (TCP_Restart_Closed);
          procedure Recursive_Failure_Query is
          begin
             Recursive_Failure_Count := Recursive_Failure_Count + 1;
@@ -329,6 +345,9 @@ procedure DNS_Smoke is
          Last               : Streams.Stream_Element_Offset;
          Retry_Count        : Natural := 0;
          Scoped_Retry_Count : Natural := 0;
+         Bad_Length_Count   : Natural := 0;
+         Bad_Message_Count  : Natural := 0;
+         Restart_Connection : aliased Sockets.Socket_Type;
 
          procedure Open_Server_Sockets is
          begin
@@ -446,6 +465,19 @@ procedure DNS_Smoke is
             Buffer (Position) := 0;
             Position := Position + 1;
          end Put_Name;
+
+         procedure Send_TCP_All (Socket : Sockets.Socket_Type; Data : Streams.Stream_Element_Array) is
+            Next      : Streams.Stream_Element_Offset := Data'First;
+            Sent_Last : Streams.Stream_Element_Offset;
+         begin
+            while Next <= Data'Last loop
+               Sockets.Send_Socket (Socket, Data (Next .. Data'Last), Sent_Last);
+               if Sent_Last < Next then
+                  raise Program_Error with "TCP DNS fixture send made no progress";
+               end if;
+               Next := Sent_Last + 1;
+            end loop;
+         end Send_TCP_All;
 
          procedure Send_Response
            (Name             : String;
@@ -584,8 +616,8 @@ procedure DNS_Smoke is
                begin
                   Prefix (1) := Streams.Stream_Element ((Natural (Position - 1) / 256) mod 256);
                   Prefix (2) := Streams.Stream_Element (Natural (Position - 1) mod 256);
-                  Sockets.Send_Socket (Socket.all, Prefix, Sent_Last);
-                  Sockets.Send_Socket (Socket.all, Response (1 .. Position - 1), Sent_Last);
+                  Send_TCP_All (Socket.all, Prefix);
+                  Send_TCP_All (Socket.all, Response (1 .. Position - 1));
                end;
             end if;
             pragma Unreferenced (Name);
@@ -691,6 +723,84 @@ procedure DNS_Smoke is
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
+               elsif Name in "tcp-bad-length.test" | "tcp-bad-message.test" then
+                  if Name = "tcp-bad-length.test" then
+                     Bad_Length_Count := Bad_Length_Count + 1;
+                  else
+                     Bad_Message_Count := Bad_Message_Count + 1;
+                  end if;
+                  if (if Name = "tcp-bad-length.test" then Bad_Length_Count else Bad_Message_Count) mod 2 = 1
+                  then
+                     Send_Response (Name, Truncated => True);
+                     declare
+                        Address  : Sockets.Endpoint;
+                        Prefix   : Streams.Stream_Element_Array (1 .. 2);
+                        TCP_Last : Streams.Stream_Element_Offset;
+                        Length   : Natural;
+                        Status   : Sockets.Selector_Status;
+
+                        procedure Read_Exactly (Data : out Streams.Stream_Element_Array) is
+                           Next : Streams.Stream_Element_Offset := Data'First;
+                        begin
+                           while Next <= Data'Last loop
+                              Sockets.Receive_Socket (Restart_Connection, Data (Next .. Data'Last), TCP_Last);
+                              if TCP_Last < Next then
+                                 raise Program_Error with "TCP restart fixture closed during query";
+                              end if;
+                              Next := TCP_Last + 1;
+                           end loop;
+                        end Read_Exactly;
+                     begin
+                        Sockets.Accept_Socket
+                          (TCP, Restart_Connection, Address, Timeout => 1.0, Status => Status);
+                        if Status /= Sockets.Completed then
+                           raise Program_Error with "TCP restart fixture was not connected";
+                        end if;
+                        Sockets.Set_Socket_Option
+                          (Restart_Connection,
+                           Sockets.Socket_Level,
+                           (Name => Sockets.Receive_Timeout, Timeout => 1.0));
+                        Read_Exactly (Prefix);
+                        Length := Natural (Prefix (1)) * 256 + Natural (Prefix (2));
+                        if Length < 12 or else Length > Query'Length then
+                           raise Program_Error with "TCP restart fixture query has invalid length";
+                        end if;
+                        Read_Exactly (Query (1 .. Streams.Stream_Element_Offset (Length)));
+                        Last := Streams.Stream_Element_Offset (Length);
+                        if Name = "tcp-bad-length.test" then
+                           Send_TCP_All (Restart_Connection, (1 => 0, 2 => 1));
+                        else
+                           Send_Response
+                             (Name,
+                              IPv4      => "192.0.2.180",
+                              Malformed => True,
+                              Socket    => Restart_Connection'Access);
+                        end if;
+                     end;
+                  else
+                     --  The next UDP attempt must arrive after closing the
+                     --  abandoned TCP connection, before resolution ends.
+                     declare
+                        Probe    : Streams.Stream_Element_Array (1 .. 1);
+                        TCP_Last : Streams.Stream_Element_Offset;
+                        Closed   : Boolean := False;
+                     begin
+                        begin
+                           Sockets.Set_Socket_Option
+                             (Restart_Connection,
+                              Sockets.Socket_Level,
+                              (Name => Sockets.Receive_Timeout, Timeout => 0.2));
+                           Sockets.Receive_Socket (Restart_Connection, Probe, TCP_Last);
+                           Closed := TCP_Last < Probe'First;
+                        exception
+                           when Sockets.Socket_Error =>
+                              null;
+                        end;
+                        Control.TCP_Restart_Checked (Closed);
+                        Sockets.Close_Socket (Restart_Connection);
+                     end;
+                     Send_Response (Name, IPv4 => "192.0.2.180");
+                  end if;
                elsif Name = "tcp-silent.test" then
                   Send_Response (Name, Truncated => True);
                   declare
@@ -771,6 +881,7 @@ procedure DNS_Smoke is
                end if;
             end;
          end loop;
+         Close_Quietly (Restart_Connection);
          Sockets.Close_Socket (UDP);
          Sockets.Close_Socket (TCP);
       exception
@@ -778,6 +889,7 @@ procedure DNS_Smoke is
             Close_Quietly (Collision);
             Close_Quietly (UDP);
             Close_Quietly (TCP);
+            Close_Quietly (Restart_Connection);
             Ada.Text_IO.Put_Line
               (Ada.Text_IO.Standard_Error,
                "primary DNS test server failed: " & Ada.Exceptions.Exception_Information (Error));
@@ -1001,6 +1113,30 @@ procedure DNS_Smoke is
          procedure Run_Scoped_Checks is
             function Ref (Item : Operations.Operation'Class) return Operations.Operation_Reference
             renames Operations.Reference;
+
+            procedure Expect_TCP_Restart (Name : String) is
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    Name,
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 2,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Set_Stage ("scoped TCP restart " & Name);
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.180";
+               end;
+            end Expect_TCP_Restart;
          begin
             Set_Stage ("scoped default deadline");
             DNS.Clear_Cache;
@@ -1166,6 +1302,10 @@ procedure DNS_Smoke is
                     and then Sockets.Image (Values (Values'First)) = "198.51.100.9";
                end;
             end;
+
+            Expect_TCP_Restart ("tcp-bad-length.test");
+            Expect_TCP_Restart ("tcp-bad-message.test");
+            OK := OK and then Control.TCP_Restart_Checks = 2 and then Control.TCP_Restarts_Closed;
 
             Set_Stage ("scoped malformed retry");
             DNS.Clear_Cache;

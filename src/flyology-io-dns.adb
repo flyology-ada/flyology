@@ -2261,6 +2261,9 @@ package body Flyology.IO.DNS is
             end case;
          end Exhaust;
       begin
+         --  A retry abandons either transport, including a TCP reply that
+         --  failed framing or validation before another UDP attempt.
+         Close_Quietly (Item.State.TCP_Socket);
          if Time_Left (Item.State.Family_Deadline) = 0.0 then
             Exhaust;
             return;
