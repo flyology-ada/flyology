@@ -162,6 +162,12 @@ expect_safe \
 expect_safe \
   CompletionSetFinalize CompletionSetFinalize.cfg completion-finalize-safe
 expect_safe \
+  CompletionSetFinalize CompletionSetFinalize_atc_batch.cfg completion-atc-batch-safe
+expect_safe \
+  CompletionSetFinalize CompletionSetFinalize_atc_stabilizer.cfg completion-atc-stabilizer-safe
+expect_safe \
+  CompletionSetFinalize CompletionSetFinalize_atc_rearm.cfg completion-atc-rearm-safe
+expect_safe \
   PollerRegistrationOwnership PollerRegistrationOwnership.cfg \
   poller-registration-safe
 expect_safe \
@@ -237,6 +243,12 @@ expect_temporal_counterexample \
 expect_counterexample \
   CompletionSetFinalize CompletionSetFinalize_driver_raise_broken.cfg \
   DriverRaiseHasProgress completion-driver-raise-broken
+expect_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_atc_propagation_broken.cfg \
+  ATCPropagationGuardLeak completion-atc-propagation-broken
+expect_counterexample \
+  CompletionSetFinalize CompletionSetFinalize_atc_stabilizer_broken.cfg \
+  ATCStabilizerGuardLeak completion-atc-stabilizer-broken
 if ! grep -Fq 'raiseRootState = "Pending"' \
   "$run_root/completion-driver-raise-broken.log" \
   || ! grep -Fq 'raiseRootSource = "None"' \
@@ -407,18 +419,18 @@ expect_temporal_counterexample \
 proof_log="$run_root/completion-finalize-proof.log"
 if ! "$FLYOLOGY_TLAPM" \
   --cache-dir "$run_root/tlapm-cache" --cleanfp --nofp \
-  --strict --method smt "$model_root/CompletionSetFinalizeProof.tla" \
+  --strict --stretch 10 --method smt "$model_root/CompletionSetFinalizeProof.tla" \
   >"$proof_log" 2>&1
 then
   cat "$proof_log" >&2
   exit 1
 fi
-if ! grep -Fq 'All 2 obligations proved' "$proof_log"; then
+if ! grep -Fq 'All 18 obligations proved' "$proof_log"; then
   cat "$proof_log" >&2
-  printf '%s\n' 'completion-finalization proof did not discharge both obligations' >&2
+  printf '%s\n' 'completion-finalization and ATC proof obligations did not all discharge' >&2
   exit 1
 fi
-printf '%s\n' 'TLAPS proved       CompletionSetFinalizeProof    2 obligations'
+printf '%s\n' 'TLAPS proved       CompletionSetFinalizeProof    18 obligations'
 
 adaptive_proof_log="$run_root/adaptive-pool-lifecycle-proof.log"
 if ! "$FLYOLOGY_TLAPM" \
@@ -474,31 +486,13 @@ then
     'completion-finalization witness did not reach its exact terminal state' >&2
   exit 1
 fi
-if ! grep -Eq '^<FinalizeAtomically .*: [1-9]' "$finalize_log"; then
-  cat "$finalize_log" >&2
-  printf '%s\n' 'completion-finalization witness did not cover FinalizeAtomically' >&2
-  exit 1
-fi
-if ! grep -Eq '^<DriverFinishAtomically .*: [1-9]' "$finalize_log"; then
-  cat "$finalize_log" >&2
-  printf '%s\n' 'completion-finalization witness did not cover DriverFinishAtomically' >&2
-  exit 1
-fi
-if ! grep -Eq '^<DriverConsumeAtomically .*: [1-9]' "$finalize_log"; then
-  cat "$finalize_log" >&2
-  printf '%s\n' 'completion-finalization witness did not cover DriverConsumeAtomically' >&2
-  exit 1
-fi
-if ! grep -Eq '^<DriverFinalizeAtomically .*: [1-9]' "$finalize_log"; then
-  cat "$finalize_log" >&2
-  printf '%s\n' 'completion-finalization witness did not cover DriverFinalizeAtomically' >&2
-  exit 1
-fi
-if ! grep -Eq '^<DriverRaisesAtomically .*: [1-9]' "$finalize_log"; then
-  cat "$finalize_log" >&2
-  printf '%s\n' 'completion-finalization witness did not cover DriverRaisesAtomically' >&2
-  exit 1
-fi
+for finalize_action in Finalize DriverFinish DriverConsume DriverFinalize DriverRaises; do
+  if ! grep -Fq "lastAction |-> \"$finalize_action\"" "$finalize_log"; then
+    cat "$finalize_log" >&2
+    printf '%s\n' "completion-finalization witness did not cover $finalize_action" >&2
+    exit 1
+  fi
+done
 if grep -q '^Warning:' "$finalize_log"; then
   cat "$finalize_log" >&2
   printf '%s\n' 'completion-finalization witness emitted a TLC warning' >&2
@@ -539,6 +533,35 @@ finalize_trace="$run_root/completion-set-finalize.trace.json"
 cmp \
   "$project_root/tests/operations_finalize_conformance/traces/completion-set-finalize.trace.json" \
   "$finalize_trace"
+
+for atc_case in batch stabilizer rearm; do
+  atc_config="$model_root/CompletionSetFinalize_atc_${atc_case}_trace.cfg"
+  atc_raw="$run_root/completion-set-atc-${atc_case}-raw.json"
+  atc_trace="$run_root/completion-set-atc-${atc_case}.trace.json"
+  atc_log="$run_root/completion-set-atc-${atc_case}-witness.log"
+  atc_meta="$run_root/completion-set-atc-${atc_case}-states"
+  set +e
+  "$java_bin" -Xmx1g -XX:+UseParallelGC -cp "$tla_jar" tlc2.TLC \
+    -workers 1 -noGenerateSpecTE -metadir "$atc_meta" \
+    -config "$atc_config" -dumpTrace json "$atc_raw" \
+    CompletionSetFinalize.tla >"$atc_log" 2>&1
+  atc_status=$?
+  set -e
+  if [ "$atc_status" -ne 12 ] || \
+    ! grep -Fq 'Invariant ATCWitnessIncomplete is violated.' "$atc_log"
+  then
+    cat "$atc_log" >&2
+    printf '%s\n' "ATC $atc_case witness did not reach its exact terminal state" >&2
+    exit 1
+  fi
+  "$tla_cli" trace normalize "$atc_raw" "$atc_trace" \
+    "$model_root/CompletionSetFinalize.tla" --config "$atc_config" \
+    --toolchain tla2tools-1.8.0+b123b22 16 32
+  "$tla_cli" trace validate "$atc_trace" 16 32
+  cmp \
+    "$project_root/tests/operations_atc_conformance/traces/completion-set-atc-${atc_case}.trace.json" \
+    "$atc_trace"
+done
 
 adaptive_raw="$run_root/adaptive-pool-raw.json"
 adaptive_log="$run_root/adaptive-pool-witness.log"
@@ -933,6 +956,42 @@ grep -Fq '"verdict":"conformant"' \
 grep -Fq '"compared_steps":5' \
   "$run_root/operations-finalize-result.json"
 printf '%s\n' 'Ada/TLA+ match    CompletionSetFinalize          5 transitions'
+
+atc_conformance_source="$project_root/tests/operations_atc_conformance"
+atc_conformance_root="$run_root/operations-atc-conformance"
+mkdir -p "$atc_conformance_root/src" "$run_root/atc_support"
+cp \
+  "$atc_conformance_source/alire.toml" \
+  "$atc_conformance_source/operations_atc_conformance.gpr" \
+  "$atc_conformance_root/"
+cp "$atc_conformance_source/src/"* "$atc_conformance_root/src/"
+cp "$project_root/tests/atc_support/"* "$run_root/atc_support/"
+cd "$atc_conformance_root"
+if ! "$alire" -n with flyology --use "$project_root" \
+  >"$run_root/operations-atc-pin-flyology.log" 2>&1
+then
+  cat "$run_root/operations-atc-pin-flyology.log" >&2
+  exit 1
+fi
+if ! "$alire" -n with flyology_tla --use "$harness_root" \
+  >"$run_root/operations-atc-pin-harness.log" 2>&1
+then
+  cat "$run_root/operations-atc-pin-harness.log" >&2
+  exit 1
+fi
+if ! "$alire" -n build >"$run_root/operations-atc-build.log" 2>&1; then
+  cat "$run_root/operations-atc-build.log" >&2
+  exit 1
+fi
+for atc_case in batch stabilizer rearm; do
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    ./bin/operations_atc_conformance "$atc_case" \
+    "$run_root/completion-set-atc-${atc_case}.trace.json" \
+    >"$run_root/operations-atc-${atc_case}-replay.log"
+  grep -Fq "ATC replay $atc_case matched 6 owner transitions" \
+    "$run_root/operations-atc-${atc_case}-replay.log"
+  printf 'Ada/TLA+ match    CompletionSetATC-%-18s 6 transitions\n' "$atc_case"
+done
 
 adaptive_conformance_source="$project_root/tests/adaptive_pool_conformance"
 adaptive_conformance_root="$run_root/adaptive-pool-conformance"

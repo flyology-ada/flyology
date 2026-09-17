@@ -528,6 +528,7 @@ observability_smoke
 observability_utilization_smoke
 operations_smoke
 operations_finalize_smoke
+operations_atc_smoke
 operation_gates_smoke
 operation_composition_smoke
 operation_return_boundary_smoke
@@ -961,6 +962,16 @@ for test_main in $ordinary_mains; do
     tls_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
+      ;;
+    operations_atc_smoke)
+      for scenario in \
+        batch stabilize nested-stabilize rearm \
+        lw-batch lw-stabilize lw-nested-stabilize lw-rearm \
+        normal-batch normal-stabilize exception exception-stabilize abort
+      do
+        "$project_root/scripts/run-with-timeout.sh" 30 \
+          "$current_test_bin/$test_main" "$scenario"
+      done
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \

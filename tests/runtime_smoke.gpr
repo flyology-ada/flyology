@@ -16,7 +16,7 @@ project Runtime_Smoke is
    end case;
 
    for Languages use ("Ada", "C");
-   for Source_Dirs use (".", "native", Controlled_Subpool_Source_Dir);
+   for Source_Dirs use (".", "native", "atc_support", Controlled_Subpool_Source_Dir);
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
    for Main use
@@ -128,6 +128,7 @@ project Runtime_Smoke is
       "observability_smoke.adb",
       "operations_smoke.adb",
       "operations_finalize_smoke.adb",
+      "operations_atc_smoke.adb",
       "operation_gates_smoke.adb",
       "operation_composition_smoke.adb",
       "operation_return_boundary_smoke.adb",
