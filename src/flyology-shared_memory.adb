@@ -19,6 +19,11 @@ package body Flyology.Shared_Memory is
 
    type Namespace_Mode is (Create_Only, Open_Only, Create_Or_Open);
 
+   --  Unknown, unsupported, supported. Concurrent first inspections may
+   --  repeat the probe; each publishes the same kernel capability result.
+   Noexec_Support : C.int := -1
+   with Atomic;
+
    function Current_Error return C.int
    is (C.int (GNAT.OS_Lib.Errno));
 
@@ -54,6 +59,35 @@ package body Flyology.Shared_Memory is
 
    function Has_All (Value, Flags : C.int) return Boolean
    is ((Interfaces.Unsigned_32 (Value) and Interfaces.Unsigned_32 (Flags)) = Interfaces.Unsigned_32 (Flags));
+
+   function Supports_Noexec_Seal return Boolean is
+      Cached     : constant C.int := Noexec_Support;
+      Descriptor : C.int;
+      Ignored    : C.int;
+   begin
+      if not Native.Is_Linux then
+         return False;
+      elsif Cached >= 0 then
+         return Cached = 1;
+      end if;
+
+      Descriptor :=
+        Native.Memfd_Create
+          (Native.Memfd_Close_On_Exec + Native.Memfd_Allow_Sealing + Native.Memfd_No_Execute_Seal);
+      if Descriptor < 0 then
+         if Current_Error /= Native.Error_Invalid then
+            Raise_Current ("no-execute seal capability probe");
+         end if;
+         Noexec_Support := 0;
+         return False;
+      end if;
+      Ignored := Native.Close (Descriptor);
+      if Ignored /= 0 then
+         Raise_Current ("no-execute seal capability probe close");
+      end if;
+      Noexec_Support := 1;
+      return True;
+   end Supports_Noexec_Seal;
 
    procedure Ensure_Close_On_Exec (Descriptor : C.int) is
       Flags : C.int := Native.Get_Descriptor_Flags (Descriptor);
@@ -97,7 +131,7 @@ package body Flyology.Shared_Memory is
         (Close_On_Exec             => Has_All (Descriptor_Flags, Native.Descriptor_Close_On_Exec),
          Size_Immutable            => Seals >= 0 and then Has_All (Seals, Immutable_Seals),
          No_Execute_Seal           => Seals >= 0 and then Has_All (Seals, Native.Seal_Execute),
-         No_Execute_Seal_Supported => Seals >= 0 and then Has_All (Seals, Native.Seal_Execute),
+         No_Execute_Seal_Supported => False,
          No_Symlink_Follow         => No_Follow,
          Owner_Only_Permissions    =>
            Policy.Owner_Only (Interfaces.Unsigned_32 (Fields.Mode), Native.Owner_Only_Mask));
@@ -282,6 +316,7 @@ package body Flyology.Shared_Memory is
                Close_Ignoring (Descriptor);
                Raise_Failure ("anonymous shared-memory creation", -3);
             end if;
+            Noexec_Support := (if Noexec_Supported then 1 else 0);
             if Native.Truncate (Descriptor, Native_Size) /= 0 then
                declare
                   Error : constant C.int := Current_Error;
@@ -640,11 +675,14 @@ package body Flyology.Shared_Memory is
    end Kind;
 
    function Properties (Item : Backing_Object) return Security_Properties is
+      Result : Security_Properties;
    begin
       if not Is_Open (Item) then
          raise Validation_Error with "backing object is closed";
       end if;
-      return Item.Property_Value;
+      Result := Item.Property_Value;
+      Result.No_Execute_Seal_Supported := Supports_Noexec_Seal;
+      return Result;
    end Properties;
 
    procedure Map (Item : in out Mapping; Source : Backing_Object) is
