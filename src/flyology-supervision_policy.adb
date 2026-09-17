@@ -245,15 +245,14 @@ is
       Now               : Tick;
       Recovery_Deadline : Tick;
       Admission         : out Restart_Admission;
-      Backoff           : out Tick)
-   is
-      In_Window   : constant Boolean := Now - Account.Window_Started < Limits.Window;
-      Window_Used : constant Attempt_Count := (if In_Window then Account.Window_Used else 0);
+      Backoff           : out Tick) is
    begin
       Backoff := Backoff_For (Account.Consecutive + 1, Limits.Initial_Delay, Limits.Maximum_Delay);
       if Account.Total_Used >= Limits.Total_Limit then
          Admission := Total_Exhausted;
-      elsif Window_Used >= Limits.Burst_Limit then
+      elsif Account.Window_Used >= Limits.Burst_Limit
+        and then Now - Account.Times (Account.Window_Used - Limits.Burst_Limit + 1) < Limits.Window
+      then
          Admission := Burst_Exhausted;
       elsif Backoff > Recovery_Deadline - Now then
          Admission := Deadline_Exhausted;
@@ -263,13 +262,25 @@ is
    end Classify_Attempt;
 
    procedure Record_Attempt (Limits : Restart_Limits; Now : Tick; Account : in out Restart_Account) is
+      pragma Unreferenced (Limits);
    begin
-      if Now - Account.Window_Started >= Limits.Window then
-         Account.Window_Started := Now;
-         Account.Window_Used := 0;
+      if Account.Window_Used = Account.Capacity then
+         for Index in 1 .. Account.Capacity - 1 loop
+            Account.Times (Index) := Account.Times (Index + 1);
+            pragma
+              Loop_Invariant
+                (for all Previous in 1 .. Index =>
+                   Account.Times (Previous) = Account.Times'Loop_Entry (Previous + 1));
+            pragma
+              Loop_Invariant
+                (for all Later in Index + 1 .. Account.Capacity =>
+                   Account.Times (Later) = Account.Times'Loop_Entry (Later));
+         end loop;
+      else
+         Account.Window_Used := Account.Window_Used + 1;
       end if;
       Account.Total_Used := Account.Total_Used + 1;
-      Account.Window_Used := Account.Window_Used + 1;
+      Account.Times (Account.Window_Used) := Now;
       Account.Consecutive := Account.Consecutive + 1;
    end Record_Attempt;
 
@@ -277,7 +288,12 @@ is
      (Limits : Restart_Limits; Now : Tick; Ready_Since : Tick; Account : in out Restart_Account) is
    begin
       if Now - Ready_Since >= Limits.Stability_Time then
-         Account := (Total_Used => 0, Window_Used => 0, Consecutive => 0, Window_Started => Now);
+         Account :=
+           (Capacity    => Account.Capacity,
+            Total_Used  => 0,
+            Window_Used => 0,
+            Consecutive => 0,
+            Times       => (others => 0));
       end if;
    end Reset_If_Stable;
 

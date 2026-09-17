@@ -1,3 +1,4 @@
+with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Environment_Variables;
@@ -123,6 +124,64 @@ procedure Shared_Memory_Smoke is
       end loop;
       return -1;
    end Wait_Child;
+
+   procedure Check_Noexec_Capability_Report is
+      Named, Received, Anonymous : Shared.Backing_Object;
+      Left, Right                : aliased C.int := -1;
+      Received_Props             : Shared.Security_Properties;
+      Name                       : constant String :=
+        "/flyology-noexec-"
+        & Identifier
+        & "-"
+        & Ada.Strings.Fixed.Trim
+            (Duration'Image (Ada.Calendar.Seconds (Ada.Calendar.Clock)),
+             Ada.Strings.Both);
+      Ignored                    : C.int;
+   begin
+      if Is_Linux /= 1 then
+         return;
+      end if;
+
+      --  Inspect the unsealed descriptor first, exercising the lazy kernel
+      --  capability probe before Flyology creates an anonymous memfd.
+      Shared.Create_Named (Named, Name, Mapping_Length);
+      Shared.Unlink (Named);
+      Assert
+        (Socketpair (Left'Access, Right'Access) = 0,
+         "noexec report socketpair failed");
+      Unix_Sockets.Send
+        (Unix_Sockets.Socket_Descriptor (Left), Named, Unix_Sockets.Borrow);
+      Unix_Sockets.Receive
+        (Unix_Sockets.Socket_Descriptor (Right), Mapping_Length, Received);
+      Received_Props := Shared.Properties (Received);
+      Assert
+        (not Received_Props.No_Execute_Seal,
+         "unsealed received descriptor reports F_SEAL_EXEC");
+
+      Shared.Create_Anonymous (Anonymous, Mapping_Length);
+      Assert
+        (Received_Props.No_Execute_Seal_Supported
+         = Shared.Properties (Anonymous).No_Execute_Seal_Supported,
+         "received descriptor confused kernel noexec support with its seal state");
+      Shared.Close (Anonymous);
+      Shared.Close (Received);
+      Shared.Close (Named);
+      Ignored := Close_Socket (Left);
+      Assert (Ignored = 0, "noexec report sender socket close failed");
+      Left := -1;
+      Ignored := Close_Socket (Right);
+      Assert (Ignored = 0, "noexec report receiver socket close failed");
+      Right := -1;
+   exception
+      when others =>
+         if Left >= 0 then
+            Ignored := Close_Socket (Left);
+         end if;
+         if Right >= 0 then
+            Ignored := Close_Socket (Right);
+         end if;
+         raise;
+   end Check_Noexec_Capability_Report;
 
    function Size_Changes_Rejected (Descriptor : C.int; Length : Shared.Byte_Length) return Boolean is
       Grow_Result   : constant C.int := Truncate (Descriptor, C.long_long (Length + 1));
@@ -1432,6 +1491,7 @@ procedure Shared_Memory_Smoke is
    end Check_Handoff;
 
 begin
+   Check_Noexec_Capability_Report;
    Check_Anonymous_And_Registry;
    Check_Named;
    Check_File;

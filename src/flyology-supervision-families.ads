@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology.Execution_Groups;
+with Flyology.Supervision_Windows;
 with Flyology.Wake_Sources;
 with Interfaces.C;
 
@@ -200,6 +201,7 @@ private
    type Boolean_Array is array (Slot_Index) of Boolean;
    type Slot_Order is array (Slot_Index) of Slot_Index;
    type Natural_Array is array (Slot_Index) of Natural;
+   type Window_Array is array (Slot_Index) of Flyology.Supervision_Windows.History;
    type Termination_Array is array (Slot_Index) of Termination_Summary;
    type Time_Array is array (Slot_Index) of Ada.Real_Time.Time;
    type Incident_Id_Array is array (Slot_Index) of Incident_Id;
@@ -279,8 +281,13 @@ private
    type Prepared_Commit_Status is (Prepared_Committed, Prepared_Commit_Closed);
    protected type Family_State is
       procedure Configure (Identity : Controller_Id; Inherited : Incident_Context);
-      procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle);
-      procedure Commit (Slot : Slot_Index; Handle : Child_Handle);
+      --  Publish caller-owned reservation evidence in the protected cut, and
+      --  disarm it in the same cut that queues the committed generation.
+      procedure Reserve
+        (Slot   : not null access Slot_Index;
+         Handle : not null access Child_Handle;
+         Active : not null access Boolean);
+      procedure Commit (Slot : Slot_Index; Handle : Child_Handle; Active : not null access Boolean);
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle);
       procedure Reserve_Prepared
         (Slot   : not null access Slot_Index;
@@ -493,10 +500,9 @@ private
       Reserved_Children          : Natural := 0;
       Live_Managers              : Natural := 0;
       Total_Used                 : Natural_Array := (others => 0);
-      Window_Used                : Natural_Array := (others => 0);
+      Windows                    : Window_Array;
       Consecutive                : Natural_Array := (others => 0);
       Incident_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
-      Window_Since               : Time_Array := (others => Ada.Real_Time.Time_First);
       Ready_Since                : Time_Array := (others => Ada.Real_Time.Time_First);
       Last_Incident              : Incident_Id_Array := (others => Incident_Id'First);
       Last_Attempt               : Incident_Attempt_Array := (others => Incident_Attempt'First);

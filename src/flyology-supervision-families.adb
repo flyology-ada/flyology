@@ -259,6 +259,9 @@ package body Flyology.Supervision.Families is
          if Run_Used then
             raise Program_Error with "supervision family is one-shot";
          end if;
+         for Slot in Slot_Index loop
+            Flyology.Supervision_Windows.Initialize (Windows (Slot), Policy.Recovery.Burst_Attempts);
+         end loop;
          Run_Used := True;
          Configured := True;
          Family_State.Identity := Identity;
@@ -336,7 +339,11 @@ package body Flyology.Supervision.Families is
             Backoff     => Backoff);
       end Record_Event;
 
-      procedure Reserve (Slot : out Slot_Index; Handle : out Child_Handle) is
+      procedure Reserve
+        (Slot   : not null access Slot_Index;
+         Handle : not null access Child_Handle;
+         Active : not null access Boolean)
+      is
          Found      : Boolean := False;
          Has_Vacant : Boolean := False;
          Selected   : Slot_Index := Slot_Index'First;
@@ -384,23 +391,23 @@ package body Flyology.Supervision.Families is
          Snapshots (Selected).Attempts := 0;
          Snapshots (Selected).Backoff := Ada.Real_Time.Time_Span_Zero;
          Total_Used (Selected) := 0;
-         Window_Used (Selected) := 0;
+         Flyology.Supervision_Windows.Reset (Windows (Selected));
          Consecutive (Selected) := 0;
          Incident_Since (Selected) := Ada.Real_Time.Time_First;
-         Window_Since (Selected) := Ada.Real_Time.Time_First;
          Ready_Since (Selected) := Ada.Real_Time.Time_First;
          Last_Incident (Selected) := Incident_Id'First;
          Last_Attempt (Selected) := Incident_Attempt'First;
          Has_Incident (Selected) := False;
          Active_Incidents (Selected) := No_Incident;
-         Slot := Selected;
-         Handle :=
+         Slot.all := Selected;
+         Handle.all :=
            (Controller => Identity,
             Id         => Logical_Id (Selected),
             Generation => Snapshots (Selected).Generation);
+         Active.all := True;
       end Reserve;
 
-      procedure Commit (Slot : Slot_Index; Handle : Child_Handle) is
+      procedure Commit (Slot : Slot_Index; Handle : Child_Handle; Active : not null access Boolean) is
       begin
          if Slots (Slot) /= Reserved
            or else not Generation_Is_Current
@@ -415,6 +422,7 @@ package body Flyology.Supervision.Families is
          Queue (Queue_Tail) := Slot;
          Queue_Tail := Next_Slot (Queue_Tail);
          Queue_Length := Queue_Length + 1;
+         Active.all := False;
       end Commit;
 
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle) is
@@ -488,10 +496,9 @@ package body Flyology.Supervision.Families is
          Snapshots (Selected).Attempts := 0;
          Snapshots (Selected).Backoff := Ada.Real_Time.Time_Span_Zero;
          Total_Used (Selected) := 0;
-         Window_Used (Selected) := 0;
+         Flyology.Supervision_Windows.Reset (Windows (Selected));
          Consecutive (Selected) := 0;
          Incident_Since (Selected) := Ada.Real_Time.Time_First;
-         Window_Since (Selected) := Ada.Real_Time.Time_First;
          Ready_Since (Selected) := Ada.Real_Time.Time_First;
          Last_Incident (Selected) := Incident_Id'First;
          Last_Attempt (Selected) := Incident_Attempt'First;
@@ -1004,21 +1011,17 @@ package body Flyology.Supervision.Families is
            and then Now - Ready_Since (Slot) >= Policy.Recovery.Stability_Reset
          then
             Total_Used (Slot) := 0;
-            Window_Used (Slot) := 0;
+            Flyology.Supervision_Windows.Reset (Windows (Slot));
             Consecutive (Slot) := 0;
-            Window_Since (Slot) := Now;
             Incident_Since (Slot) := Now;
          end if;
          if not Has_Incident (Slot) or else Last_Incident (Slot) /= Flyology.Supervision.Incident (Cascade)
          then
             Incident_Since (Slot) := Now;
          end if;
-         if Window_Used (Slot) = 0 or else Now - Window_Since (Slot) >= Policy.Recovery.Window then
-            Window_Since (Slot) := Now;
-            Window_Used (Slot) := 0;
-         end if;
          if Total_Used (Slot) >= Policy.Recovery.Total_Attempts
-           or else Window_Used (Slot) >= Policy.Recovery.Burst_Attempts
+           or else not Flyology.Supervision_Windows.Has_Capacity
+                         (Windows (Slot), Now, Policy.Recovery.Window, Policy.Recovery.Burst_Attempts)
            or else Now > Recovery_Deadline (Cascade)
          then
             Snapshots (Slot).Termination.Kind := Policy_Exhaustion;
@@ -1050,7 +1053,7 @@ package body Flyology.Supervision.Families is
          end if;
 
          Total_Used (Slot) := Total_Used (Slot) + 1;
-         Window_Used (Slot) := Window_Used (Slot) + 1;
+         Flyology.Supervision_Windows.Record_Attempt (Windows (Slot), Now);
          Consecutive (Slot) := Consecutive (Slot) + 1;
          Last_Incident (Slot) := Flyology.Supervision.Incident (Cascade);
          Last_Attempt (Slot) := Attempt (Cascade);
@@ -2048,17 +2051,39 @@ package body Flyology.Supervision.Families is
    end Validate;
 
    procedure Start (Item : in out Family; Input : Request; Handle : out Child_Handle) is
-      Slot : Slot_Index;
-   begin
-      Item.State.Reserve (Slot, Handle);
+      type Reservation_Guard is new Ada.Finalization.Limited_Controlled with record
+         Slot   : aliased Slot_Index := Slot_Index'First;
+         Handle : aliased Child_Handle;
+         Active : aliased Boolean := False;
+      end record;
+
+      overriding
+      procedure Finalize (Guard : in out Reservation_Guard);
+
+      overriding
+      procedure Finalize (Guard : in out Reservation_Guard) is
       begin
-         Item.Inputs (Slot) := Input;
-         Item.State.Commit (Slot, Handle);
-      exception
-         when others =>
-            Item.State.Rollback (Slot, Handle);
-            raise;
-      end;
+         if Guard.Active then
+            Item.State.Rollback (Guard.Slot, Guard.Handle);
+         end if;
+      end Finalize;
+
+      Guard : Reservation_Guard;
+   begin
+      --  The guard exists before Reserve publishes anything. Its aliased
+      --  evidence is armed before the protected action permits pending abort.
+      Item.State.Reserve (Guard.Slot'Access, Guard.Handle'Access, Guard.Active'Access);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Family_Start_Reserved);
+      end if;
+      Item.Inputs (Guard.Slot) := Input;
+      Item.State.Commit (Guard.Slot, Guard.Handle, Guard.Active'Access);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Family_Start_Committed);
+      end if;
+      Handle := Guard.Handle;
    end Start;
 
    procedure Stop (Item : in out Family; Handle : Child_Handle) is

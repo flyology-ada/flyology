@@ -16,7 +16,7 @@ project Runtime_Smoke is
    end case;
 
    for Languages use ("Ada", "C");
-   for Source_Dirs use (".", "native", Controlled_Subpool_Source_Dir);
+   for Source_Dirs use (".", "native", "atc_support", Controlled_Subpool_Source_Dir);
    for Object_Dir use "obj/runtime_smoke";
    for Exec_Dir use "bin";
    for Main use
@@ -49,6 +49,7 @@ project Runtime_Smoke is
       "data_structures_concurrency_smoke.adb",
       "data_structures_destroy_contention_smoke.adb",
       "data_structures_smoke.adb",
+      "flyology-data_structures-guard_epoch_smoke.adb",
       "deadline_clamp_smoke.adb",
       "flyology-data_structures-clock_policy-smoke.adb",
       "descriptor_ownership_smoke.adb",
@@ -64,6 +65,7 @@ project Runtime_Smoke is
       "fault_injection_smoke.adb",
       "file_transfers_smoke.adb",
       "fairness_smoke.adb",
+      "family_start_abort_smoke.adb",
       "fiber_trampoline_abort_smoke.adb",
       "fiber_trampoline_smoke.adb",
       "file_cancellation_smoke.adb",
@@ -110,6 +112,7 @@ project Runtime_Smoke is
       "lazy_event_start_smoke.adb",
       "library_finalize_exception_runtime_smoke.adb",
       "library_finalize_runtime_smoke.adb",
+      "lane_identity_lookup_smoke.adb",
       "lifecycle_smoke.adb",
       "lifecycle_churn_smoke.adb",
       "lightweight_affinity_smoke.adb",
@@ -127,6 +130,7 @@ project Runtime_Smoke is
       "observability_smoke.adb",
       "operations_smoke.adb",
       "operations_finalize_smoke.adb",
+      "operations_atc_smoke.adb",
       "operation_gates_smoke.adb",
       "operation_composition_smoke.adb",
       "operation_return_boundary_smoke.adb",
@@ -134,6 +138,7 @@ project Runtime_Smoke is
       "poller_policy_smoke.adb",
       "pool_growth_smoke.adb",
       "pool_reduction_claim_smoke.adb",
+      "pool_reduction_cross_to_shard_smoke.adb",
       "pool_reduction_inert_smoke.adb",
       "pool_reduction_smoke.adb",
       "priority_semantics_smoke.adb",

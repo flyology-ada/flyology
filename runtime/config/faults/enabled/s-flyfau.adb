@@ -2,6 +2,14 @@ package body System.Flyology.Faults is
 
    use type Interfaces.C.int;
 
+   procedure Test_Note_Registry_Lookup (Kind : Interfaces.C.int);
+   pragma Import (C, Test_Note_Registry_Lookup, "flyology_test_note_registry_lookup");
+
+   procedure Note_Registry_Lookup (Kind : Registry_Lookup_Kind) is
+   begin
+      Test_Note_Registry_Lookup (Interfaces.C.int (Registry_Lookup_Kind'Enum_Rep (Kind)));
+   end Note_Registry_Lookup;
+
    function Test_Fault_Hit (Point : Interfaces.C.int) return Interfaces.C.int;
    pragma Import (C, Test_Fault_Hit, "flyology_test_fault_hit");
 

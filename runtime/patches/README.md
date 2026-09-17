@@ -71,6 +71,24 @@ is part of the patch-family contract: moving it earlier would race live task
 stacks, while omitting it leaves internal scheduler pthreads and pollers for the
 operating system to reclaim at process exit.
 
+The common tasking patches add one immutable lane flag to the ATCB and set it
+before the task is published. The environment ATCB and both temporary and
+registered foreign ATCBs are explicitly native. GNARL lane predicates read that
+field without taking a Flyology registry shard; `Task_Thread`, wake, priority,
+and destruction paths retain registry lookup because they need the Fiber record.
+Preactivation priority updates remain ATCB-only while GNARL marks the task
+`Unactivated`. Destruction of an absent Fiber succeeds only for `Unactivated`
+allocator cleanup or `Terminated` tasks, including failed creation; absent
+records for live tasks remain errors.
+GNARL's `Common.State` is already atomic. Priority callers hold the target task
+lock; late `Finalize_TCB` callers retain exclusive finalization or expunge
+ownership of the ATCB after releasing that lock, excluding reactivation and
+reclamation through the state snapshot.
+Because the field changes `s-taskin.ads`, runtime preparation derives the exact
+dependent-unit closure from the selected compiler's ALI metadata, recompiles
+those units, and replaces their members in `libgnat` or `libgnarl` before the
+runtime is published.
+
 The same common patch publishes a fixed task-owned exit result at GNARL's outer
 task wrapper boundary, after the compiler-generated body has unwound and
 completed its dependent-task master but before user termination handlers run.

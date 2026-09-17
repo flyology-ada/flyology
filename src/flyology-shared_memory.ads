@@ -40,12 +40,13 @@ package Flyology.Shared_Memory is
    --  @enum Received_Capability Descriptor received through SCM_RIGHTS
    type Backing_Kind is (Anonymous_Capability, Named_POSIX, File_Backed, Received_Capability);
 
-   --  Security properties verified on the live descriptor.
+   --  Descriptor security properties and host no-execute seal capability.
    --  @field Close_On_Exec FD_CLOEXEC is set
    --  @field Size_Immutable Linux grow, shrink, and further-seal seals are set
-   --  @field No_Execute_Seal Linux MFD_NOEXEC_SEAL was accepted by the kernel
-   --  @field No_Execute_Seal_Supported The running Linux kernel recognized
-   --     MFD_NOEXEC_SEAL
+   --  @field No_Execute_Seal Linux F_SEAL_EXEC is present on this descriptor
+   --  @field No_Execute_Seal_Supported A memfd_create probe shows that the
+   --     running Linux kernel recognizes MFD_NOEXEC_SEAL, independently of
+   --     whether this descriptor has F_SEAL_EXEC
    --  @field No_Symlink_Follow File opening used O_NOFOLLOW
    --  @field Owner_Only_Permissions Group and other permission bits are clear;
    --     Linux memfd objects are capability-only but normally report this as
@@ -202,10 +203,13 @@ package Flyology.Shared_Memory is
    --  @exception Validation_Error Item is closed
    function Kind (Item : Backing_Object) return Backing_Kind;
 
-   --  Return descriptor properties verified when Item was acquired.
+   --  Return descriptor properties verified when Item was acquired. On Linux,
+   --  the first request for kernel no-execute seal support may create and
+   --  close a temporary memfd; subsequent requests use the cached result.
    --  @param Item Open owner to inspect
    --  @return Verified security properties
    --  @exception Validation_Error Item is closed
+   --  @exception Operating_System_Error The capability probe fails
    function Properties (Item : Backing_Object) return Security_Properties;
 
    --  Map the complete backing object shared, readable, and writable at an

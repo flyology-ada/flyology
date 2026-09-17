@@ -288,6 +288,7 @@ procedure Data_Structures_Smoke is
    Scratch_Slab_Location     : constant DS.Region_Offset := 132_000;
    Scratch_Map_Location      : constant DS.Region_Offset := 134_000;
    Scratch_Open_Location     : constant DS.Region_Offset := 140_000;
+   Raising_MPMC_Location     : constant DS.Region_Offset := 142_000;
    Arena_Location            : constant DS.Region_Offset := 180_224;
    Dynamic_Vector_Location   : constant DS.Region_Offset := 150_016;
    Dynamic_String_Location   : constant DS.Region_Offset := 151_040;
@@ -2032,6 +2033,22 @@ begin
          "create-or-attach overwrote an incompatible ready vector");
 
       declare
+         Saved_Length : constant Interfaces.Unsigned_64 :=
+           Read_U64 (Base_B, Raw_Offset (Vector_Location, 48));
+      begin
+         Write_U64 (Base_B, Raw_Offset (Vector_Location, 48), 17);
+         Failed := False;
+         begin
+            Vectors.Attach (Wrong, Region_B, Vector_Location, 16);
+         exception
+            when DS.Layout_Error =>
+               Failed := True;
+         end;
+         Write_U64 (Base_B, Raw_Offset (Vector_Location, 48), Saved_Length);
+         Assert (Failed and then not Vectors.Is_Attached (Wrong), "vector accepted a corrupt length");
+      end;
+
+      declare
          Wrong_Element : Wrong_Vectors.View;
          Wrong_Version : Wrong_Version_Vectors.View;
       begin
@@ -2250,13 +2267,19 @@ begin
         DS.Hash_Maps
           (Key     => U64_Elements.Element,
            Element => Raising_U64_Element);
+      package Raising_MPMC is new DS.Rings.MPMC (Element => Raising_U64_Element);
 
       use type Raising_Maps.Put_Result;
+      use type Raising_MPMC.Pop_Result;
+      use type Raising_MPMC.Push_Result;
 
-      First, Second, Third : Raising_Maps.View;
-      Outcome              : Raising_Maps.Put_Result;
-      Home                 : Interfaces.Unsigned_64;
-      Failed               : Boolean := False;
+      First, Second, Third  : Raising_Maps.View;
+      Outcome               : Raising_Maps.Put_Result;
+      Ring_A, Ring_B, Ring_C : Raising_MPMC.View;
+      Push_Outcome          : Raising_MPMC.Push_Result;
+      Pop_Outcome           : Raising_MPMC.Pop_Result;
+      Home                  : Interfaces.Unsigned_64;
+      Failed                : Boolean := False;
    begin
       Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
       Raising_Maps.Attach (Second, Region_B, Scratch_Map_Location, 4);
@@ -2340,6 +2363,57 @@ begin
          "timed hash-map Get did not poison a corrupt entry state");
       Raising_Maps.Initialize (First, Region_A, Scratch_Map_Location, 4);
       Raising_Maps.Destroy (First);
+
+      Raising_MPMC.Initialize (Ring_A, Region_A, Raising_MPMC_Location, 2);
+      Raising_MPMC.Attach (Ring_B, Region_B, Raising_MPMC_Location, 2);
+      Raising_MPMC.Try_Push (Ring_A, Observer_Trigger, Push_Outcome);
+      Assert (Push_Outcome = Raising_MPMC.Pushed, "raising-observer MPMC setup push failed");
+      Raising_MPMC.Try_Push (Ring_B, 42, Push_Outcome);
+      Assert (Push_Outcome = Raising_MPMC.Pushed, "raising-observer MPMC second push failed");
+
+      Failed := False;
+      begin
+         Raising_MPMC.Try_Pop (Ring_A, U64_Value, Pop_Outcome);
+      exception
+         when Raising_Observer_Error =>
+            Failed := True;
+      end;
+      Assert (Failed, "MPMC Try_Pop did not propagate observer failure");
+      Assert (not Raising_MPMC.Is_Poisoned (Ring_B), "MPMC observer failure poisoned the ring");
+      Raising_MPMC.Try_Pop (Ring_B, U64_Value, Pop_Outcome);
+      Assert
+        (Pop_Outcome = Raising_MPMC.Popped and then U64_Value = 42,
+         "MPMC observer failure hid the next element");
+      Raising_MPMC.Try_Push (Ring_A, 84, Push_Outcome);
+      Assert (Push_Outcome = Raising_MPMC.Pushed, "MPMC slot was not reusable after observer failure");
+      Raising_MPMC.Try_Pop (Ring_B, U64_Value, Pop_Outcome);
+      Assert
+        (Pop_Outcome = Raising_MPMC.Popped and then U64_Value = 84,
+         "MPMC failed to consume a later element");
+
+      Raising_MPMC.Try_Push (Ring_B, Observer_Trigger, Push_Outcome);
+      Assert (Push_Outcome = Raising_MPMC.Pushed, "MPMC timed observer setup push failed");
+      Failed := False;
+      begin
+         Raising_MPMC.Pop (Ring_B, U64_Value, 0.0);
+      exception
+         when Raising_Observer_Error =>
+            Failed := True;
+      end;
+      Assert (Failed, "MPMC Pop did not propagate observer failure");
+      Assert (not Raising_MPMC.Is_Poisoned (Ring_A), "MPMC timed observer failure poisoned the ring");
+      Raising_MPMC.Try_Push (Ring_A, 73, Push_Outcome);
+      Assert (Push_Outcome = Raising_MPMC.Pushed, "MPMC timed observer failure blocked later push");
+      Raising_MPMC.Attach (Ring_C, Region_A, Raising_MPMC_Location, 2);
+      Raising_MPMC.Try_Pop (Ring_C, U64_Value, Pop_Outcome);
+      Assert
+        (Pop_Outcome = Raising_MPMC.Popped and then U64_Value = 73,
+         "MPMC observer failure blocked a newly attached consumer");
+      Raising_MPMC.Try_Pop (Ring_B, U64_Value, Pop_Outcome);
+      Assert (Pop_Outcome = Raising_MPMC.Empty, "MPMC observer failure left a claimed slot");
+      Raising_MPMC.Detach (Ring_C);
+      Raising_MPMC.Detach (Ring_B);
+      Raising_MPMC.Destroy (Ring_A);
    end;
 
    declare

@@ -152,6 +152,8 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Item Any concurrently attached consumer view
    --  @param Data Observation assigned only after a successful claim
    --  @param Result Consumed, empty, or bounded-contention outcome
+   --  If the bound observer raises, its claimed element is discarded, the slot
+   --  is released, and the observer exception propagates.
    procedure Try_Pop (Item : in out View; Data : out Element.Observed; Result : out Pop_Result);
 
    --  Wait through empty or contended observations until one element is
@@ -160,6 +162,8 @@ package Flyology.Data_Structures.Rings.MPMC with Preelaborate is
    --  @param Data Observation assigned only on success
    --  @param Timeout Maximum wait; zero permits one bounded claim campaign
    --  @exception Timeout_Error No element is consumed by the deadline
+   --  If the bound observer raises, its claimed element is discarded, the slot
+   --  is released, and the observer exception propagates.
    procedure Pop (Item : in out View; Data : out Element.Observed; Timeout : Wait_Timeout);
 
    --  Invalidate an empty, quiescent ring and detach Item.

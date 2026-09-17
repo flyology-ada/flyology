@@ -1,4 +1,5 @@
 with Flyology.Data_Structures.Atomics;
+with Flyology.Data_Structures.Guard_Test_Hooks;
 with Flyology.Data_Structures.Storage;
 with Flyology.Data_Structures.Waits;
 with System.Storage_Elements;
@@ -154,14 +155,18 @@ package body Flyology.Data_Structures.Vectors is
       if Header.Capacity /= Interfaces.Unsigned_32 (Capacity)
         or else Header.Element_Size /= Interfaces.Unsigned_32 (Element.Size)
         or else Header.Alignment /= Interfaces.Unsigned_32 (Element.Alignment)
-        or else Header.Auxiliary /= Unlocked
         or else Header.Word_2 /= Element.Signature
-        or else Header.Word_1 > Interfaces.Unsigned_64 (Header.Capacity)
         or else Core.Extent /= Extent
       then
          raise Layout_Error with "vector capacity or immutable element contract does not match";
       end if;
       Set_View (Item, Core, Header.Capacity, Stride);
+      --  Auxiliary is the live guard and Word_1 is the live length.  The
+      --  snapshot above is unsynchronized, so validate the length through
+      --  the same guard used by ordinary vector operations.
+      if Length (Item) > Capacity then
+         raise Layout_Error with "vector length is corrupt";
+      end if;
    exception
       when others =>
          if Item.Core.Attached then
@@ -198,7 +203,9 @@ package body Flyology.Data_Structures.Vectors is
    begin
       if not Item.Core.Attached or else Item.Guard_Address = System.Null_Address then
          raise Region_Error with "detached vector view";
-      elsif not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
+      end if;
+      Layouts.Require_Ready (Item.Core);
+      if not Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked) then
          Layouts.Require_Ready (Item.Core);
          if Expected = Locked then
             raise Busy_Error with "vector is busy";
@@ -207,6 +214,9 @@ package body Flyology.Data_Structures.Vectors is
          end if;
       end if;
       begin
+         if Guard_Test_Hooks.Enabled then
+            Guard_Test_Hooks.After_CAS (Item.Core, Item.Guard_Address);
+         end if;
          Layouts.Require_Ready (Item.Core);
       exception
          when others =>
@@ -225,6 +235,7 @@ package body Flyology.Data_Structures.Vectors is
       end if;
       loop
          Expected := Unlocked;
+         Layouts.Require_Ready (Item.Core);
          exit when Atomic.Compare_Exchange_U32 (Item.Guard_Address, Expected, Locked);
          Layouts.Require_Ready (Item.Core);
          if Expected /= Locked then
@@ -233,6 +244,9 @@ package body Flyology.Data_Structures.Vectors is
          Waiting.Retry (Wait);
       end loop;
       begin
+         if Guard_Test_Hooks.Enabled then
+            Guard_Test_Hooks.After_CAS (Item.Core, Item.Guard_Address);
+         end if;
          Layouts.Require_Ready (Item.Core);
       exception
          when others =>

@@ -67,7 +67,7 @@ package Flyology.IO.File_Watches is
    --  @param Item Open watcher with at least one registration; must outlive
    --     the returned operation
    --  @param Timeout Relative deadline; negative waits indefinitely and zero
-   --     only drains already-pending events
+   --     immediately probes and drains already-queued native events
    --  @return Started limited watcher operation
    function Next
      (Set     : not null access Flyology.Operations.Completion_Set'Class;

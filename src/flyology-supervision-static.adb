@@ -100,10 +100,14 @@ package body Flyology.Supervision.Static is
          if Run_Used then
             raise Program_Error with "supervisor is one-shot";
          end if;
-         Run_Used := True;
-         Configured := True;
          Lifecycle.Identity := Identity;
          Child_Specs := Specs;
+         for Child in Child_Kind loop
+            Flyology.Supervision_Windows.Initialize (Windows (Child), Specs (Child).Recovery.Burst_Attempts);
+         end loop;
+         Flyology.Supervision_Windows.Initialize (Subtree_Window, Subtree_Recovery.Burst_Attempts);
+         Run_Used := True;
+         Configured := True;
          Child_Ids := Ids;
          Child_Dependencies := Dependencies;
          Child_Cohorts := Cohorts;
@@ -554,41 +558,31 @@ package body Flyology.Supervision.Static is
            and then Now - Ready_Since (Child) >= Limits.Stability_Reset
          then
             Total_Used (Child) := 0;
-            Window_Used (Child) := 0;
+            Flyology.Supervision_Windows.Reset (Windows (Child));
             Consecutive (Child) := 0;
             Incident_Since (Child) := Now;
-            Window_Since (Child) := Now;
          end if;
 
          if Total_Used (Child) = 0 then
             Incident_Since (Child) := Now;
          end if;
-         if Window_Used (Child) = 0 or else Now - Window_Since (Child) >= Limits.Window then
-            Window_Since (Child) := Now;
-            Window_Used (Child) := 0;
-         end if;
-
          if Subtree_Ready_Since /= Ada.Real_Time.Time_First
            and then Now - Subtree_Ready_Since >= Subtree_Recovery.Stability_Reset
          then
             Subtree_Total_Used := 0;
-            Subtree_Window_Used := 0;
+            Flyology.Supervision_Windows.Reset (Subtree_Window);
             Subtree_Consecutive := 0;
             Subtree_Incident_Since := Now;
-            Subtree_Window_Since := Now;
          end if;
          if Subtree_Total_Used = 0 then
             Subtree_Incident_Since := Now;
          end if;
-         if Subtree_Window_Used = 0 or else Now - Subtree_Window_Since >= Subtree_Recovery.Window then
-            Subtree_Window_Since := Now;
-            Subtree_Window_Used := 0;
-         end if;
-
          if Total_Used (Child) >= Limits.Total_Attempts
-           or else Window_Used (Child) >= Limits.Burst_Attempts
+           or else not Flyology.Supervision_Windows.Has_Capacity
+                         (Windows (Child), Now, Limits.Window, Limits.Burst_Attempts)
            or else Subtree_Total_Used >= Subtree_Recovery.Total_Attempts
-           or else Subtree_Window_Used >= Subtree_Recovery.Burst_Attempts
+           or else not Flyology.Supervision_Windows.Has_Capacity
+                         (Subtree_Window, Now, Subtree_Recovery.Window, Subtree_Recovery.Burst_Attempts)
            or else Now > Recovery_Deadline (Incident)
          then
             Admitted := False;
@@ -613,9 +607,11 @@ package body Flyology.Supervision.Static is
          Subtree_Elapsed := Now - Subtree_Incident_Since;
          Admitted :=
            Total_Used (Child) < Limits.Total_Attempts
-           and then Window_Used (Child) < Limits.Burst_Attempts
+           and then Flyology.Supervision_Windows.Has_Capacity
+                      (Windows (Child), Now, Limits.Window, Limits.Burst_Attempts)
            and then Subtree_Total_Used < Subtree_Recovery.Total_Attempts
-           and then Subtree_Window_Used < Subtree_Recovery.Burst_Attempts
+           and then Flyology.Supervision_Windows.Has_Capacity
+                      (Subtree_Window, Now, Subtree_Recovery.Window, Subtree_Recovery.Burst_Attempts)
            and then Elapsed <= Limits.Recovery_Deadline
            and then Backoff <= Limits.Recovery_Deadline - Elapsed
            and then Subtree_Elapsed <= Subtree_Recovery.Recovery_Deadline
@@ -631,7 +627,7 @@ package body Flyology.Supervision.Static is
          Backoff  : Ada.Real_Time.Time_Span) is
       begin
          Total_Used (Child) := Total_Used (Child) + 1;
-         Window_Used (Child) := Window_Used (Child) + 1;
+         Flyology.Supervision_Windows.Record_Attempt (Windows (Child), Now);
          Consecutive (Child) := Consecutive (Child) + 1;
          if not Policy.Same_Incident_Attempt
                   (Has_Observed_Attempt,
@@ -641,7 +637,7 @@ package body Flyology.Supervision.Static is
                    Attempt (Incident))
          then
             Subtree_Total_Used := Subtree_Total_Used + 1;
-            Subtree_Window_Used := Subtree_Window_Used + 1;
+            Flyology.Supervision_Windows.Record_Attempt (Subtree_Window, Now);
             Subtree_Consecutive := Subtree_Consecutive + 1;
             Observed_Incident := Flyology.Supervision.Incident (Incident);
             Observed_Attempt := Attempt (Incident);

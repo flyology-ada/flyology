@@ -96,6 +96,13 @@ package System.Flyology.Scheduler is
    function Migrate (Group : Interfaces.C.int) return Interfaces.C.int;
    pragma Export (C, Migrate, "flyology_runtime_migrate");
 
+   --  Move the calling fiber to Group only when Group remains in the
+   --  configured automatic pool at the topology-locked physical transfer.
+   --  Return -3 when a reduction removes Group; other results have Migrate's
+   --  meanings.
+   function Migrate_Configured (Group : Interfaces.C.int) return Interfaces.C.int;
+   pragma Export (C, Migrate_Configured, "flyology_runtime_migrate_configured");
+
    function Pin_Current_Thread (Owner : access System.Address) return Interfaces.C.int;
    pragma Export (C, Pin_Current_Thread, "flyology_runtime_pin_current_thread");
 

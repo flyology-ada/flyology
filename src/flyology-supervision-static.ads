@@ -1,6 +1,7 @@
 with Ada.Finalization;
 with Ada.Real_Time;
 with Flyology.Execution_Groups;
+with Flyology.Supervision_Windows;
 
 --  Runs a typed, fixed static topology as a synchronous structured scope.
 --  Recovery is coordinated as one stop, join, backoff, start, and readiness
@@ -198,6 +199,7 @@ private
    type Boolean_Array is array (Child_Kind) of Boolean;
    type Time_Array is array (Child_Kind) of Ada.Real_Time.Time;
    type Natural_Array is array (Child_Kind) of Natural;
+   type Window_Array is array (Child_Kind) of Flyology.Supervision_Windows.History;
    type Termination_Array is array (Child_Kind) of Termination_Summary;
    type Event_Buffer is array (Positive range 1 .. Event_Capacity) of Supervisor_Event;
    subtype Monitor_Index is Positive range 1 .. Monitor_Capacity;
@@ -343,8 +345,7 @@ private
       Ready_Since              : Time_Array := (others => Ada.Real_Time.Time_First);
       Restart_Due              : Time_Array := (others => Ada.Real_Time.Time_First);
       Incident_Since           : Time_Array := (others => Ada.Real_Time.Time_First);
-      Window_Since             : Time_Array := (others => Ada.Real_Time.Time_First);
-      Window_Used              : Natural_Array := (others => 0);
+      Windows                  : Window_Array;
       Total_Used               : Natural_Array := (others => 0);
       Consecutive              : Natural_Array := (others => 0);
       Recovery_Affected        : Boolean_Array := (others => False);
@@ -354,10 +355,9 @@ private
       Recovery_Due             : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Active_Incident          : Incident_Context := No_Incident;
       Inherited_Incident       : Incident_Context := No_Incident;
-      Subtree_Window_Since     : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Subtree_Window           : Flyology.Supervision_Windows.History;
       Subtree_Incident_Since   : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
       Subtree_Ready_Since      : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
-      Subtree_Window_Used      : Natural := 0;
       Subtree_Total_Used       : Natural := 0;
       Subtree_Consecutive      : Natural := 0;
       Observed_Incident        : Incident_Id := Incident_Id'First;

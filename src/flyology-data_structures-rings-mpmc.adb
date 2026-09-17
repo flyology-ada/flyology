@@ -333,7 +333,7 @@ package body Flyology.Data_Structures.Rings.MPMC is
                   Data := Element.Observe (Source);
                exception
                   when others =>
-                     Layouts.Poison (Item.Core);
+                     Atomic.Store_Release_U64 (Slot, Position + Interfaces.Unsigned_64 (Item.Capacity_Value));
                      raise;
                end;
                Atomic.Store_Release_U64 (Slot, Position + Interfaces.Unsigned_64 (Item.Capacity_Value));

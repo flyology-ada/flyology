@@ -422,7 +422,9 @@ different pool size or calling `Grow_Configured_Pool` can remap keys.
 The overload taking an explicit `Shard_Count` is available when an application
 must keep a stored partitioning scheme independent of loop configuration.
 Crossing targets are limited to configured shared-pool ids; dedicated groups
-are not shards in this policy.
+are not shards in this policy. A concurrent pool reduction may make a target
+stale; `Cross_To_Shard` then raises `Migration_Error` without changing the
+calling task's placement.
 
 Migration alone does not make arbitrary data share-nothing. The application
 must assign each mutable object to a shard and arrange that only its owner
@@ -1092,9 +1094,11 @@ power-of-two capacities for masked slot selection. MPMC capacity is at least
 two so a slot's ready and free sequence phases cannot alias. MPMC `Try`
 operations report bounded contention rather than waiting; `Push` and `Pop`
 retry full, empty, or contended observations through an explicit timeout. A
-producer or consumer that terminates after
-claiming an MPMC slot but before publishing its sequence can prevent later
-progress. Core does not detect that death; an external recovery authority can
+consumer whose bound observer raises loses only its claimed element: the ring
+releases that slot before propagating the exception, so other elements remain
+available. A producer or consumer that terminates after claiming an MPMC slot
+but before publishing its sequence can prevent later progress. Core does not
+detect that death; an external recovery authority can
 poison the ring after establishing quiescence, and exclusive initialization
 then restores an empty ring. A distinct local MPMC view may attach while
 transfers are active: attachment validates only the published immutable
@@ -1695,6 +1699,17 @@ uses host headers for address conversion, socket constants, variadic descriptor
 configuration, and `errno` capture; retry, timeout, cancellation, and exception
 policy remain in Ada.
 
+`Connect_Socket`, `Receive_Socket`, and `Send_Socket` issue their first syscall
+without preparing the descriptor. A lightweight task must call `Prepare` first,
+or otherwise ensure the descriptor is nonblocking. A blocking syscall can
+occupy its execution group's event-loop pthread and stall other lightweight
+tasks in that group. The receive and send forms do not wait for readiness and
+report would-block as `Socket_Error`. `Connect_Socket` waits only after the
+initial connect reports an interrupted or in-progress attempt. Use the
+task-aware `Connect`, `Receive`, and `Send` operations when a readiness wait is
+needed. Native setup code may use a blocking socket intentionally. `Prepare`
+changes the descriptor's blocking mode, including for an adopted descriptor.
+
 `Reuse_Address` and `Reuse_Port` remain separate socket options. On Darwin and
 Linux, `Reuse_Port` permits multiple sockets that all enable it before
 `Bind_Socket` to bind the same concrete IPv4 or IPv6 endpoint. Kernel policy
@@ -1813,6 +1828,9 @@ the same set. Those references contain no Ada access value, do not extend an
 operation or set lifetime, and naturally make the construction graph acyclic.
 A member result remains retained until every observing gate terminalizes.
 Cancelling a gate detaches only that observer; it does not cancel its members.
+Batch dispatch and dependent-gate propagation defer task abort while their
+temporary guards and cleared provider sources are live. A waiting task remains
+abortable between those owner-stack scheduler cuts.
 
 Every started operation should normally reach exactly one provider-specific
 `Finish`. That call releases the set slot, commits outputs such as `Last` or a
@@ -2091,8 +2109,10 @@ termination and waits for the root for its grace interval. Root exit triggers
 immediate hard cleanup of remaining group members; otherwise `Stop` applies
 hard termination when the grace interval expires. `Close` and
 finalization hard-terminate an unjoined group, reap the root, close every pipe,
-and join the reaper. Finalization can wait indefinitely if the kernel cannot
-complete hard termination.
+and join the reaper. If hard termination fails, explicit `Close` reports the
+error promptly and retains process ownership for a later retry. Finalization
+still waits for natural root exit when hard termination remains unavailable,
+since the reaper borrows state in the finalizing process object.
 
 `Flyology.Subprocesses.Capture.Run` is the bounded structured layer. It
 interleaves stdin writes with stdout and stderr reads under one monotonic
@@ -3197,7 +3217,8 @@ The repository also retains the detailed
 | Configure loop pthread placement separately | Logical co-location and physical scheduling are different policies | Linux can verify a strict one-CPU mask; Darwin exposes only a capability-checked advisory cache tag, and requests become immutable once startup begins |
 | Allow live fiber migration | Work can be rebalanced or moved to a dedicated blocking lane without changing task identity | Migration is explicit and occurs only at the API safe point |
 | Integrate below GNARL | Rendezvous, protected objects, activation, and masters are already mature | The patch is coupled to the exact GNAT runtime source version |
-| Hash ATCB addresses to fibers | Rendezvous wakeups and priority changes must not scan every lightweight task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in wake paths |
+| Record immutable lane identity in each ATCB | GNARL predicates must distinguish lightweight and native tasks without consulting shared scheduler state | Ordinary task creation publishes the designation once; environment and foreign ATCBs remain native |
+| Hash lightweight ATCB addresses to fibers | Operations that need scheduler state must not scan every lightweight task while holding the registry lock | Lookup and removal are constant-time on average; a prime-sized fixed bucket table avoids allocation in Fiber-consuming paths |
 | Shard the task registry | Independent loops and native wake sources should not serialize every lookup on one process-wide mutex | 64 shard locks isolate ordinary wake and priority paths; group creation, reservations, migration, and destruction still coordinate through a short-held topology lock |
 | Hash descriptor waiters per group | Readiness delivery must not scan every fiber once for every ready descriptor | Delivery is constant-time on average while collision chains retain same-descriptor reader/writer fan-out |
 | Keep deadlines in per-group indexed heaps | Timer maintenance must scale with active deadlines rather than every fiber in a loop | Insert and arbitrary cancellation are logarithmic; earliest-deadline lookup is constant-time |

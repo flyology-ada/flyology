@@ -335,7 +335,7 @@ precedes peer drain, complete close only after the peer registration withdraws,
 and leave the raised driver with a terminal root, no source or child, and one
 failure publication.
 
-Six broken configurations are required to fail. The first routes the finalizer
+Six legacy broken configurations are required to fail. The first routes the finalizer
 through the user-visible `Wait_Some` gate and produces the issue #130 lasso:
 `EarlyGateReturn` marks the unrelated slot reported, `RestoreReported` makes it
 unreported again, and the cycle repeats without entering `DispatchTarget`. The
@@ -350,7 +350,9 @@ from its first drain claim and local obligation retirement; abort after
 publication leaves the connection in `HandoffAborted` when no peer remains to
 complete the close. The sixth lets a generic driver raise after its immediate
 source is cleared; the root remains pending with neither source nor child and
-violates `DriverRaiseHasProgress`.
+violates `DriverRaiseHasProgress`. Two additional ATC broken configurations
+deliver transfer before the owner driver returns, exposing a leaked batch or
+stabilization guard.
 
 `PollerRegistrationOwnership` also isolates Linux registration ownership,
 descriptor reuse, and repeated one-shot readiness. Its retained configuration
@@ -365,10 +367,12 @@ one initial allocation and add, one modify on rearm, and no delivery-time delete
 or record release. Separate Linux regressions exercise high and colliding
 descriptor values with exact probe counters, cancellation, and finalization.
 
-The model still keeps propagation-guard state and general child capacity
-outside its state vector. Those remain extension points for analysis of other
-abort-deferred drive sections (#136); issue #180 is represented by the generic
-driver-raise source and child state.
+The model includes owner-local propagation depth, stabilization, dirty-gate
+state, and abort deferral for the issue #136 ATC schedules. It checks batch,
+standalone stabilization, and provider rearm cuts; broken configurations
+deliver the transfer before the driver returns and expose a leaked guard.
+General child capacity remains outside the state vector. Issue #180 is
+represented by the generic driver-raise source and child state.
 
 The maintained gate also regenerates the typed Ada model twice, byte-compares
 both results with the checked-in files, regenerates and validates the bounded
@@ -386,8 +390,9 @@ discard it. A fifth transition reproduces later hidden-child exhaustion through
 scoped DNS and checks the terminal failure, retained exception, and source/child
 post-state. The replay runs under a 20-second external timeout and must report
 five conformant modeled transitions.
-TLAPS separately proves both stated safety obligations; replay is not
-represented as proof.
+TLAPS proves initialization and preservation obligations for the legacy
+finalization and deferred ATC safety predicates. Replay is conformance
+evidence, not proof.
 
 ## Reviewed abstraction boundary
 

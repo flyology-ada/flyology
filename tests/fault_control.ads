@@ -2,6 +2,13 @@ with Interfaces.C;
 
 package Fault_Control is
 
+   type Registry_Lookup_Kind is (Lane_Predicate, Task_Thread, Wake, Set_Priority, Destroy, Fiber_Required);
+
+   for Registry_Lookup_Kind use
+     (Lane_Predicate => 0, Task_Thread => 1, Wake => 2, Set_Priority => 3, Destroy => 4, Fiber_Required => 5);
+
+   function Registry_Lookup_Count (Kind : Registry_Lookup_Kind) return Natural;
+
    type Point is
      (Fiber_Allocation,
       Stack_Mapping,
@@ -53,7 +60,8 @@ package Fault_Control is
       Poller_Record_Release,
       Poller_Control_Add,
       Poller_Control_Modify,
-      Poller_Control_Delete);
+      Poller_Control_Delete,
+      Cross_To_Shard_Window);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -106,7 +114,8 @@ package Fault_Control is
       Poller_Record_Release          => 48,
       Poller_Control_Add             => 49,
       Poller_Control_Modify          => 50,
-      Poller_Control_Delete          => 51);
+      Poller_Control_Delete          => 51,
+      Cross_To_Shard_Window          => 52);
 
    function Enabled return Boolean;
    procedure Reset;
@@ -160,6 +169,9 @@ package Fault_Control is
 private
    function C_Enabled return Interfaces.C.int;
    pragma Import (C, C_Enabled, "flyology_test_faults_enabled");
+
+   function C_Registry_Lookup_Count (Kind : Interfaces.C.int) return Interfaces.C.unsigned;
+   pragma Import (C, C_Registry_Lookup_Count, "flyology_test_registry_lookup_count");
 
    procedure C_Reset;
    pragma Import (C, C_Reset, "flyology_test_fault_reset");

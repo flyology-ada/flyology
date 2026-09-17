@@ -237,7 +237,9 @@ runtime_artifacts_valid () {
     && [ ! -L "$patched_core_manifest" ] || return 1
   [ -f "$include/s-taprop.adb" ] \
     && [ -f "$include/s-tassta.adb" ] \
+    && [ -f "$include/s-taskin.ads" ] \
     && [ -f "$include/s-taskin.adb" ] \
+    && [ -f "$include/s-tporft.adb" ] \
     && [ -f "$include/s-interr.adb" ] \
     && [ -f "$include/s-taasde.adb" ] || return 1
   if [ "$(uname -s)" = Linux ]; then
@@ -276,8 +278,12 @@ runtime_artifacts_valid () {
     "$include/s-taprop.adb"
   record_patched_core source adainclude/s-tassta.adb \
     "$include/s-tassta.adb"
+  record_patched_core source adainclude/s-taskin.ads \
+    "$include/s-taskin.ads"
   record_patched_core source adainclude/s-taskin.adb \
     "$include/s-taskin.adb"
+  record_patched_core source adainclude/s-tporft.adb \
+    "$include/s-tporft.adb"
   record_patched_core source adainclude/s-interr.adb \
     "$include/s-interr.adb"
   record_patched_core source adainclude/s-taasde.adb \
@@ -326,8 +332,12 @@ runtime_artifacts_valid () {
     "$include/s-tassta.adb" >/dev/null || return 1
   grep -F "System.Flyology.Task_Results.Publish" \
     "$include/s-tassta.adb" >/dev/null || return 1
+  grep -F "Is_Lightweight : Boolean;" \
+    "$include/s-taskin.ads" >/dev/null || return 1
   grep -F "System.Flyology.Scheduler.Current_Task" \
     "$include/s-taskin.adb" >/dev/null || return 1
+  grep -F "Local_ATCB.Common.Is_Lightweight := False;" \
+    "$include/s-tporft.adb" >/dev/null || return 1
   grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
     "$include/s-interr.adb" >/dev/null || return 1
   grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \

@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Exceptions;
 with Ada.Real_Time;
 with Ada.Streams;
@@ -112,6 +113,7 @@ procedure DNS_Smoke is
       Search_Name       : constant String (1 .. 60) := (others => 'r');
       Bare_Name         : constant String (1 .. 60) := (others => 'b');
       Search_Label      : constant String (1 .. 62) := (others => 's');
+      Invalid_Label     : constant String (1 .. 64) := (others => 'i');
       Long_Search       : constant String :=
         Search_Label & "." & Search_Label & "." & Search_Label & "." & Search_Label;
 
@@ -136,6 +138,9 @@ procedure DNS_Smoke is
          function Chain_Queries return Natural;
          procedure TCP_Truncated_Query;
          function TCP_Truncated_Queries return Natural;
+         procedure TCP_Restart_Checked (Closed : Boolean);
+         function TCP_Restart_Checks return Natural;
+         function TCP_Restarts_Closed return Boolean;
          procedure Recursive_Failure_Query;
          function Recursive_Failure_Queries return Natural;
          procedure Finished (Passed : Boolean);
@@ -154,6 +159,8 @@ procedure DNS_Smoke is
          Alias_Count             : Natural := 0;
          Chain_Count             : Natural := 0;
          TCP_Truncated_Count     : Natural := 0;
+         TCP_Restart_Count       : Natural := 0;
+         TCP_Restart_Closed      : Boolean := True;
          Recursive_Failure_Count : Natural := 0;
          Is_Finished             : Boolean := False;
          All_OK                  : Boolean := False;
@@ -162,7 +169,8 @@ procedure DNS_Smoke is
       function Config_Path (Server : Sockets.Endpoint; Suffix : String := "") return String is
       begin
          return
-           "/tmp/flyology-dns-smoke-"
+           Ada.Environment_Variables.Value ("TMPDIR", "/tmp")
+           & "/flyology-dns-smoke-"
            & Ada.Strings.Fixed.Trim (Sockets.Port'Image (Server.Port), Ada.Strings.Both)
            & Suffix
            & ".conf";
@@ -300,6 +308,15 @@ procedure DNS_Smoke is
          end TCP_Truncated_Query;
          function TCP_Truncated_Queries return Natural
          is (TCP_Truncated_Count);
+         procedure TCP_Restart_Checked (Closed : Boolean) is
+         begin
+            TCP_Restart_Count := TCP_Restart_Count + 1;
+            TCP_Restart_Closed := TCP_Restart_Closed and Closed;
+         end TCP_Restart_Checked;
+         function TCP_Restart_Checks return Natural
+         is (TCP_Restart_Count);
+         function TCP_Restarts_Closed return Boolean
+         is (TCP_Restart_Closed);
          procedure Recursive_Failure_Query is
          begin
             Recursive_Failure_Count := Recursive_Failure_Count + 1;
@@ -328,6 +345,9 @@ procedure DNS_Smoke is
          Last               : Streams.Stream_Element_Offset;
          Retry_Count        : Natural := 0;
          Scoped_Retry_Count : Natural := 0;
+         Bad_Length_Count   : Natural := 0;
+         Bad_Message_Count  : Natural := 0;
+         Restart_Connection : aliased Sockets.Socket_Type;
 
          procedure Open_Server_Sockets is
          begin
@@ -446,24 +466,81 @@ procedure DNS_Smoke is
             Position := Position + 1;
          end Put_Name;
 
+         procedure Send_TCP_All (Socket : Sockets.Socket_Type; Data : Streams.Stream_Element_Array) is
+            Next      : Streams.Stream_Element_Offset := Data'First;
+            Sent_Last : Streams.Stream_Element_Offset;
+         begin
+            while Next <= Data'Last loop
+               Sockets.Send_Socket (Socket, Data (Next .. Data'Last), Sent_Last);
+               if Sent_Last < Next then
+                  raise Program_Error with "TCP DNS fixture send made no progress";
+               end if;
+               Next := Sent_Last + 1;
+            end loop;
+         end Send_TCP_All;
+
          procedure Send_Response
-           (Name      : String;
-            IPv4      : String := "";
-            IPv6      : String := "";
-            CNAME     : String := "";
-            NXDOMAIN  : Boolean := False;
-            Truncated : Boolean := False;
-            Malformed : Boolean := False;
-            TTL       : Natural := 60;
-            Socket    : access Sockets.Socket_Type := null;
-            Datagram  : access Sockets.Socket_Type := null)
+           (Name             : String;
+            IPv4             : String := "";
+            IPv6             : String := "";
+            CNAME            : String := "";
+            NXDOMAIN         : Boolean := False;
+            Truncated        : Boolean := False;
+            Malformed        : Boolean := False;
+            Extra_Answers    : Natural := 0;
+            Bad_Extra_Length : Boolean := False;
+            Bad_Extra_CNAME  : Boolean := False;
+            Late_CNAME       : String := "";
+            TTL              : Natural := 60;
+            Socket           : access Sockets.Socket_Type := null;
+            Datagram         : access Sockets.Socket_Type := null)
          is
-            Response      : Streams.Stream_Element_Array (1 .. 512) := (others => 0);
+            Response      : Streams.Stream_Element_Array (1 .. 2_048) := (others => 0);
             Position      : Streams.Stream_Element_Offset := 1;
             Question_Last : Streams.Stream_Element_Offset := 13;
             Sent_Last     : Streams.Stream_Element_Offset;
             Address       : Sockets.IP_Address;
             Destination   : constant Sockets.Endpoint := Peer;
+
+            procedure Append_Answers is
+               Length_Position : Streams.Stream_Element_Offset;
+               Data_Start      : Streams.Stream_Element_Offset;
+            begin
+               for Index in 1 .. Extra_Answers loop
+                  if Late_CNAME'Length > 0 and then Index < Extra_Answers then
+                     Put_Name (Response, Position, Late_CNAME);
+                  else
+                     Response (Position) := 16#C0#;
+                     Response (Position + 1) := 12;
+                     Position := Position + 2;
+                  end if;
+                  if (Late_CNAME'Length > 0 or else Bad_Extra_CNAME) and then Index = Extra_Answers then
+                     Put_U16 (Response, Position, 5);
+                  else
+                     Put_U16 (Response, Position, 1);
+                  end if;
+                  Put_U16 (Response, Position, 1);
+                  Put_U32 (Response, Position, TTL);
+                  if Late_CNAME'Length > 0 and then Index = Extra_Answers then
+                     Length_Position := Position;
+                     Position := Position + 2;
+                     Data_Start := Position;
+                     Put_Name (Response, Position, Late_CNAME);
+                     Response (Length_Position) := 0;
+                     Response (Length_Position + 1) := Streams.Stream_Element (Position - Data_Start);
+                  elsif Bad_Extra_CNAME and then Index = Extra_Answers then
+                     Put_U16 (Response, Position, 2);
+                     Response (Position .. Position + 1) := (16#FF#, 16#FF#);
+                     Position := Position + 2;
+                  else
+                     Put_U16
+                       (Response, Position,
+                        (if Bad_Extra_Length and then Index = Extra_Answers then 16 else 4));
+                     Response (Position .. Position + 3) := (192, 0, 2, 200);
+                     Position := Position + 4;
+                  end if;
+               end loop;
+            end Append_Answers;
          begin
             while Query (Question_Last) /= 0 loop
                Question_Last := Question_Last + 1 + Streams.Stream_Element_Offset (Query (Question_Last));
@@ -474,13 +551,15 @@ procedure DNS_Smoke is
             Put_U16
               (Response, Position, (if Truncated then 16#8380# elsif NXDOMAIN then 16#8183# else 16#8180#));
             Put_U16 (Response, Position, 1);
-            Put_U16 (Response, Position, (if Truncated or else NXDOMAIN then 0 else 1));
+            Put_U16 (Response, Position, (if Truncated or else NXDOMAIN then 0 else 1 + Extra_Answers));
             Put_U16 (Response, Position, 0);
             Put_U16 (Response, Position, 0);
             Response (Position .. Position + Question_Last - 13) := Query (13 .. Question_Last);
             Position := Position + Question_Last - 12;
             if not Truncated and then not NXDOMAIN then
-               if Malformed then
+               if Late_CNAME'Length > 0 then
+                  Put_Name (Response, Position, Late_CNAME);
+               elsif Malformed then
                   Response (Position) := 16#C0#;
                   Response (Position + 1) := Streams.Stream_Element (Position - 1);
                   Position := Position + 2;
@@ -524,6 +603,7 @@ procedure DNS_Smoke is
                   end if;
                end if;
             end if;
+            Append_Answers;
             if Socket = null then
                if Datagram = null then
                   Sockets.Send_Socket (UDP, Response (1 .. Position - 1), Sent_Last, Destination);
@@ -536,8 +616,8 @@ procedure DNS_Smoke is
                begin
                   Prefix (1) := Streams.Stream_Element ((Natural (Position - 1) / 256) mod 256);
                   Prefix (2) := Streams.Stream_Element (Natural (Position - 1) mod 256);
-                  Sockets.Send_Socket (Socket.all, Prefix, Sent_Last);
-                  Sockets.Send_Socket (Socket.all, Response (1 .. Position - 1), Sent_Last);
+                  Send_TCP_All (Socket.all, Prefix);
+                  Send_TCP_All (Socket.all, Response (1 .. Position - 1));
                end;
             end if;
             pragma Unreferenced (Name);
@@ -559,6 +639,17 @@ procedure DNS_Smoke is
                if Name = "a.test" then
                   Control.A_Query;
                   Send_Response (Name, IPv4 => "192.0.2.1");
+               elsif Name = "many-answers.test" then
+                  Send_Response (Name, IPv4 => "192.0.2.10", Extra_Answers => 32);
+               elsif Name = "bad-surplus.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.13", Extra_Answers => 32, Bad_Extra_Length => True);
+               elsif Name = "late-alias.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.25", Extra_Answers => 32, Late_CNAME => "target-late.test");
+               elsif Name = "bad-surplus-cname.test" then
+                  Send_Response
+                    (Name, IPv4 => "192.0.2.14", Extra_Answers => 32, Bad_Extra_CNAME => True);
                elsif Name = "default-deadline.test" then
                   delay 0.05;
                   Send_Response (Name, IPv4 => "192.0.2.179");
@@ -603,7 +694,7 @@ procedure DNS_Smoke is
                   if Scoped_Retry_Count > 1 then
                      Send_Response (Name, IPv4 => "198.51.100.178");
                   end if;
-               elsif Name = "tcp.test" then
+               elsif Name in "tcp.test" | "many-tcp.test" then
                   Send_Response (Name, Truncated => True);
                   declare
                      Connection : aliased Sockets.Socket_Type;
@@ -624,10 +715,92 @@ procedure DNS_Smoke is
                         Sockets.Receive_Socket
                           (Connection, Query (1 .. Streams.Stream_Element_Offset (Length)), TCP_Last);
                         Last := Streams.Stream_Element_Offset (Length);
-                        Send_Response (Name, IPv4 => "198.51.100.9", Socket => Connection'Access);
+                        Send_Response
+                          (Name,
+                           IPv4          => "198.51.100.9",
+                           Extra_Answers => (if Name = "many-tcp.test" then 32 else 0),
+                           Socket        => Connection'Access);
                         Sockets.Close_Socket (Connection);
                      end if;
                   end;
+               elsif Name in "tcp-bad-length.test" | "tcp-bad-message.test" then
+                  if Name = "tcp-bad-length.test" then
+                     Bad_Length_Count := Bad_Length_Count + 1;
+                  else
+                     Bad_Message_Count := Bad_Message_Count + 1;
+                  end if;
+                  if (if Name = "tcp-bad-length.test" then Bad_Length_Count else Bad_Message_Count) mod 2 = 1
+                  then
+                     Send_Response (Name, Truncated => True);
+                     declare
+                        Address  : Sockets.Endpoint;
+                        Prefix   : Streams.Stream_Element_Array (1 .. 2);
+                        TCP_Last : Streams.Stream_Element_Offset;
+                        Length   : Natural;
+                        Status   : Sockets.Selector_Status;
+
+                        procedure Read_Exactly (Data : out Streams.Stream_Element_Array) is
+                           Next : Streams.Stream_Element_Offset := Data'First;
+                        begin
+                           while Next <= Data'Last loop
+                              Sockets.Receive_Socket (Restart_Connection, Data (Next .. Data'Last), TCP_Last);
+                              if TCP_Last < Next then
+                                 raise Program_Error with "TCP restart fixture closed during query";
+                              end if;
+                              Next := TCP_Last + 1;
+                           end loop;
+                        end Read_Exactly;
+                     begin
+                        Sockets.Accept_Socket
+                          (TCP, Restart_Connection, Address, Timeout => 1.0, Status => Status);
+                        if Status /= Sockets.Completed then
+                           raise Program_Error with "TCP restart fixture was not connected";
+                        end if;
+                        Sockets.Set_Socket_Option
+                          (Restart_Connection,
+                           Sockets.Socket_Level,
+                           (Name => Sockets.Receive_Timeout, Timeout => 1.0));
+                        Read_Exactly (Prefix);
+                        Length := Natural (Prefix (1)) * 256 + Natural (Prefix (2));
+                        if Length < 12 or else Length > Query'Length then
+                           raise Program_Error with "TCP restart fixture query has invalid length";
+                        end if;
+                        Read_Exactly (Query (1 .. Streams.Stream_Element_Offset (Length)));
+                        Last := Streams.Stream_Element_Offset (Length);
+                        if Name = "tcp-bad-length.test" then
+                           Send_TCP_All (Restart_Connection, (1 => 0, 2 => 1));
+                        else
+                           Send_Response
+                             (Name,
+                              IPv4      => "192.0.2.180",
+                              Malformed => True,
+                              Socket    => Restart_Connection'Access);
+                        end if;
+                     end;
+                  else
+                     --  The next UDP attempt must arrive after closing the
+                     --  abandoned TCP connection, before resolution ends.
+                     declare
+                        Probe    : Streams.Stream_Element_Array (1 .. 1);
+                        TCP_Last : Streams.Stream_Element_Offset;
+                        Closed   : Boolean := False;
+                     begin
+                        begin
+                           Sockets.Set_Socket_Option
+                             (Restart_Connection,
+                              Sockets.Socket_Level,
+                              (Name => Sockets.Receive_Timeout, Timeout => 0.2));
+                           Sockets.Receive_Socket (Restart_Connection, Probe, TCP_Last);
+                           Closed := TCP_Last < Probe'First;
+                        exception
+                           when Sockets.Socket_Error =>
+                              null;
+                        end;
+                        Control.TCP_Restart_Checked (Closed);
+                        Sockets.Close_Socket (Restart_Connection);
+                     end;
+                     Send_Response (Name, IPv4 => "192.0.2.180");
+                  end if;
                elsif Name = "tcp-silent.test" then
                   Send_Response (Name, Truncated => True);
                   declare
@@ -691,6 +864,8 @@ procedure DNS_Smoke is
                   Send_Response (Name, IPv4 => "192.0.2.53");
                elsif Name = Search_Name & ".valid.test" then
                   Send_Response (Name, IPv4 => "192.0.2.54");
+               elsif Name = Search_Name & ".bad" then
+                  Send_Response (Name, IPv4 => "192.0.2.56");
                elsif Name = Bare_Name then
                   Send_Response (Name, IPv4 => "192.0.2.55");
                elsif Name = "entropy.test" then
@@ -706,6 +881,7 @@ procedure DNS_Smoke is
                end if;
             end;
          end loop;
+         Close_Quietly (Restart_Connection);
          Sockets.Close_Socket (UDP);
          Sockets.Close_Socket (TCP);
       exception
@@ -713,6 +889,7 @@ procedure DNS_Smoke is
             Close_Quietly (Collision);
             Close_Quietly (UDP);
             Close_Quietly (TCP);
+            Close_Quietly (Restart_Connection);
             Ada.Text_IO.Put_Line
               (Ada.Text_IO.Standard_Error,
                "primary DNS test server failed: " & Ada.Exceptions.Exception_Information (Error));
@@ -869,6 +1046,26 @@ procedure DNS_Smoke is
             end;
          end Expect;
 
+         procedure Expect_Many (Name, First_Address : String) is
+         begin
+            Set_Stage ("many records " & Name);
+            declare
+               Values : constant DNS.Address_Array :=
+                 DNS.Resolve_Using
+                   (Name,
+                    Servers,
+                    DNS.IPv4_Only,
+                    Timeout        => Operation_Timeout,
+                    Attempts       => 1,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               OK :=
+                 OK
+                 and then Values'Length = 16
+                 and then Sockets.Image (Values (Values'First)) = First_Address;
+            end;
+         end Expect_Many;
+
          procedure Expect_IPv6 (Name, Address : String) is
          begin
             Set_Stage ("IPv6 " & Name);
@@ -916,6 +1113,30 @@ procedure DNS_Smoke is
          procedure Run_Scoped_Checks is
             function Ref (Item : Operations.Operation'Class) return Operations.Operation_Reference
             renames Operations.Reference;
+
+            procedure Expect_TCP_Restart (Name : String) is
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    Name,
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts       => 2,
+                    Retry_Interval => Attempt_Interval);
+            begin
+               Set_Stage ("scoped TCP restart " & Name);
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.180";
+               end;
+            end Expect_TCP_Restart;
          begin
             Set_Stage ("scoped default deadline");
             DNS.Clear_Cache;
@@ -939,6 +1160,59 @@ procedure DNS_Smoke is
                     and then Values'Length = 1
                     and then Sockets.Image (Values (Values'First)) = "192.0.2.179";
                end;
+            end;
+
+            Set_Stage ("scoped many UDP answers");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "many-answers.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts => 1);
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 16
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.10";
+               end;
+            end;
+
+            Set_Stage ("scoped malformed surplus");
+            DNS.Clear_Cache;
+            declare
+               Set       : aliased Operations.Completion_Set (2);
+               Operation : DNS.Resolve_Operation :=
+                 DNS.Resolve_Using
+                   (Set'Access,
+                    "bad-surplus.test",
+                    Servers,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout),
+                    Attempts => 1);
+               Raised    : Boolean := False;
+            begin
+               Operations.Wait_All (Set);
+               begin
+                  declare
+                     Ignored : constant DNS.Address_Array := DNS.Finish (Operation);
+                     pragma Unreferenced (Ignored);
+                  begin
+                     null;
+                  end;
+               exception
+                  when DNS.Malformed_Response =>
+                     Raised := True;
+               end;
+               OK := OK and Raised;
             end;
 
             Set_Stage ("scoped UDP and hidden child");
@@ -1028,6 +1302,10 @@ procedure DNS_Smoke is
                     and then Sockets.Image (Values (Values'First)) = "198.51.100.9";
                end;
             end;
+
+            Expect_TCP_Restart ("tcp-bad-length.test");
+            Expect_TCP_Restart ("tcp-bad-message.test");
+            OK := OK and then Control.TCP_Restart_Checks = 2 and then Control.TCP_Restarts_Closed;
 
             Set_Stage ("scoped malformed retry");
             DNS.Clear_Cache;
@@ -1131,6 +1409,31 @@ procedure DNS_Smoke is
                     OK
                     and then Values'Length = 1
                     and then Sockets.Image (Values (Values'First)) = "192.0.2.53";
+               end;
+            end;
+
+            Set_Stage ("scoped invalid search domains");
+            DNS.Clear_Cache;
+            declare
+               Configuration : aliased constant DNS.Resolver_Configuration :=
+                 DNS.Load_Configuration (Config_Path (Server, "-invalid-search"));
+               Set           : aliased Operations.Completion_Set (2);
+               Operation     : DNS.Resolve_Operation :=
+                 DNS.Resolve
+                   (Set'Access,
+                    Search_Name,
+                    Configuration'Access,
+                    DNS.IPv4_Only,
+                    Ada.Real_Time.Clock + Ada.Real_Time.To_Time_Span (Operation_Timeout));
+            begin
+               Operations.Wait_All (Set);
+               declare
+                  Values : constant DNS.Address_Array := DNS.Finish (Operation);
+               begin
+                  OK :=
+                    OK
+                    and then Values'Length = 1
+                    and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
                end;
             end;
 
@@ -1426,6 +1729,11 @@ procedure DNS_Smoke is
          Expect ("a.test", "192.0.2.1");
          Expect ("a.test", "192.0.2.1");
          OK := OK and then Control.A_Queries = 1;
+         Expect_Many ("many-answers.test", "192.0.2.10");
+         Expect_Many ("late-alias.test", "192.0.2.25");
+         Expect_Malformed ("bad-surplus.test");
+         Expect_Malformed ("bad-surplus-cname.test");
+         Expect_Many ("many-tcp.test", "198.51.100.9");
          Expect_IPv6 ("v6.test", "2001:db8::5");
          Expect ("target.test", "203.0.113.7");
          Expect ("alias.test", "203.0.113.7");
@@ -1490,6 +1798,49 @@ procedure DNS_Smoke is
             OK :=
               OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "198.51.100.77";
          end;
+         Set_Stage ("synchronous attempt count boundary");
+         declare
+            Pair   : constant DNS.Name_Server_Array := [Server, Secondary];
+            Raised : Boolean := False;
+         begin
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve_Using
+                      ("attempt-boundary.test",
+                       Pair,
+                       DNS.IPv4_Only,
+                       Timeout  => 0.0,
+                       Attempts => Positive'Last / 2);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when Flyology.IO.Timeout_Error =>
+                  Raised := True;
+            end;
+            OK := OK and then Raised;
+            Raised := False;
+            begin
+               declare
+                  Ignored : constant DNS.Address_Array :=
+                    DNS.Resolve_Using
+                      ("attempt-boundary.test",
+                       Pair,
+                       DNS.IPv4_Only,
+                       Timeout  => 0.0,
+                       Attempts => Positive'Last / 2 + 1);
+                  pragma Unreferenced (Ignored);
+               begin
+                  null;
+               end;
+            exception
+               when DNS.Resolution_Failed =>
+                  Raised := True;
+            end;
+            OK := OK and then Raised;
+         end;
          Set_Stage ("dual-family fallback");
          declare
             Values : constant DNS.Address_Array :=
@@ -1537,6 +1888,30 @@ procedure DNS_Smoke is
                  Configuration_Path => Config_Path (Server, "-remaining"));
          begin
             OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
+         end;
+         Set_Stage ("invalid search domains before valid candidate");
+         DNS.Clear_Cache;
+         declare
+            Values : constant DNS.Address_Array :=
+              DNS.Resolve
+                (Search_Name,
+                 DNS.IPv4_Only,
+                 Timeout            => Operation_Timeout,
+                 Configuration_Path => Config_Path (Server, "-invalid-search"));
+         begin
+            OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.54";
+         end;
+         Set_Stage ("invalid search domains before bare fallback");
+         DNS.Clear_Cache;
+         declare
+            Values : constant DNS.Address_Array :=
+              DNS.Resolve
+                (Bare_Name,
+                 DNS.IPv4_Only,
+                 Timeout            => Operation_Timeout,
+                 Configuration_Path => Config_Path (Server, "-invalid-only"));
+         begin
+            OK := OK and then Values'Length = 1 and then Sockets.Image (Values (Values'First)) = "192.0.2.55";
          end;
          Set_Stage ("bare-name fallback");
          declare
@@ -1643,6 +2018,9 @@ procedure DNS_Smoke is
       Write_Config (Address);
       Write_Config (Address, Long_Search & " valid.test", Suffix => "-remaining");
       Write_Config (Address, Long_Search, Suffix => "-bare");
+      Write_Config
+        (Address, "bad.. .bad a..b " & Invalid_Label & ".test valid.test", Suffix => "-invalid-search");
+      Write_Config (Address, "bad.. .bad a..b " & Invalid_Label & ".test", Suffix => "-invalid-only");
       Control.Begin_Client;
       select
          Control.Wait_Cancel_Or_Finished (Client_Finished, Passed);
@@ -1672,6 +2050,12 @@ procedure DNS_Smoke is
       end if;
       if Ada.Directories.Exists (Config_Path (Address, "-bare")) then
          Ada.Directories.Delete_File (Config_Path (Address, "-bare"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-invalid-search")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-invalid-search"));
+      end if;
+      if Ada.Directories.Exists (Config_Path (Address, "-invalid-only")) then
+         Ada.Directories.Delete_File (Config_Path (Address, "-invalid-only"));
       end if;
       return Passed;
    end Run;

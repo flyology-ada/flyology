@@ -5,6 +5,7 @@ with Ada.Text_IO;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.File_Watches;
+with Flyology.Operations;
 
 procedure File_Watches_Smoke is
    package Watches renames Flyology.IO.File_Watches;
@@ -94,6 +95,58 @@ procedure File_Watches_Smoke is
             Require (Outcome = Flyology.IO.Timed_Out, "drained watcher remained spuriously ready");
             Item.Remove (Id);
             Item.Close;
+            Item.Close;
+         end;
+
+         --  A zero-timeout scoped wait must drain a change already queued by
+         --  the kernel, even when no earlier wait has pumped the watcher.
+         declare
+            Item : aliased Watches.Watcher;
+            Id   : Watches.Watch_Id;
+            Set  : aliased Flyology.Operations.Completion_Set (1);
+            Op   : Watches.Next_Operation (Set'Access);
+         begin
+            Item.Open;
+            Id := Item.Add (Spare_Directory);
+            Create_File (Spare_Directory & "/scoped-one.txt");
+            Watches.Next (Item'Access, 0.0, Op);
+            Require
+              (Flyology.Operations.Is_Terminal (Op),
+               "scoped zero-timeout wait did not complete");
+            Watches.Finish (Op, Result, Outcome);
+            Require
+              (Outcome = Flyology.IO.Ready,
+               "scoped zero-timeout wait missed a queued event");
+            Require
+              (Result.Watch = Id,
+               "scoped zero-timeout wait used the wrong id");
+            Require
+              (Result.Changes (Watches.Contents_Changed),
+               "scoped zero-timeout wait lacked a contents hint");
+
+            Watches.Next (Item'Access, 0.0, Op);
+            Watches.Finish (Op, Result, Outcome);
+            Require
+              (Outcome = Flyology.IO.Timed_Out,
+               "drained scoped watcher remained ready");
+            Flyology.Operations.Release (Op);
+
+            Create_File (Spare_Directory & "/scoped-two.txt");
+            declare
+               Next_Op : Watches.Next_Operation :=
+                 Watches.Next (Set'Access, Item'Access, 0.0);
+            begin
+               Require
+                 (Flyology.Operations.Is_Terminal (Next_Op),
+                  "scoped zero-timeout function did not complete");
+               Watches.Finish (Next_Op, Result, Outcome);
+               Require
+                 (Outcome = Flyology.IO.Ready,
+                  "scoped zero-timeout function missed a queued event");
+               Require
+                 (Result.Watch = Id,
+                  "scoped zero-timeout function used the wrong id");
+            end;
             Item.Close;
          end;
 

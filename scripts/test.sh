@@ -473,6 +473,7 @@ dormancy_smoke
 execution_groups_smoke
 exception_traceback_smoke
 fairness_smoke
+family_start_abort_smoke
 fiber_trampoline_abort_smoke
 fiber_trampoline_smoke
 file_cancellation_smoke
@@ -527,6 +528,7 @@ observability_smoke
 observability_utilization_smoke
 operations_smoke
 operations_finalize_smoke
+operations_atc_smoke
 operation_gates_smoke
 operation_composition_smoke
 operation_return_boundary_smoke
@@ -598,7 +600,9 @@ connect_transient_smoke
 create_finalize_race_smoke
 library_finalize_exception_runtime_smoke
 library_finalize_runtime_smoke
+lane_identity_lookup_smoke
 pool_reduction_claim_smoke
+pool_reduction_cross_to_shard_smoke
 structured_server_reuse_smoke
 task_result_publication_smoke
 fault_injection_smoke'
@@ -614,6 +618,7 @@ worker_pool_hook_mains='concurrency_primitives_smoke
 task_scope_faults_smoke'
 
 task_lifecycle_hook_mains='flyology-supervision-static_smoke
+family_start_abort_smoke
 flyology-supervision-families_smoke
 flyology-supervision-restart_window_smoke
 prepared_admission_observation_smoke
@@ -638,12 +643,13 @@ subprocess_smoke'
 
 file_watch_hook_mains=file_watches_recovery_smoke
 
-destroy_contention_hook_mains=data_structures_destroy_contention_smoke
+destroy_contention_hook_mains='data_structures_destroy_contention_smoke
+flyology-data_structures-guard_epoch_smoke'
 
 ordinary_unhooked_mains=
 for test_main in $ordinary_mains; do
   case "$test_main" in
-    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|family_start_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
       ;;
     *)
       ordinary_unhooked_mains="$ordinary_unhooked_mains
@@ -864,6 +870,9 @@ unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
 "$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
 "$socket_test_bin/socket_preparation_smoke"
 "$destroy_contention_test_bin/data_structures_destroy_contention_smoke"
+for mode in vector vector-timed vector-reattach bytes bytes-timed dynamic-vector dynamic-bytes dynamic-map adaptive-destroy map-control adaptive-allocate-control; do
+  "$destroy_contention_test_bin/flyology-data_structures-guard_epoch_smoke" "$mode"
+done
 
 for test_main in $ordinary_mains; do
   printf '%s\n' "test: BEGIN $test_main"
@@ -874,7 +883,7 @@ for test_main in $ordinary_mains; do
     concurrency_primitives_smoke|task_scope_faults_smoke)
       current_test_bin=$worker_pool_test_bin
       ;;
-    flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
+    flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|family_start_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
       current_test_bin=$task_lifecycle_test_bin
       ;;
     channel_operations_smoke)
@@ -958,6 +967,16 @@ for test_main in $ordinary_mains; do
     tls_state_model)
       "$project_root/scripts/run-with-timeout.sh" 30 \
         "$current_test_bin/$test_main"
+      ;;
+    operations_atc_smoke)
+      for scenario in \
+        batch stabilize nested-stabilize rearm \
+        lw-batch lw-stabilize lw-nested-stabilize lw-rearm \
+        normal-batch normal-stabilize exception exception-stabilize abort
+      do
+        "$project_root/scripts/run-with-timeout.sh" 30 \
+          "$current_test_bin/$test_main" "$scenario"
+      done
       ;;
     *)
       "$project_root/scripts/run-with-timeout.sh" 60 \
@@ -1077,6 +1096,8 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 #  finalizer event followed by exactly one scheduler-finalizer event.
 "$project_root/scripts/run-with-timeout.sh" 10 \
   "$test_bin/library_finalize_runtime_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/lane_identity_lookup_smoke"
 #  A saved exception from a controlled library finalizer must propagate after
 #  scheduler teardown. The atexit marker proves the exceptional path retained
 #  the same exactly-once ordering instead of merely producing a nonzero exit.
@@ -1109,6 +1130,13 @@ esac
 #  reduction must retain that claim until the released task drains to group 0.
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/pool_reduction_claim_smoke"
+#  Reduce below a shard target both before migration commits and after it
+#  commits but before physical transfer. Neither ordering may move the task
+#  outside the reduced pool or discard its automatic placement.
+for crossing_window in precommit postcommit; do
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/pool_reduction_cross_to_shard_smoke" "$crossing_window"
+done
 #  Allocation failure after automatic placement must not retain the creation
 #  or placement claims that keep later pool reduction and growth coherent.
 for allocation_case in group-storage-allocation fiber-storage-allocation context-storage-allocation; do

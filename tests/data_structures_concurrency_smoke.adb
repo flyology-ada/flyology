@@ -79,6 +79,7 @@ procedure Data_Structures_Concurrency_Smoke is
    end Observation_Gate;
 
    Paused_Observation     : Observation_Gate;
+   Paused_Vector_Observation : Observation_Gate;
    Paused_Map_Observation : Observation_Gate;
 
    function Observe_After_Claim (Item : U64_Elements.Representation.Const_Ref) return Interfaces.Unsigned_64
@@ -97,6 +98,22 @@ procedure Data_Structures_Concurrency_Smoke is
         Create_Value   => U64_Elements.Create,
         Observe_Value  => Observe_After_Claim);
    package Paused_MPMC is new DS.Rings.MPMC (Element => Paused_U64_Element);
+   function Observe_Vector_After_Claim
+     (Item : U64_Elements.Representation.Const_Ref) return Interfaces.Unsigned_64 is
+   begin
+      Paused_Vector_Observation.Mark_Entered;
+      Paused_Vector_Observation.Continue;
+      return U64_Elements.Value_Of (Item);
+   end Observe_Vector_After_Claim;
+
+   package Paused_Vector_Element is new
+     DS.Storage_Types.Elements
+       (Representation => U64_Elements.Representation,
+        Source_Type    => Interfaces.Unsigned_64,
+        Observed_Type  => Interfaces.Unsigned_64,
+        Create_Value   => U64_Elements.Create,
+        Observe_Value  => Observe_Vector_After_Claim);
+   package Paused_Vectors is new DS.Vectors (Element => Paused_Vector_Element);
    function Observe_Map_After_Claim
      (Item : U64_Elements.Representation.Const_Ref) return Interfaces.Unsigned_64 is
    begin
@@ -688,6 +705,86 @@ procedure Data_Structures_Concurrency_Smoke is
       type View_Access is access all Vectors.View;
       Finished     : Completion (Worker_Count);
 
+      procedure Run_Deterministic_Attach_Contention is
+         Held_View     : aliased Paused_Vectors.View;
+         Candidate     : Vectors.View;
+         Read_Finished : Completion (1);
+         Outcome       : DS.Open_Result;
+
+         task type Guard_Holder (Item : not null access Paused_Vectors.View) is
+            pragma Task_Info (Flyology.Native_Task);
+         end Guard_Holder;
+
+         task body Guard_Holder is
+         begin
+            if Paused_Vectors.Read (Item.all, 1) /= 1 then
+               raise Program_Error with "guard-holder vector read returned a wrong value";
+            end if;
+            Read_Finished.Done (True);
+         exception
+            when others =>
+               Read_Finished.Done (False);
+         end Guard_Holder;
+
+         type Guard_Holder_Access is access Guard_Holder;
+         Holder : Guard_Holder_Access;
+      begin
+         Paused_Vectors.Attach (Held_View, Region_B, Vector_Location, Total);
+         Holder := new Guard_Holder (Held_View'Access);
+         select
+            Paused_Vector_Observation.Await_Entered;
+         or
+            delay 5.0;
+            Paused_Vector_Observation.Release;
+            abort Holder.all;
+            Paused_Vectors.Detach (Held_View);
+            raise Program_Error with "guard-holder vector read did not acquire the guard";
+         end select;
+
+         begin
+            begin
+               Vectors.Attach (Candidate, Region_A, Vector_Location, Total);
+               Vectors.Detach (Candidate);
+               raise Program_Error with "vector attachment ignored a held guard";
+            exception
+               when DS.Busy_Error =>
+                  null;
+            end;
+            Assert (not Vectors.Is_Attached (Candidate), "busy vector attachment retained a view");
+            begin
+               Vectors.Create_Or_Attach (Candidate, Region_A, Vector_Location, Total, Outcome);
+               Vectors.Detach (Candidate);
+               raise Program_Error with "vector create-or-attach ignored a held guard";
+            exception
+               when DS.Busy_Error =>
+                  null;
+            end;
+            Assert (not Vectors.Is_Attached (Candidate), "busy vector create-or-attach retained a view");
+         exception
+            when others =>
+               Paused_Vector_Observation.Release;
+               Vectors.Detach (Candidate);
+               Paused_Vectors.Detach (Held_View);
+               raise;
+         end;
+
+         Paused_Vector_Observation.Release;
+         select
+            Read_Finished.Await_All;
+         or
+            delay 5.0;
+            abort Holder.all;
+            Paused_Vectors.Detach (Held_View);
+            raise Program_Error with "guard-holder vector read did not finish";
+         end select;
+         Assert (Read_Finished.Passed, "guard-holder vector read failed after releasing the guard");
+         Vectors.Create_Or_Attach (Candidate, Region_A, Vector_Location, Total, Outcome);
+         Assert (Outcome = DS.Attached_Existing, "vector did not attach after releasing the guard");
+         Assert (Vectors.Length (Candidate) = Total, "attached vector length does not match");
+         Vectors.Detach (Candidate);
+         Paused_Vectors.Detach (Held_View);
+      end Run_Deterministic_Attach_Contention;
+
       task type Worker_Task
         (Identifier : Positive;
          Vector     : not null View_Access)
@@ -747,6 +844,7 @@ procedure Data_Structures_Concurrency_Smoke is
             "internally synchronized vector duplicated/corrupted an element");
          Seen (Positive (Value)) := True;
       end loop;
+      Run_Deterministic_Attach_Contention;
       Vectors.Destroy (Views (1));
       for Index in 2 .. Worker_Count loop
          Vectors.Detach (Views (Index));

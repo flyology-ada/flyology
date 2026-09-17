@@ -485,7 +485,9 @@ if [ "$platform" = darwin ]; then
   fi
 fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
+task_identity_patch="$patch_root/common/s-taskin.ads.patch"
 blocking_detection_patch="$patch_root/common/s-taskin.adb.patch"
+foreign_task_patch="$patch_root/common/s-tporft.adb.patch"
 interrupt_service_patch="$patch_root/common/s-interr.adb.patch"
 async_delay_patch="$patch_root/common/s-taasde.adb.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
@@ -572,7 +574,9 @@ if [ -n "$monotonic_patch" ]; then
   apply_runtime_patch "$monotonic_patch"
 fi
 apply_runtime_patch "$task_state_patch"
+apply_runtime_patch "$task_identity_patch"
 apply_runtime_patch "$blocking_detection_patch"
+apply_runtime_patch "$foreign_task_patch"
 apply_runtime_patch "$interrupt_service_patch"
 apply_runtime_patch "$async_delay_patch"
 if [ "$compat_family" = gnat-legacy ]; then
@@ -593,9 +597,17 @@ require_generated_text \
   "System.Flyology.Task_Results.Publish" \
   "task-stages result publication"
 require_generated_text \
+  "$generated_include/s-taskin.ads" \
+  "Is_Lightweight : Boolean;" \
+  "immutable task lane identity"
+require_generated_text \
   "$generated_include/s-taskin.adb" \
   "System.Flyology.Scheduler.Current_Task" \
   "blocking-detection scheduler"
+require_generated_text \
+  "$generated_include/s-tporft.adb" \
+  "Local_ATCB.Common.Is_Lightweight := False;" \
+  "native temporary foreign ATCB"
 require_generated_text \
   "$generated_include/s-interr.adb" \
   "pragma Task_Info (System.Flyology.Native_Designation);" \
@@ -684,6 +696,50 @@ compile_native_service_runtime_ada () {
   fi
 }
 
+#  Changing Common_ATCB invalidates every precompiled body whose ALI records
+#  s-taskin.ads. Derive that exact compiler-specific closure from the copied
+#  runtime metadata instead of guessing a list shared by GNAT releases.
+tasking_closure_sources=
+tasking_closure_alis=
+tasking_closure_gnat_objects=
+tasking_closure_gnarl_objects=
+for tasking_ali in "$source_lib"/*.ali; do
+  if ! grep -F "D s-taskin.ads" "$tasking_ali" >/dev/null; then
+    continue
+  fi
+  tasking_stem=${tasking_ali##*/}
+  tasking_stem=${tasking_stem%.ali}
+  case "$tasking_stem" in
+    s-taskin|s-taprop|s-tassta|s-interr) continue ;;
+    s-mudido)
+      [ "$platform" = linux ] && continue
+      ;;
+    a-sytaco)
+      [ "$compat_family" = gnat-legacy ] && continue
+      ;;
+  esac
+  if [ -f "$generated_include/$tasking_stem.adb" ]; then
+    tasking_source="$tasking_stem.adb"
+  elif [ -f "$generated_include/$tasking_stem.ads" ]; then
+    tasking_source="$tasking_stem.ads"
+  else
+    printf '%s\n' \
+      "tasking closure source is missing: $tasking_stem" >&2
+    exit 1
+  fi
+  tasking_closure_sources="$tasking_closure_sources $tasking_source"
+  tasking_closure_alis="$tasking_closure_alis $tasking_stem.ali"
+  if ar -t "$source_lib/libgnat.a" | grep -Fx "$tasking_stem.o" >/dev/null; then
+    tasking_closure_gnat_objects="$tasking_closure_gnat_objects $tasking_stem.o"
+  elif ar -t "$source_lib/libgnarl.a" | grep -Fx "$tasking_stem.o" >/dev/null; then
+    tasking_closure_gnarl_objects="$tasking_closure_gnarl_objects $tasking_stem.o"
+  else
+    printf '%s\n' \
+      "tasking closure archive member is missing: $tasking_stem.o" >&2
+    exit 1
+  fi
+done
+
 if [ "$platform" = linux ]; then
   compile_flyology_runtime_ada \
     -I "$generated_include" \
@@ -714,6 +770,13 @@ compile_upstream_runtime_ada \
   "$generated_include/s-taprop.adb" \
   "$generated_include/s-taskin.adb" \
   "$generated_include/s-tassta.adb"
+if [ -n "$tasking_closure_sources" ]; then
+  #  Split only compiler-owned basenames. The generated runtime path can
+  #  contain spaces, as exercised by the independent consumer fixture.
+  for tasking_source in $tasking_closure_sources; do
+    compile_upstream_runtime_ada -I "$generated_include" "$generated_include/$tasking_source"
+  done
+fi
 if [ "$platform" = linux ]; then
   compile_upstream_runtime_ada \
     -I "$generated_include" \
@@ -737,6 +800,10 @@ cp \
   s-flscpo.ali s-fszcpo.ali s-flysch.ali s-taprop.ali s-interr.ali s-taasde.ali \
   s-taskin.ali s-tassta.ali \
   "$generated_lib/"
+if [ -n "$tasking_closure_alis" ]; then
+  # shellcheck disable=SC2086
+  cp $tasking_closure_alis "$generated_lib/"
+fi
 if [ "$platform" = linux ]; then
   cp s-mudido.ali "$generated_lib/"
 fi
@@ -772,6 +839,15 @@ ar -r "$generated_lib/libgnarl.a" \
   context_switch.o \
   platform.o \
   heap_trampoline.o
+if [ -n "$tasking_closure_gnarl_objects" ]; then
+  # shellcheck disable=SC2086
+  ar -r "$generated_lib/libgnarl.a" $tasking_closure_gnarl_objects
+fi
+if [ -n "$tasking_closure_gnat_objects" ]; then
+  # shellcheck disable=SC2086
+  ar -r "$generated_lib/libgnat.a" $tasking_closure_gnat_objects
+  ranlib "$generated_lib/libgnat.a"
+fi
 if [ "$compat_family" = gnat-legacy ]; then
   ar -r "$generated_lib/libgnarl.a" a-sytaco.o
 fi
@@ -899,8 +975,12 @@ record_patched_core source adainclude/s-taprop.adb \
   "$generated_include/s-taprop.adb"
 record_patched_core source adainclude/s-tassta.adb \
   "$generated_include/s-tassta.adb"
+record_patched_core source adainclude/s-taskin.ads \
+  "$generated_include/s-taskin.ads"
 record_patched_core source adainclude/s-taskin.adb \
   "$generated_include/s-taskin.adb"
+record_patched_core source adainclude/s-tporft.adb \
+  "$generated_include/s-tporft.adb"
 record_patched_core source adainclude/s-interr.adb \
   "$generated_include/s-interr.adb"
 record_patched_core source adainclude/s-taasde.adb \
