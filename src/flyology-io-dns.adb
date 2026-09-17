@@ -301,6 +301,26 @@ package body Flyology.IO.DNS is
    function Image (Value : Name_Buffer) return String
    is (Value.Data (1 .. Value.Length));
 
+   function Valid_Labels (Name : Name_Buffer) return Boolean is
+      Start : Positive := 1;
+      Stop  : Natural;
+   begin
+      if Name.Length = 0 or else Name.Data (Name.Length) = '.' then
+         return False;
+      end if;
+      while Start <= Name.Length loop
+         Stop := Start;
+         while Stop <= Name.Length and then Name.Data (Stop) /= '.' loop
+            Stop := Stop + 1;
+         end loop;
+         if Stop = Start or else Stop - Start > 63 then
+            return False;
+         end if;
+         Start := Stop + 1;
+      end loop;
+      return True;
+   end Valid_Labels;
+
    function Same_Name (Left, Right : Name_Buffer) return Boolean
    is (Left.Length = Right.Length and then Left.Data (1 .. Left.Length) = Right.Data (1 .. Right.Length));
 
@@ -342,14 +362,15 @@ package body Flyology.IO.DNS is
       Start : Positive := 1;
       Stop  : Natural;
    begin
+      if not Valid_Labels (Name) then
+         raise Resolution_Failed with "invalid DNS label";
+      end if;
       while Start <= Name.Length loop
          Stop := Start;
          while Stop <= Name.Length and then Name.Data (Stop) /= '.' loop
             Stop := Stop + 1;
          end loop;
-         if Stop = Start or else Stop - Start > 63 then
-            raise Resolution_Failed with "invalid DNS label";
-         elsif Position > Packet'Last then
+         if Position > Packet'Last then
             raise Resolution_Failed with "DNS query buffer exhausted";
          end if;
          Packet (Position) := Byte (Stop - Start);
@@ -840,10 +861,11 @@ package body Flyology.IO.DNS is
       end Add_Server;
 
       procedure Add_Search (Text : String) is
+         Suffix : constant Name_Buffer := To_Name (Text);
       begin
-         if Config.Search_Count < Max_Search_Domains then
+         if Valid_Labels (Suffix) and then Config.Search_Count < Max_Search_Domains then
             Config.Search_Count := Config.Search_Count + 1;
-            Config.Search (Config.Search_Count) := To_Name (Text);
+            Config.Search (Config.Search_Count) := Suffix;
          end if;
       exception
          when Resolution_Failed =>
@@ -1580,7 +1602,10 @@ package body Flyology.IO.DNS is
             --  A valid name and search domain can still exceed the DNS name
             --  limit when combined. Such a candidate is unusable, but it must
             --  not suppress later search domains or the bare-name fallback.
-            if Name'Length < Max_Name_Length and then Suffix'Length <= Max_Name_Length - Name'Length - 1 then
+            if Valid_Labels (Config.Search (Index))
+              and then Name'Length < Max_Name_Length
+              and then Suffix'Length <= Max_Name_Length - Name'Length - 1
+            then
                begin
                   return Try_Name (Name & "." & Suffix);
                exception
@@ -1691,7 +1716,10 @@ package body Flyology.IO.DNS is
          declare
             Suffix : constant String := Image (State.Configuration.Search (Index));
          begin
-            if Bare.Length < Max_Name_Length and then Suffix'Length <= Max_Name_Length - Bare.Length - 1 then
+            if Valid_Labels (State.Configuration.Search (Index))
+              and then Bare.Length < Max_Name_Length
+              and then Suffix'Length <= Max_Name_Length - Bare.Length - 1
+            then
                Append (To_Name (Image (Bare) & "." & Suffix));
             end if;
          end;
