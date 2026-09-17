@@ -289,6 +289,7 @@ package body Flyology.Supervision.Static is
          end loop;
          if Phase = Stopping_Children and then Stop_Position > Child_Total then
             Phase := Finished;
+            Dispatch.Notify;
          end if;
       end Advance_Stop_Order;
 

@@ -1,10 +1,9 @@
 with Ada.Exceptions;
-with Flyology.IO;
-with Flyology.Operations;
 with Flyology.Task_Results;
 
 package body Flyology.Supervision.Task_Generations is
    use type Ada.Task_Identification.Task_Id;
+   use type Flyology.Task_Results.Observation_Status;
 
    function Exception_Summary
      (Occurrence : Ada.Exceptions.Exception_Occurrence; Task_Id : Ada.Task_Identification.Task_Id)
@@ -60,41 +59,28 @@ package body Flyology.Supervision.Task_Generations is
             Request_Stop (Control, Shutdown => False);
       end;
       declare
-         Abort_FD          : Flyology.IO.Descriptor;
-         Already_Requested : Boolean;
+         Observation     : Flyology.Task_Results.Task_Observation;
+         Abort_Triggered : Boolean := False;
       begin
-         Control.Abort_Token.Wait_Source (Abort_FD, Already_Requested);
-         if Already_Requested then
-            Abort_Task (Subject);
-            Aborted := True;
-            Automatic_Result := Flyology.Task_Results.Wait (Identity).Result;
-         else
-            declare
-               Set         : aliased Flyology.Operations.Completion_Set (2);
-               Task_Wait   : Flyology.Task_Results.Wait_Operation :=
-                 Flyology.Task_Results.Wait (Set'Access, Identity);
-               Abort_Wait  : Flyology.IO.Readiness_Operation :=
-                 Flyology.IO.Wait (Set'Access, Abort_FD, Flyology.IO.For_Read);
-               Batch       : Flyology.Operations.Completion_Batch (Set.Capacity);
-               Observation : Flyology.Task_Results.Task_Observation;
-            begin
-               loop
-                  Flyology.Operations.Wait_Some (Set, Batch);
-                  exit when Batch.Count > 0 and then Flyology.Operations.Is_Terminal (Task_Wait);
-                  if Flyology.Operations.Is_Terminal (Abort_Wait) and then not Aborted then
-                     Abort_Task (Subject);
-                     Aborted := True;
-                  end if;
-               end loop;
-               Flyology.Task_Results.Finish (Task_Wait, Observation);
-               Automatic_Result := Observation.Result;
-               if Flyology.Operations.Is_Active (Abort_Wait) then
-                  Flyology.Operations.Cancel (Abort_Wait);
-                  Flyology.Operations.Wait_All (Set);
-               end if;
-               Flyology.Operations.Consume (Abort_Wait);
-            end;
+         --  The protected entry and task-result wait are both abortable GNARL
+         --  waits. No descriptor wake failure can strand the abort request.
+         select
+            Control.State.Await_Abort;
+            Abort_Triggered := True;
+         then abort
+            Observation := Flyology.Task_Results.Wait (Identity);
+         end select;
+         if Abort_Triggered then
+            --  Completion wins a race with abort, as it did in the former
+            --  result-first observation loop.
+            Observation := Flyology.Task_Results.Wait (Identity, Timeout => 0.0);
+            if Observation.Status /= Flyology.Task_Results.Terminal then
+               Abort_Task (Subject);
+               Aborted := True;
+               Observation := Flyology.Task_Results.Wait (Identity);
+            end if;
          end if;
+         Automatic_Result := Observation.Result;
       end;
 
       Read_Termination (Control, Reported, Summary);

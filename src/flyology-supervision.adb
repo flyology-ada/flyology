@@ -107,6 +107,11 @@ package body Flyology.Supervision is
          Abort_Requested := True;
       end Publish_Abort;
 
+      entry Await_Abort when Abort_Requested is
+      begin
+         null;
+      end Await_Abort;
+
       procedure Publish_Escalation (Incident : Incident_Context) is
       begin
          if not Opened then
@@ -406,7 +411,6 @@ package body Flyology.Supervision is
    procedure Request_Abort (Control : in out Generation_Control) is
    begin
       Control.State.Publish_Abort;
-      Control.Abort_Token.Request;
    end Request_Abort;
 
    function Is_Ready (Control : Generation_Control) return Boolean

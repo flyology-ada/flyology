@@ -567,6 +567,7 @@ private
       procedure Publish_Ready;
       procedure Publish_Stop (Shutdown : Boolean);
       procedure Publish_Abort;
+      entry Await_Abort;
       procedure Publish_Escalation (Incident : Incident_Context);
       procedure Publish_Termination (Value : Termination_Summary);
       procedure Close_Incident;
@@ -602,16 +603,16 @@ private
    type Signal_Access is access all Change_Signal;
 
    type Generation_Control is limited record
-      State       : Generation_Control_State;
-      Stop_Token  : aliased Flyology.Cancellation.Token;
-      Abort_Token : aliased Flyology.Cancellation.Token;
-      Change      : Signal_Access := null;
+      State      : Generation_Control_State;
+      Stop_Token : aliased Flyology.Cancellation.Token;
+      Change     : Signal_Access := null;
    end record;
 
    --  @exclude
    --  @param Control Internal generation control
    --  @param Value Internal generation handle
    --  @param Incident Internal inherited recovery context
+   --  @param Change Borrowed signal for generation readiness changes
    procedure Open
      (Control  : in out Generation_Control;
       Value    : Child_Handle;
