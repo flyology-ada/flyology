@@ -14,4 +14,18 @@ private package Flyology.Channel_Test_Hooks is
    function Before_Send_Reached return Boolean;
    procedure Release_Before_Send;
 
+   procedure Arm_After_Buffer_Commit;
+   procedure After_Buffer_Commit_Barrier;
+   function Buffer_Commit_Reached return Boolean;
+   procedure Release_After_Buffer_Commit;
+
+   procedure Arm_After_Signal_Claim;
+   procedure After_Signal_Claim_Barrier;
+   function Signal_Claim_Reached return Boolean;
+   function Signal_Claim_Was_Released return Boolean;
+   procedure Release_After_Signal_Claim;
+
+   procedure Arm_Next_Buffer_Signal_Failure;
+   function Fail_Next_Buffer_Signal return Boolean;
+
 end Flyology.Channel_Test_Hooks;

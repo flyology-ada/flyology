@@ -624,7 +624,8 @@ prepared_admission_cancellation_smoke
 prepared_admission_generation_smoke
 task_result_attach_abort_smoke'
 
-channel_hook_mains=channel_operations_smoke
+channel_hook_mains='channel_operations_smoke
+buffer_channel_signal_smoke'
 
 structured_server_hook_mains=structured_server_abort_smoke
 
