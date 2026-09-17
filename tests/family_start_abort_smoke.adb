@@ -49,17 +49,20 @@ procedure Family_Start_Abort_Smoke is
    package Testing renames Flyology.Task_Lifecycle_Testing;
 
    procedure Exercise
-     (Committed, ATC : Boolean; Model : Flyology.Execution_Model; Close_During_Copy : Boolean := False)
+     (Committed, ATC    : Boolean;
+      Model             : Flyology.Execution_Model;
+      Close_During_Copy : Boolean := False)
    is
-      State  : aliased Context;
-      Item   : aliased Families.Family;
-      Result : Supervisor_Result;
-      Handle : Child_Handle;
-      Point  : constant Testing.Barrier_Point :=
+      State         : aliased Context;
+      Item          : aliased Families.Family;
+      Result        : Supervisor_Result;
+      Handle        : Child_Handle;
+      Point         : constant Testing.Barrier_Point :=
         (if Committed
          then Testing.Family_Start_Committed
          else Testing.Family_Start_Reserved);
-      Copy_Rejected : Boolean := False with Atomic;
+      Copy_Rejected : Boolean := False
+      with Atomic;
 
       protected Signal is
          entry Wait;
@@ -150,7 +153,8 @@ procedure Family_Start_Abort_Smoke is
 
       if Close_During_Copy then
          if not Copy_Rejected then
-            raise Program_Error with "closed admission did not reject the pending copy";
+            raise Program_Error
+              with "closed admission did not reject the pending copy";
          end if;
       elsif Committed then
          --  The manager is still blocked. A committed generation must retain
@@ -224,7 +228,9 @@ begin
          Exercise
            (False,
             False,
-            (if Lightweight then Flyology.Lightweight_Task else Flyology.Native_Task),
+            (if Lightweight
+             then Flyology.Lightweight_Task
+             else Flyology.Native_Task),
             Close_During_Copy => True);
       end if;
    end loop;
