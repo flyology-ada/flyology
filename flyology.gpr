@@ -322,6 +322,7 @@ project Flyology is
             "flyology-supervision-service_slots.ads",
             "flyology-supervision-static.ads",
             "flyology-supervision-task_generations.ads",
+            "flyology-supervision_windows.ads",
              "flyology-task_scopes.ads",
              "flyology-task_results.ads",
              "flyology-wake_sources.ads",
