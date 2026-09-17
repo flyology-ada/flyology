@@ -729,7 +729,7 @@ package body Flyology.Supervision.Families is
          end case;
       end Prepared_Admission_Join_Is_Immediate;
 
-      entry Await_Admission_Cancel(for Slot in Slot_Index)
+      entry Await_Admission_Cancel (for Slot in Slot_Index)
         (Handle : Child_Handle; Active : not null access Boolean; Released : not null access Boolean)
         when Slots (Slot) = Released_Reapable
       is
@@ -1875,7 +1875,7 @@ package body Flyology.Supervision.Families is
          end if;
       end Take_Prepared_Monitor;
 
-      entry Await_Prepared_Monitor(for Ticket in Monitor_Index)
+      entry Await_Prepared_Monitor (for Ticket in Monitor_Index)
         (Token         : Monitor_Token;
          Preserve_Fact : Boolean;
          Status        : out Generation_Observation_Status;
@@ -1931,7 +1931,7 @@ package body Flyology.Supervision.Families is
          end if;
       end Release_Prepared_Monitor;
 
-      entry Await_Prepared_Monitor_Release(for Ticket in Monitor_Index)
+      entry Await_Prepared_Monitor_Release (for Ticket in Monitor_Index)
         (Token : Monitor_Token; Active : not null access Boolean)
         when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
       is
@@ -2000,7 +2000,7 @@ package body Flyology.Supervision.Families is
          Signals.Claimed := False;
       end Try_Acknowledge_Monitor_Signal;
 
-      entry Await_Monitor(for Ticket in Monitor_Index)
+      entry Await_Monitor (for Ticket in Monitor_Index)
         (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot)
         when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
       is
