@@ -1,4 +1,5 @@
 with Flyology.Operations;
+private with Interfaces.C;
 with System;
 
 --  A bounded FIFO channel with terminal close and drain semantics.
@@ -109,7 +110,7 @@ package Flyology.Channels.Bounded is
       --  @return Current close, buffer, and waiter counts
       function Current return Snapshot;
    private
-      procedure Signal_Scoped;
+      procedure Signal_Scoped (For_Receive : Boolean; Wake_All : Boolean := False);
       Buffer  : Element_Array (1 .. Capacity) := (others => Empty_Value);  --  Circular FIFO storage
       Head    : Positive := 1;  --  Next element to receive
       Tail    : Positive := 1;  --  Next slot to send into
@@ -228,12 +229,14 @@ private
    type Scoped_Failure is (No_Failure, Channel_Closed_Failure, Timeout_Failure, Driver_Failure);
 
    type Channel_Operation is abstract new Flyology.Operations.Operation with record
-      Item       : access Channel := null;
-      Kind       : Scoped_Kind := Scoped_Receive;
-      Value      : Element_Type := Empty_Value;
-      Next       : System.Address := System.Null_Address;
-      Subscribed : Boolean := False;
-      Failure    : Scoped_Failure := No_Failure;
+      Item              : access Channel := null;
+      Kind              : Scoped_Kind := Scoped_Receive;
+      Value             : Element_Type := Empty_Value;
+      Next              : System.Address := System.Null_Address;
+      Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Subscribed        : Boolean := False;
+      Notified          : Boolean := False;
+      Failure           : Scoped_Failure := No_Failure;
    end record;
 
    --  @exclude
