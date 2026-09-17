@@ -133,6 +133,9 @@ evidence.
 | `CompleteCleanupHandoff` | the abort-deferred guard claiming and completing a published close with no peer left |
 | `AbortCleanupHandoff` | the broken split handoff being interrupted after publication but before its first drain claim |
 | `DriverRaises` | a driver transition losing its immediate source before hidden-child admission raises, either stranding the root or terminalizing it once |
+| `PollerRegistrationOwnership.BeginOldWait` / `BeginReusedWait` | abstract descriptor-record association and MOD-to-ADD recovery after close and numeric descriptor reuse |
+| `BeginIndexedWait` / `DeliverIndexedOneShot` | retained descriptor-record association followed by a disabled `EPOLLONESHOT` record |
+| `RearmIndexedOneShot` / `PublishIndexedReadiness` | rearm by `EPOLL_CTL_MOD` with no record allocation, release, or delete/add cycle, followed by a second retained delivery |
 
 The model action names are intentionally close to the Ada operations so that a
 code review can compare the transition order directly rather than accepting a
@@ -295,7 +298,7 @@ drained, and the unowned-timer configuration permits it to be reaped while that
 entry still references it; both are required counterexamples.
 
 `PollerRegistrationOwnershipProof` states two top-level safety theorems. TLAPM
-expands their proof into fourteen obligations, all of which `check-tla.sh` requires:
+expands their proof into obligations, all of which the maintained `check-tla.sh` runner requires:
 the deferred, cancellation-owned configurations initialize in the stated
 safety conjunction, and every modeled action preserves it for either selected
 source and the always-rearm descriptor-reuse policy.
@@ -348,6 +351,19 @@ publication leaves the connection in `HandoffAborted` when no peer remains to
 complete the close. The sixth lets a generic driver raise after its immediate
 source is cleared; the root remains pending with neither source nor child and
 violates `DriverRaiseHasProgress`.
+
+`PollerRegistrationOwnership` also isolates Linux registration ownership,
+descriptor reuse, and repeated one-shot readiness. Its retained configuration
+checks that a live interest retains the correct abstract descriptor-record
+association, delivery leaves that record disabled but owned, and the next wait
+rearms the same kernel generation. The delete-on-delivery configuration violates
+`DisabledOneShotRetained`; the misindexed configuration violates
+`DescriptorIndexExact`. The model does not represent the open-addressed table's
+hash, probe, resize, or tombstone algorithms. The Linux replay observes the
+retained single-record case at event-loop boundaries: one lookup per transition,
+one initial allocation and add, one modify on rearm, and no delivery-time delete
+or record release. Separate Linux regressions exercise high and colliding
+descriptor values with exact probe counters, cancellation, and finalization.
 
 The model still keeps propagation-guard state and general child capacity
 outside its state vector. Those remain extension points for analysis of other
