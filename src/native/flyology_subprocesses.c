@@ -366,6 +366,7 @@ static void *flyology_reaper_worker(void *argument)
 {
     struct flyology_subprocess_reaper *state = argument;
     int error;
+    int group_error = 0;
     int status = 0;
     pid_t result;
 
@@ -379,14 +380,17 @@ static void *flyology_reaper_worker(void *argument)
     state->observed = 1;
     (void)pthread_mutex_unlock(&state->mutex);
 
-    if (error == 0 && kill(-state->pid, SIGKILL) != 0 &&
-        errno != ESRCH && errno != EPERM)
-        error = errno;
     if (error == 0) {
+        if (kill(-state->pid, SIGKILL) != 0 &&
+            errno != ESRCH && errno != EPERM)
+            group_error = errno;
+        /* A group-cleanup error still leaves the observed root waitable.
+           Reap it before reporting the original failure to the owner. */
         do {
             result = waitpid(state->pid, &status, 0);
         } while (result < 0 && errno == EINTR);
         if (result != state->pid) error = errno;
+        if (group_error != 0) error = group_error;
     }
 #if FLYOLOGY_SUBPROCESS_TEST_HOOKS
     flyology_reaper_test_after_reap();
