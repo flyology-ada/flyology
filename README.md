@@ -95,8 +95,8 @@ based on the surviving correspondence.
 
 ## Status
 
-Flyology Runtime is experimental. This checkout is verified on macOS/AArch64
-with Alire `gnat_flyology_native` 16.2.0-patchset.1.1.0. Linux/AArch64 and
+Flyology Runtime is experimental. This checkout's macOS/AArch64 CI job selects
+Alire `gnat_flyology_native` 16.2.0-patchset.1.1.1. Linux/AArch64 and
 Linux/x86-64 backends are
 present; the repository CI configuration includes Linux jobs, while the native
 Docker runner uses Linux/AArch64 by default on an Apple Silicon host.
@@ -107,7 +107,7 @@ combination.
 
 The current patch family covers the exact Alire compiler cells listed below.
 Linux/x86-64 runs six stock `gnat_native` releases from 13.2.2 through 16.1.0
-and `gnat_flyology_native` 16.2.0-patchset.1.1.0. Linux/AArch64 starts with
+and `gnat_flyology_native` 16.2.0-patchset.1.1.1. Linux/AArch64 starts with
 stock 14.2.1 and runs the remaining five cells; the configured Alire indexes do
 not publish Linux/AArch64 origins for stock 13.2.2 or 14.1.3, and the matrix
 runner reports both exclusions. macOS supports the releases shown in the
@@ -3754,7 +3754,7 @@ publication varies by architecture:
 | Identity | Host | Releases |
 | --- | --- | --- |
 | `gnat_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| `gnat_flyology_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+| `gnat_flyology_native` | macOS/AArch64 | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.1 |
 
 <!-- BEGIN ALIRE LINUX RUNTIME MATRIX -->
 | Provider | GNAT release | GPRbuild release | Linux/x86-64 | Linux/AArch64 |
@@ -3765,7 +3765,7 @@ publication varies by architecture:
 | `gnat_native` | `15.1.2` | `25.0.1` | required | required |
 | `gnat_native` | `15.3.1` | `25.0.1` | required | required |
 | `gnat_native` | `16.1.0` | `26.0.1` | required | required |
-| `gnat_flyology_native` | `16.2.0-patchset.1.1.0` | `26.0.1` | required | required |
+| `gnat_flyology_native` | `16.2.0-patchset.1.1.1` | `26.0.1` | required | required |
 <!-- END ALIRE LINUX RUNTIME MATRIX -->
 
 The ordered executable source for this Linux table is
@@ -4095,7 +4095,7 @@ architecture exclusions:
 `continue-on-error` fallbacks:
 
 - the full behavioral suite and a 1,000-connection showcase smoke on macOS and
-  Linux with `gnat_flyology_native` 16.2.0-patchset.1.1.0;
+  Linux with `gnat_flyology_native` 16.2.0-patchset.1.1.1;
 - explicit `epoll` and `io_uring` checks in the Linux behavioral run; and
 - the SPARK proof crate on Linux with GNATprove 16.1; and
 - the bounded TLA+ shared-memory and supervision models, allocator Ada/TLA+

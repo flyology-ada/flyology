@@ -29,7 +29,7 @@ jobs:
         os: [macos-latest, ubuntu-latest]
         toolchain: # Add one entry here to extend the supported launch matrix.
           - provider: gnat_flyology_native
-            gnat: 16.2.0-patchset.1.1.0
+            gnat: 16.2.0-patchset.1.1.1
             label: 16.2.0
             gprbuild: 26.0.1
     steps:

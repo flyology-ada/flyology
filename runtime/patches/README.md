@@ -13,7 +13,7 @@ architecture-specific:
 | Identity | Host | Releases |
 | --- | --- | --- |
 | `gnat_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0 |
-| `gnat_flyology_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.0 |
+| `gnat_flyology_native` | Darwin | 13.2.2, 14.1.3, 14.2.1, 16.1.0, 16.2.0-patchset.1.1.1 |
 
 <!-- BEGIN ALIRE LINUX RUNTIME MATRIX -->
 | Provider | GNAT release | GPRbuild release | Linux/x86-64 | Linux/AArch64 |
@@ -24,7 +24,7 @@ architecture-specific:
 | `gnat_native` | `15.1.2` | `25.0.1` | required | required |
 | `gnat_native` | `15.3.1` | `25.0.1` | required | required |
 | `gnat_native` | `16.1.0` | `26.0.1` | required | required |
-| `gnat_flyology_native` | `16.2.0-patchset.1.1.0` | `26.0.1` | required | required |
+| `gnat_flyology_native` | `16.2.0-patchset.1.1.1` | `26.0.1` | required | required |
 <!-- END ALIRE LINUX RUNTIME MATRIX -->
 
 The ordered executable source for the Linux table is
@@ -121,10 +121,10 @@ the application main begins; under a lightweight project default, an
 undesignated server would start an event loop during elaboration. The server
 also performs its own blocking timed wait, which requires a native thread.
 
-The patched region of `s-taskin.adb` is byte-identical in the eight Alire
-toolchains this repository installs, which are the Darwin builds of every
-release the family advertises, including `gnat_flyology_native`
-16.2.0-patchset.1.1.0. On Linux the patch is exercised rather than compared:
+The patched region of `s-taskin.adb` was byte-identical in the eight Darwin
+Alire toolchains previously checked through `gnat_flyology_native`
+16.2.0-patchset.1.1.0. The 1.1.1 CI job checks patch application and behavior
+on Darwin. On Linux the patch is exercised rather than compared:
 `prepare-rts.sh` fails closed when a hunk does not apply, so a successful
 `alr build` establishes that the release still carries the expected source.
 

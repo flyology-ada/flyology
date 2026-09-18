@@ -32,7 +32,7 @@ ENV ALR=/usr/local/bin/alr
 
 # Keep the compiler download independent of source changes.
 ARG GNAT_PROVIDER=gnat_flyology_native
-ARG GNAT_VERSION=16.2.0-patchset.1.1.0
+ARG GNAT_VERSION=16.2.0-patchset.1.1.1
 ARG GPRBUILD_VERSION=26.0.1
 WORKDIR /toolchain
 RUN alr index --reset-community \

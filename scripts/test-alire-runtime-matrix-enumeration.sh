@@ -51,7 +51,7 @@ Testing Linux gnat_native 14.2.1 with GPRbuild 25.0.1
 Testing Linux gnat_native 15.1.2 with GPRbuild 25.0.1
 Testing Linux gnat_native 15.3.1 with GPRbuild 25.0.1
 Testing Linux gnat_native 16.1.0 with GPRbuild 26.0.1
-Testing Linux gnat_flyology_native 16.2.0-patchset.1.1.0 with GPRbuild 26.0.1
+Testing Linux gnat_flyology_native 16.2.0-patchset.1.1.1 with GPRbuild 26.0.1
 EOF
 
 cat >"$test_root/arm64.expected" <<'EOF'
@@ -61,7 +61,7 @@ Testing Linux gnat_native 14.2.1 with GPRbuild 25.0.1
 Testing Linux gnat_native 15.1.2 with GPRbuild 25.0.1
 Testing Linux gnat_native 15.3.1 with GPRbuild 25.0.1
 Testing Linux gnat_native 16.1.0 with GPRbuild 26.0.1
-Testing Linux gnat_flyology_native 16.2.0-patchset.1.1.0 with GPRbuild 26.0.1
+Testing Linux gnat_flyology_native 16.2.0-patchset.1.1.1 with GPRbuild 26.0.1
 EOF
 
 cat >"$test_root/amd64-builds.expected" <<'EOF'
@@ -71,7 +71,7 @@ linux/amd64 GNAT_PROVIDER=gnat_native GNAT_VERSION=14.2.1 GPRBUILD_VERSION=25.0.
 linux/amd64 GNAT_PROVIDER=gnat_native GNAT_VERSION=15.1.2 GPRBUILD_VERSION=25.0.1
 linux/amd64 GNAT_PROVIDER=gnat_native GNAT_VERSION=15.3.1 GPRBUILD_VERSION=25.0.1
 linux/amd64 GNAT_PROVIDER=gnat_native GNAT_VERSION=16.1.0 GPRBUILD_VERSION=26.0.1
-linux/amd64 GNAT_PROVIDER=gnat_flyology_native GNAT_VERSION=16.2.0-patchset.1.1.0 GPRBUILD_VERSION=26.0.1
+linux/amd64 GNAT_PROVIDER=gnat_flyology_native GNAT_VERSION=16.2.0-patchset.1.1.1 GPRBUILD_VERSION=26.0.1
 EOF
 
 cat >"$test_root/arm64-builds.expected" <<'EOF'
@@ -79,7 +79,7 @@ linux/arm64 GNAT_PROVIDER=gnat_native GNAT_VERSION=14.2.1 GPRBUILD_VERSION=25.0.
 linux/arm64 GNAT_PROVIDER=gnat_native GNAT_VERSION=15.1.2 GPRBUILD_VERSION=25.0.1
 linux/arm64 GNAT_PROVIDER=gnat_native GNAT_VERSION=15.3.1 GPRBUILD_VERSION=25.0.1
 linux/arm64 GNAT_PROVIDER=gnat_native GNAT_VERSION=16.1.0 GPRBUILD_VERSION=26.0.1
-linux/arm64 GNAT_PROVIDER=gnat_flyology_native GNAT_VERSION=16.2.0-patchset.1.1.0 GPRBUILD_VERSION=26.0.1
+linux/arm64 GNAT_PROVIDER=gnat_flyology_native GNAT_VERSION=16.2.0-patchset.1.1.1 GPRBUILD_VERSION=26.0.1
 EOF
 
 run_architecture () {
