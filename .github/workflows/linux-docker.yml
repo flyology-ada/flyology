@@ -1,0 +1,91 @@
+name: Linux Docker validation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/linux-docker.yml
+      - docker/linux/Dockerfile
+      - scripts/alire-runtime-matrix.txt
+      - scripts/test-linux-docker.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flyology-linux-docker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.arch }} / BuildKit ${{ matrix.buildkit }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 135
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+            host_arch: x86_64
+            buildkit: '0'
+          - runner: ubuntu-24.04
+            arch: amd64
+            host_arch: x86_64
+            buildkit: '1'
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            host_arch: aarch64
+            buildkit: '0'
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            host_arch: aarch64
+            buildkit: '1'
+    steps:
+      - name: Check out exact source head
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Require native Docker architecture
+        timeout-minutes: 5
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_HOST_ARCH: ${{ matrix.host_arch }}
+        run: |
+          source_sha=$(git rev-parse HEAD)
+          host_arch=$(uname -m)
+          docker_os=$(docker info --format '{{.OSType}}')
+          docker_arch=$(docker version --format '{{.Server.Arch}}')
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          printf 'Source SHA: %s\nHost: %s\nDocker server: %s/%s\n' \
+            "$source_sha" "$host_arch" "$docker_os" "$docker_arch"
+          printf 'Source SHA: `%s`\n\nHost: `%s`; Docker server: `%s/%s`\n\n' \
+            "$source_sha" "$host_arch" "$docker_os" "$docker_arch" \
+            >> "$GITHUB_STEP_SUMMARY"
+          test "$source_sha" = "$EXPECTED_SHA"
+          test "$host_arch" = "$EXPECTED_HOST_ARCH"
+          test "$docker_os/$docker_arch" = "linux/$EXPECTED_ARCH"
+          docker buildx version
+          df -h "$GITHUB_WORKSPACE" "$docker_root"
+          docker system df
+
+      - name: Run maintained Linux Docker suite
+        timeout-minutes: 110
+        env:
+          DOCKER_BUILDKIT: ${{ matrix.buildkit }}
+          FLYOLOGY_LINUX_ARCH: ${{ matrix.arch }}
+          FLYOLOGY_LINUX_IMAGE: flyology-ci-${{ matrix.arch }}-buildkit-${{ matrix.buildkit }}
+        run: ./scripts/test-linux-docker.sh
+
+      - name: Report final Docker disk use
+        if: always()
+        timeout-minutes: 5
+        run: |
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          df -h "$GITHUB_WORKSPACE" "$docker_root"
+          docker system df || true
