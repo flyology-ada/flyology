@@ -1,10 +1,8 @@
 with Ada.Exceptions;
 with Ada.Real_Time;
-with Ada.Unchecked_Deallocation;
 with Flyology.Subprocess_Test_Hooks;
 with GNAT.OS_Lib;
 with Interfaces.C.Strings;
-with System;
 
 package body Flyology.Subprocesses is
    package C renames Interfaces.C;
@@ -15,8 +13,7 @@ package body Flyology.Subprocesses is
    use type Ada.Streams.Stream_Element_Offset;
    use type C.long;
    use type CS.chars_ptr;
-
-   procedure Free_Reaper is new Ada.Unchecked_Deallocation (Reaper_Task, Reaper_Access);
+   use type System.Address;
 
    type Descriptor_Pair is array (Natural range 0 .. 1) of aliased C.int with Convention => C;
    type Chars_Ptr_Array is array (Natural range <>) of aliased CS.chars_ptr with Convention => C;
@@ -57,8 +54,21 @@ package body Flyology.Subprocesses is
    Child_Control_Target    : constant C.int := 3;
    Child_Capability_Target : constant C.int := 4;
 
-   function C_Observe_Exit (Pid : C.int) return C.int;
-   pragma Import (C, C_Observe_Exit, "flyology_subprocess_observe_exit");
+   function C_Reaper_Start (Pid : C.int; State : access System.Address) return C.int;
+   pragma Import (C, C_Reaper_Start, "flyology_subprocess_reaper_start");
+
+   procedure C_Reaper_Snapshot (State : System.Address; Done, Failed, Raw_Status, Error_Code : access C.int);
+   pragma Import (C, C_Reaper_Snapshot, "flyology_subprocess_reaper_snapshot");
+
+   function C_Reaper_Descriptor (State : System.Address) return C.int;
+   pragma Import (C, C_Reaper_Descriptor, "flyology_subprocess_reaper_descriptor");
+
+   function C_Reaper_Signal
+     (State : System.Address; Signal, Forced_Error : C.int; Attempted : access C.int) return C.int;
+   pragma Import (C, C_Reaper_Signal, "flyology_subprocess_reaper_signal");
+
+   procedure C_Reaper_Release (State : System.Address);
+   pragma Import (C, C_Reaper_Release, "flyology_subprocess_reaper_release");
 
    function C_Read (Descriptor : C.int; Buffer : System.Address; Length : C.size_t) return C.long;
    pragma Import (C, C_Read, "read");
@@ -107,7 +117,6 @@ package body Flyology.Subprocesses is
    Would_Block_Error : constant C.int := C_Errno_Would_Block;
    Broken_Pipe_Error : constant C.int := C_Errno_Broken_Pipe;
    No_Process_Error  : constant C.int := C_Errno_No_Such_Process;
-   Permission_Error  : constant C.int := C_Errno_Permission;
 
    function Contains_NUL (Value : String) return Boolean is
    begin
@@ -218,121 +227,6 @@ package body Flyology.Subprocesses is
       Item.Environment.Append
         ((Name => US.To_Unbounded_String (Name), Value => US.To_Unbounded_String (Value)));
    end Set_Environment_Variable;
-
-   protected body Exit_Control is
-      procedure Prepare is
-      begin
-         Wake_Sources.Release (Wake);
-         Wake_Sources.Ensure (Wake);
-         Is_Done := False;
-         Exit_Observed := False;
-         Has_Failed := False;
-         Status_Value := 0;
-         Error_Value := 0;
-      end Prepare;
-
-      procedure Release is
-      begin
-         Wake_Sources.Release (Wake);
-         Is_Done := False;
-         Exit_Observed := False;
-         Has_Failed := False;
-         Status_Value := 0;
-         Error_Value := 0;
-      end Release;
-
-      procedure Mark_Exit_Observed is
-      begin
-         Exit_Observed := True;
-      end Mark_Exit_Observed;
-
-      procedure Send_Group_Signal (Pid, Signal : C.int; Error_Code : out C.int) is
-         Result : C.int;
-      begin
-         --  Hold the exit-state lock through kill so observation cannot pass
-         --  between the liveness decision and the system call.
-         Error_Code := 0;
-         if Exit_Observed or else Is_Done then
-            return;
-         end if;
-         if Flyology.Subprocess_Test_Hooks.Enabled then
-            if Flyology.Subprocess_Test_Hooks.Fail_Group_Signal then
-               Error_Code := Permission_Error;
-               return;
-            end if;
-            Flyology.Subprocess_Test_Hooks.Note_Group_Signal;
-         end if;
-         Result := C_Kill (-Pid, Signal);
-         if Result /= 0 then
-            Error_Code := C.int (GNAT.OS_Lib.Errno);
-         end if;
-      end Send_Group_Signal;
-
-      procedure Complete (Raw_Status, Error_Code : C.int) is
-      begin
-         Status_Value := Raw_Status;
-         Error_Value := Error_Code;
-         Has_Failed := Error_Code /= 0;
-         Is_Done := True;
-         Wake_Sources.Signal (Wake);
-      end Complete;
-
-      procedure Snapshot (Done, Failed : out Boolean; Raw_Status, Error_Code : out C.int) is
-      begin
-         Done := Is_Done;
-         Failed := Has_Failed;
-         Raw_Status := Status_Value;
-         Error_Code := Error_Value;
-      end Snapshot;
-
-      function Completed return Boolean
-      is (Is_Done);
-
-      function Wait_Descriptor return IO.Descriptor
-      is (Wake_Sources.Descriptor (Wake));
-   end Exit_Control;
-
-   task body Reaper_Task is
-      Error_Code : C.int;
-      Raw_Status : aliased C.int := 0;
-      Result     : C.int;
-   begin
-      loop
-         Error_Code := C_Observe_Exit (Pid);
-         exit when Error_Code = 0 or else Error_Code /= Interrupted_Error;
-      end loop;
-      --  waitid(WNOWAIT) keeps the root's ID reserved until waitpid. Exclude
-      --  new group signals before that reap, including the later status gap.
-      State.Mark_Exit_Observed;
-      if Error_Code = 0 then
-         Result := C_Kill (-Pid, C_Signal_Kill);
-         if Result /= 0
-           and then C.int (GNAT.OS_Lib.Errno) /= No_Process_Error
-           and then C.int (GNAT.OS_Lib.Errno) /= Permission_Error
-         then
-            Error_Code := C.int (GNAT.OS_Lib.Errno);
-         end if;
-      end if;
-      if Error_Code = 0 then
-         loop
-            Result := C_Waitpid (Pid, Raw_Status'Access, 0);
-            exit when Result = Pid;
-            if Result < 0 and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error then
-               null;
-            else
-               Error_Code := C.int (GNAT.OS_Lib.Errno);
-               exit;
-            end if;
-         end loop;
-      end if;
-      if Flyology.Subprocess_Test_Hooks.Enabled then
-         Flyology.Subprocess_Test_Hooks.After_Reap;
-      end if;
-      State.Complete (Raw_Status, Error_Code);
-   exception
-      when others =>
-         State.Complete (0, -1);
-   end Reaper_Task;
 
    procedure Close_Descriptor (Descriptor : in out IO.Descriptor) is
       Ignored : C.int;
@@ -478,24 +372,6 @@ package body Flyology.Subprocesses is
          raise Spawn_Error with "posix_spawn failed, error=" & Spawn_Result'Image;
       end if;
 
-      begin
-         Child.Exit_State.Prepare;
-      exception
-         when others =>
-            declare
-               Ignored : C.int := C_Kill (-Pid, C_Signal_Kill);
-               Raw     : aliased C.int;
-               pragma Unreferenced (Ignored);
-            begin
-               while C_Waitpid (Pid, Raw'Access, 0) < 0 and then C.int (GNAT.OS_Lib.Errno) = Interrupted_Error
-               loop
-                  null;
-               end loop;
-            end;
-            Cleanup_Ends;
-            raise Spawn_Error with "cannot create subprocess exit readiness source";
-      end;
-
       Close_Descriptor (Stdin_Ends (0));
       Close_Descriptor (Stdout_Ends (1));
       Close_Descriptor (Stderr_Ends (1));
@@ -513,7 +389,13 @@ package body Flyology.Subprocesses is
          then
             raise Storage_Error with "injected subprocess reaper failure";
          end if;
-         Child.Reaper := new Reaper_Task (Pid, Child.Exit_State'Unchecked_Access);
+         declare
+            Reaper_Error : constant C.int := C_Reaper_Start (Pid, Child.Reaper'Access);
+         begin
+            if Reaper_Error /= 0 then
+               raise Spawn_Error with "cannot start subprocess reaper, error=" & Reaper_Error'Image;
+            end if;
+         end;
       exception
          when others =>
             declare
@@ -529,7 +411,6 @@ package body Flyology.Subprocesses is
             Close_Descriptor (Child.Input_FD);
             Close_Descriptor (Child.Output_FD);
             Close_Descriptor (Child.Error_FD);
-            Child.Exit_State.Release;
             Child.Pid_Value := -1;
             raise Spawn_Error with "cannot allocate subprocess reaper";
       end;
@@ -547,12 +428,20 @@ package body Flyology.Subprocesses is
    function Is_Open (Child : Process) return Boolean
    is (Child.Pid_Value > 0);
 
+   function Exit_Wait_Descriptor (Child : Process) return IO.Descriptor
+   is (C_Reaper_Descriptor (Child.Reaper));
+
    function Has_Exited (Child : Process) return Boolean is
    begin
       if not Is_Open (Child) then
          raise Program_Error with "subprocess owner is closed";
       end if;
-      return Child.Exit_State.Completed;
+      declare
+         Done, Failed, Raw_Status, Error_Code : aliased C.int;
+      begin
+         C_Reaper_Snapshot (Child.Reaper, Done'Access, Failed'Access, Raw_Status'Access, Error_Code'Access);
+         return Done /= 0;
+      end;
    end Has_Exited;
 
    function Identifier (Child : Process) return Process_Id is
@@ -782,20 +671,19 @@ package body Flyology.Subprocesses is
       Timeout : Duration := IO.Infinite;
       Token   : access Cancellation.Token := null)
    is
-      Done, Failed           : Boolean;
-      Raw_Status, Error_Code : C.int;
+      Done, Failed, Raw_Status, Error_Code : aliased C.int;
    begin
       if not Is_Open (Child) then
          raise Program_Error with "subprocess owner is closed";
       end if;
-      Child.Exit_State.Snapshot (Done, Failed, Raw_Status, Error_Code);
-      if not Done then
-         Wait_Ready (Child.Exit_State.Wait_Descriptor, IO.For_Read, Timeout, Token);
-         Child.Exit_State.Snapshot (Done, Failed, Raw_Status, Error_Code);
+      C_Reaper_Snapshot (Child.Reaper, Done'Access, Failed'Access, Raw_Status'Access, Error_Code'Access);
+      if Done = 0 then
+         Wait_Ready (C_Reaper_Descriptor (Child.Reaper), IO.For_Read, Timeout, Token);
+         C_Reaper_Snapshot (Child.Reaper, Done'Access, Failed'Access, Raw_Status'Access, Error_Code'Access);
       end if;
-      if not Done then
+      if Done = 0 then
          raise Process_Error with "subprocess reaper wake lacked a result";
-      elsif Failed then
+      elsif Failed /= 0 then
          raise Process_Error with "subprocess reaping failed, error=" & Error_Code'Image;
       end if;
       Status := Decode (Raw_Status);
@@ -812,11 +700,21 @@ package body Flyology.Subprocesses is
 
    procedure Send_Signal (Child : in out Process; Signal : Signal_Kind) is
       Error_Code : C.int;
+      Attempted  : aliased C.int;
+      Forced     : C.int := 0;
    begin
       if not Is_Open (Child) then
          raise Program_Error with "subprocess owner is closed";
       end if;
-      Child.Exit_State.Send_Group_Signal (Child.Pid_Value, Native_Signal (Signal), Error_Code);
+      if Flyology.Subprocess_Test_Hooks.Enabled then
+         if Flyology.Subprocess_Test_Hooks.Fail_Group_Signal then
+            Forced := C_Errno_Permission;
+         end if;
+      end if;
+      Error_Code := C_Reaper_Signal (Child.Reaper, Native_Signal (Signal), Forced, Attempted'Access);
+      if Flyology.Subprocess_Test_Hooks.Enabled and then Attempted /= 0 then
+         Flyology.Subprocess_Test_Hooks.Note_Group_Signal;
+      end if;
       if Error_Code /= 0 and then Error_Code /= No_Process_Error then
          raise Process_Error with "subprocess signal failed, errno=" & Error_Code'Image;
       end if;
@@ -843,16 +741,10 @@ package body Flyology.Subprocesses is
    begin
       Close_Standard_Output (Child);
       Close_Standard_Error (Child);
-      if Child.Reaper /= null then
-         --  Publication precedes task termination. Deallocation must wait for
-         --  both, including when the exit readiness wait failed early. A timed
-         --  suspension avoids occupying the caller's thread during that join.
-         while not Child.Reaper'Terminated loop
-            delay 0.01;
-         end loop;
-         Free_Reaper (Child.Reaper);
+      if Child.Reaper /= System.Null_Address then
+         C_Reaper_Release (Child.Reaper);
+         Child.Reaper := System.Null_Address;
       end if;
-      Child.Exit_State.Release;
       Child.Pid_Value := -1;
    end Release_Process;
 
@@ -866,7 +758,7 @@ package body Flyology.Subprocesses is
       end if;
       Close_Standard_Input (Child);
       --  A failed signal gives no reason to expect the reaper to finish.
-      --  Keep its borrowed exit state and the process owner live for a retry.
+      --  Keep the process owner live for a retry.
       Kill (Child);
       begin
          Wait (Child, Status);
@@ -888,9 +780,8 @@ package body Flyology.Subprocesses is
          Close (Child);
       exception
          when others =>
-            --  Finalization cannot leave a reaper borrowing this object's
-            --  exit state. If signaling failed, join even when exit readiness
-            --  itself is unusable; natural exit may take an unlimited time.
+            --  The detached native reaper retains its own state after this
+            --  owner releases it, including when signaling failed.
             if Is_Open (Child) then
                begin
                   Close_Standard_Input (Child);

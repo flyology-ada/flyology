@@ -15,6 +15,13 @@ symbols=$(nm -g "$archive" | awk '
   }
 ' | sort -u)
 
+if nm -g "$archive" | grep -E \
+  'flyology_test_subprocess_(arm|await|release)_reap_barrier' >/dev/null
+then
+  printf '%s\n' "production archive retained subprocess reaper test barriers" >&2
+  exit 1
+fi
+
 for symbol in $symbols; do
   case "$symbol" in
     flyology_subprocess_pipe|\
@@ -23,6 +30,11 @@ for symbol in $symbols; do
     flyology_subprocess_set_no_sigpipe|\
     flyology_subprocess_spawn|\
     flyology_subprocess_observe_exit|\
+    flyology_subprocess_reaper_start|\
+    flyology_subprocess_reaper_snapshot|\
+    flyology_subprocess_reaper_descriptor|\
+    flyology_subprocess_reaper_signal|\
+    flyology_subprocess_reaper_release|\
     flyology_subprocess_write_no_sigpipe|\
     flyology_subprocess_signal_interrupt|\
     flyology_subprocess_signal_terminate|\
@@ -52,6 +64,11 @@ for required in \
   flyology_subprocess_set_no_sigpipe \
   flyology_subprocess_spawn \
   flyology_subprocess_observe_exit \
+  flyology_subprocess_reaper_start \
+  flyology_subprocess_reaper_snapshot \
+  flyology_subprocess_reaper_descriptor \
+  flyology_subprocess_reaper_signal \
+  flyology_subprocess_reaper_release \
   flyology_subprocess_write_no_sigpipe \
   flyology_subprocess_signal_interrupt \
   flyology_subprocess_signal_terminate \

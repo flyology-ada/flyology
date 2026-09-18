@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <poll.h>
 #include <signal.h>
 #include <stddef.h>
 #include <string.h>
@@ -37,6 +38,11 @@ int flyology_subprocess_status_exit_code(int);
 int flyology_subprocess_status_signaled(int);
 int flyology_subprocess_status_signal(int);
 int flyology_subprocess_status_core_dumped(int);
+int flyology_subprocess_reaper_start(int, void **);
+void flyology_subprocess_reaper_snapshot(void *, int *, int *, int *, int *);
+int flyology_subprocess_reaper_descriptor(void *);
+int flyology_subprocess_reaper_signal(void *, int, int, int *);
+void flyology_subprocess_reaper_release(void *);
 
 static int move_above_bootstrap(int *descriptor)
 {
@@ -60,6 +66,7 @@ int main(int argc, char **argv)
     int status = 0;
     pid_t child;
     pid_t live_child = -1;
+    void *live_reaper = NULL;
     char byte = 'x';
     int result = 1;
     int application_descriptor = -1;
@@ -268,9 +275,60 @@ int main(int argc, char **argv)
             goto cleanup;
         live_child = -1;
     }
+    {
+        int done, failed, raw_status, reaper_error, attempted;
+        struct pollfd ready;
+        char *child_arguments[] = { argv[0], "--wait-for-signal", NULL };
+        char *child_environment[] = { NULL };
+
+        if (flyology_subprocess_pipe(input) != 0 ||
+            flyology_subprocess_pipe(output) != 0 ||
+            flyology_subprocess_pipe(error) != 0 ||
+            flyology_subprocess_spawn
+              (&child, argv[0], child_arguments, 1, child_environment,
+               NULL, 0, input[0], input[1], output[0], output[1],
+               error[0], error[1], -1, -1, -1, -1, 3, 4) != 0)
+            goto cleanup;
+        live_child = child;
+        for (int index = 0; index < 2; ++index) {
+            close(input[index]); input[index] = -1;
+            close(output[index]); output[index] = -1;
+            close(error[index]); error[index] = -1;
+        }
+        if (flyology_subprocess_reaper_start(child, &live_reaper) != 0)
+            goto cleanup;
+        live_child = -1;
+        if (flyology_subprocess_reaper_signal(live_reaper, SIGKILL, EPERM,
+                                             &attempted) != EPERM || attempted != 0 ||
+            flyology_subprocess_reaper_signal(live_reaper, SIGKILL, 0,
+                                             &attempted) != 0 || attempted != 1)
+            goto cleanup;
+        ready.fd = flyology_subprocess_reaper_descriptor(live_reaper);
+        ready.events = POLLIN;
+        ready.revents = 0;
+        if (ready.fd <= STDERR_FILENO ||
+            (fcntl(ready.fd, F_GETFD) & FD_CLOEXEC) == 0 ||
+            poll(&ready, 1, 5000) <= 0)
+            goto cleanup;
+        flyology_subprocess_reaper_snapshot(live_reaper, &done, &failed,
+                                            &raw_status, &reaper_error);
+        if (!done || failed || reaper_error != 0 ||
+            !flyology_subprocess_status_signaled(raw_status) ||
+            flyology_subprocess_reaper_signal(live_reaper, SIGKILL, 0,
+                                             &attempted) != 0 || attempted != 0)
+            goto cleanup;
+        flyology_subprocess_reaper_release(live_reaper);
+        live_reaper = NULL;
+    }
     result = 0;
 
 cleanup:
+    if (live_reaper != NULL) {
+        int attempted;
+        (void)flyology_subprocess_reaper_signal(live_reaper, SIGKILL, 0,
+                                                 &attempted);
+        flyology_subprocess_reaper_release(live_reaper);
+    }
     if (application_descriptor >= 0) close(application_descriptor);
     if (sigpipe_overridden)
         (void)sigaction(SIGPIPE, &previous_pipe, NULL);

@@ -12,7 +12,6 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t flyology_subprocess_stop_requested;
-static volatile sig_atomic_t flyology_subprocess_fail_reaper_allocation;
 
 /* Ignore the enumeration handle itself and report the complete sorted set.
    A Linux child may legitimately inherit application-owned descriptors; the
@@ -53,16 +52,6 @@ int flyology_test_subprocess_descriptor_list(char *buffer, size_t capacity)
         length += (size_t)written;
     }
     return (int)length;
-}
-
-void flyology_test_subprocess_set_fail_reaper_allocation(int enabled)
-{
-    flyology_subprocess_fail_reaper_allocation = enabled != 0;
-}
-
-int flyology_test_subprocess_fail_reaper_allocation(void)
-{
-    return flyology_subprocess_fail_reaper_allocation != 0;
 }
 
 static void flyology_subprocess_handle_term(int signal_number)
@@ -138,4 +127,9 @@ int flyology_test_subprocess_pid_exists(int pid)
 {
     if (kill((pid_t)pid, 0) == 0) return 1;
     return errno == EPERM ? 1 : 0;
+}
+
+int flyology_test_subprocess_kill_group(int pid)
+{
+    return kill((pid_t)-pid, SIGKILL);
 }
