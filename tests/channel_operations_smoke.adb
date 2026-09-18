@@ -314,6 +314,70 @@ procedure Channel_Operations_Smoke is
            and then ((A = 1 and then B = 2) or else (A = 2 and then B = 1));
       end;
 
+      --  Separate completion sets need separate notifications. Each send
+      --  claims a different waiting receiver even before any owner waits.
+      declare
+         Channel                          :
+           aliased Integer_Channels.Channel (Capacity => 3);
+         First_Set, Second_Set, Third_Set :
+           aliased Flyology.Operations.Completion_Set (1);
+         First                            :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (First_Set'Access, Channel'Access, 1.0);
+         Second                           :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (Second_Set'Access, Channel'Access, 1.0);
+         Third                            :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (Third_Set'Access, Channel'Access, 1.0);
+         Status                           : Integer_Channels.Try_Send_Result;
+         A, B, C                          : Integer := 0;
+      begin
+         for Number in 1 .. 3 loop
+            Channel.Try_Send (Number, Status);
+            Check
+              (Status = Integer_Channels.Item_Sent,
+               "fan-out publication failed");
+         end loop;
+         Flyology.Operations.Wait_All (First_Set);
+         Flyology.Operations.Wait_All (Second_Set);
+         Flyology.Operations.Wait_All (Third_Set);
+         Integer_Channels.Finish (First, A);
+         Integer_Channels.Finish (Second, B);
+         Integer_Channels.Finish (Third, C);
+         Passed := Passed and then A + B + C = 6 and then A * B * C = 6;
+      end;
+
+      --  Cancellation of a signalled receiver passes its outstanding wake
+      --  claim to another pending receiver for the already buffered item.
+      declare
+         Channel               :
+           aliased Integer_Channels.Channel (Capacity => 1);
+         First_Set, Second_Set :
+           aliased Flyology.Operations.Completion_Set (1);
+         First                 : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (First_Set'Access, Channel'Access, 1.0);
+         Second                : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Second_Set'Access, Channel'Access, 1.0);
+         Status                : Integer_Channels.Try_Send_Result;
+         Value                 : Integer := 0;
+      begin
+         Channel.Try_Send (27, Status);
+         Check
+           (Status = Integer_Channels.Item_Sent, "handoff publication failed");
+         Flyology.Operations.Cancel (Second);
+         begin
+            Integer_Channels.Finish (Second, Value);
+            Passed := False;
+         exception
+            when Integer_Channels.Operation_Cancelled =>
+               null;
+         end;
+         Flyology.Operations.Wait_All (First_Set);
+         Integer_Channels.Finish (First, Value);
+         Passed := Passed and then Value = 27;
+      end;
+
       --  A full channel retains a pending send. Receiving capacity wakes it;
       --  Finish consumes the operation but the channel keeps FIFO ownership.
       declare

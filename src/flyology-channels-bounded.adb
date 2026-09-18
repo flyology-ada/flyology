@@ -2,7 +2,7 @@ with Ada.Unchecked_Conversion;
 with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
-with Interfaces.C;
+with Flyology.Wake_Sources;
 with System.Storage_Elements;
 
 package body Flyology.Channels.Bounded is
@@ -33,7 +33,8 @@ package body Flyology.Channels.Bounded is
    protected Subscriptions is
       procedure Link (Operation : System.Address);
       procedure Unlink (Operation : System.Address);
-      procedure Signal (Channel_Address : System.Address);
+      procedure Clear_Notification (Operation : System.Address);
+      procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean);
    private
       Heads : Bucket_Array := (others => System.Null_Address);
    end Subscriptions;
@@ -49,6 +50,7 @@ package body Flyology.Channels.Bounded is
          Index := Bucket (Target.Item.all'Address);
          Target.Next := Heads (Index);
          Target.Subscribed := True;
+         Target.Notified := False;
          Heads (Index) := Operation;
          Active_Subscriptions (Index) := Active_Subscriptions (Index) + 1;
       end Link;
@@ -75,20 +77,46 @@ package body Flyology.Channels.Bounded is
          else
             To_Operation (Previous).Next := Target.Next;
          end if;
-         Target.Next := System.Null_Address;
-         Target.Subscribed := False;
-         Active_Subscriptions (Index) := Active_Subscriptions (Index) - 1;
+         declare
+            Handoff : constant Boolean := Target.Notified;
+            Kind    : constant Scoped_Kind := Target.Kind;
+            Address : constant System.Address := Target.Item.all'Address;
+         begin
+            Target.Next := System.Null_Address;
+            Target.Subscribed := False;
+            Target.Notified := False;
+            Active_Subscriptions (Index) := Active_Subscriptions (Index) - 1;
+            --  A cancelled or timed-out operation may have claimed the only
+            --  wake for a buffered item. Pass that claim to another waiter.
+            if Handoff then
+               Signal (Address, Kind, Wake_All => False);
+            end if;
+         end;
       end Unlink;
 
-      procedure Signal (Channel_Address : System.Address) is
+      procedure Clear_Notification (Operation : System.Address) is
+         Target : constant Channel_Operation_Access := To_Operation (Operation);
+      begin
+         if Target /= null and then Target.Subscribed then
+            Target.Notified := False;
+         end if;
+      end Clear_Notification;
+
+      procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean) is
          Cursor : System.Address := Heads (Bucket (Channel_Address));
       begin
          while Cursor /= System.Null_Address loop
             declare
                Operation : constant Channel_Operation_Access := To_Operation (Cursor);
             begin
-               if Operation.Item /= null and then Operation.Item.all'Address = Channel_Address then
-                  Flyology.Operations.Drivers.Signal_Completion (Operation.all);
+               if Operation.Item /= null
+                 and then Operation.Item.all'Address = Channel_Address
+                 and then (Wake_All or else Operation.Kind = Kind)
+                 and then not Operation.Notified
+               then
+                  Flyology.Wake_Sources.Signal_Borrowed (Operation.Signal_Descriptor);
+                  Operation.Notified := True;
+                  exit when not Wake_All;
                end if;
                Cursor := Operation.Next;
             end;
@@ -97,7 +125,7 @@ package body Flyology.Channels.Bounded is
    end Subscriptions;
 
    protected body Channel is
-      procedure Signal_Scoped is
+      procedure Signal_Scoped (For_Receive : Boolean; Wake_All : Boolean := False) is
          --  Channel'Address names the protected data part on GNAT, whereas an
          --  access-to-Channel designates the complete protected object. Form
          --  the same complete-object identity used by operation initiation.
@@ -105,7 +133,8 @@ package body Flyology.Channels.Bounded is
          Index           : constant Bucket_Index := Bucket (Channel_Address);
       begin
          if Active_Subscriptions (Index) /= 0 then
-            Subscriptions.Signal (Channel_Address);
+            Subscriptions.Signal
+              (Channel_Address, (if For_Receive then Scoped_Receive else Scoped_Send), Wake_All);
          end if;
       end Signal_Scoped;
 
@@ -116,7 +145,7 @@ package body Flyology.Channels.Bounded is
                Buffer (Tail) := Value;
                Tail := Policy.Advance (Tail, Capacity);
                Count := Policy.Count_After_Send (Count, Capacity);
-               Signal_Scoped;
+               Signal_Scoped (For_Receive => True);
 
             when Policy.Reject_Send  =>
                raise Channel_Closed with "send on closed channel";
@@ -138,7 +167,7 @@ package body Flyology.Channels.Bounded is
                --  ordering prevents a violating finalizer from making the
                --  already-copied item deliverable twice.
                Buffer (Position) := Empty_Value;
-               Signal_Scoped;
+               Signal_Scoped (For_Receive => False);
 
             when Policy.Reject_Receive  =>
                raise Channel_Closed with "receive from drained channel";
@@ -164,7 +193,7 @@ package body Flyology.Channels.Bounded is
                Count := Policy.Count_After_Send (Count, Capacity);
                Result := Item_Sent;
                Accepted.all := True;
-               Signal_Scoped;
+               Signal_Scoped (For_Receive => True);
 
             when Policy.Wait_To_Send =>
                Result := Channel_Full;
@@ -183,7 +212,7 @@ package body Flyology.Channels.Bounded is
                Policy.Apply_Dequeue (Head, Count, Capacity, Position);
                Buffer (Position) := Empty_Value;
                Result := Item_Received;
-               Signal_Scoped;
+               Signal_Scoped (For_Receive => False);
 
             when Policy.Wait_To_Receive =>
                Result := Channel_Empty;
@@ -196,7 +225,7 @@ package body Flyology.Channels.Bounded is
       procedure Close is
       begin
          Stopped := True;
-         Signal_Scoped;
+         Signal_Scoped (For_Receive => True, Wake_All => True);
       end Close;
 
       entry Await_Drained when Policy.Is_Drained (Stopped, Count) is
@@ -301,12 +330,15 @@ package body Flyology.Channels.Bounded is
       Operation.Kind := Kind;
       Operation.Value := Value;
       Operation.Next := System.Null_Address;
+      Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
+      Operation.Notified := False;
       Operation.Failure := No_Failure;
 
       Try_Scoped (Operation, Result);
       if Result = Channel_Empty and then Timeout /= 0.0 then
          Flyology.Operations.Drivers.Completion_Source (Operation, Read_Descriptor, Signal_Descriptor);
+         Operation.Signal_Descriptor := Signal_Descriptor;
          --  Subscribe before rechecking. A state transition before Link is
          --  found by the recheck; one after Link signals this operation.
          Subscriptions.Link (Operation'Address);
@@ -393,6 +425,9 @@ package body Flyology.Channels.Bounded is
             raise Program_Error with "channel operation was already started";
 
          when Flyology.Operations.Source_Ready                                                =>
+            --  Clear before rechecking. A concurrent channel transition can
+            --  then signal again if this operation loses the race for data.
+            Subscriptions.Clear_Notification (Item'Address);
             Try_Scoped (Item, Result);
             if Result /= Channel_Empty then
                Subscriptions.Unlink (Item'Address);
@@ -450,7 +485,9 @@ package body Flyology.Channels.Bounded is
       Operation.Item := null;
       Operation.Value := Empty_Value;
       Operation.Next := System.Null_Address;
+      Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
+      Operation.Notified := False;
       Operation.Failure := No_Failure;
    end Reset;
 
