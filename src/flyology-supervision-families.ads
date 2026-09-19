@@ -562,4 +562,7 @@ private
       Dispatch : aliased Change_Signal;
    end record;
 
+   --  Complete pending family notifications after leaving Family_State.
+   procedure Flush_Notifications (Item : in out Family);
+
 end Flyology.Supervision.Families;

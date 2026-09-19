@@ -38,34 +38,238 @@ package body Flyology.Supervision is
       end Next;
    end Incident_Source;
 
-   protected body Change_Signal is
-      procedure Arm (Descriptor : out Interfaces.C.int) is
-      begin
-         Flyology.Wake_Sources.Ensure (Wake);
-         if Pending then
-            Flyology.Wake_Sources.Signal (Wake);
-         end if;
-         Descriptor := Flyology.Wake_Sources.Descriptor (Wake);
-      end Arm;
+   overriding
+   procedure Finalize (Item : in out Change_Wake_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Flyology.Wake_Sources.Signal_Borrowed (Item.Descriptor);
+            Item.Delivered := True;
+         exception
+            when others =>
+               null;
+         end;
+         Item.State.Complete_Signal (Item.Delivered);
+         Item.Armed := False;
+      end if;
+   end Finalize;
 
-      procedure Notify is
+   overriding
+   procedure Finalize (Item : in out Change_Initialization_Claim) is
+   begin
+      if Item.Armed then
+         Item.State.Cancel_Initialization;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Change_Drain_Claim) is
+      Delivered : Boolean := False;
+   begin
+      if Item.Armed then
+         if Item.Has_Signal then
+            begin
+               Flyology.Wake_Sources.Drain (Item.Wake.all);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+         Item.State.Complete_Consume (Item.Armed'Access, Item.Signal_Armed'Access, Item.Signal_FD'Access);
+      end if;
+      if Item.Signal_Armed then
+         begin
+            Flyology.Wake_Sources.Signal_Borrowed (Item.Signal_FD);
+            Delivered := True;
+         exception
+            when others =>
+               null;
+         end;
+         Item.State.Complete_Signal (Delivered);
+         Item.Signal_Armed := False;
+      end if;
+   end Finalize;
+
+   protected body Change_Signal_State is
+      procedure Begin_Arm (Claim : not null access Change_Initialization_Claim; FD : out Interfaces.C.int) is
+      begin
+         FD := Read_FD;
+         if FD < 0 and then not Initializing then
+            Initializing := True;
+            Claim.Armed := True;
+         end if;
+      end Begin_Arm;
+
+      entry Await_Ready when not Initializing is
+      begin
+         null;
+      end Await_Ready;
+
+      procedure Publish_Source (FD, Signal_FD : Interfaces.C.int) is
+      begin
+         if not Initializing or else Read_FD >= 0 or else FD < 0 or else Signal_FD < 0 then
+            raise Program_Error with "invalid supervision wake source publication";
+         end if;
+         Read_FD := FD;
+         Write_FD := Signal_FD;
+         Initializing := False;
+      end Publish_Source;
+
+      procedure Cancel_Initialization is
+      begin
+         Initializing := False;
+      end Cancel_Initialization;
+
+      procedure Record_Change is
       begin
          if not Pending then
-            if Flyology.Wake_Sources.Descriptor (Wake) /= Interfaces.C.int (-1) then
-               Flyology.Wake_Sources.Signal (Wake);
-            end if;
             Pending := True;
+         elsif Draining then
+            --  Preserve a change committed while the owner drains an older
+            --  descriptor byte outside this protected action.
+            Resignal_Required := True;
          end if;
-      end Notify;
+      end Record_Change;
 
-      procedure Consume is
+      procedure Signal_Pending (Claim : not null access Change_Wake_Claim) is
       begin
-         if Pending then
-            Flyology.Wake_Sources.Consume_All (Wake);
-            Pending := False;
+         if Pending
+           and then not Signalled
+           and then not Signalling
+           and then not Draining
+           and then Write_FD >= 0
+         then
+            Signalling := True;
+            Claim.Descriptor := Write_FD;
+            Claim.Armed := True;
          end if;
-      end Consume;
-   end Change_Signal;
+      end Signal_Pending;
+
+      procedure Complete_Signal (Delivered : Boolean) is
+      begin
+         if Signalling then
+            Signalling := False;
+            Signalled := Delivered;
+         end if;
+      end Complete_Signal;
+
+      procedure Begin_Consume (Claim : not null access Change_Drain_Claim; Is_Pending : out Boolean) is
+      begin
+         Is_Pending := Pending;
+         if Pending and then not Signalling and then not Draining then
+            Draining := True;
+            Claim.Has_Signal := Signalled;
+            Claim.Armed := True;
+         end if;
+      end Begin_Consume;
+
+      entry Await_Signal when not Signalling and then not Draining is
+      begin
+         null;
+      end Await_Signal;
+
+      procedure Complete_Consume
+        (Armed        : not null access Boolean;
+         Signal_Armed : not null access Boolean;
+         Signal_FD    : not null access Interfaces.C.int) is
+      begin
+         if Draining and then Armed.all then
+            Signalled := False;
+            Draining := False;
+            if Resignal_Required then
+               Resignal_Required := False;
+               if Write_FD >= 0 then
+                  Signalling := True;
+                  Signal_FD.all := Write_FD;
+                  Signal_Armed.all := True;
+               end if;
+            else
+               Pending := False;
+            end if;
+            Armed.all := False;
+         end if;
+      end Complete_Consume;
+   end Change_Signal_State;
+
+   procedure Arm (Item : in out Change_Signal; Descriptor : out Interfaces.C.int) is
+   begin
+      loop
+         declare
+            Claim : aliased Change_Initialization_Claim;
+         begin
+            Claim.State := Item.State'Unchecked_Access;
+            Item.State.Begin_Arm (Claim'Access, Descriptor);
+            if Descriptor >= 0 then
+               exit;
+            elsif Claim.Armed then
+               Flyology.Wake_Sources.Ensure (Item.Wake);
+               Item.State.Publish_Source
+                 (Flyology.Wake_Sources.Descriptor (Item.Wake),
+                  Flyology.Wake_Sources.Signal_Descriptor (Item.Wake));
+               Claim.Armed := False;
+            else
+               Item.State.Await_Ready;
+            end if;
+         end;
+      end loop;
+      Flush (Item);
+   end Arm;
+
+   procedure Mark_Pending (Item : in out Change_Signal) is
+   begin
+      Item.State.Record_Change;
+   end Mark_Pending;
+
+   procedure Flush (Item : in out Change_Signal) is
+      Claim : aliased Change_Wake_Claim;
+   begin
+      Claim.State := Item.State'Unchecked_Access;
+      Item.State.Signal_Pending (Claim'Access);
+      if Claim.Armed then
+         Flyology.Wake_Sources.Signal_Borrowed (Claim.Descriptor);
+         Claim.Delivered := True;
+         Item.State.Complete_Signal (Claim.Delivered);
+         Claim.Armed := False;
+      end if;
+   end Flush;
+
+   procedure Notify (Item : in out Change_Signal) is
+   begin
+      Mark_Pending (Item);
+      Flush (Item);
+   end Notify;
+
+   procedure Consume (Item : in out Change_Signal) is
+      Is_Pending : Boolean;
+   begin
+      loop
+         declare
+            Claim : aliased Change_Drain_Claim;
+         begin
+            Claim.State := Item.State'Unchecked_Access;
+            Claim.Wake := Item.Wake'Unchecked_Access;
+            Item.State.Begin_Consume (Claim'Access, Is_Pending);
+            if not Is_Pending then
+               return;
+            end if;
+            if Claim.Armed then
+               if Claim.Has_Signal then
+                  Flyology.Wake_Sources.Drain (Item.Wake);
+               end if;
+               Item.State.Complete_Consume
+                 (Claim.Armed'Access, Claim.Signal_Armed'Access, Claim.Signal_FD'Access);
+               if Claim.Signal_Armed then
+                  Flyology.Wake_Sources.Signal_Borrowed (Claim.Signal_FD);
+                  Item.State.Complete_Signal (Delivered => True);
+                  Claim.Signal_Armed := False;
+               end if;
+               return;
+            end if;
+         end;
+         Item.State.Await_Signal;
+      end loop;
+   end Consume;
 
    protected body Generation_Control_State is
       procedure Open (Value : Child_Handle; Incident : Incident_Context) is

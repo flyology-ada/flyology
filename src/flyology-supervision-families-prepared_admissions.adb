@@ -5,6 +5,18 @@ with Interfaces.C;
 package body Flyology.Supervision.Families.Prepared_Admissions is
    use type Flyology.Operations.Driver_Event;
 
+   type Notification_Guard (Owner : not null access Family) is new Ada.Finalization.Limited_Controlled
+   with null record;
+
+   overriding
+   procedure Finalize (Item : in out Notification_Guard) is
+   begin
+      Flush_Notifications (Item.Owner.all);
+   exception
+      when others =>
+         null;
+   end Finalize;
+
    type Immediate_Claim_Guard (Owner : not null access Family) is new Ada.Finalization.Limited_Controlled
    with record
       Ticket : Monitor_Index := Monitor_Index'First;
@@ -65,7 +77,9 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    procedure Prepare_Start
      (Item : not null access Family; Input : Request; Claim : in out Start_Claim; Result : out Prepare_Result)
    is
-      Status : Prepared_Reserve_Status;
+      Notifications : Notification_Guard (Item);
+      pragma Unreferenced (Notifications);
+      Status        : Prepared_Reserve_Status;
    begin
       if Claim.Owner /= Item then
          raise Program_Error with "prepared claim belongs to another family";
@@ -225,7 +239,10 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    procedure Release_To_Run
      (Admission : in out Started_Admission;
       Result    : not null access Release_Result;
-      Completed : not null access Boolean) is
+      Completed : not null access Boolean)
+   is
+      Notifications : Notification_Guard (Admission.Owner);
+      pragma Unreferenced (Notifications);
    begin
       Completed.all := False;
       if not Admission.State.Active then
@@ -237,6 +254,7 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          Admission.State.Released'Access,
          Result.Succeeded'Access,
          Completed);
+      Flush_Notifications (Admission.Owner.all);
       if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Admission.State.Released then
          Flyology.Task_Lifecycle_Test_Hooks.Barrier
            (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Admission_Released);
@@ -244,16 +262,21 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
    end Release_To_Run;
 
    procedure Rollback (Claim : in out Start_Claim) is
+      Notifications : Notification_Guard (Claim.Owner);
+      pragma Unreferenced (Notifications);
    begin
       if Claim.State.Active then
          Claim.Owner.State.Rollback_Prepared
            (Claim.State.Slot, Claim.State.Handle, Claim.State.Active'Access);
+         Flush_Notifications (Claim.Owner.all);
       end if;
    end Rollback;
 
    procedure Cancel_And_Join (Admission : in out Started_Admission) is
-      Completed : Boolean;
-      Signals   : aliased Monitor_Signal_Guard (Admission.Owner);
+      Notifications : Notification_Guard (Admission.Owner);
+      pragma Unreferenced (Notifications);
+      Completed     : Boolean;
+      Signals       : aliased Monitor_Signal_Guard (Admission.Owner);
    begin
       if not Admission.State.Active then
          return;
@@ -265,17 +288,22 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
          Admission.State.Released'Access,
          Signals'Access,
          Completed);
+      Flush_Notifications (Admission.Owner.all);
       Flush_Monitor_Signals (Signals);
       if not Completed then
          Admission.Owner.State.Await_Admission_Cancel (Admission.State.Slot)
            (Admission.State.Handle, Admission.State.Active'Access, Admission.State.Released'Access);
+         Flush_Notifications (Admission.Owner.all);
       end if;
    end Cancel_And_Join;
 
    procedure Request_Cancellation
      (Admission  : Started_Admission;
       Generation : Flyology.Supervision.Generation;
-      Applied    : not null access Boolean) is
+      Applied    : not null access Boolean)
+   is
+      Notifications : Notification_Guard (Admission.Owner);
+      pragma Unreferenced (Notifications);
    begin
       Applied.all := False;
       if not Admission.State.Active or else not Admission.State.Released then
@@ -286,6 +314,7 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
           Id         => Admission.State.Handle.Id,
           Generation => Generation),
          Applied);
+      Flush_Notifications (Admission.Owner.all);
       if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Applied.all then
          Flyology.Task_Lifecycle_Test_Hooks.Barrier
            (Flyology.Task_Lifecycle_Test_Hooks.Prepared_Admission_Cancellation_Requested);
@@ -294,9 +323,12 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
 
    overriding
    procedure Finalize (Item : in out Claim_Owner) is
+      Notifications : Notification_Guard (Item.Owner);
+      pragma Unreferenced (Notifications);
    begin
       if Item.Active then
          Item.Owner.State.Rollback_Prepared (Item.Slot, Item.Handle, Item.Active'Access);
+         Flush_Notifications (Item.Owner.all);
       end if;
    exception
       when others =>
@@ -305,16 +337,20 @@ package body Flyology.Supervision.Families.Prepared_Admissions is
 
    overriding
    procedure Finalize (Item : in out Admission_Owner) is
-      Completed : Boolean;
-      Signals   : aliased Monitor_Signal_Guard (Item.Owner);
+      Notifications : Notification_Guard (Item.Owner);
+      pragma Unreferenced (Notifications);
+      Completed     : Boolean;
+      Signals       : aliased Monitor_Signal_Guard (Item.Owner);
    begin
       if Item.Active then
          Item.Owner.State.Begin_Admission_Cancel
            (Item.Slot, Item.Handle, Item.Active'Access, Item.Released'Access, Signals'Access, Completed);
+         Flush_Notifications (Item.Owner.all);
          Flush_Monitor_Signals (Signals);
          if not Completed then
             Item.Owner.State.Await_Admission_Cancel (Item.Slot)
               (Item.Handle, Item.Active'Access, Item.Released'Access);
+            Flush_Notifications (Item.Owner.all);
          end if;
       end if;
    exception

@@ -495,7 +495,9 @@ procedure Connection_Operations_Smoke is
       begin
          Sockets.Create_Socket_Pair (Socket, Peer);
          Connections.Take (Manager, Socket, Item);
-         Connection_Drivers.Signal (Channel.Wakeup);
+         for Notification in 1 .. 3 loop
+            Connection_Drivers.Signal (Channel.Wakeup);
+         end loop;
          declare
             Set : aliased Flyology.Operations.Completion_Set (1);
             Get : Synthetic_Receive_Operation (Set'Access, Channel'Access);

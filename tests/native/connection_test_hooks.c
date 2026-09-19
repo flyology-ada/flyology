@@ -3,13 +3,14 @@
 
 enum {
    raw_accept_returned = 13,
-   barrier_count = 24
+   barrier_count = 25
 };
 
 static _Atomic int armed[barrier_count];
 static _Atomic int reached[barrier_count];
 static _Atomic int released[barrier_count];
 static _Atomic int fail_next_capacity_release_wake;
+static _Atomic int fail_next_controller_wake;
 static _Atomic int receive_cap;
 static _Atomic unsigned receive_calls;
 static pthread_mutex_t raw_accept_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -24,6 +25,7 @@ void flyology_test_connection_barrier_reset(void)
 {
    atomic_store_explicit(
      &fail_next_capacity_release_wake, 0, memory_order_seq_cst);
+   atomic_store_explicit(&fail_next_controller_wake, 0, memory_order_seq_cst);
    for (int point = 0; point < barrier_count; ++point) {
       atomic_store_explicit(&armed[point], 0, memory_order_seq_cst);
       atomic_store_explicit(&reached[point], 0, memory_order_seq_cst);
@@ -130,4 +132,14 @@ int flyology_test_connection_fail_next_capacity_release_wake(void)
 {
    return atomic_exchange_explicit(
      &fail_next_capacity_release_wake, 0, memory_order_seq_cst);
+}
+
+void flyology_test_connection_arm_controller_wake_failure(void)
+{
+   atomic_store_explicit(&fail_next_controller_wake, 1, memory_order_seq_cst);
+}
+
+int flyology_test_connection_fail_next_controller_wake(void)
+{
+   return atomic_exchange_explicit(&fail_next_controller_wake, 0, memory_order_seq_cst);
 }

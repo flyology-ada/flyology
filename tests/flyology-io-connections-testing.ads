@@ -24,7 +24,8 @@ package Flyology.IO.Connections.Testing is
       Managed_Connect_Child_Detached,
       Raw_Scoped_Connect_Armed,
       Deferred_Close_Published,
-      Cleanup_Dispatch_Entered);
+      Cleanup_Dispatch_Entered,
+      Wake_Preparation_Claimed);
 
    --  Return the number of operations queued for Item's exclusive lease.
    --  This child is a smoke-test source and is not part of libFlyology.
@@ -47,6 +48,10 @@ package Flyology.IO.Connections.Testing is
    --  Fail the first attempt to drain a capacity wake after permit transfer.
    --  The gate must preserve the accepted permit and retry on finalization.
    procedure Fail_Next_Drain_Wake;
+
+   --  Fail the first connection-controller wake write after its protected
+   --  state transition. The caller's cleanup guard must retry outside it.
+   procedure Fail_Next_Controller_Wake;
 
    --  Restrict each connection receive to at most Maximum bytes and reset the
    --  observed receive-call count. Zero removes the test-only restriction.

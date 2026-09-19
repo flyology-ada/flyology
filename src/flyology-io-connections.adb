@@ -60,6 +60,7 @@ package body Flyology.IO.Connections is
       Provider_Error : Boolean := False;
       Failed         : Boolean := False;
       Failure        : Ada.Exceptions.Exception_Occurrence;
+      Wake           : aliased Wake_Claim;
    end record;
 
    type Close_Guard
@@ -81,6 +82,7 @@ package body Flyology.IO.Connections is
       Generation : Descriptor_Generation := 0;
       Ready      : Boolean := False;
       Outcome    : Close_Outcome;
+      Wake       : aliased Wake_Claim;
    end record;
 
    overriding
@@ -105,12 +107,89 @@ package body Flyology.IO.Connections is
       Guard.Armed := False;
    end Disarm;
 
+   procedure Flush (Item : in out Wake_Claim) is
+   begin
+      if Item.Armed then
+         if Test_Hooks.Enabled and then Test_Hooks.Fail_Next_Controller_Wake then
+            raise Program_Error with "injected connection-controller wake failure";
+         end if;
+         Wake_Sources.Signal_Borrowed (Item.Descriptor);
+         Item.Delivered := True;
+         Item.State.Complete_Signal (Item.Armed'Access);
+      end if;
+   end Flush;
+
+   overriding
+   procedure Finalize (Item : in out Wake_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Flush (Item);
+         exception
+            when others =>
+               --  Keep close teardown able to finish if the descriptor itself
+               --  has failed. The protected cut has already committed.
+               Item.State.Complete_Signal (Item.Armed'Access);
+         end;
+         if not Item.Delivered and then Item.Lease_Owner /= null then
+            begin
+               Request_Deferred_Close (Item.Lease_Owner);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Adoption_Claim) is
+   begin
+      if Item.Armed then
+         Wake_Sources.Release (Item.Lease.all);
+         Wake_Sources.Release (Item.Close.all);
+         Item.State.Cancel_Adoption;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Lease_Drain_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Wake_Sources.Drain (Item.Wake.all);
+         exception
+            when others =>
+               null;
+         end;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
    protected body Descriptor_Controller is
+      procedure Begin_Adoption (Claim : not null access Adoption_Claim) is
+      begin
+         if Preparing or else Current_FD >= 0 or else Active or else Closing then
+            raise Program_Error with "descriptor controller already owns a resource";
+         end if;
+         Preparing := True;
+         Claim.Lease := Lease_Wake'Unchecked_Access;
+         Claim.Close := Close_Wake'Unchecked_Access;
+         Claim.Armed := True;
+      end Begin_Adoption;
+
+      procedure Cancel_Adoption is
+      begin
+         Preparing := False;
+      end Cancel_Adoption;
+
       procedure Adopt
         (FD            : Descriptor;
          Socket        : in out Sockets.Socket_Type;
          Owner         : Server_Access;
-         Cleanup_Armed : not null access Boolean) is
+         Cleanup_Armed : not null access Boolean;
+         Prepared      : not null access Boolean) is
       begin
          if FD < 0
            or else not Sockets.Is_Open (Socket)
@@ -119,12 +198,14 @@ package body Flyology.IO.Connections is
            or else Current_FD >= 0
            or else Active
            or else Closing
+           or else not Preparing
+           or else not Prepared.all
+           or else Wake_Sources.Descriptor (Lease_Wake) < 0
+           or else Wake_Sources.Descriptor (Close_Wake) < 0
            or else not Cleanup_Armed.all
          then
             raise Program_Error with "descriptor controller already owns a resource";
          end if;
-         Wake_Sources.Ensure (Lease_Wake);
-         Wake_Sources.Ensure (Close_Wake);
          Sockets.Move (Socket, Current_Socket);
          Current_Owner := Owner;
          Current_FD := FD;
@@ -134,6 +215,8 @@ package body Flyology.IO.Connections is
          --  leave the protected action until the cleanup obligation reflects
          --  that transfer.
          Cleanup_Armed.all := False;
+         Prepared.all := False;
+         Preparing := False;
       end Adopt;
 
       procedure Start_Operation
@@ -174,10 +257,16 @@ package body Flyology.IO.Connections is
          Close_Source        : out Descriptor;
          Socket              : in out Sockets.Socket_Type;
          Owner               : out Server_Access;
-         Transport           : out Transport_Kind) is
+         Transport           : out Transport_Kind;
+         Drain               : not null access Lease_Drain_Claim) is
       begin
          if State.all /= Registered then
             raise Program_Error with "connection operation is not registered";
+         end if;
+         if Lease_Signalled and then Pending_Signals > 0 and then not Closing then
+            Result := Lease_Busy;
+            Transport := No_Transport;
+            return;
          end if;
          case Policy.Classify_Acquire
                 (Generation_Matches => Expected_Generation = Current_Generation,
@@ -204,7 +293,8 @@ package body Flyology.IO.Connections is
                null;
          end case;
          if Lease_Signalled then
-            Wake_Sources.Consume (Lease_Wake);
+            Drain.Wake := Lease_Wake'Unchecked_Access;
+            Drain.Armed := True;
             Lease_Signalled := False;
          end if;
          Active := True;
@@ -220,7 +310,9 @@ package body Flyology.IO.Connections is
       end Try_Acquire;
 
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation; State : not null access Operation_State) is
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim) is
       begin
          pragma Unreferenced (Generation);
          if State.all /= Registered or else Started_Operations = 0 then
@@ -231,8 +323,10 @@ package body Flyology.IO.Connections is
          --  protected action and before the fallible wake notification.
          State.all := Unregistered;
          if Policy.Should_Wake_Next (Active, Closing, Started_Operations, Lease_Signalled) then
-            Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
+            Pending_Signals := Pending_Signals + 1;
+            Wake.Descriptor := Wake_Sources.Signal_Descriptor (Lease_Wake);
+            Wake.Armed := True;
          end if;
       end Abandon_Operation;
 
@@ -276,7 +370,8 @@ package body Flyology.IO.Connections is
       procedure Release
         (Generation : Descriptor_Generation;
          Socket     : in out Sockets.Socket_Type;
-         State      : not null access Operation_State) is
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim) is
       begin
          if State.all /= Acquired
            or else not Active
@@ -295,41 +390,74 @@ package body Flyology.IO.Connections is
          --  fail. Validation failures leave it owning so finalization retries.
          State.all := Unregistered;
          if Policy.Should_Wake_Next (Active, Closing, Started_Operations, Lease_Signalled) then
-            Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
+            Pending_Signals := Pending_Signals + 1;
+            Wake.Descriptor := Wake_Sources.Signal_Descriptor (Lease_Wake);
+            Wake.Armed := True;
          end if;
       end Release;
 
       procedure Begin_Close
-        (FD : out Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean) is
+        (FD         : out Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean;
+         Wake       : not null access Wake_Claim) is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
          Leader := Policy.Close_Leader (Current_FD >= 0, Closing);
          if Leader then
             if Policy.Close_Wake_Required (Leader, Started_Operations) then
-               Wake_Sources.Signal (Close_Wake);
+               Pending_Signals := Pending_Signals + 1;
+               Wake.Descriptor := Wake_Sources.Signal_Descriptor (Close_Wake);
+               Wake.Armed := True;
             end if;
-            --  Publish the close only after the wake is known to be usable.
-            --  A failed signal leaves no leadership behind, so a later Close
-            --  can retry instead of waiting for a completion that the failed
-            --  attempt can no longer perform.
             Closing := True;
             Deferred_Closing := False;
          end if;
       end Begin_Close;
 
-      procedure Begin_Deferred_Close is
+      procedure Begin_Deferred_Close (Wake : not null access Wake_Claim) is
          Leader : constant Boolean := Policy.Close_Leader (Current_FD >= 0, Closing);
       begin
          if Leader then
             if Policy.Close_Wake_Required (Leader, Started_Operations) then
-               Wake_Sources.Signal (Close_Wake);
+               Pending_Signals := Pending_Signals + 1;
+               Wake.Descriptor := Wake_Sources.Signal_Descriptor (Close_Wake);
+               Wake.Armed := True;
             end if;
             Closing := True;
             Deferred_Closing := True;
          end if;
       end Begin_Deferred_Close;
+
+      procedure Complete_Signal (Armed : not null access Boolean) is
+      begin
+         if Armed.all then
+            if Pending_Signals = 0 then
+               raise Program_Error with "missing connection wake claim";
+            end if;
+            Pending_Signals := Pending_Signals - 1;
+            Armed.all := False;
+         end if;
+      end Complete_Signal;
+
+      procedure Cancel_Close is
+      begin
+         if Closing then
+            Closing := False;
+            Deferred_Closing := False;
+         end if;
+      end Cancel_Close;
+
+      procedure Close_Wakes (Lease : out Wake_Source_Access; Close : out Wake_Source_Access) is
+      begin
+         if not Closing or else Active or else Started_Operations /= 0 or else Pending_Signals /= 0 then
+            raise Program_Error with "connection wake sources still borrowed";
+         end if;
+         Lease := Lease_Wake'Unchecked_Access;
+         Close := Close_Wake'Unchecked_Access;
+      end Close_Wakes;
 
       procedure Try_Drain_Deferred_Close
         (Socket     : in out Sockets.Socket_Type;
@@ -342,6 +470,7 @@ package body Flyology.IO.Connections is
            and then Closing
            and then not Active
            and then Started_Operations = 0
+           and then Pending_Signals = 0
            and then Current_FD >= 0
            and then Sockets.Is_Open (Current_Socket)
            and then Current_Owner /= null;
@@ -357,7 +486,7 @@ package body Flyology.IO.Connections is
       end Try_Drain_Deferred_Close;
 
       entry Await_Drained (Socket : in out Sockets.Socket_Type; Owner : out Server_Access)
-        when not Active and then Started_Operations = 0
+        when not Active and then Started_Operations = 0 and then Pending_Signals = 0
       is
       begin
          if not Closing
@@ -379,6 +508,9 @@ package body Flyology.IO.Connections is
 
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
+         if Pending_Signals /= 0 then
+            raise Program_Error with "connection wake signal still pending";
+         end if;
          if not Policy.Finish_Close_Allowed
                   (Closing,
                    Active,
@@ -390,8 +522,6 @@ package body Flyology.IO.Connections is
          end if;
          Current_FD := Invalid_Descriptor;
          Current_Transport := No_Transport;
-         Wake_Sources.Release (Lease_Wake);
-         Wake_Sources.Release (Close_Wake);
          Lease_Signalled := False;
          Closing := False;
          Deferred_Closing := False;
@@ -411,21 +541,73 @@ package body Flyology.IO.Connections is
 
    end Descriptor_Controller;
 
-   procedure Release_Operation (Guard : in out Operation_Guard) is
+   procedure Adopt_Connection
+     (Item          : in out Connection'Class;
+      FD            : Descriptor;
+      Socket        : in out Sockets.Socket_Type;
+      Owner         : Server_Access;
+      Cleanup_Armed : not null access Boolean)
+   is
+      Claim : aliased Adoption_Claim;
    begin
+      Claim.State := Item.Controller'Unchecked_Access;
+      Item.Controller.Begin_Adoption (Claim'Access);
+      if Test_Hooks.Enabled then
+         Test_Hooks.Barrier (24);
+      end if;
+      Wake_Sources.Ensure (Claim.Lease.all);
+      Wake_Sources.Ensure (Claim.Close.all);
+      Item.Controller.Adopt (FD, Socket, Owner, Cleanup_Armed, Claim.Armed'Access);
+   end Adopt_Connection;
+
+   procedure Try_Acquire_Lease
+     (Item                : in out Connection'Class;
+      Expected_Generation : Descriptor_Generation;
+      State               : not null access Operation_State;
+      Result              : out Lease_Result;
+      FD                  : out Descriptor;
+      Close_Source        : out Descriptor;
+      Socket              : in out Sockets.Socket_Type;
+      Owner               : out Server_Access;
+      Transport           : out Transport_Kind)
+   is
+      Drain : aliased Lease_Drain_Claim;
+   begin
+      Item.Controller.Try_Acquire
+        (Expected_Generation, State, Result, FD, Close_Source, Socket, Owner, Transport, Drain'Access);
+      if Drain.Armed then
+         Wake_Sources.Drain (Drain.Wake.all);
+         Drain.Armed := False;
+      end if;
+   end Try_Acquire_Lease;
+
+   procedure Release_Operation (Guard : in out Operation_Guard) is
+      Wake : aliased Wake_Claim;
+   begin
+      Wake.State := Guard.Item.Controller'Unchecked_Access;
+      Wake.Lease_Owner := Guard.Item.all'Unchecked_Access;
       case Guard.State is
          when Unregistered =>
             null;
 
          when Registered   =>
-            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access);
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access, Wake'Access);
 
          when Acquired     =>
-            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
+            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access, Wake'Access);
       end case;
+      Flush (Wake);
       if Guard.State = Unregistered then
          Try_Finish_Deferred_Close (Guard.Item, Begin_Close => False);
       end if;
+   exception
+      when others =>
+         Finalize (Wake);
+         if Guard.State = Unregistered then
+            Try_Finish_Deferred_Close
+              (Guard.Item, Begin_Close => Wake.Descriptor >= 0 and then not Wake.Delivered);
+         end if;
+         raise;
    end Release_Operation;
 
    overriding
@@ -436,27 +618,35 @@ package body Flyology.IO.Connections is
 
    procedure Release_Operation (Guard : in out Scoped_Operation_Guard) is
       Target : constant Connection_Access := Guard.Item;
+      Wake   : aliased Wake_Claim;
    begin
+      if Target /= null then
+         Wake.State := Target.Controller'Unchecked_Access;
+         Wake.Lease_Owner := Target;
+      end if;
       case Guard.State is
          when Unregistered =>
             null;
 
          when Registered   =>
-            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access);
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access, Wake'Access);
 
          when Acquired     =>
-            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access);
+            Guard.Item.Controller.Release (Guard.Generation, Guard.Socket, Guard.State'Access, Wake'Access);
       end case;
+      Flush (Wake);
       if Guard.State = Unregistered and then Target /= null then
          Try_Finish_Deferred_Close (Target, Begin_Close => False);
          Guard.Item := null;
       end if;
    exception
       when others =>
+         Finalize (Wake);
          --  Drop the retained Item only when the controller has atomically
          --  discharged the guard. Otherwise finalization must retry.
          if Guard.State = Unregistered and then Target /= null then
-            Try_Finish_Deferred_Close (Target, Begin_Close => False);
+            Try_Finish_Deferred_Close
+              (Target, Begin_Close => Wake.Descriptor >= 0 and then not Wake.Delivered);
             Guard.Item := null;
          end if;
          raise;
@@ -532,7 +722,9 @@ package body Flyology.IO.Connections is
    overriding
    procedure Initialize (Guard : in out Close_Guard) is
    begin
-      Guard.Item.Controller.Begin_Close (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader);
+      Guard.Outcome.Wake.State := Guard.Item.Controller'Unchecked_Access;
+      Guard.Item.Controller.Begin_Close
+        (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader, Guard.Outcome.Wake'Access);
    end Initialize;
 
    procedure Finish_Close_Resources
@@ -542,6 +734,8 @@ package body Flyology.IO.Connections is
       Owner      : Server_Access;
       Outcome    : in out Close_Outcome)
    is
+      Lease_Wake : Wake_Source_Access;
+      Close_Wake : Wake_Source_Access;
       procedure Record_Failure (Occurrence : Ada.Exceptions.Exception_Occurrence) is
       begin
          if not Outcome.Failed then
@@ -571,6 +765,9 @@ package body Flyology.IO.Connections is
          end;
       end if;
       begin
+         Item.Controller.Close_Wakes (Lease_Wake, Close_Wake);
+         Wake_Sources.Release (Lease_Wake.all);
+         Wake_Sources.Release (Close_Wake.all);
          Item.Controller.Finish_Close (Generation);
       exception
          when Occurrence : others =>
@@ -595,6 +792,19 @@ package body Flyology.IO.Connections is
          return;
       end if;
 
+      begin
+         Flush (Guard.Outcome.Wake);
+      exception
+         when Occurrence : others =>
+            Ada.Exceptions.Save_Occurrence (Guard.Outcome.Failure, Occurrence);
+            Finalize (Guard.Outcome.Wake);
+      end;
+      if Guard.Outcome.Wake.Descriptor >= 0 and then not Guard.Outcome.Wake.Delivered then
+         Guard.Item.Controller.Cancel_Close;
+         Guard.Outcome.Failed := True;
+         return;
+      end if;
+
       --  The exact generation remains allocated until its sole operation has
       --  observed Close_Wake and acknowledged release. Only then may the OS
       --  recycle the integer descriptor.
@@ -606,7 +816,8 @@ package body Flyology.IO.Connections is
    procedure Initialize (Guard : in out Deferred_Close_Guard) is
    begin
       if Guard.Begin_Close then
-         Guard.Item.Controller.Begin_Deferred_Close;
+         Guard.Wake.State := Guard.Item.Controller'Unchecked_Access;
+         Guard.Item.Controller.Begin_Deferred_Close (Guard.Wake'Access);
          if Test_Hooks.Enabled then
             --  Paired with Deferred_Close_Published in the test interface.
             Test_Hooks.Barrier (22);
@@ -619,6 +830,20 @@ package body Flyology.IO.Connections is
    overriding
    procedure Finalize (Guard : in out Deferred_Close_Guard) is
    begin
+      begin
+         Flush (Guard.Wake);
+      exception
+         when others =>
+            Finalize (Guard.Wake);
+      end;
+      if Guard.Wake.Descriptor >= 0 and then not Guard.Wake.Delivered then
+         Guard.Item.Controller.Cancel_Close;
+         return;
+      end if;
+      if not Guard.Ready then
+         Guard.Item.Controller.Try_Drain_Deferred_Close
+           (Guard.Socket, Guard.Owner, Guard.Generation, Guard.Ready);
+      end if;
       if Guard.Ready then
          Finish_Close_Resources (Guard.Item.all, Guard.Generation, Guard.Socket, Guard.Owner, Guard.Outcome);
       end if;
@@ -717,8 +942,16 @@ package body Flyology.IO.Connections is
       loop
          Interrupts (1) := Initial_Close_Source;
          Interrupt_Sources (Initial_Owner, Token, Interrupts (2 .. 3), Interrupt_Count);
-         Item.Controller.Try_Acquire
-           (Guard.Generation, Guard.State'Access, Result, FD, Close_Source, Guard.Socket, Owner, Transport);
+         Try_Acquire_Lease
+           (Item.all,
+            Guard.Generation,
+            Guard.State'Access,
+            Result,
+            FD,
+            Close_Source,
+            Guard.Socket,
+            Owner,
+            Transport);
          case Result is
             when Lease_Acquired  =>
                if Test_Hooks.Enabled then
@@ -904,8 +1137,8 @@ package body Flyology.IO.Connections is
       end if;
 
       Reserve (Manager, Guard);
-      Item.Controller.Adopt
-        (Flyology.IO.Sockets.Native_Descriptor (Socket), Socket, Guard.Owner, Guard.Armed'Access);
+      Adopt_Connection
+        (Item, Flyology.IO.Sockets.Native_Descriptor (Socket), Socket, Guard.Owner, Guard.Armed'Access);
       if Test_Hooks.Enabled then
          Test_Hooks.Barrier (12);
       end if;
@@ -944,8 +1177,8 @@ package body Flyology.IO.Connections is
       if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
-      Item.Controller.Adopt
-        (Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
+      Adopt_Connection
+        (Item, Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
    end Connect;
 
    procedure Complete_Managed_Connect
@@ -1282,8 +1515,9 @@ package body Flyology.IO.Connections is
          if Is_Open (Item) then
             raise Program_Error with "connection target is open";
          end if;
-         Item.Controller.Adopt
-           (Sockets.Native_Descriptor (Operation.State.Resources.Socket),
+         Adopt_Connection
+           (Item,
+            Sockets.Native_Descriptor (Operation.State.Resources.Socket),
             Operation.State.Resources.Socket,
             Operation.State.Resources.Manager,
             Operation.State.Resources.Armed'Access);
@@ -1483,8 +1717,12 @@ package body Flyology.IO.Connections is
       if Manager.Shutdown_Requested or else (Token /= null and then Token.Requested) then
          raise Operation_Cancelled;
       end if;
-      Item.Controller.Adopt
-        (Flyology.IO.Sockets.Native_Descriptor (Guard.Socket), Guard.Socket, Guard.Owner, Guard.Armed'Access);
+      Adopt_Connection
+        (Item,
+         Flyology.IO.Sockets.Native_Descriptor (Guard.Socket),
+         Guard.Socket,
+         Guard.Owner,
+         Guard.Armed'Access);
       if Test_Hooks.Enabled then
          Test_Hooks.Barrier (11);
       end if;
@@ -1518,6 +1756,9 @@ package body Flyology.IO.Connections is
 
          when Policy.Await_Leader          =>
             Item.Controller.Await_Closed;
+            if Is_Open (Item) then
+               Close (Item);
+            end if;
 
          when Policy.Raise_Cleanup_Failure =>
             Ada.Exceptions.Reraise_Occurrence (Outcome.Failure);
@@ -1771,8 +2012,9 @@ package body Flyology.IO.Connections is
       begin
          Interrupt_Sources (Item.Owner, Item.Token, Interrupts, Count);
       end;
-      Item.Item.Controller.Try_Acquire
-        (Item.Guard.Generation,
+      Try_Acquire_Lease
+        (Item.Item.all,
+         Item.Guard.Generation,
          Item.Guard.State'Access,
          Result,
          Item.FD,
@@ -2197,8 +2439,7 @@ package body Flyology.IO.Connections is
          end if;
          if Test_Hooks.Enabled then
             declare
-               Limit : constant Interfaces.C.int :=
-                 Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
+               Limit : constant Interfaces.C.int := Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
             begin
                TLS_Driver.Receive
                  (Item.TLS_Session.all,
@@ -2221,8 +2462,7 @@ package body Flyology.IO.Connections is
       begin
          if Test_Hooks.Enabled then
             declare
-               Limit : constant Interfaces.C.int :=
-                 Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
+               Limit : constant Interfaces.C.int := Test_Hooks.Receive_Limit (Interfaces.C.int (Data'Length));
             begin
                Flyology.IO.Sockets.Receive
                  (Guard.Socket,

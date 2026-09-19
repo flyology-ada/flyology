@@ -58,6 +58,7 @@ package body Flyology.IO.TLS is
       Provider_Error   : Boolean := False;
       Socket_Error     : Boolean := False;
       Controller_Error : Boolean := False;
+      Wake             : aliased Wake_Claim;
    end record;
 
    type Close_Guard
@@ -70,16 +71,95 @@ package body Flyology.IO.TLS is
    overriding
    procedure Finalize (Guard : in out Close_Guard);
 
+   procedure Flush (Item : in out Wake_Claim) is
+   begin
+      if Item.Armed then
+         Wake_Sources.Signal_Borrowed (Item.Descriptor);
+         Item.Delivered := True;
+         Item.State.Complete_Signal (Item.Armed'Access);
+      end if;
+   end Flush;
+
+   overriding
+   procedure Finalize (Item : in out Wake_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Flush (Item);
+         exception
+            when others =>
+               Item.State.Complete_Signal (Item.Armed'Access);
+         end;
+         if not Item.Delivered and then Item.Lease_Owner /= null then
+            begin
+               Close (Connection (Item.Lease_Owner.all));
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Adoption_Claim) is
+   begin
+      if Item.Armed then
+         Wake_Sources.Release (Item.Lease.all);
+         Wake_Sources.Release (Item.Close.all);
+         Item.State.Cancel_Adoption;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Lease_Drain_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Wake_Sources.Drain (Item.Wake.all);
+         exception
+            when others =>
+               null;
+         end;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
    protected body Descriptor_Controller is
-      procedure Adopt (FD : Descriptor) is
+      procedure Begin_Adoption (Claim : not null access Adoption_Claim) is
       begin
-         if FD < 0 or else Current_FD >= 0 or else Active or else Close_In_Progress then
+         if Preparing or else Current_FD >= 0 or else Active or else Close_In_Progress then
             raise Program_Error with "TLS descriptor controller already owns a resource";
          end if;
-         Wake_Sources.Ensure (Close_Wake);
-         Wake_Sources.Ensure (Lease_Wake);
+         Preparing := True;
+         Claim.Lease := Lease_Wake'Unchecked_Access;
+         Claim.Close := Close_Wake'Unchecked_Access;
+         Claim.Armed := True;
+      end Begin_Adoption;
+
+      procedure Cancel_Adoption is
+      begin
+         Preparing := False;
+      end Cancel_Adoption;
+
+      procedure Adopt (FD : Descriptor; Prepared : not null access Boolean) is
+      begin
+         if FD < 0
+           or else Current_FD >= 0
+           or else Active
+           or else Close_In_Progress
+           or else not Preparing
+           or else not Prepared.all
+           or else Wake_Sources.Descriptor (Close_Wake) < 0
+           or else Wake_Sources.Descriptor (Lease_Wake) < 0
+         then
+            raise Program_Error with "TLS descriptor controller already owns a resource";
+         end if;
          Current_FD := FD;
          Current_Generation := Current_Generation + 1;
+         Prepared.all := False;
+         Preparing := False;
       end Adopt;
 
       procedure Start_Operation
@@ -109,10 +189,15 @@ package body Flyology.IO.TLS is
          State               : not null access Operation_State;
          Result              : out Lease_Result;
          FD                  : in out Descriptor;
-         Close_Source        : in out Descriptor) is
+         Close_Source        : in out Descriptor;
+         Drain               : not null access Lease_Drain_Claim) is
       begin
          if State.all /= Registered then
             raise Program_Error with "TLS operation is not registered";
+         end if;
+         if Lease_Signalled and then Pending_Signals > 0 and then not Close_In_Progress then
+            Result := Lease_Busy;
+            return;
          end if;
          case Lease_Policy.Classify_Acquire
                 (Generation_Matches => Expected_Generation = Current_Generation,
@@ -137,7 +222,8 @@ package body Flyology.IO.TLS is
                null;
          end case;
          if Lease_Signalled then
-            Wake_Sources.Consume (Lease_Wake);
+            Drain.Wake := Lease_Wake'Unchecked_Access;
+            Drain.Armed := True;
             Lease_Signalled := False;
          end if;
          Active := True;
@@ -148,7 +234,9 @@ package body Flyology.IO.TLS is
       end Try_Acquire;
 
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation; State : not null access Operation_State)
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim)
       is
          pragma Unreferenced (Generation);
       begin
@@ -159,8 +247,10 @@ package body Flyology.IO.TLS is
          State.all := Unregistered;
          if Lease_Policy.Should_Wake_Next (Active, Close_In_Progress, Started_Operations, Lease_Signalled)
          then
-            Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
+            Pending_Signals := Pending_Signals + 1;
+            Wake.Descriptor := Wake_Sources.Signal_Descriptor (Lease_Wake);
+            Wake.Armed := True;
          end if;
       end Abandon_Operation;
 
@@ -173,7 +263,10 @@ package body Flyology.IO.TLS is
          end if;
       end Check_Operation;
 
-      procedure Release (Generation : Descriptor_Generation; State : not null access Operation_State) is
+      procedure Release
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim) is
       begin
          if State.all /= Acquired
            or else not Active
@@ -187,29 +280,61 @@ package body Flyology.IO.TLS is
          State.all := Unregistered;
          if Lease_Policy.Should_Wake_Next (Active, Close_In_Progress, Started_Operations, Lease_Signalled)
          then
-            Wake_Sources.Signal (Lease_Wake);
             Lease_Signalled := True;
+            Pending_Signals := Pending_Signals + 1;
+            Wake.Descriptor := Wake_Sources.Signal_Descriptor (Lease_Wake);
+            Wake.Armed := True;
          end if;
       end Release;
 
       procedure Begin_Close
-        (FD : out Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean) is
+        (FD         : out Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean;
+         Wake       : not null access Wake_Claim) is
       begin
          FD := Current_FD;
          Generation := Current_Generation;
          Leader := Policy.Close_Leader (Current_FD >= 0, Close_In_Progress);
          if Leader then
             if Started_Operations > 0 then
-               Wake_Sources.Signal (Close_Wake);
+               Pending_Signals := Pending_Signals + 1;
+               Wake.Descriptor := Wake_Sources.Signal_Descriptor (Close_Wake);
+               Wake.Armed := True;
             end if;
-            --  Publish the close only after the wake is known to be usable. If
-            --  Signal raises, a later Close can retry instead of waiting on a
-            --  state that no caller can finish.
             Close_In_Progress := True;
          end if;
       end Begin_Close;
 
-      entry Await_Drained when not Active and then Started_Operations = 0 is
+      procedure Complete_Signal (Armed : not null access Boolean) is
+      begin
+         if Armed.all then
+            if Pending_Signals = 0 then
+               raise Program_Error with "missing TLS wake claim";
+            end if;
+            Pending_Signals := Pending_Signals - 1;
+            Armed.all := False;
+         end if;
+      end Complete_Signal;
+
+      procedure Cancel_Close is
+      begin
+         if Close_In_Progress then
+            Close_In_Progress := False;
+         end if;
+      end Cancel_Close;
+
+      procedure Close_Wakes (Lease, Close : out Wake_Source_Access) is
+      begin
+         if not Close_In_Progress or else Active or else Started_Operations /= 0 or else Pending_Signals /= 0
+         then
+            raise Program_Error with "TLS wake sources still borrowed";
+         end if;
+         Lease := Lease_Wake'Unchecked_Access;
+         Close := Close_Wake'Unchecked_Access;
+      end Close_Wakes;
+
+      entry Await_Drained when not Active and then Started_Operations = 0 and then Pending_Signals = 0 is
       begin
          null;
       end Await_Drained;
@@ -221,20 +346,15 @@ package body Flyology.IO.TLS is
 
       procedure Finish_Close (Generation : Descriptor_Generation) is
       begin
+         if Pending_Signals /= 0 then
+            raise Program_Error with "TLS wake signal still pending";
+         end if;
          if not Policy.Finish_Close_Allowed
                   (Close_In_Progress, Active or else Started_Operations /= 0, Generation = Current_Generation)
          then
             raise Program_Error with "stale TLS close completion";
          end if;
          Current_FD := Invalid_Descriptor;
-         begin
-            Wake_Sources.Release (Lease_Wake);
-            Wake_Sources.Release (Close_Wake);
-         exception
-            when others =>
-               Close_In_Progress := False;
-               raise;
-         end;
          Lease_Signalled := False;
          Close_In_Progress := False;
       end Finish_Close;
@@ -246,27 +366,81 @@ package body Flyology.IO.TLS is
       is (Close_In_Progress);
    end Descriptor_Controller;
 
+   procedure Adopt_TLS_Connection (Item : in out Connection; FD : Descriptor) is
+      Claim : aliased Adoption_Claim;
+   begin
+      Claim.State := Item.Controller'Unchecked_Access;
+      Item.Controller.Begin_Adoption (Claim'Access);
+      Wake_Sources.Ensure (Claim.Close.all);
+      Wake_Sources.Ensure (Claim.Lease.all);
+      Item.Controller.Adopt (FD, Claim.Armed'Access);
+   end Adopt_TLS_Connection;
+
+   procedure Try_Acquire_Lease
+     (Item                : in out Connection'Class;
+      Expected_Generation : Descriptor_Generation;
+      State               : not null access Operation_State;
+      Result              : out Lease_Result;
+      FD                  : in out Descriptor;
+      Close_Source        : in out Descriptor)
+   is
+      Drain : aliased Lease_Drain_Claim;
+   begin
+      Item.Controller.Try_Acquire (Expected_Generation, State, Result, FD, Close_Source, Drain'Access);
+      if Drain.Armed then
+         Wake_Sources.Drain (Drain.Wake.all);
+         Drain.Armed := False;
+      end if;
+   end Try_Acquire_Lease;
+
    overriding
    procedure Initialize (Guard : in out Close_Guard) is
    begin
-      Guard.Item.Controller.Begin_Close (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader);
+      Guard.Outcome.Wake.State := Guard.Item.Controller'Unchecked_Access;
+      Guard.Item.Controller.Begin_Close
+        (Guard.Outcome.FD, Guard.Outcome.Generation, Guard.Outcome.Leader, Guard.Outcome.Wake'Access);
    end Initialize;
 
    procedure Release_Operation (Guard : in out Operation_Guard) is
+      Wake : aliased Wake_Claim;
    begin
+      if Guard.Item /= null then
+         Wake.State := Guard.Item.Controller'Unchecked_Access;
+         Wake.Lease_Owner := Guard.Item;
+      end if;
       case Guard.State is
          when Unregistered =>
             null;
 
          when Registered   =>
-            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access);
+            Guard.Item.Controller.Abandon_Operation (Guard.Generation, Guard.State'Access, Wake'Access);
 
          when Acquired     =>
-            Guard.Item.Controller.Release (Guard.Generation, Guard.State'Access);
+            Guard.Item.Controller.Release (Guard.Generation, Guard.State'Access, Wake'Access);
       end case;
+      Flush (Wake);
       if Guard.State = Unregistered then
          Guard.Item := null;
       end if;
+   exception
+      when others =>
+         Finalize (Wake);
+         if Guard.State = Unregistered
+           and then Guard.Item /= null
+           and then Wake.Descriptor >= 0
+           and then not Wake.Delivered
+         then
+            begin
+               Close (Guard.Item.all);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+         if Guard.State = Unregistered then
+            Guard.Item := null;
+         end if;
+         raise;
    end Release_Operation;
 
    overriding
@@ -325,8 +499,13 @@ package body Flyology.IO.TLS is
       elsif State.Token /= null and then State.Token.Requested then
          raise Operation_Cancelled;
       end if;
-      State.Item.Controller.Try_Acquire
-        (State.Guard.Generation, State.Guard.State'Access, Result, State.FD, State.Close_Source);
+      Try_Acquire_Lease
+        (State.Item.all,
+         State.Guard.Generation,
+         State.Guard.State'Access,
+         Result,
+         State.FD,
+         State.Close_Source);
       if Result = Lease_Acquired and then State.Item.Session = null then
          raise Program_Error with "TLS connection has no provider session";
       elsif Result = Lease_Busy and then State.Deadline >= 0.0 and then Driver_Remaining (State) = 0.0 then
@@ -426,11 +605,24 @@ package body Flyology.IO.TLS is
 
    overriding
    procedure Finalize (Guard : in out Close_Guard) is
+      Lease_Wake : Wake_Source_Access;
+      Close_Wake : Wake_Source_Access;
    begin
       if not Guard.Outcome.Leader then
          return;
       end if;
 
+      begin
+         Flush (Guard.Outcome.Wake);
+      exception
+         when others =>
+            Finalize (Guard.Outcome.Wake);
+      end;
+      if Guard.Outcome.Wake.Descriptor >= 0 and then not Guard.Outcome.Wake.Delivered then
+         Guard.Item.Controller.Cancel_Close;
+         Guard.Outcome.Controller_Error := True;
+         return;
+      end if;
       Guard.Item.Controller.Await_Drained;
       begin
          Free (Guard.Item.Session);
@@ -452,6 +644,9 @@ package body Flyology.IO.TLS is
             Guard.Outcome.Controller_Error := True;
       end;
       begin
+         Guard.Item.Controller.Close_Wakes (Lease_Wake, Close_Wake);
+         Wake_Sources.Release (Lease_Wake.all);
+         Wake_Sources.Release (Close_Wake.all);
          Guard.Item.Controller.Finish_Close (Guard.Outcome.Generation);
       exception
          when others =>
@@ -554,7 +749,7 @@ package body Flyology.IO.TLS is
             raise Operation_Cancelled;
          end if;
          Left := Remaining (Started, Timeout);
-         Item.Controller.Try_Acquire (Guard.Generation, Guard.State'Access, Result, FD, Close_Source);
+         Try_Acquire_Lease (Item, Guard.Generation, Guard.State'Access, Result, FD, Close_Source);
          case Result is
             when Lease_Acquired  =>
                return;
@@ -615,7 +810,7 @@ package body Flyology.IO.TLS is
          end if;
 
          begin
-            Item.Controller.Adopt (FD);
+            Adopt_TLS_Connection (Item, FD);
          exception
             when others =>
                Free (New_Session);
@@ -1238,6 +1433,9 @@ package body Flyology.IO.TLS is
       if not Outcome.Leader then
          if Outcome.FD >= 0 then
             Item.Controller.Await_Closed;
+            if Is_Open (Item) then
+               Close (Item);
+            end if;
          end if;
          return;
       end if;

@@ -294,18 +294,70 @@ package Flyology.IO.Connections.Drivers is
       Token   : access Cancellation_Token := null);
 
 private
+   type Wake_Claim;
+   type Initialization_Claim;
+   type Drain_Claim;
+
    protected type Wakeup_Controller is
-      procedure Signal;
-      procedure Wait_Source (FD : out Flyology.IO.Descriptor; Already_Pending : out Boolean);
-      procedure Consume;
+      procedure Record_Signal (Claim : not null access Wake_Claim);
+      procedure Complete_Signal (Delivered : Boolean);
+      procedure Begin_Wait
+        (Claim           : not null access Initialization_Claim;
+         FD              : out Flyology.IO.Descriptor;
+         Already_Pending : out Boolean);
+      entry Await_Ready;
+      procedure Publish_Source (FD, Signal_FD : Flyology.IO.Descriptor);
+      procedure Cancel_Initialization;
+      procedure Begin_Consume (Claim : not null access Drain_Claim);
+      entry Await_Signal;
+      procedure Complete_Consume
+        (Armed        : not null access Boolean;
+         Signal_Armed : not null access Boolean;
+         Signal_FD    : not null access Flyology.IO.Descriptor);
    private
-      Pending   : Boolean := False;
-      Signalled : Boolean := False;
-      Wake      : Flyology.Wake_Sources.Source;
+      Pending           : Boolean := False;
+      Initializing      : Boolean := False;
+      Signalling        : Boolean := False;
+      Draining          : Boolean := False;
+      Signalled         : Boolean := False;
+      Resignal_Required : Boolean := False;
+      Read_FD           : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Write_FD          : Flyology.IO.Descriptor := Invalid_Descriptor;
    end Wakeup_Controller;
 
+   type Wake_Claim is new Ada.Finalization.Limited_Controlled with record
+      State      : access Wakeup_Controller := null;
+      Descriptor : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Armed      : Boolean := False;
+      Delivered  : Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Wake_Claim);
+
+   type Initialization_Claim is new Ada.Finalization.Limited_Controlled with record
+      State : access Wakeup_Controller := null;
+      Armed : Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Initialization_Claim);
+
+   type Drain_Claim is new Ada.Finalization.Limited_Controlled with record
+      State        : access Wakeup_Controller := null;
+      Wake         : access Flyology.Wake_Sources.Source := null;
+      Has_Signal   : Boolean := False;
+      Armed        : aliased Boolean := False;
+      Signal_FD    : aliased Flyology.IO.Descriptor := Invalid_Descriptor;
+      Signal_Armed : aliased Boolean := False;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Drain_Claim);
+
    type Outbound_Wakeup is limited record
-      Controller : Wakeup_Controller;
+      Wake       : aliased Flyology.Wake_Sources.Source;
+      Controller : aliased Wakeup_Controller;
    end record;
 
    type Capability is new Ada.Finalization.Limited_Controlled with record

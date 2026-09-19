@@ -1,4 +1,5 @@
 with Ada.Exceptions;
+with Ada.Finalization;
 with Ada.Real_Time;
 with Ada.Task_Identification;
 with Flyology.Cancellation;
@@ -591,14 +592,74 @@ private
       Termination          : Termination_Summary;
    end Generation_Control_State;
 
-   protected type Change_Signal is
-      procedure Arm (Descriptor : out Interfaces.C.int);
-      procedure Notify;
-      procedure Consume;
+   type Change_Wake_Claim;
+   type Change_Initialization_Claim;
+   type Change_Drain_Claim;
+
+   protected type Change_Signal_State is
+      procedure Begin_Arm (Claim : not null access Change_Initialization_Claim; FD : out Interfaces.C.int);
+      entry Await_Ready;
+      procedure Publish_Source (FD, Signal_FD : Interfaces.C.int);
+      procedure Cancel_Initialization;
+      procedure Record_Change;
+      procedure Signal_Pending (Claim : not null access Change_Wake_Claim);
+      procedure Complete_Signal (Delivered : Boolean);
+      procedure Begin_Consume (Claim : not null access Change_Drain_Claim; Is_Pending : out Boolean);
+      entry Await_Signal;
+      procedure Complete_Consume
+        (Armed        : not null access Boolean;
+         Signal_Armed : not null access Boolean;
+         Signal_FD    : not null access Interfaces.C.int);
    private
-      Wake    : Flyology.Wake_Sources.Source;
-      Pending : Boolean := False;
-   end Change_Signal;
+      Pending           : Boolean := False;
+      Initializing      : Boolean := False;
+      Signalling        : Boolean := False;
+      Signalled         : Boolean := False;
+      Draining          : Boolean := False;
+      Resignal_Required : Boolean := False;
+      Read_FD           : Interfaces.C.int := Interfaces.C.int (-1);
+      Write_FD          : Interfaces.C.int := Interfaces.C.int (-1);
+   end Change_Signal_State;
+
+   type Change_Signal is tagged limited record
+      Wake  : aliased Flyology.Wake_Sources.Source;
+      State : aliased Change_Signal_State;
+   end record;
+
+   type Change_Wake_Claim is new Ada.Finalization.Limited_Controlled with record
+      State      : access Change_Signal_State := null;
+      Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Armed      : Boolean := False;
+      Delivered  : Boolean := False;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Change_Wake_Claim);
+
+   type Change_Initialization_Claim is new Ada.Finalization.Limited_Controlled with record
+      State : access Change_Signal_State := null;
+      Armed : Boolean := False;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Change_Initialization_Claim);
+
+   type Change_Drain_Claim is new Ada.Finalization.Limited_Controlled with record
+      State        : access Change_Signal_State := null;
+      Wake         : access Flyology.Wake_Sources.Source := null;
+      Has_Signal   : Boolean := False;
+      Armed        : aliased Boolean := False;
+      Signal_FD    : aliased Interfaces.C.int := Interfaces.C.int (-1);
+      Signal_Armed : aliased Boolean := False;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Change_Drain_Claim);
+
+   procedure Arm (Item : in out Change_Signal; Descriptor : out Interfaces.C.int);
+   --  Mark_Pending may be called by a surrounding protected controller. Its owner
+   --  must call Flush after leaving that protected action.
+   procedure Mark_Pending (Item : in out Change_Signal);
+   procedure Flush (Item : in out Change_Signal);
+   procedure Notify (Item : in out Change_Signal);
+   procedure Consume (Item : in out Change_Signal);
 
    type Signal_Access is access all Change_Signal;
 

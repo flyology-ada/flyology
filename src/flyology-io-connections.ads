@@ -466,13 +466,23 @@ private
    --  connection never exposes the intermediate state to application I/O.
    type Transport_Kind is (No_Transport, Plain_Transport, TLS_Upgrading, TLS_Transport);
 
+   type Wake_Claim;
+   type Adoption_Claim;
+   type Lease_Drain_Claim;
+   type Wake_Source_Access is access all Flyology.Wake_Sources.Source;
+
    protected type Descriptor_Controller is
+      --  Preparing excludes other adopters while the caller creates wake
+      --  sources outside this protected object. Abort rolls the claim back.
+      procedure Begin_Adoption (Claim : not null access Adoption_Claim);
+      procedure Cancel_Adoption;
       --  Publish descriptor, socket, and admission ownership atomically.
       procedure Adopt
         (FD            : Flyology.IO.Descriptor;
          Socket        : in out Flyology.IO.Sockets.Socket_Type;
          Owner         : Server_Access;
-         Cleanup_Armed : not null access Boolean);
+         Cleanup_Armed : not null access Boolean;
+         Prepared      : not null access Boolean);
       --  Register an open generation before waiting for its exclusive lease.
       --  Close retains the borrowed sources until Try_Acquire, abandonment, or
       --  operation release resolves this registration.
@@ -491,10 +501,13 @@ private
          Close_Source        : out Flyology.IO.Descriptor;
          Socket              : in out Flyology.IO.Sockets.Socket_Type;
          Owner               : out Server_Access;
-         Transport           : out Transport_Kind);
+         Transport           : out Transport_Kind;
+         Drain               : not null access Lease_Drain_Claim);
       --  Withdraw one operation whose lease acquisition did not complete.
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation; State : not null access Operation_State);
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim);
       --  Reject further chunks after Close has marked this leased generation.
       procedure Check_Operation (Generation : Descriptor_Generation);
       --  Replace the plaintext operation generation while retaining the same
@@ -507,10 +520,19 @@ private
       procedure Release
         (Generation : Descriptor_Generation;
          Socket     : in out Flyology.IO.Sockets.Socket_Type;
-         State      : not null access Operation_State);
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim);
       procedure Begin_Close
-        (FD : out Flyology.IO.Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean);
-      procedure Begin_Deferred_Close;
+        (FD         : out Flyology.IO.Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean;
+         Wake       : not null access Wake_Claim);
+      procedure Begin_Deferred_Close (Wake : not null access Wake_Claim);
+      procedure Complete_Signal (Armed : not null access Boolean);
+      procedure Cancel_Close;
+      --  Closing, zero registrations, and zero signal claims exclude every
+      --  borrower while the caller releases these sources outside the lock.
+      procedure Close_Wakes (Lease : out Wake_Source_Access; Close : out Wake_Source_Access);
       procedure Try_Drain_Deferred_Close
         (Socket     : in out Flyology.IO.Sockets.Socket_Type;
          Owner      : out Server_Access;
@@ -528,25 +550,71 @@ private
    private
       Current_FD         : Flyology.IO.Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;
+      Preparing          : Boolean := False;
       Active             : Boolean := False with Atomic;
       Closing            : Boolean := False with Atomic;
       Deferred_Closing   : Boolean := False;
       --  Active operation plus callers between Start_Operation and
       --  Try_Acquire.
       Started_Operations : Natural := 0 with Atomic;
+      Pending_Signals    : Natural := 0;
       Lease_Signalled    : Boolean := False;
-      Lease_Wake         : Flyology.Wake_Sources.Source;
-      Close_Wake         : Flyology.Wake_Sources.Source;
+      Lease_Wake         : aliased Flyology.Wake_Sources.Source;
+      Close_Wake         : aliased Flyology.Wake_Sources.Source;
       Current_Socket     : Flyology.IO.Sockets.Socket_Type;
       Current_Owner      : Server_Access := null;
       Current_Transport  : Transport_Kind := No_Transport;
    end Descriptor_Controller;
 
+   type Wake_Claim is new Ada.Finalization.Limited_Controlled with record
+      State       : access Descriptor_Controller := null;
+      Descriptor  : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Armed       : aliased Boolean := False;
+      Delivered   : Boolean := False;
+      Lease_Owner : access Connection'Class := null;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Wake_Claim);
+
+   type Adoption_Claim is new Ada.Finalization.Limited_Controlled with record
+      State : access Descriptor_Controller := null;
+      Lease : Wake_Source_Access := null;
+      Close : Wake_Source_Access := null;
+      Armed : aliased Boolean := False;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Adoption_Claim);
+
+   type Lease_Drain_Claim is new Ada.Finalization.Limited_Controlled with record
+      Wake  : Wake_Source_Access := null;
+      Armed : Boolean := False;
+   end record;
+   overriding
+   procedure Finalize (Item : in out Lease_Drain_Claim);
+
    type Connection (Manager : access Server := null) is new Ada.Finalization.Limited_Controlled with record
-      Controller            : Descriptor_Controller;
+      Controller            : aliased Descriptor_Controller;
       TLS_Session           : Flyology.IO.TLS.Session_Access := null;
       TLS_Shutdown_Complete : Boolean := False;
    end record;
+
+   procedure Adopt_Connection
+     (Item          : in out Connection'Class;
+      FD            : Flyology.IO.Descriptor;
+      Socket        : in out Flyology.IO.Sockets.Socket_Type;
+      Owner         : Server_Access;
+      Cleanup_Armed : not null access Boolean);
+
+   procedure Try_Acquire_Lease
+     (Item                : in out Connection'Class;
+      Expected_Generation : Descriptor_Generation;
+      State               : not null access Operation_State;
+      Result              : out Lease_Result;
+      FD                  : out Flyology.IO.Descriptor;
+      Close_Source        : out Flyology.IO.Descriptor;
+      Socket              : in out Flyology.IO.Sockets.Socket_Type;
+      Owner               : out Server_Access;
+      Transport           : out Transport_Kind);
 
    --  @exclude
    --  @exclude

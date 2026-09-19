@@ -21,6 +21,8 @@ private package Flyology.Connection_Test_Hooks is
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_raw_accept";
    function Fail_Next_Capacity_Wake return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_capacity_wake";
+   function Fail_Next_Controller_Wake return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_controller_wake";
 
    procedure Reset_Scheduler_Waiter_Work
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_reset";
