@@ -1603,6 +1603,8 @@ procedure Data_Structures_Concurrency_Smoke is
       Instance      : constant Interfaces.Unsigned_64 := 16#ADA7_C0A7_3E11_0001#;
       Arenas        : array (Positive range 1 .. Worker_Count) of aliased TLSF_Arenas.View;
       Pools         : array (Positive range 1 .. Worker_Count) of aliased Adaptive_U64.View;
+      Full_Chunk    : array (Positive range 1 .. 64) of Adaptive_U64.Handle;
+      Fill_Result   : Adaptive_U64.Allocation_Result;
       Finished      : Completion (Worker_Count);
 
       task type Worker_Task
@@ -1668,6 +1670,11 @@ procedure Data_Structures_Concurrency_Smoke is
             Instance);
       end loop;
       Adaptive_U64.Initialize (Pools (1), Region_A, Adaptive_Pool_Location, Arenas (1));
+      for Index in Full_Chunk'Range loop
+         Adaptive_U64.Try_Allocate
+           (Pools (1), Arenas (1), Interfaces.Unsigned_64 (Index), Full_Chunk (Index), Fill_Result);
+         Assert (Fill_Result = Adaptive_U64.Allocated, "adaptive fixture could not fill its first chunk");
+      end loop;
       for Index in 2 .. Worker_Count loop
          Adaptive_U64.Attach
            (Pools (Index),
@@ -1688,6 +1695,9 @@ procedure Data_Structures_Concurrency_Smoke is
          raise Program_Error with "adaptive-pool native-task test timed out";
       end select;
       Assert (Finished.Passed, "adaptive-pool native-task allocation campaign failed");
+      for Index in Full_Chunk'Range loop
+         Adaptive_U64.Release (Pools (1), Arenas (1), Full_Chunk (Index));
+      end loop;
       for Index in 2 .. Worker_Count loop
          Adaptive_U64.Detach (Pools (Index));
       end loop;
