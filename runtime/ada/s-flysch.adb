@@ -312,6 +312,8 @@ package body System.Flyology.Scheduler is
       Dormancy_Policy          : Dormancy_Advice := Prompt_Advice;
       Dormancy_Minimum_Wait    : Duration := 1.0;
       Stack_Cold               : Boolean := False;
+      Advice_In_Progress       : Boolean := False;
+      Advice_Destroy_Deferred  : Boolean := False;
       --  Queue-head placement exists only while a Ready fiber is immediately
       --  requeued after losing inherited priority. Enqueue consumes it before
       --  the fiber runs; a running fiber retains no preference, so a later
@@ -456,6 +458,10 @@ package body System.Flyology.Scheduler is
    --  Finalize observes every claim while it holds all shards.
    Registry_Creators          : Registry_Creator_Array := (others => 0);
    Initialized                : Boolean := False;
+   Cold_Advice_Available      : Boolean := False;
+   pragma Atomic (Cold_Advice_Available);
+   Pageout_Advice_Available   : Boolean := False;
+   pragma Atomic (Pageout_Advice_Available);
    Event_Runtime_Active       : C.int := 0;
    pragma Atomic (Event_Runtime_Active);
    --  0 dormant, 1 running, 2 finalizing, 3 stopped, 4 cleanup deferred.
@@ -2333,7 +2339,6 @@ package body System.Flyology.Scheduler is
         or else Item.Timer_Index = 0
         or else Item.IO_Wait
         or else Item.File_Wait
-        or else Item.Deadline - Clock < Item.Dormancy_Minimum_Wait
       then
          return;
       end if;
@@ -2343,24 +2348,54 @@ package body System.Flyology.Scheduler is
             return;
 
          when Cold_Advice    =>
-            if not Contexts.Cold_Advice_Supported then
+            if not Cold_Advice_Available then
                return;
             end if;
+
+         when Pageout_Advice =>
+            if not Pageout_Advice_Available then
+               return;
+            end if;
+      end case;
+
+      if Item.Deadline - Clock < Item.Dormancy_Minimum_Wait then
+         return;
+      end if;
+
+      Item.Advice_In_Progress := True;
+      case Item.Dormancy_Policy is
+         when Prompt_Advice  =>
+            null;
+
+         when Cold_Advice    =>
             Group.Cold_Advice_Attempts := Group.Cold_Advice_Attempts + 1;
+
+         when Pageout_Advice =>
+            Group.Pageout_Advice_Attempts := Group.Pageout_Advice_Attempts + 1;
+      end case;
+
+      --  A foreign wake may make this fiber ready while the kernel processes
+      --  advice. Destroy defers its reap until this scheduler regains the lock.
+      Unlock_Group (Group);
+      case Item.Dormancy_Policy is
+         when Prompt_Advice  =>
+            Result := 0;
+
+         when Cold_Advice    =>
             Result := Contexts.Advise_Stack_Cold (Item.Context);
 
          when Pageout_Advice =>
-            if not Contexts.Pageout_Advice_Supported then
-               return;
-            end if;
-            Group.Pageout_Advice_Attempts := Group.Pageout_Advice_Attempts + 1;
             Result := Contexts.Advise_Stack_Pageout (Item.Context);
       end case;
-      if Result = 1 then
+      Lock_Group (Group);
+      Item.Advice_In_Progress := False;
+      if Result = 1 and then Item.State = Waiting then
          Item.Stack_Cold := True;
          Group.Cold_Stacks := Group.Cold_Stacks + 1;
          Group.Cold_Stack_Bytes :=
            Group.Cold_Stack_Bytes + C.unsigned_long_long (Contexts.Stack_Size (Item.Context));
+      end if;
+      if Result = 1 then
          if Item.Dormancy_Policy = Cold_Advice then
             Group.Cold_Advice_Accepted := Group.Cold_Advice_Accepted + 1;
          else
@@ -2464,6 +2499,8 @@ package body System.Flyology.Scheduler is
       Reduction_Phase_Code := C.int (Scheduling.Reduction_Phase'Pos (Scheduling.No_Reduction));
       Reduction_Target := Pool_Size;
       Reduction_Destination := System.Null_Address;
+      Cold_Advice_Available := Contexts.Cold_Advice_Supported;
+      Pageout_Advice_Available := Contexts.Pageout_Advice_Supported;
       Initialized := True;
       Fork_Child_State := 0;
       Lifecycle_State := 0;
@@ -2992,10 +3029,10 @@ package body System.Flyology.Scheduler is
    end Current_Dormancy;
 
    function Cold_Advice_Supported return C.int
-   is (if Contexts.Cold_Advice_Supported then 1 else 0);
+   is (if Cold_Advice_Available then 1 else 0);
 
    function Pageout_Advice_Supported return C.int
-   is (if Contexts.Pageout_Advice_Supported then 1 else 0);
+   is (if Pageout_Advice_Available then 1 else 0);
 
    function Configured_Pool_Size return C.int
    is (C.int (Automatic_Pool_Size));
@@ -4427,6 +4464,16 @@ package body System.Flyology.Scheduler is
       Item.T := System.Null_Address;
       Item.Destroy_Requested := True;
 
+      if Item.Advice_In_Progress then
+         Item.Advice_Destroy_Deferred := True;
+         Unlock_Group (Item.Group);
+         if Has_Reservation then
+            Unlock_Topology;
+         end if;
+         Unlock_Registry_Shard (Shard);
+         return 0;
+      end if;
+
       case Scheduling.Plan_Destroy (Phase_Of (Item.State)) is
          when Scheduling.Defer    =>
             Unlock_Group (Item.Group);
@@ -4695,7 +4742,9 @@ package body System.Flyology.Scheduler is
                Group.Trampoline_Fiber := null;
                Consider_Dormant_Stack (Group, Next);
 
-               if Next.Migration_Target /= null then
+               if Next.Advice_Destroy_Deferred then
+                  Reap_From_Scheduler (Group, Next);
+               elsif Next.Migration_Target /= null then
                   Transfer (Next, Group);
                elsif Next.State = Finished then
                   Release_Execution_Locked (Next);
