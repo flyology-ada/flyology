@@ -29,7 +29,26 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       is (Count);
    end Counter;
 
-   type Guard (Finalized : not null access Counter) is new Ada.Finalization.Limited_Controlled
+   protected type Task_Identity_Store is
+      procedure Capture (Identity : Ada.Task_Identification.Task_Id);
+      function Value return Ada.Task_Identification.Task_Id;
+   private
+      Stored : Ada.Task_Identification.Task_Id :=
+        Ada.Task_Identification.Null_Task_Id;
+   end Task_Identity_Store;
+
+   protected body Task_Identity_Store is
+      procedure Capture (Identity : Ada.Task_Identification.Task_Id) is
+      begin
+         Stored := Identity;
+      end Capture;
+
+      function Value return Ada.Task_Identification.Task_Id
+      is (Stored);
+   end Task_Identity_Store;
+
+   type Guard (Finalized : not null access Counter) is
+     new Ada.Finalization.Limited_Controlled
    with null record;
 
    overriding
@@ -124,12 +143,16 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    end Service_Task;
 
    function Create
-     (State : not null access Context; Control : not null access Generation_Control) return Service_Task is
+     (State   : not null access Context;
+      Control : not null access Generation_Control) return Service_Task is
    begin
       return Subject : Service_Task (State, Control, Instance => 42);
    end Create;
 
-   procedure Initialize (Subject : in out Service_Task; Control : aliased in out Generation_Control) is
+   procedure Initialize
+     (Subject : in out Service_Task;
+      Control : aliased in out Generation_Control)
+   is
       pragma Unreferenced (Control);
    begin
       Subject.Begin_Service;
@@ -144,7 +167,8 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       end if;
    end Initialize;
 
-   function Task_Identity (Subject : in out Service_Task) return Ada.Task_Identification.Task_Id
+   function Task_Identity
+     (Subject : in out Service_Task) return Ada.Task_Identification.Task_Id
    is (Subject'Identity);
 
    procedure Abort_Task (Subject : in out Service_Task) is
@@ -175,7 +199,10 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    end Stopper;
 
    procedure Check_Service
-     (Mode : Run_Mode; Expected : Termination_Kind; Expected_Ready : Boolean; Expected_Finalizers : Natural)
+     (Mode                : Run_Mode;
+      Expected            : Termination_Kind;
+      Expected_Ready      : Boolean;
+      Expected_Finalizers : Natural)
    is
       State   : aliased Context := (Mode => Mode, others => <>);
       Control : aliased Generation_Control;
@@ -183,10 +210,13 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    begin
       Open
         (Control,
-         (Controller => New_Controller, Id => Child_Id (9_000 + Run_Mode'Pos (Mode)), Generation => 1));
+         (Controller => New_Controller,
+          Id         => Child_Id (9_000 + Run_Mode'Pos (Mode)),
+          Generation => 1));
       if Mode in Await_Stop | Await_Abort then
          declare
-            Requester : Stopper (Control'Access, Request_Abort => Mode = Await_Abort);
+            Requester :
+              Stopper (Control'Access, Request_Abort => Mode = Await_Abort);
          begin
             Service_Generations.Run (State, Control, Result);
          end;
@@ -199,14 +229,22 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       pragma Assert (State.Began.Value = 1);
       pragma Assert (State.Finalized.Value = Expected_Finalizers);
       if Mode = Raise_Exception then
-         pragma Assert (Result.Termination.Exception_Id = Ada.Exceptions.Null_Id);
+         pragma
+           Assert (Result.Termination.Exception_Id = Ada.Exceptions.Null_Id);
          pragma
            Assert
              (Exception_Name_Text (Result.Termination)
                 = Ada.Exceptions.Exception_Name (Test_Failure'Identity));
-         pragma Assert (Message_Text (Result.Termination) = "application task failed");
-      elsif Mode in Override_Exception | Initialize_Failure | Initialize_Failure_After_Ready then
-         pragma Assert (Result.Termination.Exception_Id = Test_Failure'Identity);
+         pragma
+           Assert
+             (Message_Text (Result.Termination) = "application task failed");
+      elsif Mode
+            in Override_Exception
+             | Initialize_Failure
+             | Initialize_Failure_After_Ready
+      then
+         pragma
+           Assert (Result.Termination.Exception_Id = Test_Failure'Identity);
          pragma
            Assert
              (Exception_Name_Text (Result.Termination)
@@ -217,8 +255,10 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
    subtype Input is Positive range 1 .. 10;
 
    type Input_Context is limited record
-      Observed  : Counter;
-      Finalized : aliased Counter;
+      Observed         : Counter;
+      Finalized        : aliased Counter;
+      Identity         : Task_Identity_Store;
+      Report_Unhealthy : Boolean := False;
    end record;
 
    task type Input_Task
@@ -247,7 +287,11 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
             end if;
          end Start;
          State.Observed.Increment;
+         State.Identity.Capture (Ada.Task_Identification.Current_Task);
          Mark_Ready (Control.all);
+         if State.Report_Unhealthy then
+            Report_Unhealthy (Control.all, "input task reported unhealthy");
+         end if;
       end;
    end Input_Task;
 
@@ -259,13 +303,16 @@ procedure Flyology.Supervision.Task_Generations_Smoke is
       return Subject : Input_Task (State, Value, Control, Tag => 99);
    end Create;
 
-   procedure Initialize_Input (Subject : in out Input_Task; Control : aliased in out Generation_Control) is
+   procedure Initialize_Input
+     (Subject : in out Input_Task; Control : aliased in out Generation_Control)
+   is
       pragma Unreferenced (Control);
    begin
       Subject.Start (Subject.Value.all);
    end Initialize_Input;
 
-   function Task_Identity (Subject : in out Input_Task) return Ada.Task_Identification.Task_Id
+   function Task_Identity
+     (Subject : in out Input_Task) return Ada.Task_Identification.Task_Id
    is (Subject'Identity);
 
    procedure Abort_Task (Subject : in out Input_Task) is
@@ -285,7 +332,8 @@ begin
    Check_Service (Raise_Exception, Unhandled_Exception, True, 1);
    Check_Service (Override_Exception, Unhandled_Exception, True, 1);
    Check_Service (Initialize_Failure, Unhandled_Exception, False, 1);
-   Check_Service (Initialize_Failure_After_Ready, Unhandled_Exception, True, 1);
+   Check_Service
+     (Initialize_Failure_After_Ready, Unhandled_Exception, True, 1);
    Check_Service (Await_Stop, Supervisor_Shutdown, True, 1);
    Check_Service (Await_Abort, Abnormal_Completion, True, 1);
 
@@ -294,9 +342,31 @@ begin
       Control : aliased Generation_Control;
       Result  : Generation_Result;
    begin
-      Open (Control, (Controller => New_Controller, Id => 10_000, Generation => 1));
+      Open
+        (Control,
+         (Controller => New_Controller, Id => 10_000, Generation => 1));
       Input_Generations.Run (State, 7, Control, Result);
       pragma Assert (Result.Termination.Kind = Normal_Return);
+      pragma Assert (Result.Reported_Ready);
+      pragma Assert (State.Observed.Value = 1);
+      pragma Assert (State.Finalized.Value = 1);
+   end;
+
+   declare
+      State   : aliased Input_Context :=
+        (Report_Unhealthy => True, others => <>);
+      Control : aliased Generation_Control;
+      Result  : Generation_Result;
+   begin
+      Open
+        (Control,
+         (Controller => New_Controller, Id => 10_001, Generation => 1));
+      Input_Generations.Run (State, 7, Control, Result);
+      pragma Assert (Result.Termination.Kind = Unhealthy);
+      pragma Assert (Result.Termination.Task_Id = State.Identity.Value);
+      pragma
+        Assert
+          (Result.Termination.Task_Id /= Ada.Task_Identification.Null_Task_Id);
       pragma Assert (Result.Reported_Ready);
       pragma Assert (State.Observed.Value = 1);
       pragma Assert (State.Finalized.Value = 1);
