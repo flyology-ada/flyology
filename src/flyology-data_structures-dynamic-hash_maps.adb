@@ -671,11 +671,11 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
      (Item       : View;
       Table      : Table_View;
       Stored_Key : Key.Value;
+      Hash_Value : Interfaces.Unsigned_64;
       Found      : out Boolean;
       Index      : out Interfaces.Unsigned_64;
       Insertion  : out Interfaces.Unsigned_64)
    is
-      Hash_Value : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
       Candidate  : Interfaces.Unsigned_64;
       State      : Interfaces.Unsigned_32;
       Slot       : System.Address;
@@ -846,7 +846,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Result   : out Put_Result)
    is
       Stored_Key       : constant Key.Value := Key.Create (Key_Data);
-      Stored_Value     : constant Element.Value := Element.Create (Value);
+      Hash_Value       : constant Interfaces.Unsigned_64 := Key.Hash (Stored_Key);
       Current_Capacity : Interfaces.Unsigned_64;
       Count            : Interfaces.Unsigned_64;
       Current          : Arena_Provider.Allocation_Handle;
@@ -854,7 +854,6 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       Found            : Boolean;
       Index, Insertion : Interfaces.Unsigned_64;
       Slot             : System.Address;
-      Hash_Value       : Interfaces.Unsigned_64;
       Mutated          : Boolean := False;
    begin
       Acquire (Item);
@@ -872,11 +871,17 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          end if;
          Current := Read_Handle (Item.Current_Address);
          Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-         Find (Item, Table, Stored_Key, Found, Index, Insertion);
+         Find (Item, Table, Stored_Key, Hash_Value, Found, Index, Insertion);
          if Found then
             Slot := Slot_Address (Item, Table, Index);
-            Mutated := True;
-            Element.Copy_To (Stored_Value, Value_Binding (Item, Slot, True));
+            --  Replacements target a published slot, so stage a value before
+            --  copying it. A raising creator leaves the old value intact.
+            declare
+               Stored_Value : constant Element.Value := Element.Create (Value);
+            begin
+               Mutated := True;
+               Element.Copy_To (Stored_Value, Value_Binding (Item, Slot, True));
+            end;
             Result := Put_Replaced;
          else
             if (Count + 1) * 4 > Current_Capacity * 3 or else Insertion = Interfaces.Unsigned_64'Last then
@@ -888,17 +893,24 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
                Current_Capacity := Stored_Capacity (Item);
                Current := Read_Handle (Item.Current_Address);
                Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-               Find (Item, Table, Stored_Key, Found, Index, Insertion);
+               Find (Item, Table, Stored_Key, Hash_Value, Found, Index, Insertion);
                if Found or else Insertion = Interfaces.Unsigned_64'Last then
                   raise Layout_Error with "dynamic-map rehash did not produce an insertion slot";
                end if;
             end if;
             Slot := Slot_Address (Item, Table, Insertion);
-            Hash_Value := Key.Hash (Stored_Key);
-            Mutated := True;
+            --  An exception while constructing an unpublished slot leaves the
+            --  table valid, even when a completed growth preceded this insert.
+            Mutated := False;
             Bytes.Write_U64 (Slot_Field (Item, Slot, Hash_Offset, 8), Hash_Value);
             Key.Copy_To (Stored_Key, Key_Binding (Item, Slot, True));
-            Element.Copy_To (Stored_Value, Value_Binding (Item, Slot, True));
+            declare
+               Builder : Element.Builder;
+            begin
+               Element.Bind (Builder, Value_Binding (Item, Slot, True));
+               Element.Construct (Builder, Value);
+            end;
+            Mutated := True;
             Bytes.Write_U32 (Slot_Field (Item, Slot, Slot_State_Offset, 4), Occupied_State);
             Bytes.Write_U64 (Item.Count_Address, Count + 1);
             Result := Put_Inserted;
@@ -933,7 +945,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          if Current_Capacity /= 0 then
             Current := Read_Handle (Item.Current_Address);
             Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-            Find (Item, Table, Stored_Key, Found, Index, Insertion);
+            Find (Item, Table, Stored_Key, Key.Hash (Stored_Key), Found, Index, Insertion);
             if Found then
                Slot := Slot_Address (Item, Table, Index);
                declare
@@ -1009,7 +1021,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
          if Current_Capacity /= 0 then
             Current := Read_Handle (Item.Current_Address);
             Attach_Table (Item, Arena, Current, Current_Capacity, Table);
-            Find (Item, Table, Stored_Key, Found, Index, Insertion);
+            Find (Item, Table, Stored_Key, Key.Hash (Stored_Key), Found, Index, Insertion);
             if Found then
                if Count = 0 then
                   raise Layout_Error with "dynamic-map occupied entry contradicts zero count";
