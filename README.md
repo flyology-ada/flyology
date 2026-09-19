@@ -1048,9 +1048,12 @@ from every payload read, write, copy, or nested region derived from it.
 
 `Allocation_Pools.Adaptive` is a separate generic for fixed-size immutable
 elements. Its fixed outer table records generation-stamped arena allocations
-for bounded slab chunks. Allocation scans published chunks first and adds one
-chunk only after acquiring the outer nonblocking growth guard; unrelated live
-slots retain `Slab_Pools` per-slot synchronization. `Slots_Per_Chunk` and
+for bounded slab chunks. Allocation scans published chunks first, skips those
+marked full, and adds one chunk only after acquiring the outer nonblocking
+growth guard. Release and replacement clear their chunk's full hint across
+attached views;
+unrelated live slots retain `Slab_Pools` per-slot synchronization.
+`Slots_Per_Chunk` and
 `Maximum_Chunks` are compile-time bounds, so "adaptive" means growing the
 number of chunks within one fixed arena rather than an unbounded resource. If
 chunk creation is abandoned, recovery requires exclusive reinitialization of

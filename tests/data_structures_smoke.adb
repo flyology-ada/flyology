@@ -1702,7 +1702,31 @@ begin
    Assert
      (U64_Value = 40 and then Adaptive_Handles (17).Chunk = 2 and then Adaptive_Handles (33).Chunk = 3,
       "adaptive pool chunk growth or cross-view read is wrong");
+   Assert
+     ((Read_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 88)) and 16#8000_0000_0000_0000#) /= 0,
+      "adaptive pool did not remember an exhausted chunk");
+   Adaptive_U64.Replace (Adaptive_A, TLSF_A, Adaptive_Handles (1), 111);
+   Assert
+     ((Read_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 88)) and 16#8000_0000_0000_0000#) = 0,
+      "replacement did not invalidate the exhausted chunk hint");
+   Adaptive_U64.Read (Adaptive_B, TLSF_B, Adaptive_Handles (1), U64_Value);
+   Assert (U64_Value = 111, "adaptive pool replacement was not visible across views");
+   declare
+      Extra  : Adaptive_U64.Handle;
+      Result : Adaptive_U64.Allocation_Result;
+   begin
+      Adaptive_U64.Try_Allocate (Adaptive_A, TLSF_A, 41, Extra, Result);
+      Assert (Result = Adaptive_U64.Allocated and then Extra.Chunk = 3,
+              "adaptive pool did not recache an exhausted chunk");
+      Assert
+        ((Read_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 88)) and 16#8000_0000_0000_0000#) /= 0,
+         "adaptive pool did not restore its full hint after replacement");
+      Adaptive_U64.Release (Adaptive_A, TLSF_A, Extra);
+   end;
    Adaptive_U64.Release (Adaptive_B, TLSF_B, Adaptive_Handles (1));
+   Assert
+     ((Read_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 88)) and 16#8000_0000_0000_0000#) = 0,
+      "another view did not invalidate the exhausted chunk hint");
    declare
       Failed : Boolean := False;
    begin
@@ -1713,6 +1737,16 @@ begin
             Failed := True;
       end;
       Assert (Failed, "adaptive pool accepted a stale slot handle");
+   end;
+   declare
+      Reused : Adaptive_U64.Handle;
+      Result : Adaptive_U64.Allocation_Result;
+   begin
+      Adaptive_U64.Try_Allocate (Adaptive_A, TLSF_A, 101, Reused, Result);
+      Assert
+        (Result = Adaptive_U64.Allocated and then Reused.Chunk = 1,
+         "adaptive pool skipped a slot released through another view");
+      Adaptive_U64.Release (Adaptive_A, TLSF_A, Reused);
    end;
 
    declare
@@ -1730,6 +1764,42 @@ begin
       Assert
         (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
          "adaptive pool accepted corrupt chunk state");
+
+      --  The full hint extends each stored table entry, so an older outer
+      --  layout must not be interpreted using the new entry stride.
+      declare
+         Version : constant Interfaces.Unsigned_32 :=
+           Read_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4));
+      begin
+         Write_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4), 1);
+         Failed := False;
+         begin
+            Adaptive_U64.Attach (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_B);
+         exception
+            when DS.Layout_Error =>
+               Failed := True;
+         end;
+         Write_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4), Version);
+         Assert (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
+                 "adaptive pool accepted an older chunk-table layout");
+      end;
+
+      declare
+         Hint : constant Interfaces.Unsigned_64 :=
+           Read_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 152));
+      begin
+         Write_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 152), 16#8000_0000_0000_0000#);
+         Failed := False;
+         begin
+            Adaptive_U64.Attach (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_B);
+         exception
+            when DS.Layout_Error =>
+               Failed := True;
+         end;
+         Write_U64 (Base_B, Raw_Offset (Adaptive_Pool_Location, 152), Hint);
+         Assert (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
+                 "adaptive pool accepted a false full hint");
+      end;
 
       --  Arena validation can fail before the outer header is inspected. A
       --  reused output view must still be detached before that failure so the
