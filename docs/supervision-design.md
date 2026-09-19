@@ -145,6 +145,14 @@ and dependent-task joining remain Ada-controlled. Omitting `Request_Shutdown`
 is safe only if another terminal rule ends `Run`; omitting an explicit join is
 safe because `Run` cannot return without one.
 
+The static controller has fixed-capacity snapshots, dependency state, and event
+storage. For each started generation, it also creates one lightweight runner
+task with a guarded fiber stack. The runner executes the synchronous
+`Run_One_Generation` factory while the manager observes readiness and stop
+deadlines. Its local task master joins the runner before the generation control
+leaves scope. This task and stack lifetime repeats on every restart, separately
+from the application's fresh generation task.
+
 Shutdown is sticky across configuration. A request made before `Run`, or while
 static policy callbacks are still being validated, prevents manager activation
 and child admission. Configuration never reopens a family after shutdown.

@@ -63,8 +63,11 @@ is
    --  One-shot static supervisor. Run is the ownership boundary and must be
    --  called from one task. Current and Request_Shutdown may be called safely
    --  by other tasks. A shutdown requested before or during validation is
-   --  sticky and prevents manager activation. Storage is fixed by Child_Kind;
-   --  no per-restart allocation is performed by the controller.
+   --  sticky and prevents manager activation. Controller metadata has fixed
+   --  capacities from Child_Kind, Event_Capacity, and Monitor_Capacity. Each
+   --  started generation creates one controller-owned lightweight runner task
+   --  with a guarded stack. The runner joins before that generation's control
+   --  leaves scope.
    type Supervisor is limited private;
 
    --  Validate configuration, create bounded lightweight manager tasks, and
