@@ -766,6 +766,17 @@ package body Flyology.Data_Structures.Slab_Pools is
       Validate_Slots (Item);
    end Validate_Empty;
 
+   function All_Live (Item : View) return Boolean is
+   begin
+      Layouts.Require_Ready (Item.Core);
+      for Slot in Interfaces.Unsigned_32 range 1 .. Item.Capacity_Value loop
+         if Atomic.Load_Acquire_U32 (State_Address (Item, Slot)) /= Live_State then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end All_Live;
+
    procedure Destroy (Item : in out View) is
    begin
       Validate_Empty (Item);

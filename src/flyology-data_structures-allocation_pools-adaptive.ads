@@ -13,6 +13,8 @@ use type Interfaces.Unsigned_64;
 --  exhausted. Chunk allocation is serialized by one persisted nonblocking
 --  guard; live chunks use Slab_Pools per-slot synchronization, so operations
 --  on different slots may proceed concurrently through distinct local views.
+--  Each chunk stores an atomic full hint. Releases and replacements invalidate
+--  it across views; an interrupted change disables it until exclusive recovery.
 --  One local View must not be used concurrently because it owns process-local
 --  chunk attachment caches. A dead chunk-creation owner leaves the pool guard
 --  locked; an external authority may poison the whole pool after establishing
@@ -54,7 +56,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive with Preelaborate is
      xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Maximum_Chunks), 32);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 1;
+   Layout_Version : constant Interfaces.Unsigned_32 := 2;
 
    --  Complete persisted pool identity.
    Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);

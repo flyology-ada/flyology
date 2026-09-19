@@ -272,6 +272,14 @@ private
    --  @exclude
    procedure Validate_Empty (Item : View);
 
+   --  True only when every slot is live. A transient allocation may fail and
+   --  return its slot to free without a Release call, so composite owners may
+   --  cache exhaustion only after this check.
+   --  @param Item Attached slab view
+   --  @return Whether all slots were observed live
+   --  @exclude
+   function All_Live (Item : View) return Boolean;
+
    type View is limited record
       Core                      : Layouts.Local_View;
       Capacity_Value            : Interfaces.Unsigned_32 := 0;
