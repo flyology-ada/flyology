@@ -233,6 +233,7 @@ private
       Kind              : Scoped_Kind := Scoped_Receive;
       Value             : Element_Type := Empty_Value;
       Next              : System.Address := System.Null_Address;
+      Previous          : System.Address := System.Null_Address;
       Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
       Subscribed        : Boolean := False;
       Notified          : Boolean := False;

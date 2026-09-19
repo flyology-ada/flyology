@@ -20,7 +20,11 @@ package body Flyology.Channels.Bounded is
 
    Bucket_Count         : constant := 32;
    subtype Bucket_Index is Positive range 1 .. Bucket_Count;
-   type Bucket_Array is array (Bucket_Index) of System.Address;
+   type Subscription_Queue is record
+      Head : System.Address := System.Null_Address;
+      Tail : System.Address := System.Null_Address;
+   end record;
+   type Queue_Array is array (Bucket_Index) of Subscription_Queue;
    type Subscription_Count_Array is array (Bucket_Index) of Interfaces.C.unsigned with Atomic_Components;
    Active_Subscriptions : Subscription_Count_Array := (others => 0);
 
@@ -30,13 +34,80 @@ package body Flyology.Channels.Bounded is
           mod System.Storage_Elements.Integer_Address (Bucket_Count)
           + 1));
 
+   --  Queue links are mutated only while Subscriptions is protected.
+   procedure Append (Queue : in out Subscription_Queue; Operation : System.Address) is
+      Target : constant Channel_Operation_Access := To_Operation (Operation);
+   begin
+      if Target = null
+        or else Target.Next /= System.Null_Address
+        or else Target.Previous /= System.Null_Address
+      then
+         raise Program_Error with "invalid channel subscription links";
+      end if;
+      Target.Previous := Queue.Tail;
+      if Queue.Tail = System.Null_Address then
+         Queue.Head := Operation;
+      else
+         To_Operation (Queue.Tail).Next := Operation;
+      end if;
+      Queue.Tail := Operation;
+   end Append;
+
+   procedure Remove (Queue : in out Subscription_Queue; Operation : System.Address) is
+      Target : constant Channel_Operation_Access := To_Operation (Operation);
+   begin
+      if Target = null
+        or else (Target.Previous = System.Null_Address and then Queue.Head /= Operation)
+        or else (Target.Next = System.Null_Address and then Queue.Tail /= Operation)
+      then
+         raise Program_Error with "channel subscription link is stale";
+      end if;
+      if Target.Previous = System.Null_Address then
+         Queue.Head := Target.Next;
+      else
+         To_Operation (Target.Previous).Next := Target.Next;
+      end if;
+      if Target.Next = System.Null_Address then
+         Queue.Tail := Target.Previous;
+      else
+         To_Operation (Target.Next).Previous := Target.Previous;
+      end if;
+      Target.Next := System.Null_Address;
+      Target.Previous := System.Null_Address;
+   end Remove;
+
+   procedure Notify
+     (Ready, Notified : in out Subscription_Queue; Channel_Address : System.Address; Wake_All : Boolean)
+   is
+      Cursor : System.Address := Ready.Head;
+   begin
+      while Cursor /= System.Null_Address loop
+         declare
+            Target : constant Channel_Operation_Access := To_Operation (Cursor);
+            Next   : constant System.Address := Target.Next;
+         begin
+            if Target.Item /= null and then Target.Item.all'Address = Channel_Address then
+               Flyology.Wake_Sources.Signal_Borrowed (Target.Signal_Descriptor);
+               Remove (Ready, Cursor);
+               Append (Notified, Cursor);
+               Target.Notified := True;
+               exit when not Wake_All;
+            end if;
+            Cursor := Next;
+         end;
+      end loop;
+   end Notify;
+
    protected Subscriptions is
       procedure Link (Operation : System.Address);
       procedure Unlink (Operation : System.Address);
       procedure Clear_Notification (Operation : System.Address);
       procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean);
    private
-      Heads : Bucket_Array := (others => System.Null_Address);
+      Ready_Sends       : Queue_Array;
+      Ready_Receives    : Queue_Array;
+      Notified_Sends    : Queue_Array;
+      Notified_Receives : Queue_Array;
    end Subscriptions;
 
    protected body Subscriptions is
@@ -48,41 +119,40 @@ package body Flyology.Channels.Bounded is
             raise Program_Error with "invalid channel operation subscription";
          end if;
          Index := Bucket (Target.Item.all'Address);
-         Target.Next := Heads (Index);
+         if Target.Kind = Scoped_Send then
+            Append (Ready_Sends (Index), Operation);
+         else
+            Append (Ready_Receives (Index), Operation);
+         end if;
          Target.Subscribed := True;
          Target.Notified := False;
-         Heads (Index) := Operation;
          Active_Subscriptions (Index) := Active_Subscriptions (Index) + 1;
       end Link;
 
       procedure Unlink (Operation : System.Address) is
-         Target           : constant Channel_Operation_Access := To_Operation (Operation);
-         Index            : Bucket_Index;
-         Cursor, Previous : System.Address;
+         Target : constant Channel_Operation_Access := To_Operation (Operation);
+         Index  : Bucket_Index;
       begin
          if Target = null or else not Target.Subscribed then
             return;
          end if;
          Index := Bucket (Target.Item.all'Address);
-         Cursor := Heads (Index);
-         Previous := System.Null_Address;
-         while Cursor /= System.Null_Address and then Cursor /= Operation loop
-            Previous := Cursor;
-            Cursor := To_Operation (Cursor).Next;
-         end loop;
-         if Cursor = System.Null_Address then
-            raise Program_Error with "channel subscription link is stale";
-         elsif Previous = System.Null_Address then
-            Heads (Index) := Target.Next;
+         if Target.Kind = Scoped_Send then
+            if Target.Notified then
+               Remove (Notified_Sends (Index), Operation);
+            else
+               Remove (Ready_Sends (Index), Operation);
+            end if;
+         elsif Target.Notified then
+            Remove (Notified_Receives (Index), Operation);
          else
-            To_Operation (Previous).Next := Target.Next;
+            Remove (Ready_Receives (Index), Operation);
          end if;
          declare
             Handoff : constant Boolean := Target.Notified;
             Kind    : constant Scoped_Kind := Target.Kind;
             Address : constant System.Address := Target.Item.all'Address;
          begin
-            Target.Next := System.Null_Address;
             Target.Subscribed := False;
             Target.Notified := False;
             Active_Subscriptions (Index) := Active_Subscriptions (Index) - 1;
@@ -96,31 +166,33 @@ package body Flyology.Channels.Bounded is
 
       procedure Clear_Notification (Operation : System.Address) is
          Target : constant Channel_Operation_Access := To_Operation (Operation);
+         Index  : Bucket_Index;
       begin
-         if Target /= null and then Target.Subscribed then
-            Target.Notified := False;
+         if Target = null or else not Target.Subscribed or else not Target.Notified then
+            return;
          end if;
+         Index := Bucket (Target.Item.all'Address);
+         if Target.Kind = Scoped_Send then
+            Remove (Notified_Sends (Index), Operation);
+            Append (Ready_Sends (Index), Operation);
+         else
+            Remove (Notified_Receives (Index), Operation);
+            Append (Ready_Receives (Index), Operation);
+         end if;
+         Target.Notified := False;
       end Clear_Notification;
 
       procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean) is
-         Cursor : System.Address := Heads (Bucket (Channel_Address));
+         Index : constant Bucket_Index := Bucket (Channel_Address);
       begin
-         while Cursor /= System.Null_Address loop
-            declare
-               Operation : constant Channel_Operation_Access := To_Operation (Cursor);
-            begin
-               if Operation.Item /= null
-                 and then Operation.Item.all'Address = Channel_Address
-                 and then (Wake_All or else Operation.Kind = Kind)
-                 and then not Operation.Notified
-               then
-                  Flyology.Wake_Sources.Signal_Borrowed (Operation.Signal_Descriptor);
-                  Operation.Notified := True;
-                  exit when not Wake_All;
-               end if;
-               Cursor := Operation.Next;
-            end;
-         end loop;
+         if Wake_All then
+            Notify (Ready_Sends (Index), Notified_Sends (Index), Channel_Address, True);
+            Notify (Ready_Receives (Index), Notified_Receives (Index), Channel_Address, True);
+         elsif Kind = Scoped_Send then
+            Notify (Ready_Sends (Index), Notified_Sends (Index), Channel_Address, False);
+         else
+            Notify (Ready_Receives (Index), Notified_Receives (Index), Channel_Address, False);
+         end if;
       end Signal;
    end Subscriptions;
 
@@ -330,6 +402,7 @@ package body Flyology.Channels.Bounded is
       Operation.Kind := Kind;
       Operation.Value := Value;
       Operation.Next := System.Null_Address;
+      Operation.Previous := System.Null_Address;
       Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
       Operation.Notified := False;
@@ -485,6 +558,7 @@ package body Flyology.Channels.Bounded is
       Operation.Item := null;
       Operation.Value := Empty_Value;
       Operation.Next := System.Null_Address;
+      Operation.Previous := System.Null_Address;
       Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
       Operation.Notified := False;

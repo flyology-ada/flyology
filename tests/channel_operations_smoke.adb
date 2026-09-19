@@ -314,6 +314,40 @@ procedure Channel_Operations_Smoke is
            and then ((A = 1 and then B = 2) or else (A = 2 and then B = 1));
       end;
 
+      --  Many operations in one set exercise movement between the ready and
+      --  notified lists. One source wake may drive all pending operations;
+      --  each value must still be transferred exactly once.
+      declare
+         Channel : aliased Integer_Channels.Channel (Capacity => 24);
+         Set     : aliased Flyology.Operations.Completion_Set (24);
+         type Operation_Array is
+           array (Positive range <>)
+           of aliased Integer_Channels.Receive_Operation (Set'Access);
+         Pending : Operation_Array (1 .. 24);
+         Status  : Integer_Channels.Try_Send_Result;
+         Seen    : array (1 .. 24) of Boolean := (others => False);
+         Value   : Integer := 0;
+      begin
+         for Index in Pending'Range loop
+            Integer_Channels.Receive (Channel'Access, 1.0, Pending (Index));
+         end loop;
+         for Index in Pending'Range loop
+            Channel.Try_Send (Index, Status);
+            Check
+              (Status = Integer_Channels.Item_Sent,
+               "many-subscriber publication failed");
+         end loop;
+         Flyology.Operations.Wait_All (Set);
+         for Index in Pending'Range loop
+            Integer_Channels.Finish (Pending (Index), Value);
+            Check
+              (Value in Seen'Range and then not Seen (Value),
+               "many-subscriber delivery repeated");
+            Seen (Value) := True;
+         end loop;
+         Passed := Passed and then (for all Delivered of Seen => Delivered);
+      end;
+
       --  Separate completion sets need separate notifications. Each send
       --  claims a different waiting receiver even before any owner waits.
       declare
@@ -376,6 +410,66 @@ procedure Channel_Operations_Smoke is
          Flyology.Operations.Wait_All (First_Set);
          Integer_Channels.Finish (First, Value);
          Passed := Passed and then Value = 27;
+      end;
+
+      --  Removing a notified node from the middle of a longer queue keeps
+      --  both neighboring links intact and hands its claim to a ready waiter.
+      declare
+         Channel                                      :
+           aliased Integer_Channels.Channel (Capacity => 3);
+         First_Set, Second_Set, Third_Set, Fourth_Set :
+           aliased Flyology.Operations.Completion_Set (1);
+         First                                        :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (First_Set'Access, Channel'Access, 1.0);
+         Second                                       :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (Second_Set'Access, Channel'Access, 1.0);
+         Third                                        :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (Third_Set'Access, Channel'Access, 1.0);
+         Fourth                                       :
+           Integer_Channels.Receive_Operation :=
+             Integer_Channels.Receive (Fourth_Set'Access, Channel'Access, 1.0);
+         Status                                       :
+           Integer_Channels.Try_Send_Result;
+         Seen                                         :
+           array (1 .. 3) of Boolean := (others => False);
+         Value                                        : Integer := 0;
+      begin
+         for Number in Seen'Range loop
+            Channel.Try_Send (Number, Status);
+            Check
+              (Status = Integer_Channels.Item_Sent,
+               "middle-unlink publication failed");
+         end loop;
+         Flyology.Operations.Cancel (Second);
+         begin
+            Integer_Channels.Finish (Second, Value);
+            Passed := False;
+         exception
+            when Integer_Channels.Operation_Cancelled =>
+               null;
+         end;
+         Flyology.Operations.Wait_All (First_Set);
+         Flyology.Operations.Wait_All (Third_Set);
+         Flyology.Operations.Wait_All (Fourth_Set);
+         Integer_Channels.Finish (First, Value);
+         Check
+           (Value in Seen'Range and then not Seen (Value),
+            "first middle-unlink delivery repeated");
+         Seen (Value) := True;
+         Integer_Channels.Finish (Third, Value);
+         Check
+           (Value in Seen'Range and then not Seen (Value),
+            "third middle-unlink delivery repeated");
+         Seen (Value) := True;
+         Integer_Channels.Finish (Fourth, Value);
+         Check
+           (Value in Seen'Range and then not Seen (Value),
+            "fourth middle-unlink delivery repeated");
+         Seen (Value) := True;
+         Passed := Passed and then (for all Delivered of Seen => Delivered);
       end;
 
       --  A full channel retains a pending send. Receiving capacity wakes it;
