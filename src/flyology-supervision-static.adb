@@ -1599,7 +1599,10 @@ package body Flyology.Supervision.Static is
                      if Decision_Override.Kind /= No_Termination then
                         Override := Decision_Override;
                      end if;
-                     if not Ready_Published and then Now - Started_At >= Spec.Readiness_Timeout then
+                     if not Ready_Published
+                       and then not Stop_Published
+                       and then Now - Started_At >= Spec.Readiness_Timeout
+                     then
                         Stop_Now := True;
                         Shutdown_Stop := False;
                         Override := Empty_Summary (Readiness_Timeout);
