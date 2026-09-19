@@ -1097,7 +1097,8 @@ FLYOLOGY_CONNECTION_TEST_HOOKS=true
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 link_test_mains \
   "$connection_test_subdir" "$project_root/build/rts" \
-  "$scheduler_waiter_hook_mains"
+  "$connection_hook_mains
+$scheduler_waiter_hook_mains"
 unset FLYOLOGY_CONNECTION_TEST_HOOKS
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
 export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
