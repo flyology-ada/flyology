@@ -127,12 +127,21 @@ procedure Data_Structures_Smoke is
         Create_Value       => U64_Elements.Create,
         Observe_Value      => U64_Elements.Value_Of,
         Direct_Constructor => Test_U64_Construct'Access);
+   function Read_U32 (Base : System.Address; Offset : Interfaces.C.size_t) return Interfaces.Unsigned_32;
+   pragma Import (C, Read_U32, "flyology_test_mapping_read_u32");
+
    Value_Creates     : Natural := 0;
    Direct_Constructs : Natural := 0;
+   Creator_Probe     : Boolean := False;
+   Creator_Base      : System.Address := System.Null_Address;
+   Creator_Offset    : Interfaces.C.size_t := 0;
 
    function Counting_Create (Data : Interfaces.Unsigned_64) return U64_Elements.Value is
    begin
       Value_Creates := Value_Creates + 1;
+      if Creator_Probe and then Interfaces."/=" (Read_U32 (Creator_Base, Creator_Offset), 0) then
+         raise Program_Error with "value creator ran under the dynamic-map guard";
+      end if;
       if Interfaces."=" (Data, 16#CAFE_BABE#) then
          raise Constraint_Error with "deliberate value creation failure";
       end if;
@@ -373,9 +382,6 @@ procedure Data_Structures_Smoke is
    function Close_Mapping (Path : C.char_array; FD : C.int) return C.int;
    pragma Import (C, Close_Mapping, "flyology_test_mapping_close");
 
-   function Read_U32 (Base : System.Address; Offset : C.size_t) return Interfaces.Unsigned_32;
-   pragma Import (C, Read_U32, "flyology_test_mapping_read_u32");
-
    function Read_U64 (Base : System.Address; Offset : C.size_t) return Interfaces.Unsigned_64;
    pragma Import (C, Read_U64, "flyology_test_mapping_read_u64");
 
@@ -598,6 +604,9 @@ procedure Data_Structures_Smoke is
          16#BAAC_5A1F_7000_0002#);
       Counting_Dynamic_Maps.Initialize (Direct_Map, Header_Region, 64, Arena, 2);
       Fallback_Dynamic_Maps.Initialize (Fallback_Map, Header_Region, 256, Arena, 2);
+      Creator_Base := Header_Storage'Address;
+      Creator_Offset := C.size_t (64 + 44);
+      Creator_Probe := True;
 
       Value_Creates := 0;
       Direct_Constructs := 0;
@@ -626,6 +635,7 @@ procedure Data_Structures_Smoke is
         (Raised and then Found and then Observed = 33
          and then not Counting_Dynamic_Maps.Is_Poisoned (Direct_Map),
          "raising replacement creator changed the published value");
+      Creator_Probe := False;
 
       Counting_Dynamic_Maps.Put (Direct_Map, Arena, 3, 44, Direct_Result);
       Assert
