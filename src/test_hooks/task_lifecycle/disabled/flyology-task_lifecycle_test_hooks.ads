@@ -77,5 +77,11 @@ private package Flyology.Task_Lifecycle_Test_Hooks is
    with
      Import,
      External_Name => "flyology_disabled_hook_must_be_elided_task_lifecycle_family_manager_consume";
+   procedure Force_Next_Supervision_Signal_Failure
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_supervision_signal_arm";
+   function Consume_Supervision_Signal_Failure return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_supervision_signal_consume";
+   function Supervision_Signal_Failure_Pending return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_supervision_signal_pending";
 
 end Flyology.Task_Lifecycle_Test_Hooks;

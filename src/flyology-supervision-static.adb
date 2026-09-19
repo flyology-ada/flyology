@@ -99,15 +99,26 @@ package body Flyology.Supervision.Static is
       return Result;
    end Failure_Summary;
 
-   --  Lifecycle records changes under its lock. Deliver them only from a
-   --  caller that has left that protected action.
+   --  Lifecycle records changes under its lock. Delivery is best effort
+   --  after publication: a failed source retains Pending for later attempts.
    procedure Flush_Notifications (Item : in out Supervisor) is
-      Failed  : Boolean := False;
-      Failure : Ada.Exceptions.Exception_Occurrence;
-   begin
-      for Child in Child_Kind loop
+      procedure Attempt is
+         Failed  : Boolean := False;
+         Failure : Ada.Exceptions.Exception_Occurrence;
+      begin
+         for Child in Child_Kind loop
+            begin
+               Item.Signals (Child).Flush;
+            exception
+               when Occurrence : others =>
+                  if not Failed then
+                     Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                     Failed := True;
+                  end if;
+            end;
+         end loop;
          begin
-            Item.Signals (Child).Flush;
+            Item.Dispatch.Flush;
          exception
             when Occurrence : others =>
                if not Failed then
@@ -115,19 +126,22 @@ package body Flyology.Supervision.Static is
                   Failed := True;
                end if;
          end;
-      end loop;
-      begin
-         Item.Dispatch.Flush;
-      exception
-         when Occurrence : others =>
-            if not Failed then
-               Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
-               Failed := True;
-            end if;
-      end;
-      if Failed then
-         Ada.Exceptions.Reraise_Occurrence (Failure);
-      end if;
+         if Failed then
+            Ada.Exceptions.Reraise_Occurrence (Failure);
+         end if;
+      end Attempt;
+   begin
+      Attempt;
+   exception
+      when others =>
+         --  Keep the committed transition visible while retrying the wake.
+         --  Notification_Guard makes another attempt on scope exit.
+         begin
+            Attempt;
+         exception
+            when others =>
+               null;
+         end;
    end Flush_Notifications;
 
    type Notification_Guard

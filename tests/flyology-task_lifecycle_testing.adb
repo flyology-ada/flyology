@@ -60,4 +60,12 @@ package body Flyology.Task_Lifecycle_Testing is
       Test_Hooks.Force_Next_Family_Manager_Failure;
    end Force_Next_Family_Manager_Failure;
 
+   procedure Force_Next_Supervision_Signal_Failure is
+   begin
+      Test_Hooks.Force_Next_Supervision_Signal_Failure;
+   end Force_Next_Supervision_Signal_Failure;
+
+   function Supervision_Signal_Failure_Pending return Boolean
+   is (Test_Hooks.Supervision_Signal_Failure_Pending);
+
 end Flyology.Task_Lifecycle_Testing;

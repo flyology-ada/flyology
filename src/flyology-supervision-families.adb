@@ -102,15 +102,26 @@ package body Flyology.Supervision.Families is
       return Value;
    end Failure_Summary;
 
-   --  Family_State records changes under its lock. Deliver them only from a
-   --  caller that has left that protected action.
+   --  Family_State records changes under its lock. Delivery is best effort
+   --  after publication: a failed source retains Pending for later attempts.
    procedure Flush_Notifications (Item : in out Family) is
-      Failed  : Boolean := False;
-      Failure : Ada.Exceptions.Exception_Occurrence;
-   begin
-      for Slot in Slot_Index loop
+      procedure Attempt is
+         Failed  : Boolean := False;
+         Failure : Ada.Exceptions.Exception_Occurrence;
+      begin
+         for Slot in Slot_Index loop
+            begin
+               Item.Signals (Slot).Flush;
+            exception
+               when Occurrence : others =>
+                  if not Failed then
+                     Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                     Failed := True;
+                  end if;
+            end;
+         end loop;
          begin
-            Item.Signals (Slot).Flush;
+            Item.Dispatch.Flush;
          exception
             when Occurrence : others =>
                if not Failed then
@@ -118,19 +129,27 @@ package body Flyology.Supervision.Families is
                   Failed := True;
                end if;
          end;
-      end loop;
-      begin
-         Item.Dispatch.Flush;
-      exception
-         when Occurrence : others =>
-            if not Failed then
-               Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
-               Failed := True;
-            end if;
-      end;
-      if Failed then
-         Ada.Exceptions.Reraise_Occurrence (Failure);
+         if Failed then
+            Ada.Exceptions.Reraise_Occurrence (Failure);
+         end if;
+      end Attempt;
+   begin
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+        and then Flyology.Task_Lifecycle_Test_Hooks.Consume_Supervision_Signal_Failure
+      then
+         raise Program_Error with "injected supervision wake failure";
       end if;
+      Attempt;
+   exception
+      when others =>
+         --  Retry immediately after a transient failure. The controlled guard
+         --  also retries on scope exit without changing committed ownership.
+         begin
+            Attempt;
+         exception
+            when others =>
+               null;
+         end;
    end Flush_Notifications;
 
    type Notification_Guard
