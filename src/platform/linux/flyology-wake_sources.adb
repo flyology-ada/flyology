@@ -114,6 +114,28 @@ package body Flyology.Wake_Sources is
       end if;
    end Consume_All;
 
+   procedure Drain (Item : in out Source) is
+      type Byte_Array is array (Positive range <>) of C.unsigned_char;
+      Buffer : aliased Byte_Array (1 .. 256);
+      Result : C.long;
+   begin
+      if Item.Read_End < 0 then
+         raise Program_Error with "cannot drain absent wake source";
+      end if;
+      loop
+         Result := Read (Item.Read_End, Buffer'Address, C.size_t (Buffer'Length));
+         if Result > 0
+           or else (Result < 0 and then C.int (GNAT.OS_Lib.Errno) = C.int (System.OS_Constants.EINTR))
+         then
+            null;
+         elsif Result < 0 and then GNAT.OS_Lib.Errno = System.OS_Constants.EAGAIN then
+            exit;
+         else
+            raise Program_Error with "cannot drain wake source";
+         end if;
+      end loop;
+   end Drain;
+
    function Descriptor (Item : Source) return C.int
    is (Item.Read_End);
 

@@ -672,7 +672,7 @@ package body Flyology.Buffers.Channels is
          raise Operation_Cancelled;
       else
          select
-            Token.Await_Request;
+            Token.Wait_Event.Await_Request;
             raise Operation_Cancelled;
          then abort
             Timed_Receive_Move (Item, Target, Timeout, Metadata);

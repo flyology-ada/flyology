@@ -16,7 +16,7 @@ package body Flyology.Connection_Test_Hooks is
    procedure Test_Raw_Accept_Return_Barrier
    with Import, Convention => C, External_Name => "flyology_test_connection_raw_accept_return_barrier";
 
-   function Test_Fail_Next_Capacity_Release_Wake return Interfaces.C.int
+   function Test_Fail_Next_Capacity_Wake return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_connection_fail_next_capacity_release_wake";
 
    procedure Barrier (Point : Interfaces.C.int) is
@@ -45,7 +45,7 @@ package body Flyology.Connection_Test_Hooks is
       Test_Raw_Accept_Return_Barrier;
    end Raw_Accept_Return_Barrier;
 
-   function Fail_Next_Capacity_Release_Wake return Boolean
-   is (Test_Fail_Next_Capacity_Release_Wake /= 0);
+   function Fail_Next_Capacity_Wake return Boolean
+   is (Test_Fail_Next_Capacity_Wake /= 0);
 
 end Flyology.Connection_Test_Hooks;

@@ -816,9 +816,12 @@ The website has a focused [supervision guide](https://flyology.org/guide/supervi
 `Flyology.Capacity.Gate` admits a fixed number of concurrent holders. It offers
 blocking, nonblocking, and timed acquisition, terminal shutdown, waiter and
 active counts, and a drain barrier. `Flyology.IO.Connections.Server` is a
-source-compatible subtype of this general gate, so connection admission and
+subtype of this general gate, so connection admission and
 application capacity control share the same implementation. The caller remains
 responsible for pairing every successful acquisition with `Release`.
+Gate operations are package-level primitives on a limited object. Descriptor
+creation, signaling, and draining occur after the private protected state cut;
+callers must not invoke these operations from an enclosing protected action.
 
 `Flyology.Channels.Bounded` is generic over a definite element type and a
 resource-empty value for unoccupied slots. Each channel is a fixed-storage MPMC
@@ -873,10 +876,12 @@ token, retain the first exception, and are reported as `Pool_Failed` after the
 workers join. The shared context must provide its own synchronization when
 workers can execute concurrently.
 
-`Flyology.Cancellation.Token.Await_Request` provides a protected-entry wait for
-task-only coordination. Descriptor-backed wakeup remains available through
-`Wait_Source` when cancellation must participate in a socket or file wait; a
-task-only request does not allocate an OS descriptor.
+`Flyology.Cancellation.Await_Request` waits on a token for task-only
+coordination. An abortable `select` uses `Token.Wait_Event.Await_Request` as its
+trigger. Descriptor-backed wakeup remains available through `Wait_Source` when
+cancellation must participate in a socket or file wait; a task-only request
+does not allocate an OS descriptor. Request and descriptor operations must not
+be invoked from an enclosing protected action.
 
 ### Relocatable data structures
 

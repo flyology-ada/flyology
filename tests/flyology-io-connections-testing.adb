@@ -64,6 +64,11 @@ package body Flyology.IO.Connections.Testing is
       C_Fail_Next_Release_Wake;
    end Fail_Next_Release_Wake;
 
+   procedure Fail_Next_Drain_Wake is
+   begin
+      C_Fail_Next_Release_Wake;
+   end Fail_Next_Drain_Wake;
+
    procedure Set_Receive_Cap (Maximum : Natural) is
    begin
       C_Set_Receive_Cap (Interfaces.C.int (Maximum));
