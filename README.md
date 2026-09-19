@@ -719,6 +719,11 @@ rings. Static trees validate dependencies and named cohorts, start in
 deterministic topological order, stop in reverse order, and coordinate isolated,
 cohort, or transitive-dependent recovery. Each restart constructs a fresh Ada
 task object under a local master; stale handles cannot control its replacement.
+The static controller also creates one lightweight runner task and guarded
+fiber stack per started generation so its manager can observe readiness and
+stop deadlines while the synchronous generation factory runs. The runner
+joins before its generation control leaves scope; the controller's snapshots,
+dependency matrix, and event ring retain fixed capacities.
 If that generation owns a nested family, reconstruction also creates an empty
 one-shot family with new controller authority. Applications retain desired
 dynamic requests outside the family, reconcile external state idempotently,
