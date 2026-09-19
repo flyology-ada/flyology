@@ -9,4 +9,11 @@ package Flyology.Data_Structures.Slab_Pools.Validation with Preelaborate is
    --  @exclude
    procedure Validate_Empty (Item : View);
 
+   --  Observe whether every slot is live before a composite owner caches
+   --  exhaustion. A transient slot must not be treated as permanently full.
+   --  @param Item Attached slab view
+   --  @return Whether all slots were observed live
+   --  @exclude
+   function All_Live (Item : View) return Boolean;
+
 end Flyology.Data_Structures.Slab_Pools.Validation;

@@ -19,19 +19,25 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    use type Interfaces.Unsigned_32;
    use type System.Address;
 
-   Table_Offset      : constant Byte_Count := Layouts.Header_Size;
-   Entry_Size        : constant Byte_Count := 24;
-   Token_Offset      : constant Byte_Count := 0;
-   Generation_Offset : constant Byte_Count := 8;
-   State_Offset      : constant Byte_Count := 16;
-   Reserved_Offset   : constant Byte_Count := 20;
-   Guard_Offset      : constant Byte_Count := 44;
+   Table_Offset        : constant Byte_Count := Layouts.Header_Size;
+   Entry_Size          : constant Byte_Count := 32;
+   Token_Offset        : constant Byte_Count := 0;
+   Generation_Offset   : constant Byte_Count := 8;
+   State_Offset        : constant Byte_Count := 16;
+   Reserved_Offset     : constant Byte_Count := 20;
+   Availability_Offset : constant Byte_Count := 24;
+   Guard_Offset        : constant Byte_Count := 44;
 
    Empty_State        : constant Interfaces.Unsigned_32 := 0;
    Initializing_State : constant Interfaces.Unsigned_32 := 1;
    Live_State         : constant Interfaces.Unsigned_32 := 2;
    Unlocked           : constant Interfaces.Unsigned_32 := 0;
    Locked             : constant Interfaces.Unsigned_32 := 1;
+
+   Full_Bit    : constant Interfaces.Unsigned_64 := 16#8000_0000_0000_0000#;
+   Change_Unit : constant Interfaces.Unsigned_64 := 16#0000_0000_8000_0000#;
+   Change_Mask : constant Interfaces.Unsigned_64 := 16#7FFF_FFFF_8000_0000#;
+   Epoch_Mask  : constant Interfaces.Unsigned_64 := 16#0000_0000_7FFF_FFFF#;
 
    Chunk_Location : constant Region_Offset := Region_Offset (Minimum_Arena_Alignment);
 
@@ -92,6 +98,60 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Bytes.Write_U64 (Entry_Address (Item, Index, Generation_Offset, 8, 8), Value.Generation);
    end Set_Entry_Allocation;
 
+   function Availability_Address (Item : View; Index : Positive) return System.Address
+   is (Entry_Address (Item, Index, Availability_Offset, 8, 8));
+
+   --  A saturated epoch permanently disables the hint rather than allowing
+   --  an old scan to match a wrapped availability generation.
+   function Advance_Epoch (State : Interfaces.Unsigned_64) return Interfaces.Unsigned_64
+   is (if (State and Epoch_Mask) = Epoch_Mask then State else State + 1);
+
+   procedure Begin_Change (Item : View; Index : Positive) is
+      Address  : constant System.Address := Availability_Address (Item, Index);
+      Current  : Interfaces.Unsigned_64 := Atomic.Load_Acquire_U64 (Address);
+      Desired  : Interfaces.Unsigned_64;
+      Expected : Interfaces.Unsigned_64;
+   begin
+      loop
+         if (Current and Change_Mask) = Change_Mask then
+            raise Busy_Error with "adaptive-pool chunk has too many concurrent changes";
+         end if;
+         Desired := Advance_Epoch ((Current and not Full_Bit) + Change_Unit);
+         Expected := Current;
+         exit when Atomic.Compare_Exchange_U64 (Address, Expected, Desired);
+         Current := Expected;
+      end loop;
+   end Begin_Change;
+
+   procedure End_Change (Item : View; Index : Positive) is
+      Address  : constant System.Address := Availability_Address (Item, Index);
+      Current  : Interfaces.Unsigned_64 := Atomic.Load_Acquire_U64 (Address);
+      Desired  : Interfaces.Unsigned_64;
+      Expected : Interfaces.Unsigned_64;
+   begin
+      loop
+         if (Current and Change_Mask) = 0 then
+            raise Layout_Error with "adaptive-pool change count is corrupt";
+         end if;
+         Desired := Advance_Epoch ((Current and not Full_Bit) - Change_Unit);
+         Expected := Current;
+         exit when Atomic.Compare_Exchange_U64 (Address, Expected, Desired);
+         Current := Expected;
+      end loop;
+   end End_Change;
+
+   procedure Mark_Full (Item : View; Index : Positive; Observed : Interfaces.Unsigned_64) is
+      Expected : Interfaces.Unsigned_64 := Observed;
+   begin
+      if (Observed and (Full_Bit or Change_Mask)) = 0 and then (Observed and Epoch_Mask) /= Epoch_Mask then
+         if not Atomic.Compare_Exchange_U64
+                  (Availability_Address (Item, Index), Expected, Observed or Full_Bit)
+         then
+            null;
+         end if;
+      end if;
+   end Mark_Full;
+
    procedure Clear_Cache (Item : in out View; Index : Positive) is
    begin
       if Chunk_Slabs.Is_Attached (Item.Chunks (Index).Slab) then
@@ -130,6 +190,7 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       for Index in 1 .. Maximum_Chunks loop
          Set_Entry_Allocation (Item, Index, Arena_Provider.Null_Allocation);
          Bytes.Write_U32 (Entry_Address (Item, Index, Reserved_Offset, 4, 4), 0);
+         Atomic.Store_Release_U64 (Availability_Address (Item, Index), 0);
          Set_Entry_State (Item, Index, Empty_State);
       end loop;
       Layouts.Publish (Item.Core);
@@ -195,19 +256,31 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
    end Ensure_Chunk;
 
    procedure Validate_Table (Item : in out View; Arena : Arena_Provider.View) is
+      Availability : Interfaces.Unsigned_64;
    begin
       for Index in 1 .. Maximum_Chunks loop
          if Bytes.Read_U32 (Entry_Address (Item, Index, Reserved_Offset, 4, 4)) /= 0 then
             raise Layout_Error with "adaptive-pool chunk reserved field is corrupt";
          end if;
+         Availability := Atomic.Load_Acquire_U64 (Availability_Address (Item, Index));
+         if (Availability and Full_Bit) /= 0 and then (Availability and Change_Mask) /= 0 then
+            raise Layout_Error with "adaptive-pool chunk availability is corrupt";
+         end if;
          case Entry_State (Item, Index) is
             when Empty_State        =>
                if Entry_Allocation (Item, Index) /= Arena_Provider.Null_Allocation then
                   raise Layout_Error with "adaptive-pool empty chunk retains an allocation";
+               elsif Availability /= 0 then
+                  raise Layout_Error with "adaptive-pool empty chunk retains availability state";
                end if;
 
             when Live_State         =>
                Ensure_Chunk (Item, Arena, Index);
+               if (Availability and Full_Bit) /= 0
+                 and then not Chunk_Validation.All_Live (Item.Chunks (Index).Slab)
+               then
+                  raise Layout_Error with "adaptive-pool full hint disagrees with slab slots";
+               end if;
 
             when Initializing_State =>
                raise Layout_Error with "adaptive-pool chunk initialization is incomplete";
@@ -365,28 +438,34 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Slab_Handle    : Handles.Handle;
       Slab_Result    : Chunk_Slabs.Allocation_Result;
       Saw_Contention : Boolean := False;
+      Availability   : Interfaces.Unsigned_64;
    begin
       Value := Null_Handle;
       for Index in 1 .. Maximum_Chunks loop
          if Entry_State (Item, Index) = Live_State then
-            Ensure_Chunk (Item, Arena, Index);
-            Chunk_Slabs.Try_Allocate (Item.Chunks (Index).Slab, Data, Slab_Handle, Slab_Result);
-            case Slab_Result is
-               when Chunk_Slabs.Allocated            =>
-                  Value :=
-                    (Chunk => Interfaces.Unsigned_32 (Index),
-                     Slot  => Slab_Handle.Slot,
-                     Stamp => Slab_Handle.Stamp,
-                     Epoch => Item.Core.Epoch_Value);
-                  Result := Allocated;
-                  return;
+            Availability := Atomic.Load_Acquire_U64 (Availability_Address (Item, Index));
+            if (Availability and Full_Bit) = 0 then
+               Ensure_Chunk (Item, Arena, Index);
+               Chunk_Slabs.Try_Allocate (Item.Chunks (Index).Slab, Data, Slab_Handle, Slab_Result);
+               case Slab_Result is
+                  when Chunk_Slabs.Allocated            =>
+                     Value :=
+                       (Chunk => Interfaces.Unsigned_32 (Index),
+                        Slot  => Slab_Handle.Slot,
+                        Stamp => Slab_Handle.Stamp,
+                        Epoch => Item.Core.Epoch_Value);
+                     Result := Allocated;
+                     return;
 
-               when Chunk_Slabs.Allocation_Contended =>
-                  Saw_Contention := True;
+                  when Chunk_Slabs.Allocation_Contended =>
+                     Saw_Contention := True;
 
-               when Chunk_Slabs.Exhausted            =>
-                  null;
-            end case;
+                  when Chunk_Slabs.Exhausted            =>
+                     if Chunk_Validation.All_Live (Item.Chunks (Index).Slab) then
+                        Mark_Full (Item, Index, Availability);
+                     end if;
+               end case;
+            end if;
          end if;
       end loop;
       Result := (if Saw_Contention then Allocation_Contended else Exhausted);
@@ -534,7 +613,17 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Slab_Handle : Handles.Handle;
    begin
       Resolve (Item, Arena, Value, Index, Slab_Handle);
-      Chunk_Slabs.Replace (Item.Chunks (Index).Slab, Slab_Handle, Data);
+      --  A failed replacement may poison a slot that an external supervisor
+      --  later recycles. Keep the full hint invalid throughout the operation.
+      Begin_Change (Item, Index);
+      begin
+         Chunk_Slabs.Replace (Item.Chunks (Index).Slab, Slab_Handle, Data);
+      exception
+         when others =>
+            End_Change (Item, Index);
+            raise;
+      end;
+      End_Change (Item, Index);
    end Replace;
 
    procedure Release (Item : in out View; Arena : Arena_Provider.View; Value : Handle) is
@@ -542,7 +631,26 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
       Slab_Handle : Handles.Handle;
    begin
       Resolve (Item, Arena, Value, Index, Slab_Handle);
-      Chunk_Slabs.Release (Item.Chunks (Index).Slab, Slab_Handle);
+      --  Keep the availability transition around slab release indivisible
+      --  with respect to task abort. A dead process can leave a positive
+      --  change count; that disables caching rather than hiding a free slot.
+      System.Soft_Links.Abort_Defer.all;
+      begin
+         Begin_Change (Item, Index);
+         begin
+            Chunk_Slabs.Release (Item.Chunks (Index).Slab, Slab_Handle);
+         exception
+            when others =>
+               End_Change (Item, Index);
+               raise;
+         end;
+         End_Change (Item, Index);
+      exception
+         when others =>
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
    end Release;
 
    procedure Destroy (Item : in out View; Arena : in out Arena_Provider.View) is
@@ -580,6 +688,7 @@ package body Flyology.Data_Structures.Allocation_Pools.Adaptive is
                   Regions.Detach (Item.Chunks (Index).Region);
                   Item.Chunks (Index).Allocation := Arena_Provider.Null_Allocation;
                   Set_Entry_Allocation (Item, Index, Arena_Provider.Null_Allocation);
+                  Atomic.Store_Release_U64 (Availability_Address (Item, Index), 0);
                   Set_Entry_State (Item, Index, Empty_State);
                   if Flyology.Adaptive_Pool_Test_Hooks.Enabled then
                      Flyology.Adaptive_Pool_Test_Hooks.Record_Chunk_State (Index, Live => False);
