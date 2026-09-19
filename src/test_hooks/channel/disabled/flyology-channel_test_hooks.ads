@@ -46,4 +46,31 @@ private package Flyology.Channel_Test_Hooks is
    function Fail_Next_Buffer_Signal return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_buffer_signal_failure";
 
+   procedure Arm_Next_Bounded_Signal_Interrupt
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_interrupt_arm";
+   function Take_Bounded_Signal_Interrupt return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_interrupt_take";
+   function Bounded_Signal_Interrupt_Observed return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_interrupt_observed";
+   procedure Arm_Next_Bounded_Signal_Failure
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_failure_arm";
+   function Take_Bounded_Signal_Failure return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_failure_take";
+   function Bounded_Signal_Failure_Observed return Boolean
+   with
+     Import,
+     External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_signal_failure_observed";
+   procedure Arm_After_Bounded_Failure_Ack
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_ack_arm";
+   procedure After_Bounded_Failure_Ack_Barrier
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_ack_barrier";
+   function Bounded_Failure_Ack_Reached return Boolean
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_ack_reached";
+   procedure Release_After_Bounded_Failure_Ack
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_channel_bounded_ack_release";
+
 end Flyology.Channel_Test_Hooks;

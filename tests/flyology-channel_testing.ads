@@ -20,4 +20,12 @@ package Flyology.Channel_Testing is
 
    procedure Arm_Next_Buffer_Signal_Failure;
 
+   procedure Arm_Next_Bounded_Signal_Interrupt;
+   function Bounded_Signal_Interrupt_Observed return Boolean;
+   procedure Arm_Next_Bounded_Signal_Failure;
+   function Bounded_Signal_Failure_Observed return Boolean;
+   procedure Arm_After_Bounded_Failure_Ack;
+   procedure Wait_After_Bounded_Failure_Ack;
+   procedure Release_After_Bounded_Failure_Ack;
+
 end Flyology.Channel_Testing;
