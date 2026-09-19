@@ -127,6 +127,56 @@ procedure Data_Structures_Smoke is
         Create_Value       => U64_Elements.Create,
         Observe_Value      => U64_Elements.Value_Of,
         Direct_Constructor => Test_U64_Construct'Access);
+   function Read_U32 (Base : System.Address; Offset : Interfaces.C.size_t) return Interfaces.Unsigned_32;
+   pragma Import (C, Read_U32, "flyology_test_mapping_read_u32");
+
+   Value_Creates     : Natural := 0;
+   Direct_Constructs : Natural := 0;
+   Creator_Probe     : Boolean := False;
+   Creator_Base      : System.Address := System.Null_Address;
+   Creator_Offset    : Interfaces.C.size_t := 0;
+
+   function Counting_Create (Data : Interfaces.Unsigned_64) return U64_Elements.Value is
+   begin
+      Value_Creates := Value_Creates + 1;
+      if Creator_Probe and then Interfaces."/=" (Read_U32 (Creator_Base, Creator_Offset), 0) then
+         raise Program_Error with "value creator ran under the dynamic-map guard";
+      end if;
+      if Interfaces."=" (Data, 16#CAFE_BABE#) then
+         raise Constraint_Error with "deliberate value creation failure";
+      end if;
+      return U64_Elements.Create (Data);
+   end Counting_Create;
+
+   procedure Counting_Construct
+     (Item : in out U64_Elements.Representation.Builder; Data : Interfaces.Unsigned_64) is
+   begin
+      Direct_Constructs := Direct_Constructs + 1;
+      U64_Elements.Set (Item, Data);
+      if Interfaces."=" (Data, 16#DEAD_BEEF#) then
+         raise Constraint_Error with "deliberate direct construction failure";
+      end if;
+   end Counting_Construct;
+
+   package Counting_Element is new
+     DS.Storage_Types.Elements
+       (Representation     => U64_Elements.Representation,
+        Source_Type        => Interfaces.Unsigned_64,
+        Observed_Type      => Interfaces.Unsigned_64,
+        Create_Value       => Counting_Create,
+        Observe_Value      => U64_Elements.Value_Of,
+        Direct_Constructor => Counting_Construct'Access);
+   package Fallback_Element is new
+     DS.Storage_Types.Elements
+       (Representation => U64_Elements.Representation,
+        Source_Type    => Interfaces.Unsigned_64,
+        Observed_Type  => Interfaces.Unsigned_64,
+        Create_Value   => Counting_Create,
+        Observe_Value  => U64_Elements.Value_Of);
+   package Counting_Dynamic_Maps is new
+     DS.Dynamic.Hash_Maps (Arenas, U64_Elements.Element, Counting_Element);
+   package Fallback_Dynamic_Maps is new
+     DS.Dynamic.Hash_Maps (Arenas, U64_Elements.Element, Fallback_Element);
    package Vectors is new DS.Vectors (Element => Test_U64_Element);
    package Alternate_U64 is new
      DS.Storage_Types.Immutable
@@ -332,9 +382,6 @@ procedure Data_Structures_Smoke is
    function Close_Mapping (Path : C.char_array; FD : C.int) return C.int;
    pragma Import (C, Close_Mapping, "flyology_test_mapping_close");
 
-   function Read_U32 (Base : System.Address; Offset : C.size_t) return Interfaces.Unsigned_32;
-   pragma Import (C, Read_U32, "flyology_test_mapping_read_u32");
-
    function Read_U64 (Base : System.Address; Offset : C.size_t) return Interfaces.Unsigned_64;
    pragma Import (C, Read_U64, "flyology_test_mapping_read_u64");
 
@@ -532,6 +579,101 @@ procedure Data_Structures_Smoke is
    function Map_Entry_Offset_At
      (Location : DS.Region_Offset; Index : Interfaces.Unsigned_64; Relative : Natural) return C.size_t
    is (Raw_Offset (Location, 72 + Natural (Index) * 32 + Relative));
+
+   procedure Test_Dynamic_Map_Put_Construction is
+      use type Counting_Dynamic_Maps.Put_Result;
+      use type Fallback_Dynamic_Maps.Put_Result;
+
+      Arena_Storage  : aliased SSE.Storage_Array (1 .. 131_072) := [others => 0]
+      with Alignment => 64;
+      Header_Storage : aliased SSE.Storage_Array (1 .. 512) := [others => 0]
+      with Alignment => 64;
+      Arena_Region, Header_Region : Regions.View;
+      Arena                       : Arenas.View;
+      Direct_Map                  : Counting_Dynamic_Maps.View;
+      Fallback_Map                : Fallback_Dynamic_Maps.View;
+      Direct_Result               : Counting_Dynamic_Maps.Put_Result;
+      Fallback_Result             : Fallback_Dynamic_Maps.Put_Result;
+      Observed                    : Interfaces.Unsigned_64;
+      Found, Raised               : Boolean;
+   begin
+      Regions.Attach (Arena_Region, Arena_Storage'Address, DS.Byte_Count (Arena_Storage'Length));
+      Regions.Attach (Header_Region, Header_Storage'Address, DS.Byte_Count (Header_Storage'Length));
+      Arenas.Initialize
+        (Arena, Arena_Region, 64, (Usable_Capacity => 65_536, Minimum_Block_Size => 64),
+         16#BAAC_5A1F_7000_0002#);
+      Counting_Dynamic_Maps.Initialize (Direct_Map, Header_Region, 64, Arena, 2);
+      Fallback_Dynamic_Maps.Initialize (Fallback_Map, Header_Region, 256, Arena, 2);
+      Creator_Base := Header_Storage'Address;
+      Creator_Offset := C.size_t (64 + 44);
+      Creator_Probe := True;
+
+      Value_Creates := 0;
+      Direct_Constructs := 0;
+      Counting_Dynamic_Maps.Put (Direct_Map, Arena, 1, 11, Direct_Result);
+      Counting_Dynamic_Maps.Put (Direct_Map, Arena, 2, 22, Direct_Result);
+      Assert
+        (Direct_Result = Counting_Dynamic_Maps.Put_Inserted
+         and then Value_Creates = 0 and then Direct_Constructs = 2
+         and then Counting_Dynamic_Maps.Capacity (Direct_Map) >= 4,
+         "dynamic-map insertion did not construct directly through growth");
+      Counting_Dynamic_Maps.Put (Direct_Map, Arena, 1, 33, Direct_Result);
+      Assert
+        (Direct_Result = Counting_Dynamic_Maps.Put_Replaced
+         and then Value_Creates = 1 and then Direct_Constructs = 2,
+         "dynamic-map replacement did not stage its value once");
+
+      Raised := False;
+      begin
+         Counting_Dynamic_Maps.Put (Direct_Map, Arena, 1, 16#CAFE_BABE#, Direct_Result);
+      exception
+         when Constraint_Error =>
+            Raised := True;
+      end;
+      Counting_Dynamic_Maps.Get (Direct_Map, Arena, 1, Observed, Found);
+      Assert
+        (Raised and then Found and then Observed = 33
+         and then not Counting_Dynamic_Maps.Is_Poisoned (Direct_Map),
+         "raising replacement creator changed the published value");
+      Creator_Probe := False;
+
+      Counting_Dynamic_Maps.Put (Direct_Map, Arena, 3, 44, Direct_Result);
+      Assert
+        (Direct_Result = Counting_Dynamic_Maps.Put_Inserted
+         and then Counting_Dynamic_Maps.Capacity (Direct_Map) = 4,
+         "dynamic-map growth fixture did not fill the first table");
+      Raised := False;
+      begin
+         Counting_Dynamic_Maps.Put (Direct_Map, Arena, 4, 16#DEAD_BEEF#, Direct_Result);
+      exception
+         when Constraint_Error =>
+            Raised := True;
+      end;
+      Counting_Dynamic_Maps.Get (Direct_Map, Arena, 4, Observed, Found);
+      Assert
+        (Raised and then not Found and then Counting_Dynamic_Maps.Length (Direct_Map) = 3
+         and then not Counting_Dynamic_Maps.Is_Poisoned (Direct_Map)
+         and then Counting_Dynamic_Maps.Capacity (Direct_Map) >= 8,
+         "raising direct constructor published a slot or poisoned completed growth");
+      Counting_Dynamic_Maps.Put (Direct_Map, Arena, 4, 55, Direct_Result);
+      Counting_Dynamic_Maps.Get (Direct_Map, Arena, 4, Observed, Found);
+      Assert
+        (Direct_Result = Counting_Dynamic_Maps.Put_Inserted and then Found and then Observed = 55,
+         "dynamic-map insertion could not reuse a failed unpublished slot");
+
+      Value_Creates := 0;
+      Fallback_Dynamic_Maps.Put (Fallback_Map, Arena, 5, 55, Fallback_Result);
+      Fallback_Dynamic_Maps.Get (Fallback_Map, Arena, 5, Observed, Found);
+      Assert
+        (Fallback_Result = Fallback_Dynamic_Maps.Put_Inserted
+         and then Found and then Observed = 55 and then Value_Creates = 1,
+         "dynamic-map fallback did not create its value once");
+      Fallback_Dynamic_Maps.Destroy (Fallback_Map, Arena);
+      Counting_Dynamic_Maps.Destroy (Direct_Map, Arena);
+      Arenas.Destroy (Arena);
+      Regions.Detach (Header_Region);
+      Regions.Detach (Arena_Region);
+   end Test_Dynamic_Map_Put_Construction;
 
    procedure Test_Hash_Map_Backward_Shift is
       Capacity            : constant := 8;
@@ -1035,6 +1177,7 @@ procedure Data_Structures_Smoke is
 
 begin
    Test_Adaptive_Destroy_Atomicity;
+   Test_Dynamic_Map_Put_Construction;
    Test_Hash_Map_Backward_Shift;
    Assert
      (Mapping_Create (Path, Mapping_Length, Base_A'Access, Base_B'Access, FD'Access) = 0,
