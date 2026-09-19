@@ -720,8 +720,10 @@ procedure Flyology.Supervision.Static_Smoke is
         Run_One_Generation  => Run_Backoff_Generation,
         Subtree_Recovery    => Backoff_Second_Recovery);
 
-   type Edge_Mode is (Readiness_Case, Stuck_Case);
-   type Edge_Context (Mode : Edge_Mode) is limited null record;
+   type Edge_Mode is (Readiness_Case, Shutdown_Before_Readiness_Case, Stuck_Case);
+   type Edge_Context (Mode : Edge_Mode) is limited record
+      Started : Invocation_Count;
+   end record;
 
    procedure Execute_Edge
      (Context : in out Edge_Context; Control : not null access Flyology.Supervision.Generation_Control) is
@@ -734,6 +736,17 @@ procedure Flyology.Supervision.Static_Smoke is
                end if;
                delay 0.001;
             end loop;
+
+         when Shutdown_Before_Readiness_Case =>
+            Context.Started.Increment;
+            loop
+               exit when Flyology.Supervision.Stopping (Control.all).Requested;
+               delay 0.001;
+            end loop;
+            --  Keep the unready generation alive past the stop grace deadline
+            --  so the manager checks readiness again after publishing shutdown.
+            delay 2.0;
+            raise Flyology.Cancellation.Operation_Cancelled;
 
          when Stuck_Case     =>
             Flyology.Supervision.Mark_Ready (Control.all);
@@ -769,6 +782,16 @@ procedure Flyology.Supervision.Static_Smoke is
          Has_Group         => False,
          Group             => 0);
    end Readiness_Specification;
+
+   function Shutdown_Before_Readiness_Specification
+     (Child : Edge_Kind) return Flyology.Supervision.Child_Specification
+   is
+      Value : Flyology.Supervision.Child_Specification := Readiness_Specification (Child);
+   begin
+      Value.Readiness_Timeout := Ada.Real_Time.Seconds (1);
+      Value.Stopping.Grace := Ada.Real_Time.Milliseconds (1_250);
+      return Value;
+   end Shutdown_Before_Readiness_Specification;
 
    function Stuck_Specification (Child : Edge_Kind) return Flyology.Supervision.Child_Specification is
       pragma Unreferenced (Child);
@@ -824,6 +847,16 @@ procedure Flyology.Supervision.Static_Smoke is
         Application_Context => Edge_Context,
         Logical_Id          => Edge_Id,
         Specification       => Readiness_Specification,
+        Depends_On          => No_Edge_Dependency,
+        Cohort_Member       => Edge_Cohort,
+        Run_One_Generation  => Run_Edge_Generation);
+
+   package Shutdown_Before_Readiness_Supervisors is new
+     Flyology.Supervision.Static
+       (Child_Kind          => Edge_Kind,
+        Application_Context => Edge_Context,
+        Logical_Id          => Edge_Id,
+        Specification       => Shutdown_Before_Readiness_Specification,
         Depends_On          => No_Edge_Dependency,
         Cohort_Member       => Edge_Cohort,
         Run_One_Generation  => Run_Edge_Generation);
@@ -1879,6 +1912,59 @@ begin
       pragma Assert (Result.Termination.Kind = Flyology.Supervision.Readiness_Timeout);
       pragma Assert (Readiness_Supervisors.Current (Item, Edge_Service).State = Flyology.Supervision.Joined);
       pragma Assert (Readiness_Supervisors.Current (Item, Edge_Service).Task_Model = Flyology.Native_Task);
+   end;
+
+   declare
+      Context : aliased Edge_Context (Shutdown_Before_Readiness_Case);
+      Item    : aliased Shutdown_Before_Readiness_Supervisors.Supervisor;
+      Result  : Flyology.Supervision.Supervisor_Result;
+      Events  : Flyology.Supervision.Supervisor_Event_Array (1 .. 32);
+      Cursor  : Flyology.Supervision.Event_Sequence := 0;
+      Count   : Natural;
+      Dropped : Flyology.Supervision.Event_Sequence;
+      Saw_Termination : Boolean := False;
+
+      task Owner is
+         entry Start;
+         entry Join;
+      end Owner;
+
+      task body Owner is
+      begin
+         accept Start;
+         Shutdown_Before_Readiness_Supervisors.Run (Item, Context, Result);
+         accept Join;
+      end Owner;
+
+      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (5);
+   begin
+      Owner.Start;
+      loop
+         exit when Context.Started.Value = 1;
+         if Ada.Real_Time.Clock >= Deadline then
+            Shutdown_Before_Readiness_Supervisors.Request_Shutdown (Item);
+            Owner.Join;
+            raise Program_Error with "shutdown-before-readiness child did not start";
+         end if;
+         delay 0.001;
+      end loop;
+      Shutdown_Before_Readiness_Supervisors.Request_Shutdown (Item);
+      Owner.Join;
+      pragma Assert (Result.Outcome = Flyology.Supervision.Shutdown_Completed);
+      pragma Assert
+        (Shutdown_Before_Readiness_Supervisors.Current (Item, Edge_Service).Termination.Kind =
+         Flyology.Supervision.Supervisor_Shutdown);
+      Shutdown_Before_Readiness_Supervisors.Read_Events (Item, Cursor, Events, Count, Dropped);
+      pragma Assert (Dropped = 0);
+      for Index in 1 .. Count loop
+         if Events (Index).Kind = Flyology.Supervision.Lifecycle_Changed
+           and then Events (Index).After = Flyology.Supervision.Terminated
+         then
+            Saw_Termination := True;
+            pragma Assert (Events (Index).Termination = Flyology.Supervision.Supervisor_Shutdown);
+         end if;
+      end loop;
+      pragma Assert (Saw_Termination);
    end;
 
    declare
