@@ -1636,6 +1636,196 @@ package body System.Flyology.File_Engine is
          return False;
    end Submit;
 
+   procedure Submit_Batch
+     (Item       : in out Engine;
+      Requests   : File_Submission_Array;
+      Submitted  : out Natural;
+      Error_Code : out C.int)
+   is
+      State : constant Engine_State_Access := To_State (Item.State);
+   begin
+      Submitted := 0;
+      Error_Code := 0;
+      if Requests'Length = 0 then
+         return;
+      elsif State = null then
+         Error_Code := EINVAL;
+         return;
+      elsif State.Backend = Native_AIO then
+         for Request of Requests loop
+            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+               Error_Code := EAGAIN;
+               exit;
+            end if;
+            exit when not Submit
+              (Item, Request.Descriptor, Request.Buffer, Request.Length,
+               Request.Offset, Request.For_Write, Request.Token, Error_Code);
+            Submitted := Submitted + 1;
+         end loop;
+         if Submitted = Requests'Length then
+            Error_Code := 0;
+         end if;
+         return;
+      end if;
+
+      declare
+         type Request_Array is array (Positive range <>) of IO_Uring_Request_Access;
+         Prepared : Request_Array (1 .. Natural'Min (Requests'Length, Natural (Ring_Entries))) :=
+           (others => null);
+         Count        : Natural := 0;
+         Head         : constant U32 := Load (State.SQ_Head, AP.Acquire);
+         Tail         : constant U32 := Load (State.SQ_Tail, AP.Relaxed);
+         Entries      : constant U32 := Load (State.SQ_Entries, AP.Acquire);
+         Mask         : constant U32 := Load (State.SQ_Mask, AP.Acquire);
+         Result       : C.long;
+         Submit_Error : C.int;
+         Consumed     : U32;
+         Request      : IO_Uring_Request_Access;
+         Identity     : SSE.Integer_Address;
+         Index        : U32;
+         Submission   : Submission_Entry_Access;
+      begin
+         if Head /= Tail then
+            --  Never retract an SQ tail past an earlier producer's entries.
+            if Faults.Enabled then
+               Faults.Note (Faults.File_Submission_Full);
+            end if;
+            Error_Code := EAGAIN;
+            return;
+         end if;
+         for Position in Prepared'Range loop
+            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+               Error_Code := EAGAIN;
+               exit;
+            elsif Has_Overflow_Backlog (State)
+              or else State.Uring_In_Flight + U32 (Count) >= State.CQ_Capacity
+              or else Tail + U32 (Count) - Head >= Entries
+            then
+               if Faults.Enabled and then State.Uring_In_Flight + U32 (Count) >= State.CQ_Capacity then
+                  State.Test_Backpressure_Observed := True;
+                  Faults.Note (Faults.File_Uring_Backpressure);
+               end if;
+               Error_Code := EAGAIN;
+               exit;
+            elsif Requests (Requests'First + Position - 1).Length > C.size_t (U32'Last) then
+               Error_Code := EINVAL;
+               exit;
+            end if;
+
+            begin
+               Request := Acquire_Uring_Request (State);
+            exception
+               when Storage_Error =>
+                  Error_Code := ENOMEM;
+                  exit;
+            end;
+            Identity := SSE.To_Integer (Request.all'Address);
+            if Identity mod 2 /= 0 then
+               Recycle_Uring_Request (State, Request);
+               Error_Code := EINVAL;
+               exit;
+            end if;
+            Request.all :=
+              (Token                 => Requests (Requests'First + Position - 1).Token,
+               Kind                  => File_Data,
+               Cancel_Submitted      => False,
+               Operation_Complete    => False,
+               Main_Complete         => False,
+               Notification_Expected => False,
+               Stored_Result         => 0,
+               Stored_Error          => 0,
+               Admin_Complete        => False,
+               Admin_Submit_Deferred => False,
+               Next_Free             => null,
+               Next_Active           => null,
+               Previous_Active       => null,
+               Active_Owner          => System.Null_Address,
+               Next_Deferred         => null,
+               Cancel_Next           => null,
+               Cancel_Previous       => null,
+               Cancel_Owner          => System.Null_Address);
+            Index := (Tail + U32 (Count)) and Mask;
+            Submission :=
+              To_Submission_Entry
+                (State.SQEs + Storage_Offset (Index) * Storage_Offset (Submission_Entry'Size / 8));
+            Submission.all :=
+              (Opcode       =>
+                 (if Requests (Requests'First + Position - 1).For_Write
+                  then IORING_OP_WRITE else IORING_OP_READ),
+               Flags        => 0,
+               IO_Priority  => 0,
+               Descriptor   => S32 (Requests (Requests'First + Position - 1).Descriptor),
+               Offset       => U64 (Requests (Requests'First + Position - 1).Offset),
+               Buffer       => U64 (SSE.To_Integer (Requests (Requests'First + Position - 1).Buffer)),
+               Length       => U32 (Requests (Requests'First + Position - 1).Length),
+               Read_Flags   => 0,
+               User_Data    => U64 (Identity),
+               Buffer_Index => 0,
+               Personality  => 0,
+               Input_FD     => 0,
+               Address_3    => 0,
+               Padding      => 0);
+            Store
+              (State.SQ_Array + Storage_Offset (Index) * Storage_Offset (U32'Size / 8), Index, AP.Relaxed);
+            Count := Count + 1;
+            Prepared (Count) := Request;
+            if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Submit_EBUSY) then
+               Recycle_Uring_Request (State, Prepared (Count));
+               Count := Count - 1;
+               Error_Code := EAGAIN;
+               exit;
+            end if;
+         end loop;
+         if Count = 0 then
+            return;
+         end if;
+
+         --  The owning event-loop thread is the sole producer. Publish the
+         --  contiguous run once, then commit only the prefix consumed by the
+         --  kernel. The suffix is unpublished again before recycling nodes.
+         Store (State.SQ_Tail, Tail + U32 (Count), AP.Release);
+         loop
+            Result := Linux_IO_Uring_Enter (State.Ring_FD, C.unsigned (Count), 0, 0, System.Null_Address, 0);
+            exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+         end loop;
+         Submit_Error := (if Result < 0 then Retryable_Submit_Error (C.int (OSI.errno)) else EAGAIN);
+         Consumed := Load (State.SQ_Head, AP.Acquire) - Tail;
+         if Consumed > U32 (Count) then
+            raise Program_Error with "io_uring consumed beyond published file batch";
+         end if;
+         Submitted := Natural'Max ((if Result >= 0 then Natural (Result) else 0), Natural (Consumed));
+         if Submitted > Count then
+            raise Program_Error with "io_uring accepted beyond published file batch";
+         end if;
+         if Faults.Enabled and then Submitted > 1 then
+            Faults.Note (Faults.File_Uring_Multi_Submit);
+         end if;
+         if Submitted < Count then
+            Store (State.SQ_Tail, Tail + U32 (Submitted), AP.Release);
+            Error_Code := Submit_Error;
+         elsif Count < Requests'Length and then Error_Code = 0 then
+            Error_Code := EAGAIN;
+         end if;
+         for Position in 1 .. Count loop
+            Request := Prepared (Position);
+            if Position <= Submitted then
+               Request.Next_Active := State.Active_Uring_Requests;
+               Request.Previous_Active := null;
+               Request.Active_Owner := State_Address (State);
+               if State.Active_Uring_Requests /= null then
+                  State.Active_Uring_Requests.Previous_Active := Request;
+               end if;
+               State.Active_Uring_Requests := Request;
+               Index_Uring_Cancel (State, Request);
+               State.Active_Count := State.Active_Count + 1;
+               State.Uring_In_Flight := State.Uring_In_Flight + 1;
+            else
+               Recycle_Uring_Request (State, Request);
+            end if;
+         end loop;
+      end;
+   end Submit_Batch;
+
    function Cancel
      (Item           : in out Engine;
       Descriptor     : C.int;

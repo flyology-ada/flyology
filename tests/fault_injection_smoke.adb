@@ -1053,7 +1053,9 @@ procedure Fault_Injection_Smoke is
    end Test_File_Dormancy_Exclusion;
 
    procedure Test_Uring_CQ_Backpressure is
-      Path : constant String := "/tmp/flyology-uring-capacity.data";
+      Path : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-uring-capacity.data";
       File : Files.File_Descriptor := Files.Invalid_File;
    begin
       Warm_Group;
@@ -1135,6 +1137,8 @@ procedure Fault_Injection_Smoke is
             raise Program_Error with "io_uring capacity queue lost a file completion";
          elsif Fault_Control.Calls (Fault_Control.File_Uring_Backpressure) = 0 then
             raise Program_Error with "more-than-CQ-capacity load did not reach backpressure";
+         elsif Fault_Control.Calls (Fault_Control.File_Uring_Multi_Submit) = 0 then
+            raise Program_Error with "queued io_uring files did not share a kernel submission";
          elsif Fault_Control.Calls (Fault_Control.File_Uring_Submit_EBUSY) = 0 then
             raise Program_Error with "io_uring EBUSY retry was not exercised";
          elsif Fault_Control.Calls (Fault_Control.File_Uring_Overflow_Flush) < 2 then

@@ -13,6 +13,16 @@ package System.Flyology.File_Engine is
 
    type Completion_Array is array (Positive range <>) of Completion;
 
+   type File_Submission is record
+      Descriptor : Interfaces.C.int;
+      Buffer     : System.Address;
+      Length     : Interfaces.C.size_t;
+      Offset     : Interfaces.C.long_long;
+      For_Write  : Boolean;
+      Token      : System.Address;
+   end record;
+   type File_Submission_Array is array (Positive range <>) of File_Submission;
+
    type Cancellation_Disposition is
      (Cancellation_Submitted, Already_Completing, Not_Cancelable, Cancellation_Failed);
 
@@ -39,6 +49,18 @@ package System.Flyology.File_Engine is
       For_Write  : Boolean;
       Token      : System.Address;
       Error_Code : out Interfaces.C.int) return Boolean;
+
+   --  Submit a prefix of Requests in order. Submitted buffers remain owned by
+   --  the kernel until their individual completions. If fewer than all are
+   --  submitted, Error_Code describes the first unsubmitted request; none of
+   --  the remaining buffers have been transferred to the kernel. The caller
+   --  retains and retries EAGAIN requests. Only the owning loop calls this.
+   procedure Submit_Batch
+     (Item       : in out Engine;
+      Requests   : File_Submission_Array;
+      Submitted  : out Natural;
+      Error_Code : out Interfaces.C.int)
+   with Post => Submitted <= Requests'Length;
 
    --  Enqueue one socket send whose buffer remains kernel-owned until the
    --  terminal completion. False with EAGAIN has the same queue-pressure

@@ -625,6 +625,15 @@ package body System.Flyology.Poller is
           (Item.File_State, Descriptor, Buffer, Length, Offset, For_Write, Token, Error_Code);
    end Submit_File;
 
+   procedure Submit_File_Batch
+     (Item       : in out Poller;
+      Requests   : File_Engines.File_Submission_Array;
+      Submitted  : out Natural;
+      Error_Code : out C.int) is
+   begin
+      File_Engines.Submit_Batch (Item.File_State, Requests, Submitted, Error_Code);
+   end Submit_File_Batch;
+
    function Supports_Send_ZC (Item : Poller) return Boolean
    is (File_Engines.Supports_Send_ZC (Item.File_State));
 

@@ -1757,8 +1757,12 @@ package body System.Flyology.Scheduler is
    end Process_File_Cancellations_Locked;
 
    procedure Submit_Pending_Files_Locked (Group : not null Loop_Group_Access) is
-      Item  : Fiber_Access;
-      Error : C.int;
+      Item      : Fiber_Access;
+      Candidate : Fiber_Access;
+      Requests  : File_Engines.File_Submission_Array (1 .. Poll_Event_Budget);
+      Count     : Natural;
+      Submitted : Natural;
+      Error     : C.int;
    begin
       while Group.Pending_File_Head /= null loop
          Item := Group.Pending_File_Head;
@@ -1766,35 +1770,69 @@ package body System.Flyology.Scheduler is
             Fatal;
          end if;
 
-         if (if Item.File_Send_ZC
-             then
-               Pollers.Submit_Send_ZC
+         if Item.File_Send_ZC then
+            if Pollers.Submit_Send_ZC
                  (Group.Scheduler_Poller,
                   Item.File_Descriptor,
                   Item.File_Buffer,
                   Item.File_Length,
                   Fiber_To_Address (Item),
                   Error)
-             else
-               Pollers.Submit_File
-                 (Group.Scheduler_Poller,
-                  Item.File_Descriptor,
-                  Item.File_Buffer,
-                  Item.File_Length,
-                  Item.File_Offset,
-                  Item.File_For_Write,
-                  Fiber_To_Address (Item),
-                  Error))
-         then
+            then
+               Group.Pending_File_Head := Item.Next_File;
+               if Group.Pending_File_Head = null then
+                  Group.Pending_File_Tail := null;
+               end if;
+               Item.Next_File := null;
+               Item.File_Pending := False;
+            elsif Error = C.int (OSI.EAGAIN) then
+               return;
+            else
+               Group.Pending_File_Head := Item.Next_File;
+               if Group.Pending_File_Head = null then
+                  Group.Pending_File_Tail := null;
+               end if;
+               Item.Next_File := null;
+               Item.File_Pending := False;
+               Complete_File_Locked (Group, Item, 0, Error, False);
+            end if;
+            --  A zero-copy send has a different CQ reservation and is never
+            --  included in a positional-file submission batch.
+            goto Next_Pending_File;
+         end if;
+
+         Count := 0;
+         Candidate := Item;
+         while Candidate /= null and then not Candidate.File_Send_ZC and then Count < Requests'Length loop
+            if not Candidate.File_Wait or else not Candidate.File_Pending then
+               Fatal;
+            end if;
+            Count := Count + 1;
+            Requests (Count) :=
+              (Descriptor => Candidate.File_Descriptor,
+               Buffer     => Candidate.File_Buffer,
+               Length     => Candidate.File_Length,
+               Offset     => Candidate.File_Offset,
+               For_Write  => Candidate.File_For_Write,
+               Token      => Fiber_To_Address (Candidate));
+            Candidate := Candidate.Next_File;
+         end loop;
+         Pollers.Submit_File_Batch (Group.Scheduler_Poller, Requests (1 .. Count), Submitted, Error);
+         for Index in 1 .. Submitted loop
+            Item := Group.Pending_File_Head;
             Group.Pending_File_Head := Item.Next_File;
             if Group.Pending_File_Head = null then
                Group.Pending_File_Tail := null;
             end if;
             Item.Next_File := null;
             Item.File_Pending := False;
+         end loop;
+         if Submitted = Count then
+            goto Next_Pending_File;
          elsif Error = C.int (OSI.EAGAIN) then
             return;
          else
+            Item := Group.Pending_File_Head;
             Group.Pending_File_Head := Item.Next_File;
             if Group.Pending_File_Head = null then
                Group.Pending_File_Tail := null;
@@ -1803,33 +1841,43 @@ package body System.Flyology.Scheduler is
             Item.File_Pending := False;
             Complete_File_Locked (Group, Item, 0, Error, False);
          end if;
+         <<Next_Pending_File>>
+         null;
       end loop;
    end Submit_Pending_Files_Locked;
 
    procedure Submit_Pending_Async_Files_Locked (Group : not null Loop_Group_Access) is
-      Node  : Async_File_Node_Access;
-      Error : C.int;
+      Node      : Async_File_Node_Access;
+      Candidate : Async_File_Node_Access;
+      Requests  : File_Engines.File_Submission_Array (1 .. Poll_Event_Budget);
+      Count     : Natural;
+      Submitted : Natural;
+      Error     : C.int;
    begin
       while Group.Pending_Async_File_Head /= null loop
-         Node := Group.Pending_Async_File_Head;
-         if Node.State /= Async_File_Queued
-           or else Node.Owner = System.Null_Address
-           or else Node.Buffer = System.Null_Address
-           or else Group.Pending_Async_File_Count = 0
-         then
-            Fatal;
-         end if;
-
-         if Pollers.Submit_File
-              (Group.Scheduler_Poller,
-               Node.Descriptor,
-               Node.Buffer,
-               Node.Length,
-               Node.Offset,
-               Node.For_Write /= 0,
-               Async_File_Token (Node.all'Address),
-               Error)
-         then
+         Count := 0;
+         Candidate := Group.Pending_Async_File_Head;
+         while Candidate /= null and then Count < Requests'Length loop
+            if Candidate.State /= Async_File_Queued
+              or else Candidate.Owner = System.Null_Address
+              or else Candidate.Buffer = System.Null_Address
+              or else Group.Pending_Async_File_Count = 0
+            then
+               Fatal;
+            end if;
+            Count := Count + 1;
+            Requests (Count) :=
+              (Descriptor => Candidate.Descriptor,
+               Buffer     => Candidate.Buffer,
+               Length     => Candidate.Length,
+               Offset     => Candidate.Offset,
+               For_Write  => Candidate.For_Write /= 0,
+               Token      => Async_File_Token (Candidate.all'Address));
+            Candidate := To_Async_File_Node (Candidate.Next);
+         end loop;
+         Pollers.Submit_File_Batch (Group.Scheduler_Poller, Requests (1 .. Count), Submitted, Error);
+         for Index in 1 .. Submitted loop
+            Node := Group.Pending_Async_File_Head;
             Group.Pending_Async_File_Head := To_Async_File_Node (Node.Next);
             if Group.Pending_Async_File_Head = null then
                Group.Pending_Async_File_Tail := null;
@@ -1837,9 +1885,13 @@ package body System.Flyology.Scheduler is
             Group.Pending_Async_File_Count := Group.Pending_Async_File_Count - 1;
             Node.Next := System.Null_Address;
             Node.State := Async_File_Submitted;
+         end loop;
+         if Submitted = Count then
+            null;
          elsif Error = C.int (OSI.EAGAIN) then
             return;
          else
+            Node := Group.Pending_Async_File_Head;
             Group.Pending_Async_File_Head := To_Async_File_Node (Node.Next);
             if Group.Pending_Async_File_Head = null then
                Group.Pending_Async_File_Tail := null;

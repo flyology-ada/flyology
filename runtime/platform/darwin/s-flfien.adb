@@ -445,6 +445,24 @@ package body System.Flyology.File_Engine is
          return False;
    end Submit;
 
+   procedure Submit_Batch
+     (Item       : in out Engine;
+      Requests   : File_Submission_Array;
+      Submitted  : out Natural;
+      Error_Code : out C.int) is
+   begin
+      Submitted := 0;
+      for Request of Requests loop
+         exit when not Submit
+           (Item, Request.Descriptor, Request.Buffer, Request.Length,
+            Request.Offset, Request.For_Write, Request.Token, Error_Code);
+         Submitted := Submitted + 1;
+      end loop;
+      if Submitted = Requests'Length then
+         Error_Code := 0;
+      end if;
+   end Submit_Batch;
+
    function Cancel
      (Item           : in out Engine;
       Descriptor     : C.int;
