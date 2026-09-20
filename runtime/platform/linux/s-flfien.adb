@@ -302,18 +302,22 @@ package body System.Flyology.File_Engine is
    type Native_AIO_Request_Access is access all Native_AIO_Request;
 
    type Native_AIO_Request is record
-      Control     : aliased IOCB;
-      Next_Free   : Native_AIO_Request_Access;
-      Token       : System.Address;
-      Next_Active : Native_AIO_Request_Access;
+      Control         : aliased IOCB;
+      Next_Free       : Native_AIO_Request_Access;
+      Token           : System.Address;
+      Next_Active     : Native_AIO_Request_Access;
+      Previous_Active : Native_AIO_Request_Access;
+      Active_Owner    : System.Address;
    end record
-   with Size => 704, Alignment => 8;
+   with Size => 832, Alignment => 8;
    for Native_AIO_Request use
      record
        Control at 0 range 0 .. 511;
        Next_Free at 64 range 0 .. 63;
        Token at 72 range 0 .. 63;
        Next_Active at 80 range 0 .. 63;
+       Previous_Active at 88 range 0 .. 63;
+       Active_Owner at 96 range 0 .. 63;
      end record;
 
    --  io_uring cancellation has two independent completions: one for the
@@ -339,6 +343,8 @@ package body System.Flyology.File_Engine is
       Admin_Submit_Deferred : Boolean;
       Next_Free             : IO_Uring_Request_Access;
       Next_Active           : IO_Uring_Request_Access;
+      Previous_Active       : IO_Uring_Request_Access;
+      Active_Owner          : System.Address;
       Next_Deferred         : IO_Uring_Request_Access;
    end record
    with Alignment => 8;
@@ -397,7 +403,6 @@ package body System.Flyology.File_Engine is
 
    function To_State is new Ada.Unchecked_Conversion (System.Address, Engine_State_Access);
    function State_Address is new Ada.Unchecked_Conversion (Engine_State_Access, System.Address);
-   function To_Native_Request is new Ada.Unchecked_Conversion (System.Address, Native_AIO_Request_Access);
    function To_Uring_Request is new Ada.Unchecked_Conversion (System.Address, IO_Uring_Request_Access);
    function To_Submission_Entry is new Ada.Unchecked_Conversion (System.Address, Submission_Entry_Access);
    function To_Completion_Entry is new Ada.Unchecked_Conversion (System.Address, Completion_Entry_Access);
@@ -571,6 +576,8 @@ package body System.Flyology.File_Engine is
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
+      Request.Active_Owner := System.Null_Address;
       return Request;
    end Acquire_Request;
 
@@ -585,21 +592,27 @@ package body System.Flyology.File_Engine is
    procedure Unlink_Active
      (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access)
    is
-      Position : Native_AIO_Request_Access := State.Active_Requests;
-      Previous : Native_AIO_Request_Access;
+      Previous  : constant Native_AIO_Request_Access := Request.Previous_Active;
+      Following : constant Native_AIO_Request_Access := Request.Next_Active;
    begin
-      while Position /= null and then Position /= Request loop
-         Previous := Position;
-         Position := Position.Next_Active;
-      end loop;
-      if Position = null then
+      if Request.Active_Owner /= State_Address (State)
+        or else (if Previous = null
+                 then State.Active_Requests /= Request
+                 else Previous.Next_Active /= Request)
+        or else (Following /= null and then Following.Previous_Active /= Request)
+      then
          raise Program_Error with "unknown Linux native-AIO completion";
       elsif Previous = null then
-         State.Active_Requests := Request.Next_Active;
+         State.Active_Requests := Following;
       else
-         Previous.Next_Active := Request.Next_Active;
+         Previous.Next_Active := Following;
+      end if;
+      if Following /= null then
+         Following.Previous_Active := Previous;
       end if;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
+      Request.Active_Owner := System.Null_Address;
    end Unlink_Active;
 
    function Acquire_Uring_Request (State : not null Engine_State_Access) return IO_Uring_Request_Access is
@@ -611,6 +624,8 @@ package body System.Flyology.File_Engine is
       State.Free_Uring_Requests := Request.Next_Free;
       Request.Next_Free := null;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
+      Request.Active_Owner := System.Null_Address;
       Request.Next_Deferred := null;
       return Request;
    end Acquire_Uring_Request;
@@ -626,21 +641,27 @@ package body System.Flyology.File_Engine is
    procedure Unlink_Active_Uring
      (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access)
    is
-      Position : IO_Uring_Request_Access := State.Active_Uring_Requests;
-      Previous : IO_Uring_Request_Access;
+      Previous  : constant IO_Uring_Request_Access := Request.Previous_Active;
+      Following : constant IO_Uring_Request_Access := Request.Next_Active;
    begin
-      while Position /= null and then Position /= Request loop
-         Previous := Position;
-         Position := Position.Next_Active;
-      end loop;
-      if Position = null then
+      if Request.Active_Owner /= State_Address (State)
+        or else (if Previous = null
+                 then State.Active_Uring_Requests /= Request
+                 else Previous.Next_Active /= Request)
+        or else (Following /= null and then Following.Previous_Active /= Request)
+      then
          raise Program_Error with "unknown Linux io_uring completion";
       elsif Previous = null then
-         State.Active_Uring_Requests := Request.Next_Active;
+         State.Active_Uring_Requests := Following;
       else
-         Previous.Next_Active := Request.Next_Active;
+         Previous.Next_Active := Following;
+      end if;
+      if Following /= null then
+         Following.Previous_Active := Previous;
       end if;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
+      Request.Active_Owner := System.Null_Address;
    end Unlink_Active_Uring;
 
    function Signal_Drain_Retry (State : not null Engine_State_Access) return Boolean is
@@ -1094,6 +1115,8 @@ package body System.Flyology.File_Engine is
             Admin_Submit_Deferred => False,
             Next_Free             => null,
             Next_Active           => null,
+            Previous_Active       => null,
+            Active_Owner          => System.Null_Address,
             Next_Deferred         => null);
          Identity := SSE.To_Integer (Uring_Request.all'Address);
          if Identity mod 2 /= 0 then
@@ -1134,6 +1157,11 @@ package body System.Flyology.File_Engine is
             return False;
          end if;
          Uring_Request.Next_Active := State.Active_Uring_Requests;
+         Uring_Request.Previous_Active := null;
+         Uring_Request.Active_Owner := State_Address (State);
+         if State.Active_Uring_Requests /= null then
+            State.Active_Uring_Requests.Previous_Active := Uring_Request;
+         end if;
          State.Active_Uring_Requests := Uring_Request;
          State.Active_Count := State.Active_Count + 1;
          State.Uring_In_Flight := State.Uring_In_Flight + 2;
@@ -1173,7 +1201,7 @@ package body System.Flyology.File_Engine is
             Controls : aliased IOCB_Address_Array (1 .. 1) := [1 => Request.Control'Address];
          begin
             Request.all :=
-              (Control     =>
+              (Control         =>
                  (Data       => U64 (SSE.To_Integer (Token)),
                   Key        => 0,
                   Read_Flags => 0,
@@ -1186,9 +1214,11 @@ package body System.Flyology.File_Engine is
                   Reserved   => 0,
                   Flags      => IOCB_FLAG_RESFD,
                   Result_FD  => U32 (State.Wake_FD)),
-               Next_Free   => null,
-               Token       => Token,
-               Next_Active => null);
+               Next_Free       => null,
+               Token           => Token,
+               Next_Active     => null,
+               Previous_Active => null,
+               Active_Owner    => System.Null_Address);
             loop
                Result := Linux_IO_Submit (State.AIO_Context, 1, Controls'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
@@ -1199,6 +1229,11 @@ package body System.Flyology.File_Engine is
                return False;
             end if;
             Request.Next_Active := State.Active_Requests;
+            Request.Previous_Active := null;
+            Request.Active_Owner := State_Address (State);
+            if State.Active_Requests /= null then
+               State.Active_Requests.Previous_Active := Request;
+            end if;
             State.Active_Requests := Request;
             State.Active_Count := State.Active_Count + 1;
             Error_Code := 0;
@@ -1249,6 +1284,8 @@ package body System.Flyology.File_Engine is
             Admin_Submit_Deferred => False,
             Next_Free             => null,
             Next_Active           => null,
+            Previous_Active       => null,
+            Active_Owner          => System.Null_Address,
             Next_Deferred         => null);
          Identity := SSE.To_Integer (Uring_Request.all'Address);
          if Faults.Enabled then
@@ -1308,6 +1345,11 @@ package body System.Flyology.File_Engine is
             return False;
          end if;
          Uring_Request.Next_Active := State.Active_Uring_Requests;
+         Uring_Request.Previous_Active := null;
+         Uring_Request.Active_Owner := State_Address (State);
+         if State.Active_Uring_Requests /= null then
+            State.Active_Uring_Requests.Previous_Active := Uring_Request;
+         end if;
          State.Active_Uring_Requests := Uring_Request;
          State.Active_Count := State.Active_Count + 1;
          State.Uring_In_Flight := State.Uring_In_Flight + 1;
@@ -1485,9 +1527,21 @@ package body System.Flyology.File_Engine is
                      then C.int (-Events (Index).Extra)
                      else 0));
                declare
-                  Request : Native_AIO_Request_Access :=
-                    To_Native_Request (SSE.To_Address (SSE.Integer_Address (Events (Index).Object)));
+                  Request : Native_AIO_Request_Access := State.Active_Requests;
                begin
+                  --  The kernel supplies an address, not an Ada access value.
+                  --  Check it against live records before dereferencing it.
+                  while Request /= null
+                    and then SSE.To_Integer (Request.all'Address)
+                             /= SSE.Integer_Address (Events (Index).Object)
+                  loop
+                     Request := Request.Next_Active;
+                  end loop;
+                  if Request = null
+                    or else SSE.To_Integer (Request.Token) /= SSE.Integer_Address (Events (Index).Data)
+                  then
+                     raise Program_Error with "unknown Linux native-AIO completion";
+                  end if;
                   Unlink_Active (State, Request);
                   State.Active_Count := State.Active_Count - 1;
                   Recycle_Request (State, Request);

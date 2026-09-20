@@ -131,7 +131,10 @@ package body System.Flyology.File_Engine is
 
    procedure Recycle_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
 
-   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access);
+   procedure Unlink_Active
+     (State    : not null Engine_State_Access;
+      Request  : not null AIO_Request_Access;
+      Previous : AIO_Request_Access);
 
    procedure Retire_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
 
@@ -154,15 +157,12 @@ package body System.Flyology.File_Engine is
       Request := null;
    end Recycle_Request;
 
-   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access) is
-      Position : AIO_Request_Access := State.Active_Requests;
-      Previous : AIO_Request_Access;
+   procedure Unlink_Active
+     (State    : not null Engine_State_Access;
+      Request  : not null AIO_Request_Access;
+      Previous : AIO_Request_Access) is
    begin
-      while Position /= null and then Position /= Request loop
-         Previous := Position;
-         Position := Position.Next_Active;
-      end loop;
-      if Position = null then
+      if (if Previous = null then State.Active_Requests /= Request else Previous.Next_Active /= Request) then
          raise Program_Error with "unknown Darwin AIO completion";
       elsif Previous = null then
          State.Active_Requests := Request.Next_Active;
@@ -357,6 +357,7 @@ package body System.Flyology.File_Engine is
    is
       State                : constant Engine_State_Access := To_State (Item.State);
       Request              : AIO_Request_Access;
+      Previous             : AIO_Request_Access := null;
       Result               : C.int;
       Returned             : C.long;
       Registration_Removed : Boolean := True;
@@ -372,6 +373,7 @@ package body System.Flyology.File_Engine is
       Request := State.Active_Requests;
       while Request /= null and then (Request.Token /= Token or else Request.Control.Descriptor /= Descriptor)
       loop
+         Previous := Request;
          Request := Request.Next_Active;
       end loop;
       if Request = null then
@@ -425,7 +427,7 @@ package body System.Flyology.File_Engine is
             Returned := (if Request.Synthetic then 0 else AIO_Return (Request.Control'Access));
             pragma Unreferenced (Returned);
             Value := (Token => Request.Token, Result => 0, Error_Code => 0);
-            Unlink_Active (State, Request);
+            Unlink_Active (State, Request, Previous);
             State.Active_Count := State.Active_Count - 1;
             if Registration_Removed then
                Recycle_Request (State, Request);
@@ -492,7 +494,7 @@ package body System.Flyology.File_Engine is
       State    : constant Engine_State_Access := To_State (Item.State);
       Request  : AIO_Request_Access := To_Request (Request_Address);
       Position : AIO_Request_Access;
-      Previous : AIO_Request_Access;
+      Previous : AIO_Request_Access := null;
       Result   : C.long;
    begin
       Value := (others => <>);
@@ -501,6 +503,7 @@ package body System.Flyology.File_Engine is
       end if;
       Position := State.Active_Requests;
       while Position /= null and then Position /= Request loop
+         Previous := Position;
          Position := Position.Next_Active;
       end loop;
       if Position = null then
@@ -508,6 +511,7 @@ package body System.Flyology.File_Engine is
          --  Retired request records keep that address stable until this event
          --  is consumed. Unknown payloads remain poller failures.
          Position := State.Retired_Requests;
+         Previous := null;
          while Position /= null and then Position /= Request loop
             Previous := Position;
             Position := Position.Next_Free;
@@ -552,7 +556,7 @@ package body System.Flyology.File_Engine is
             elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
             then Kernel_Error
             else C.int (OSI.errno)));
-      Unlink_Active (State, Request);
+      Unlink_Active (State, Request, Previous);
       State.Active_Count := State.Active_Count - 1;
       Recycle_Request (State, Request);
       return Completion_Produced;
