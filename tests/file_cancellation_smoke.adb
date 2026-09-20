@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Unchecked_Deallocation;
@@ -15,7 +16,9 @@ procedure File_Cancellation_Smoke is
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
 
-   Path : constant String := "/tmp/flyology-file-cancellation.data";
+   Path : constant String :=
+     Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+     "/flyology-file-cancellation.data";
    File : Files.File_Descriptor := Files.Invalid_File;
 
    function Open_FD_Count return Interfaces.C.int;

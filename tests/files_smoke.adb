@@ -16,7 +16,8 @@ procedure Files_Smoke is
    function Selected_Linux_Backend return Interfaces.C.int;
    pragma Import (C, Selected_Linux_Backend, "flyology_linux_file_backend");
 
-   Path : constant String := "/tmp/flyology-files-smoke.data";
+   Path : constant String :=
+     Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") & "/flyology-files-smoke.data";
    Data : constant Stream_Element_Array (1 .. 4) := [10, 20, 30, 40];
 
    File     : Flyology.IO.Files.File_Descriptor := Flyology.IO.Files.Invalid_File;
