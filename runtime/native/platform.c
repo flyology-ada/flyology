@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -165,6 +166,42 @@ int flyology_linux_epoll_wait(int epoll_fd,
         events[index].descriptor = native_events[index].data.fd;
     }
     return count;
+}
+
+/* The syscall number comes from target headers. A direct Ada import of
+   epoll_pwait2 would require a recent glibc even on kernels that support the
+   syscall. Keep native epoll_event padding in this existing ABI bridge. */
+int flyology_linux_epoll_pwait2(int epoll_fd,
+                               struct flyology_epoll_event *events,
+                               int max_events,
+                               const struct timespec *timeout) {
+#ifdef SYS_epoll_pwait2
+    struct epoll_event native_events[64];
+    int count;
+    int index;
+#endif
+
+    if (events == NULL || max_events < 1 || max_events > 64) {
+        errno = EINVAL;
+        return -1;
+    }
+#ifdef SYS_epoll_pwait2
+    count = (int)syscall(SYS_epoll_pwait2, epoll_fd, native_events,
+                         max_events, timeout, NULL, _NSIG / 8);
+    if (count < 0) {
+        return -1;
+    }
+    for (index = 0; index < count; ++index) {
+        events[index].events = native_events[index].events;
+        events[index].descriptor = native_events[index].data.fd;
+    }
+    return count;
+#else
+    (void)epoll_fd;
+    (void)timeout;
+    errno = ENOSYS;
+    return -1;
+#endif
 }
 
 /*

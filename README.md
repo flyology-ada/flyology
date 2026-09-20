@@ -664,8 +664,8 @@ foreign libraries, or needs independent CPU execution.
 `delay 0.0` is an explicit cooperative yield for a lightweight task. A permanently
 runnable yielding task does not starve descriptors: after at most 64 dispatches,
 the scheduler promotes expired timers and drains up to 64 immediately available
-poll events in one batched `kevent` or `epoll_wait` call before returning to the
-ready queue.
+poll events in one batched `kevent`, `epoll_pwait2`, or fallback `epoll_wait`
+call before returning to the ready queue.
 Both budgets are explicit policy, keeping I/O moving without allowing a hot
 descriptor set to monopolize the loop in the opposite direction.
 
@@ -2757,11 +2757,15 @@ the monotonic clock's representable range saturates at the largest finite
 deadline; only a negative timeout selects an unlimited wait.
 
 The earliest deadline becomes the timeout of the group's next `kevent64` or
-`epoll_wait`; expiry therefore wakes the same event-loop syscall already used
-for sockets and file completions. A platform poll whose relative-timeout field
-cannot represent the full remaining interval uses its largest accepted finite
-slice and re-evaluates the retained absolute deadline afterward. There is no
-timer thread and no per-task OS timer object.
+Linux `epoll_pwait2` call; both accept a nanosecond `timespec`. Expiry therefore
+wakes the same event-loop syscall already used for sockets and file completions.
+Linux kernels before 5.11, and environments that return `ENOSYS` for
+`epoll_pwait2`, use `epoll_wait` instead, rounding positive waits up to whole
+milliseconds. A platform poll whose
+relative-timeout field cannot represent the full remaining interval uses its
+largest accepted finite slice and re-evaluates the retained absolute deadline
+afterward. Actual wake latency also depends on the kernel scheduler. There is
+no timer thread and no per-task OS timer object.
 
 ### Dormant stack advice
 
