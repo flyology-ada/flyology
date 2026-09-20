@@ -473,10 +473,17 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
    end Length;
 
    procedure Cleanup_Retired (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
-      Retired : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Retired             : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Injected_Contention : Boolean;
    begin
       if Retired = Arena_Provider.Null_Allocation then
          return;
+      end if;
+      if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
+         Flyology.Dynamic_Destroy_Test_Hooks.Consume_Retired_Release_Contention (Injected_Contention);
+         if Injected_Contention then
+            raise Busy_Error with "injected dynamic-string retired release contention";
+         end if;
       end if;
       Arena_Provider.Release (Arena, Retired);
       Mutated := True;
@@ -485,6 +492,15 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       when Handle_Error =>
          raise Layout_Error with "dynamic-byte-string deferred allocation is stale";
    end Cleanup_Retired;
+
+   procedure Cleanup_Retired_If_Possible
+     (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
+   begin
+      Cleanup_Retired (Item, Arena, Mutated);
+   exception
+      when Busy_Error =>
+         null;
+   end Cleanup_Retired_If_Possible;
 
    procedure Ensure_Capacity
      (Item     : View;
@@ -608,8 +624,11 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
+         Cleanup_Retired_If_Possible (Item, Arena, Mutated);
          if New_Length = 0 then
-            Mutated := Stored_Length (Item) /= 0;
+            if Stored_Length (Item) /= 0 then
+               Mutated := True;
+            end if;
             Bytes.Write_U64 (Item.Length_Address, 0);
             Result := Completed;
          elsif New_Length > Byte_Count (Positive'Last) then
@@ -646,6 +665,7 @@ package body Flyology.Data_Structures.Dynamic.Byte_Strings is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
+         Cleanup_Retired_If_Possible (Item, Arena, Mutated);
          Current_Length := Stored_Length (Item);
          if Added = 0 then
             Result := Completed;

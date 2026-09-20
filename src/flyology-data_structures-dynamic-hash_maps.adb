@@ -734,10 +734,17 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
    end Insert_Stored;
 
    procedure Cleanup_Retired (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
-      Retired : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Retired             : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Injected_Contention : Boolean;
    begin
       if Retired = Arena_Provider.Null_Allocation then
          return;
+      end if;
+      if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
+         Flyology.Dynamic_Destroy_Test_Hooks.Consume_Retired_Release_Contention (Injected_Contention);
+         if Injected_Contention then
+            raise Busy_Error with "injected dynamic-map retired release contention";
+         end if;
       end if;
       Arena_Provider.Release (Arena, Retired);
       Mutated := True;
@@ -746,6 +753,15 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       when Handle_Error =>
          raise Layout_Error with "dynamic-map deferred allocation is stale";
    end Cleanup_Retired;
+
+   procedure Cleanup_Retired_If_Possible
+     (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
+   begin
+      Cleanup_Retired (Item, Arena, Mutated);
+   exception
+      when Busy_Error =>
+         null;
+   end Cleanup_Retired_If_Possible;
 
    procedure Grow
      (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean; Result : out Put_Result)
@@ -861,6 +877,7 @@ package body Flyology.Data_Structures.Dynamic.Hash_Maps is
       begin
          Needs_Stage := False;
          Require_Arena (Item, Arena);
+         Cleanup_Retired_If_Possible (Item, Arena, Mutated);
          Count := Stored_Count (Item);
          Current_Capacity := Stored_Capacity (Item);
          if Current_Capacity = 0 then

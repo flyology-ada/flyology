@@ -1142,6 +1142,10 @@ remains published. An adaptive pool may already have reclaimed earlier empty
 chunks while the contended chunk remains live and names its arena allocation.
 Both are coherent ready states: `Busy_Error` releases the leaf guard without
 poisoning, and a later `Destroy` can finish reclamation.
+Dynamic byte strings and vectors retry a deferred payload release during later
+assign or append calls; dynamic hash maps retry it during `Put`. Each guarded
+call adds one opportunistic attempt before its ordinary growth path. Arena
+contention leaves the retired handle intact for a later call.
 
 Timed overloads are opt-in and leave the immediate fast path unchanged. Their
 nonnegative `Wait_Timeout` is at most 24 hours; zero permits one immediate

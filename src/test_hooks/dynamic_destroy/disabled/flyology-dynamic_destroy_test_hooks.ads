@@ -16,5 +16,9 @@ is
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_dynamic_destroy_arm_current";
    procedure Consume_Current_Release_Contention (Armed : out Boolean)
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_dynamic_destroy_consume_current";
+   procedure Arm_Retired_Release_Contention
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_dynamic_destroy_arm_retired";
+   procedure Consume_Retired_Release_Contention (Armed : out Boolean)
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_dynamic_destroy_consume_retired";
 
 end Flyology.Dynamic_Destroy_Test_Hooks;

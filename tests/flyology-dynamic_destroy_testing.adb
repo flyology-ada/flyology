@@ -12,4 +12,9 @@ package body Flyology.Dynamic_Destroy_Testing is
       Flyology.Dynamic_Destroy_Test_Hooks.Arm_Current_Release_Contention;
    end Arm_Current_Release_Contention;
 
+   procedure Arm_Retired_Release_Contention is
+   begin
+      Flyology.Dynamic_Destroy_Test_Hooks.Arm_Retired_Release_Contention;
+   end Arm_Retired_Release_Contention;
+
 end Flyology.Dynamic_Destroy_Testing;

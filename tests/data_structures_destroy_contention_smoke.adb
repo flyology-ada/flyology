@@ -45,6 +45,7 @@ procedure Data_Structures_Destroy_Contention_Smoke is
    use type Arenas.Allocation_Result;
    use type Adaptive.Allocation_Result;
    use type C.size_t;
+   use type DS.Byte_Count;
    use type DS.Dynamic.Growth_Result;
    use type Dynamic_Maps.Put_Result;
    use type Interfaces.Unsigned_64;
@@ -77,6 +78,21 @@ procedure Data_Structures_Destroy_Contention_Smoke is
          raise Program_Error with Message;
       end if;
    end Assert;
+
+   procedure Assert_Reclaimed
+     (Arena : Arenas.View; Handle : Arenas.Allocation_Handle; Message : String)
+   is
+   begin
+      declare
+         Capacity : constant DS.Byte_Count := Arenas.Block_Capacity (Arena, Handle);
+         pragma Unreferenced (Capacity);
+      begin
+         raise Program_Error with Message;
+      end;
+   exception
+      when DS.Handle_Error =>
+         null;
+   end Assert_Reclaimed;
 
    procedure Reproduce_Adaptive_Contention is
       Storage     : aliased SSE.Storage_Array (1 .. 262_144) := [others => 0]
@@ -310,6 +326,154 @@ procedure Data_Structures_Destroy_Contention_Smoke is
       Regions.Detach (Region);
    end Reproduce_Dynamic_Map_Contention;
 
+   procedure Reclaim_Dynamic_Vector is
+      Storage : aliased SSE.Storage_Array (1 .. 262_144) := [others => 0]
+      with Alignment => 64;
+      Region  : Regions.View;
+      Arena   : Arenas.View;
+      Item    : Dynamic_Vectors.View;
+      Result  : DS.Dynamic.Growth_Result;
+      Retired : Arenas.Allocation_Handle;
+      Initial_Capacity : Natural;
+   begin
+      Regions.Attach (Region, Storage'Address, DS.Byte_Count (Storage'Length));
+      Arenas.Initialize (Arena, Region, 64, Configuration, 16#A166_A166_A166_A166#);
+      Dynamic_Vectors.Initialize (Item, Region, 196_608, Arena, 1);
+      Flyology.Dynamic_Destroy_Testing.Reset;
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Vectors.Try_Append (Item, Arena, 1, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-vector initial append failed");
+      Initial_Capacity := Dynamic_Vectors.Capacity (Item);
+      for Index in 2 .. Initial_Capacity loop
+         Dynamic_Vectors.Try_Append (Item, Arena, Interfaces.Unsigned_64 (Index), Result);
+         Assert (Result = DS.Dynamic.Completed, "dynamic-vector fill failed");
+      end loop;
+      Dynamic_Vectors.Try_Append (Item, Arena, 100, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-vector growth failed");
+      Retired :=
+        (Token      => Read_U64 (Storage'Address, Dynamic_Retired_Token_Offset),
+         Generation => Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset));
+      Assert (Retired.Generation /= 0, "dynamic-vector failed release lost its handle");
+      Assert (Arenas.Block_Capacity (Arena, Retired) /= 0, "dynamic-vector retired block is not live");
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Vectors.Try_Append (Item, Arena, 101, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-vector busy retry changed append result");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = Retired.Generation,
+         "dynamic-vector busy retry lost its handle");
+      Dynamic_Vectors.Try_Append (Item, Arena, 102, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-vector reclaim append failed");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = 0,
+         "dynamic-vector append did not reclaim retired block");
+      Assert_Reclaimed (Arena, Retired, "dynamic-vector retired allocation remains live");
+      Assert
+        (Dynamic_Vectors.Length (Item) = Initial_Capacity + 3,
+         "dynamic-vector cleanup changed contents");
+      Dynamic_Vectors.Destroy (Item, Arena);
+      Arenas.Destroy (Arena);
+      Regions.Detach (Region);
+   end Reclaim_Dynamic_Vector;
+
+   procedure Reclaim_Dynamic_String is
+      Storage : aliased SSE.Storage_Array (1 .. 262_144) := [others => 0]
+      with Alignment => 64;
+      Region  : Regions.View;
+      Arena   : Arenas.View;
+      Item    : Dynamic_Strings.View;
+      Result  : DS.Dynamic.Growth_Result;
+      Retired : Arenas.Allocation_Handle;
+      One     : constant Ada.Streams.Stream_Element_Array := [1];
+   begin
+      Regions.Attach (Region, Storage'Address, DS.Byte_Count (Storage'Length));
+      Arenas.Initialize (Arena, Region, 64, Configuration, 16#A166_A166_A166_B166#);
+      Dynamic_Strings.Initialize (Item, Region, 196_608, Arena, 1);
+      Flyology.Dynamic_Destroy_Testing.Reset;
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Strings.Try_Append (Item, Arena, One, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-string initial append failed");
+      declare
+         Full :
+           constant Ada.Streams.Stream_Element_Array
+                      (1 .. Ada.Streams.Stream_Element_Offset (Dynamic_Strings.Capacity (Item))) :=
+             [others => 7];
+      begin
+         Dynamic_Strings.Try_Assign (Item, Arena, Full, Result);
+      end;
+      Assert (Result = DS.Dynamic.Completed, "dynamic-string fill failed");
+      Dynamic_Strings.Try_Append (Item, Arena, One, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-string growth failed");
+      Retired :=
+        (Token      => Read_U64 (Storage'Address, Dynamic_Retired_Token_Offset),
+         Generation => Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset));
+      Assert (Retired.Generation /= 0, "dynamic-string failed release lost its handle");
+      Assert (Arenas.Block_Capacity (Arena, Retired) /= 0, "dynamic-string retired block is not live");
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Strings.Try_Assign (Item, Arena, One, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-string busy retry changed assign result");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = Retired.Generation,
+         "dynamic-string busy retry lost its handle");
+      Dynamic_Strings.Try_Append (Item, Arena, One, Result);
+      Assert (Result = DS.Dynamic.Completed, "dynamic-string reclaim append failed");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = 0,
+         "dynamic-string append did not reclaim retired block");
+      Assert_Reclaimed (Arena, Retired, "dynamic-string retired allocation remains live");
+      Assert (Dynamic_Strings.Length (Item) = 2, "dynamic-string cleanup changed contents");
+      Dynamic_Strings.Destroy (Item, Arena);
+      Arenas.Destroy (Arena);
+      Regions.Detach (Region);
+   end Reclaim_Dynamic_String;
+
+   procedure Reclaim_Dynamic_Map is
+      Storage          : aliased SSE.Storage_Array (1 .. 262_144) := [others => 0]
+      with Alignment => 64;
+      Region           : Regions.View;
+      Arena            : Arenas.View;
+      Item             : Dynamic_Maps.View;
+      Result           : Dynamic_Maps.Put_Result;
+      Retired          : Arenas.Allocation_Handle;
+      Initial_Capacity : Natural;
+      Growth_Key       : Interfaces.Unsigned_64;
+   begin
+      Regions.Attach (Region, Storage'Address, DS.Byte_Count (Storage'Length));
+      Arenas.Initialize (Arena, Region, 64, Configuration, 16#A166_A166_A166_C166#);
+      Dynamic_Maps.Initialize (Item, Region, 196_608, Arena, 8);
+      Flyology.Dynamic_Destroy_Testing.Reset;
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Maps.Put (Item, Arena, 1, 10, Result);
+      Assert (Result = Dynamic_Maps.Put_Inserted, "dynamic-map initial put failed");
+      Initial_Capacity := Dynamic_Maps.Capacity (Item);
+      Growth_Key := Interfaces.Unsigned_64 (Initial_Capacity * 3 / 4 + 1);
+      for Index in Interfaces.Unsigned_64 range 2 .. Growth_Key loop
+         Dynamic_Maps.Put (Item, Arena, Index, Index * 10, Result);
+         Assert (Result = Dynamic_Maps.Put_Inserted, "dynamic-map fill or growth failed");
+      end loop;
+      Assert (Dynamic_Maps.Capacity (Item) > Initial_Capacity, "dynamic-map did not grow");
+      Retired :=
+        (Token      => Read_U64 (Storage'Address, Dynamic_Retired_Token_Offset),
+         Generation => Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset));
+      Assert (Retired.Generation /= 0, "dynamic-map failed release lost its handle");
+      Assert (Arenas.Block_Capacity (Arena, Retired) /= 0, "dynamic-map retired block is not live");
+      Flyology.Dynamic_Destroy_Testing.Arm_Retired_Release_Contention;
+      Dynamic_Maps.Put (Item, Arena, Growth_Key + 1, 20, Result);
+      Assert (Result = Dynamic_Maps.Put_Inserted, "dynamic-map busy retry changed put result");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = Retired.Generation,
+         "dynamic-map busy retry lost its handle");
+      Dynamic_Maps.Put (Item, Arena, Growth_Key + 2, 30, Result);
+      Assert (Result = Dynamic_Maps.Put_Inserted, "dynamic-map reclaim put failed");
+      Assert
+        (Read_U64 (Storage'Address, Dynamic_Retired_Generation_Offset) = 0,
+         "dynamic-map put did not reclaim retired block");
+      Assert_Reclaimed (Arena, Retired, "dynamic-map retired allocation remains live");
+      Assert (Dynamic_Maps.Length (Item) = Natural (Growth_Key + 2), "dynamic-map cleanup changed contents");
+      Dynamic_Maps.Destroy (Item, Arena);
+      Arenas.Destroy (Arena);
+      Regions.Detach (Region);
+   end Reclaim_Dynamic_Map;
+
 begin
    Reproduce_Adaptive_Contention;
    Ada.Text_IO.Put_Line ("issue 162 regression passed");
@@ -317,4 +481,8 @@ begin
    Reproduce_Dynamic_String_Contention;
    Reproduce_Dynamic_Map_Contention;
    Ada.Text_IO.Put_Line ("issue 163 regression passed");
+   Reclaim_Dynamic_Vector;
+   Reclaim_Dynamic_String;
+   Reclaim_Dynamic_Map;
+   Ada.Text_IO.Put_Line ("issue 166 regression passed");
 end Data_Structures_Destroy_Contention_Smoke;
