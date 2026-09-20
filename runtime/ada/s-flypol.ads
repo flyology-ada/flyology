@@ -85,6 +85,16 @@ package System.Flyology.Poller is
       Token      : System.Address;
       Error_Code : out Interfaces.C.int) return Boolean;
 
+   --  Submit a prefix of queued positional operations in FIFO order. The
+   --  unsubmitted suffix retains caller ownership; Error_Code identifies its
+   --  first member and EAGAIN denotes retryable submission pressure.
+   procedure Submit_File_Batch
+     (Item       : in out Poller;
+      Requests   : System.Flyology.File_Engine.File_Submission_Array;
+      Submitted  : out Natural;
+      Error_Code : out Interfaces.C.int)
+   with Post => Submitted <= Requests'Length;
+
    --  Report whether the poller's completion engine supports a terminal
    --  zero-copy socket send.
    function Supports_Send_ZC (Item : Poller) return Boolean;
