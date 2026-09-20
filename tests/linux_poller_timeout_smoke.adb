@@ -65,7 +65,9 @@ begin
       Limit : constant System.Flyology.Time_ABI.Timespec :=
         System.Flyology.Time_ABI.To_Timespec (0.000_05);
    begin
-      if C.long_long (Limit.tv_sec) /= 0 or else Limit.tv_nsec /= 50_000 then
+      if C.long_long (Limit.tv_sec) /= 0
+        or else C.long_long (Limit.tv_nsec) /= 50_000
+      then
          raise Program_Error with "timespec conversion lost 50 microseconds";
       end if;
    end;
