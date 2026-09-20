@@ -698,12 +698,39 @@ package body System.Flyology.Poller is
          end if;
       end if;
 
+      if Capacity > 1 and then Count = 0 then
+         --  An inline io_uring completion need not signal eventfd. Inspect
+         --  one file slot before the epoll wait. The rest of the batch stays
+         --  available for descriptors even under continuous file completions.
+         if not Drain_File_Events (Item, Events, Count, 1, May_Remain) then
+            return False;
+         end if;
+         Item.File_Drain_State := Poller_Policy.After_Drain (Item.File_Drain_State, May_Remain);
+      end if;
+
       Drain_Budget := Poller_Policy.Remaining_Budget (Capacity, Poller_Policy.Batch_Count (Count));
       Epoll_Capacity := Natural (Drain_Budget);
-      Kernel_Count := Epoll_Wait (Item.Descriptor, Kernel_Events'Address, C.int (Epoll_Capacity), 0);
+      --  A one-result caller needs the epoll probe before its file drain to
+      --  preserve source alternation. A retained drain obligation must not
+      --  sleep on a consumed edge, but epoll still observes new wakes.
+      Kernel_Count :=
+        Epoll_Wait
+          (Item.Descriptor,
+           Kernel_Events'Address,
+           C.int (Epoll_Capacity),
+           (if Capacity > 1 and then Count = 0 and then not Item.File_Drain_State.Pending
+            then Timeout_Milliseconds (Timeout)
+            else 0));
       if Kernel_Count < 0 then
-         return OSI.errno = OSI.EINTR;
-      elsif Kernel_Count = 0 and then Count = 0 then
+         if OSI.errno /= OSI.EINTR then
+            return False;
+         elsif Count = 0 then
+            return True;
+         end if;
+         --  An interrupted nonblocking call must not discard file
+         --  completions already removed from the engine.
+         Kernel_Count := 0;
+      elsif Capacity = 1 and then Kernel_Count = 0 and then Count = 0 then
          if not Drain_File_Events (Item, Events, Count, Drain_Budget, May_Remain) then
             return False;
          end if;
@@ -717,9 +744,6 @@ package body System.Flyology.Poller is
                  Only_File_Events => True);
             return True;
          elsif Item.File_Drain_State.Pending then
-            --  The test-only held-drain seam, or another conservative full
-            --  drain, must be retried without sleeping on an edge already
-            --  consumed from eventfd.
             return True;
          end if;
          Kernel_Count :=

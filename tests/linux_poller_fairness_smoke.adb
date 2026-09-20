@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Real_Time;
 with Ada.Streams;
 with Fault_Control;
@@ -13,6 +14,7 @@ procedure Linux_Poller_Fairness_Smoke is
    package Pollers renames System.Flyology.Poller;
 
    use type Ada.Real_Time.Time;
+   use type Ada.Real_Time.Time_Span;
    use type Ada.Streams.Stream_Element_Offset;
    use type Ada.Streams.Stream_Element;
    use type GNAT.OS_Lib.File_Descriptor;
@@ -224,6 +226,16 @@ begin
       raise Program_Error with "could not initialize Linux poller";
    end if;
    Initialized := True;
+   declare
+      Expected_Backend : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_EXPECT_FILE_BACKEND", "");
+   begin
+      if (Expected_Backend = "io-uring" and then Selected_Linux_Backend /= 1)
+        or else (Expected_Backend = "native-aio" and then Selected_Linux_Backend /= 2)
+      then
+         raise Program_Error with "unexpected Linux poller file backend";
+      end if;
+   end;
    if Selected_Linux_Backend = 1 then
       if Fault_Control.Calls (Fault_Control.File_Uring_Synchronous_Eventfd) /= 1 then
          raise Program_Error with "io_uring did not select synchronous eventfd for fairness test";
@@ -232,6 +244,82 @@ begin
       raise Program_Error with "native AIO reached the io_uring eventfd registration seam";
    end if;
    Fault_Control.Reset;
+
+   --  With no completion pending, the multi-result idle path drains once
+   --  before blocking in epoll. Readiness and a cross-thread wake that arrive
+   --  after the wait begins must wake it without losing either event.
+   declare
+      task Delayed_Waker is
+         pragma Task_Info (Flyology.Native_Task);
+         entry Start;
+         entry Result (Succeeded : out Boolean);
+      end Delayed_Waker;
+
+      task body Delayed_Waker is
+         Payload        : constant Ada.Streams.Stream_Element_Array := [1 => 73];
+         Last           : Ada.Streams.Stream_Element_Offset;
+         Send_Succeeded : Boolean := False;
+      begin
+         accept Start;
+         delay 0.02;
+         begin
+            Flyology.IO.Sockets.Send_Socket (Writer, Payload, Last);
+            Send_Succeeded := Last = Payload'Last and then Pollers.Wake (Poller);
+         exception
+            when others =>
+               null;
+         end;
+         accept Result (Succeeded : out Boolean) do
+            Succeeded := Send_Succeeded;
+         end Result;
+      end Delayed_Waker;
+
+      Events     : Pollers.Poll_Event_Array (1 .. 64);
+      Count      : Natural;
+      Woke       : Boolean;
+      Payload    : Ada.Streams.Stream_Element_Array (1 .. 1);
+      Last       : Ada.Streams.Stream_Element_Offset;
+      Reader_FD  : constant Interfaces.C.int :=
+        Interfaces.C.int (Flyology.IO.Sockets.Native_Descriptor (Reader));
+      Waited     : Boolean;
+      Saw_Socket : Boolean;
+      Saw_Wake   : Boolean;
+      Started    : Ada.Real_Time.Time;
+   begin
+      if not Pollers.Watch (Poller, Reader_FD, Pollers.Readable) then
+         raise Program_Error with "could not arm delayed socket readiness";
+      end if;
+      Delayed_Waker.Start;
+      Waited := Pollers.Wait_Batch (Poller, 1.0, Events, Count);
+      Delayed_Waker.Result (Woke);
+      if not Woke or else not Waited or else Count = 0 then
+         raise Program_Error with "blocking poller wait missed delayed wake";
+      end if;
+      Saw_Socket := Contains (Events, Count, Pollers.Readable_Event, Reader_FD);
+      Saw_Wake := Contains (Events, Count, Pollers.Wake_Event);
+      if not Saw_Socket or else not Saw_Wake then
+         --  The sender may signal eventfd just after the socket wakes epoll.
+         if not Pollers.Wait_Batch (Poller, 0.0, Events, Count) then
+            raise Program_Error with "poller failed after delayed wake";
+         end if;
+         Saw_Socket := Saw_Socket or else Contains (Events, Count, Pollers.Readable_Event, Reader_FD);
+         Saw_Wake := Saw_Wake or else Contains (Events, Count, Pollers.Wake_Event);
+      end if;
+      if not Saw_Socket or else not Saw_Wake then
+         raise Program_Error with "blocking poller wait missed delayed readiness or wake";
+      end if;
+      Flyology.IO.Sockets.Receive_Socket (Reader, Payload, Last);
+      if Last /= Payload'Last or else Payload (Payload'First) /= 73 then
+         raise Program_Error with "delayed socket payload was corrupted";
+      end if;
+      Started := Ada.Real_Time.Clock;
+      if not Pollers.Wait_Batch (Poller, 0.02, Events, Count)
+        or else Count /= 0
+        or else Ada.Real_Time.Clock - Started < Ada.Real_Time.Milliseconds (10)
+      then
+         raise Program_Error with "blocking poller wait did not honor its timeout";
+      end if;
+   end;
 
    --  A one-element batch can be filled by a file completion. Consuming the
    --  file engine's eventfd first must not strand that completion: the next
