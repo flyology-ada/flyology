@@ -4725,7 +4725,8 @@ package body System.Flyology.Scheduler is
 
          Submit_Pending_Files_Locked (Group);
          Submit_Pending_Async_Files_Locked (Group);
-         if (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
+         if Pollers.Needs_File_Submission_Retry
+           and then (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
            and then (Timeout < 0.0 or else Timeout > 0.001)
          then
             --  Darwin's AIO limit is process-wide, so a group may need to
