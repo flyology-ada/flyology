@@ -1197,6 +1197,9 @@ done
   "$test_bin/fault_injection_smoke" \
   file-backpressure-wait
 "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/fault_injection_smoke" \
+  file-transient-submission
+"$project_root/scripts/run-with-timeout.sh" 30 \
   "$project_root/tests/bin/$structured_server_test_subdir/structured_server_abort_smoke"
 
 #  A capable Linux host must prove both initialization-fallback boundaries in

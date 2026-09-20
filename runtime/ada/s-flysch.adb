@@ -4725,14 +4725,15 @@ package body System.Flyology.Scheduler is
 
          Submit_Pending_Files_Locked (Group);
          Submit_Pending_Async_Files_Locked (Group);
-         if Pollers.Needs_File_Submission_Retry
-           and then (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
+         if (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
+           and then (Pollers.Needs_File_Submission_Retry
+                     or else Pollers.File_Quiescent (Group.Scheduler_Poller))
            and then (Timeout < 0.0 or else Timeout > 0.001)
          then
-            --  Darwin's AIO limit is process-wide, so a group may need to
-            --  retry even when the completion that frees capacity belongs to
-            --  another loop. The bounded poll timeout supplies that progress
-            --  without a submission worker.
+            --  Darwin's process-wide AIO capacity may be freed by another
+            --  group. Linux can wait for a local completion only while one
+            --  is in flight; a transient rejection of the sole request must
+            --  still retry without an external wake.
             Timeout := 0.001;
          end if;
 
