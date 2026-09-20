@@ -716,13 +716,20 @@ procedure Data_Structures_Concurrency_Smoke is
          end Guard_Holder;
 
          task body Guard_Holder is
+            Value : Interfaces.Unsigned_64;
          begin
-            if Paused_Vectors.Read (Item.all, 1) /= 1 then
-               raise Program_Error with "guard-holder vector read returned a wrong value";
+            Value := Paused_Vectors.Read (Item.all, 1);
+            if Value not in 1 .. Interfaces.Unsigned_64 (Total)
+              or else (Value - 1) mod Interfaces.Unsigned_64 (Per_Worker) /= 0
+            then
+               raise Program_Error with "guard-holder vector index 1 returned" & Value'Image;
             end if;
             Read_Finished.Done (True);
          exception
-            when others =>
+            when Error : others =>
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "guard-holder vector read failed: " & Ada.Exceptions.Exception_Information (Error));
                Read_Finished.Done (False);
          end Guard_Holder;
 
