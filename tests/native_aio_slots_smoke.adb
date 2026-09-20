@@ -79,6 +79,40 @@ procedure Native_AIO_Slots_Smoke is
       end loop;
    end Drain_One;
 
+   procedure Drain_Batch (Size : Positive) is
+      Completed : Natural := 0;
+      Limit     : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (10);
+   begin
+      Seen := (others => False);
+      while Completed < Size loop
+         if not Engine.Drain (Item, Values, Count) then
+            raise Program_Error with "native-AIO batch drain failed";
+         end if;
+         for Index in 1 .. Count loop
+            declare
+               Number : constant SSE.Integer_Address := SSE.To_Integer (Values (Index).Token);
+            begin
+               if Number not in 1 .. SSE.Integer_Address (Size)
+                 or else Seen (Natural (Number))
+                 or else Values (Index).Result /= 1
+                 or else Values (Index).Error_Code /= 0
+               then
+                  raise Program_Error with "native-AIO batch completion lost identity";
+               end if;
+               Seen (Natural (Number)) := True;
+               Completed := Completed + 1;
+            end;
+         end loop;
+         if Count = 0 then
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "native-AIO batch timed out";
+            end if;
+            delay 0.001;
+         end if;
+      end loop;
+   end Drain_Batch;
+
 begin
    if Ada.Directories.Exists (Path) then
       Ada.Directories.Delete_File (Path);
@@ -95,6 +129,66 @@ begin
       raise Program_Error
         with "native-AIO slot test requires the forced fallback";
    end if;
+
+   if not Fault_Control.Enabled then
+      raise Program_Error with "native-AIO batch observations require fault hooks";
+   end if;
+   declare
+      Batch     : Engine.File_Submission_Array (1 .. 4);
+      Submitted : Natural;
+   begin
+      for Index in Batch'Range loop
+         Batch (Index) :=
+           (Descriptor => File_FD,
+            Buffer     => Data (Index)'Address,
+            Length     => 1,
+            Offset     => C.long_long (Index - 1),
+            For_Write  => True,
+            Token      => SSE.To_Address (SSE.Integer_Address (Index)));
+      end loop;
+
+      Engine.Submit_Batch (Item, Batch, Submitted, Error);
+      if Submitted /= Batch'Length or else Error /= 0
+        or else Fault_Control.Calls (Fault_Control.File_Native_AIO_Multi_Submit) = 0
+      then
+         raise Program_Error with "native-AIO queued run did not use a multi-request submit";
+      end if;
+      Drain_Batch (Batch'Length);
+
+      Fault_Control.Arm (Fault_Control.File_Native_AIO_Short_Submit);
+      Engine.Submit_Batch (Item, Batch, Submitted, Error);
+      if Submitted /= 1 or else Error /= 11
+        or else Fault_Control.Calls (Fault_Control.File_Native_AIO_Short_Submit) = 0
+      then
+         raise Program_Error with "native-AIO short submit did not retain its suffix";
+      end if;
+      declare
+         Value          : Engine.Completion;
+         Has_Completion : Boolean;
+         Disposition    : constant Engine.Cancellation_Disposition :=
+           Engine.Cancel (Item, File_FD, Batch (2).Token, Value, Has_Completion, Error);
+      begin
+         if Disposition /= Engine.Already_Completing or else Has_Completion or else Error /= 0 then
+            raise Program_Error with "native-AIO unaccepted suffix entered the cancellation index";
+         end if;
+      end;
+      Engine.Submit_Batch (Item, Batch (2 .. 4), Submitted, Error);
+      if Submitted /= 3 or else Error /= 0 then
+         raise Program_Error with "native-AIO rejected suffix did not retry";
+      end if;
+      Drain_Batch (Batch'Length);
+
+      Fault_Control.Arm (Fault_Control.File_Submission_Full);
+      Engine.Submit_Batch (Item, Batch (1 .. 1), Submitted, Error);
+      if Submitted /= 0 or else Error /= 11 or else not Engine.Is_Quiescent (Item) then
+         raise Program_Error with "native-AIO sole rejection retained a buffer";
+      end if;
+      Engine.Submit_Batch (Item, Batch (1 .. 1), Submitted, Error);
+      if Submitted /= 1 or else Error /= 0 then
+         raise Program_Error with "native-AIO sole rejected request did not progress";
+      end if;
+      Drain_One (Batch (1).Token);
+   end;
 
    for Round in 1 .. Rounds loop
       Seen := (others => False);

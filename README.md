@@ -2887,8 +2887,12 @@ kernel once. A lone request is submitted before the loop blocks in the poller;
 after kernel pressure, pending requests are retried each turn. An unaccepted suffix
 remains queued without kernel buffer ownership. The bound counts cooperative
 dispatches, not elapsed time: a fiber that does not yield can still delay its
-group. Zero-copy sends and the native-AIO and Darwin AIO paths retain their
-individual eager submissions.
+group. Zero-copy sends and Darwin AIO retain their individual eager submissions.
+The native-AIO fallback also submits an eager first request individually. When
+kernel pressure queues a run of positional requests, it passes up to 64 IOCB
+pointers to one `io_submit` in FIFO order. Only the accepted prefix becomes
+kernel-owned; the unaccepted suffix remains queued for retry. Cancellation
+retains its individual path.
 Under continuous descriptor readiness, one slot in each 64-event scheduler
 batch is reserved for that drain; one-event callers alternate sources. No Ada
 worker task, pthread pool, or blocking
