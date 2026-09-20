@@ -1,7 +1,9 @@
 with Ada.Streams;
+with Interfaces.C;
 with Flyology;
 with Flyology.IO;
 with Flyology.IO.Sockets;
+with Flyology.Operations;
 with Flyology.Wake_Sources;
 
 procedure Datagram_IO_Smoke is
@@ -12,6 +14,17 @@ procedure Datagram_IO_Smoke is
    use type Sockets.IPv4_Octets;
    use type Sockets.IPv6_Octets;
    use type Sockets.Port;
+   use type Interfaces.C.int;
+
+   function Set_Timestamp
+     (FD : Interfaces.C.int; Enabled : Interfaces.C.int)
+      return Interfaces.C.int;
+   pragma Import (C, Set_Timestamp, "flyology_test_datagram_timestamp");
+
+   function Set_Packet_Info
+     (FD : Interfaces.C.int; Enabled : Interfaces.C.int)
+      return Interfaces.C.int;
+   pragma Import (C, Set_Packet_Info, "flyology_test_datagram_packet_info");
 
    function Same_Address (Left, Right : Sockets.IP_Address) return Boolean is
    begin
@@ -22,7 +35,8 @@ procedure Datagram_IO_Smoke is
                     when Sockets.IPv6 => Left.V6 = Right.V6);
    end Same_Address;
 
-   Client_IPv4 : constant Sockets.IP_Address (Sockets.IPv4) := Sockets.Loopback_IPv4;
+   Client_IPv4 : constant Sockets.IP_Address (Sockets.IPv4) :=
+     Sockets.Loopback_IPv4;
 
    procedure Close_If_Open (Socket : in out Sockets.Socket_Type) is
    begin
@@ -37,7 +51,8 @@ procedure Datagram_IO_Smoke is
       Client_Bound    : Sockets.Endpoint;
       Destination     : Sockets.Endpoint;
       Selected_Source : Sockets.Endpoint;
-      Request         : constant Stream_Element_Array := [16#C0#, 16#01#, 16#02#];
+      Request         : constant Stream_Element_Array :=
+        [16#C0#, 16#01#, 16#02#];
       Response        : constant Stream_Element_Array := [16#40#, 16#03#];
 
       protected Server_Result is
@@ -69,22 +84,73 @@ procedure Datagram_IO_Smoke is
       Sockets.Bind_Socket
         (Server,
          Sockets.Network_Endpoint
-           ((if Family = Sockets.IPv4 then Sockets.Any_IPv4 else Sockets.Any_IPv6), Sockets.Any_Port));
+           ((if Family = Sockets.IPv4
+             then Sockets.Any_IPv4
+             else Sockets.Any_IPv6),
+            Sockets.Any_Port));
       Server_Bound := Sockets.Get_Socket_Name (Server);
       Destination :=
         Sockets.Network_Endpoint
-          ((if Family = Sockets.IPv4 then Sockets.Loopback_IPv4 else Sockets.Loopback_IPv6),
+          ((if Family = Sockets.IPv4
+            then Sockets.Loopback_IPv4
+            else Sockets.Loopback_IPv6),
            Server_Bound.Port);
 
       Sockets.Create_Socket (Client, Family, Sockets.Socket_Datagram);
       Sockets.Bind_Socket
         (Client,
          Sockets.Network_Endpoint
-           ((if Family = Sockets.IPv4 then Sockets.Any_IPv4 else Sockets.Any_IPv6), Sockets.Any_Port));
+           ((if Family = Sockets.IPv4
+             then Sockets.Any_IPv4
+             else Sockets.Any_IPv6),
+            Sockets.Any_Port));
       Client_Bound := Sockets.Get_Socket_Name (Client);
       Selected_Source :=
         Sockets.Network_Endpoint
-          ((if Family = Sockets.IPv4 then Client_IPv4 else Sockets.Loopback_IPv6), Client_Bound.Port);
+          ((if Family = Sockets.IPv4
+            then Client_IPv4
+            else Sockets.Loopback_IPv6),
+           Client_Bound.Port);
+
+      declare
+         Last         : Stream_Element_Offset;
+         Rejected     : Boolean := False;
+         Wrong        : constant Sockets.Endpoint :=
+           Sockets.Network_Endpoint
+             (Selected_Source.Address,
+              (if Client_Bound.Port = Sockets.Port'Last
+               then Client_Bound.Port - 1
+               else Client_Bound.Port + 1));
+         Wrong_Family : constant Sockets.Endpoint :=
+           Sockets.Network_Endpoint
+             ((if Family = Sockets.IPv4
+               then Sockets.Loopback_IPv6
+               else Sockets.Loopback_IPv4),
+              Client_Bound.Port);
+      begin
+         begin
+            Sockets.Send_Datagram
+              (Client, Request, Last, Destination, Wrong, Timeout => 1.0);
+         exception
+            when Sockets.Socket_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+         Rejected := False;
+         begin
+            Sockets.Send_Datagram
+              (Client,
+               Request,
+               Last,
+               Destination,
+               Wrong_Family,
+               Timeout => 1.0);
+         exception
+            when Sockets.Socket_Error =>
+               Rejected := True;
+         end;
+         pragma Assert (Rejected);
+      end;
 
       declare
          task Server_Task is
@@ -97,7 +163,8 @@ procedure Datagram_IO_Smoke is
             Sent     : Stream_Element_Offset;
             Metadata : Sockets.Datagram_Metadata;
          begin
-            Sockets.Receive_Datagram (Server, Incoming, Last, Metadata, Timeout => 1.0);
+            Sockets.Receive_Datagram
+              (Server, Incoming, Last, Metadata, Timeout => 1.0);
             Sockets.Send_Datagram
               (Server,
                Response,
@@ -126,8 +193,14 @@ procedure Datagram_IO_Smoke is
             Metadata : Sockets.Datagram_Metadata;
          begin
             Sockets.Send_Datagram
-              (Client, Request, Sent, Destination => Destination, Source => Selected_Source, Timeout => 1.0);
-            Sockets.Receive_Datagram (Client, Incoming, Last, Metadata, Timeout => 1.0);
+              (Client,
+               Request,
+               Sent,
+               Destination => Destination,
+               Source      => Selected_Source,
+               Timeout     => 1.0);
+            Sockets.Receive_Datagram
+              (Client, Incoming, Last, Metadata, Timeout => 1.0);
             pragma Assert (Sent = Request'Last);
             pragma Assert (Last = Incoming'Last);
             pragma Assert (Incoming = Response);
@@ -135,13 +208,17 @@ procedure Datagram_IO_Smoke is
               Assert
                 (Same_Address
                    (Metadata.Source.Address,
-                    (if Family = Sockets.IPv4 then Sockets.Loopback_IPv4 else Sockets.Loopback_IPv6)));
+                    (if Family = Sockets.IPv4
+                     then Sockets.Loopback_IPv4
+                     else Sockets.Loopback_IPv6)));
             pragma Assert (Metadata.Source.Port = Server_Bound.Port);
             pragma
               Assert
                 (Same_Address
                    (Metadata.Destination.Address,
-                    (if Family = Sockets.IPv4 then Client_IPv4 else Sockets.Loopback_IPv6)));
+                    (if Family = Sockets.IPv4
+                     then Client_IPv4
+                     else Sockets.Loopback_IPv6)));
             pragma Assert (Metadata.Destination.Port = Client_Bound.Port);
             pragma Assert (Metadata.Original_Length = Response'Length);
             pragma Assert (not Metadata.Truncated);
@@ -157,9 +234,11 @@ procedure Datagram_IO_Smoke is
          Last     : Stream_Element_Offset;
          Metadata : Sockets.Datagram_Metadata;
       begin
-         Sockets.Send_Datagram (Client, Payload, Last, Destination, Timeout => 1.0);
+         Sockets.Send_Datagram
+           (Client, Payload, Last, Destination, Timeout => 1.0);
          pragma Assert (Last = Payload'Last);
-         Sockets.Receive_Datagram (Server, Incoming, Last, Metadata, Timeout => 1.0);
+         Sockets.Receive_Datagram
+           (Server, Incoming, Last, Metadata, Timeout => 1.0);
          pragma Assert (Last = Incoming'Last);
          pragma Assert (Incoming = [1, 2, 3]);
          pragma Assert (Metadata.Original_Length = Payload'Length);
@@ -168,7 +247,9 @@ procedure Datagram_IO_Smoke is
            Assert
              (Same_Address
                 (Metadata.Destination.Address,
-                 (if Family = Sockets.IPv4 then Sockets.Loopback_IPv4 else Sockets.Loopback_IPv6)));
+                 (if Family = Sockets.IPv4
+                  then Sockets.Loopback_IPv4
+                  else Sockets.Loopback_IPv6)));
       end;
 
       declare
@@ -177,9 +258,11 @@ procedure Datagram_IO_Smoke is
          Last     : Stream_Element_Offset;
          Metadata : Sockets.Datagram_Metadata;
       begin
-         Sockets.Send_Datagram (Client, Empty, Last, Destination, Timeout => 1.0);
+         Sockets.Send_Datagram
+           (Client, Empty, Last, Destination, Timeout => 1.0);
          pragma Assert (Last = Empty'First - 1);
-         Sockets.Receive_Datagram (Server, Incoming, Last, Metadata, Timeout => 1.0);
+         Sockets.Receive_Datagram
+           (Server, Incoming, Last, Metadata, Timeout => 1.0);
          pragma Assert (Last = Incoming'First - 1);
          pragma Assert (Metadata.Original_Length = 0);
          pragma Assert (not Metadata.Truncated);
@@ -194,6 +277,121 @@ procedure Datagram_IO_Smoke is
          raise;
    end Run_Family;
 
+   procedure Run_Ancillary_Status is
+      Server, Client : aliased Sockets.Socket_Type;
+      Bound          : Sockets.Endpoint;
+      Request        : constant Stream_Element_Array :=
+        [16#A1#, 16#B2#, 16#C3#];
+      Incoming       : aliased Stream_Element_Array := [Request'Range => 0];
+      Sent, Last     : Stream_Element_Offset;
+      Metadata       : Sockets.Datagram_Metadata;
+   begin
+      Sockets.Create_Socket (Server, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Bind_Socket
+        (Server,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Bound := Sockets.Get_Socket_Name (Server);
+      Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Bind_Socket
+        (Client,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+
+      --  One extra control message exceeds the buffer sized for the two
+      --  options Flyology enables. The payload must still be delivered.
+      pragma
+        Assert
+          (Set_Timestamp
+             (Interfaces.C.int (Sockets.Native_Descriptor (Server)), 1)
+             = 0);
+      Sockets.Send_Datagram (Client, Request, Sent, Bound, Timeout => 1.0);
+      declare
+         Set     : aliased Flyology.Operations.Completion_Set (1);
+         Receive : Sockets.Receive_Datagram_Operation :=
+           Sockets.Receive_Datagram
+             (Set'Access, Server'Access, Incoming'Access, 1.0);
+      begin
+         Flyology.Operations.Wait_All (Set);
+         Sockets.Finish (Receive, Last, Metadata);
+      end;
+      pragma Assert (Last = Request'Last and then Incoming = Request);
+      pragma
+        Assert
+          (Metadata.Original_Length = Request'Length
+             and then not Metadata.Truncated);
+      pragma Assert (Metadata.Metadata_Incomplete);
+
+      pragma
+        Assert
+          (Set_Timestamp
+             (Interfaces.C.int (Sockets.Native_Descriptor (Server)), 0)
+             = 0);
+      pragma
+        Assert
+          (Set_Packet_Info
+             (Interfaces.C.int (Sockets.Native_Descriptor (Server)), 0)
+             = 0);
+      Sockets.Send_Datagram (Client, Request, Sent, Bound, Timeout => 1.0);
+      Sockets.Receive_Datagram
+        (Server, Incoming, Last, Metadata, Timeout => 1.0);
+      pragma Assert (Last = Request'Last and then Incoming = Request);
+      pragma Assert (Metadata.Metadata_Incomplete);
+      pragma Assert (Metadata.Destination.Port = Sockets.Any_Port);
+      Sockets.Close_Socket (Client);
+      Sockets.Close_Socket (Server);
+   exception
+      when others =>
+         Close_If_Open (Client);
+         Close_If_Open (Server);
+         raise;
+   end Run_Ancillary_Status;
+
+   procedure Run_Implicit_Bind is
+      Server, Client : Sockets.Socket_Type;
+      Bound          : Sockets.Endpoint;
+      Request        : constant Stream_Element_Array := [16#51#];
+      Reply          : constant Stream_Element_Array := [16#52#];
+      Incoming       : Stream_Element_Array (1 .. 1);
+      Sent, Last     : Stream_Element_Offset;
+      Metadata       : Sockets.Datagram_Metadata;
+   begin
+      Sockets.Create_Socket (Server, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Bind_Socket
+        (Server,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Bound := Sockets.Get_Socket_Name (Server);
+      Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
+      Sockets.Send_Datagram
+        (Client,
+         Request,
+         Sent,
+         Bound,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port),
+         Timeout => 1.0);
+      Sockets.Receive_Datagram
+        (Server, Incoming, Last, Metadata, Timeout => 1.0);
+      pragma Assert (Incoming = Request);
+      Sockets.Send_Datagram
+        (Server,
+         Reply,
+         Sent,
+         Metadata.Source,
+         Metadata.Destination,
+         Timeout => 1.0);
+      Sockets.Receive_Datagram
+        (Client, Incoming, Last, Metadata, Timeout => 1.0);
+      pragma Assert (Incoming = Reply);
+      pragma
+        Assert
+          (Metadata.Destination.Port = Sockets.Get_Socket_Name (Client).Port);
+      Sockets.Close_Socket (Client);
+      Sockets.Close_Socket (Server);
+   exception
+      when others =>
+         Close_If_Open (Client);
+         Close_If_Open (Server);
+         raise;
+   end Run_Implicit_Bind;
+
    procedure Run_Deadline_And_Interruption is
       Socket                 : Sockets.Socket_Type;
       Wake                   : Flyology.Wake_Sources.Source;
@@ -203,9 +401,12 @@ procedure Datagram_IO_Smoke is
       Timed_Out, Interrupted : Boolean := False;
    begin
       Sockets.Create_Socket (Socket, Sockets.IPv4, Sockets.Socket_Datagram);
-      Sockets.Bind_Socket (Socket, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Bind_Socket
+        (Socket,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       begin
-         Sockets.Receive_Datagram (Socket, Data, Last, Metadata, Timeout => 0.020);
+         Sockets.Receive_Datagram
+           (Socket, Data, Last, Metadata, Timeout => 0.020);
       exception
          when Flyology.IO.Timeout_Error =>
             Timed_Out := True;
@@ -239,8 +440,10 @@ procedure Datagram_IO_Smoke is
       Bound                                  : Sockets.Endpoint;
       Reuse                                  : constant Sockets.Option_Type :=
         (Name => Sockets.Reuse_Port, Enabled => True);
-      Request                                : constant Stream_Element_Array := [16#C3#, 16#01#];
-      Response                               : constant Stream_Element_Array := [16#43#, 16#02#];
+      Request                                : constant Stream_Element_Array :=
+        [16#C3#, 16#01#];
+      Response                               : constant Stream_Element_Array :=
+        [16#43#, 16#02#];
       First_Received, Second_Received        : Boolean := False;
       Rejected                               : Boolean := False;
       Wake                                   : Flyology.Wake_Sources.Source;
@@ -252,10 +455,14 @@ procedure Datagram_IO_Smoke is
          Metadata   : Sockets.Datagram_Metadata;
       begin
          Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
-         Sockets.Bind_Socket (Client, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Sockets.Bind_Socket
+           (Client,
+            Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Sockets.Send_Datagram (Client, Request, Sent, Bound, Timeout => 1.0);
          pragma Assert (Sent = Request'Last);
-         Sockets.Receive_Datagram (Listener, Incoming, Last, Metadata, Timeout => 1.0);
+         Sockets.Receive_Datagram
+           (Listener, Incoming, Last, Metadata, Timeout => 1.0);
          pragma Assert (Last = Incoming'Last);
          pragma Assert (Incoming = Request);
          Sockets.Send_Datagram
@@ -266,7 +473,8 @@ procedure Datagram_IO_Smoke is
             Source      => Metadata.Destination,
             Timeout     => 1.0);
          pragma Assert (Sent = Response'Last);
-         Sockets.Receive_Datagram (Client, Incoming, Last, Metadata, Timeout => 1.0);
+         Sockets.Receive_Datagram
+           (Client, Incoming, Last, Metadata, Timeout => 1.0);
          pragma Assert (Last = Incoming'Last);
          pragma Assert (Incoming = Response);
          Sockets.Close_Socket (Client);
@@ -277,7 +485,9 @@ procedure Datagram_IO_Smoke is
       end Exchange_One;
    begin
       Sockets.Create_Socket (First, Sockets.IPv4, Sockets.Socket_Datagram);
-      Sockets.Bind_Socket (First, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Bind_Socket
+        (First,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Bound := Sockets.Get_Socket_Name (First);
       Sockets.Create_Socket (Collision, Sockets.IPv4, Sockets.Socket_Datagram);
       begin
@@ -294,7 +504,9 @@ procedure Datagram_IO_Smoke is
       Sockets.Create_Socket (Second, Sockets.IPv4, Sockets.Socket_Datagram);
       Sockets.Set_Socket_Option (First, Reuse);
       Sockets.Set_Socket_Option (Second, Reuse);
-      Sockets.Bind_Socket (First, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Bind_Socket
+        (First,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Bound := Sockets.Get_Socket_Name (First);
       Sockets.Bind_Socket (Second, Bound);
       Sockets.Move (Second, Moved_Second);
@@ -329,15 +541,20 @@ procedure Datagram_IO_Smoke is
          Metadata   : Sockets.Datagram_Metadata;
       begin
          Sockets.Create_Socket (Client, Sockets.IPv4, Sockets.Socket_Datagram);
-         Sockets.Bind_Socket (Client, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+         Sockets.Bind_Socket
+           (Client,
+            Sockets.Network_Endpoint
+              (Sockets.Loopback_IPv4, Sockets.Any_Port));
          Sockets.Send_Datagram (Client, Request, Sent, Bound, Timeout => 1.0);
          pragma Assert (Sent = Request'Last);
          begin
-            Sockets.Receive_Datagram (First, Incoming, Last, Metadata, Timeout => 0.002);
+            Sockets.Receive_Datagram
+              (First, Incoming, Last, Metadata, Timeout => 0.002);
             First_Received := True;
          exception
             when Flyology.IO.Timeout_Error =>
-               Sockets.Receive_Datagram (Moved_Second, Incoming, Last, Metadata, Timeout => 1.0);
+               Sockets.Receive_Datagram
+                 (Moved_Second, Incoming, Last, Metadata, Timeout => 1.0);
                Second_Received := True;
          end;
          pragma Assert (Last = Incoming'Last);
@@ -360,7 +577,8 @@ procedure Datagram_IO_Smoke is
                Timeout     => 1.0);
          end if;
          pragma Assert (Sent = Response'Last);
-         Sockets.Receive_Datagram (Client, Incoming, Last, Metadata, Timeout => 1.0);
+         Sockets.Receive_Datagram
+           (Client, Incoming, Last, Metadata, Timeout => 1.0);
          pragma Assert (Last = Incoming'Last);
          pragma Assert (Incoming = Response);
          Sockets.Close_Socket (Client);
@@ -394,6 +612,8 @@ procedure Datagram_IO_Smoke is
 begin
    Run_Family (Sockets.IPv4);
    Run_Family (Sockets.IPv6);
+   Run_Ancillary_Status;
+   Run_Implicit_Bind;
    Run_Deadline_And_Interruption;
    Run_Reuse_Port;
 end Datagram_IO_Smoke;

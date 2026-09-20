@@ -119,16 +119,18 @@ package Flyology.IO.Sockets is
    --  the kernel, including the bound local port. Original_Length is the whole
    --  datagram length even when only Item'Length bytes were copied.
    --  @field Source Remote source endpoint
-   --  @field Destination Local destination endpoint selected by the kernel
+   --  @field Destination Kernel-selected local endpoint, or No_Endpoint without packet info
    --  @field Original_Length Whole datagram length before caller truncation
-   --  @field Truncated True when Original_Length exceeds the receive buffer
+   --  @field Truncated True when payload exceeds the buffer or the kernel reports MSG_TRUNC
+   --  @field Metadata_Incomplete Some ancillary data was truncated or packet info was absent
    --  @field ECN Received Explicit Congestion Notification value
    type Datagram_Metadata is record
-      Source          : Endpoint;
-      Destination     : Endpoint;
-      Original_Length : Natural := 0;
-      Truncated       : Boolean := False;
-      ECN             : ECN_Codepoint := ECN_Unavailable;
+      Source              : Endpoint;
+      Destination         : Endpoint;
+      Original_Length     : Natural := 0;
+      Truncated           : Boolean := False;
+      Metadata_Incomplete : Boolean := False;
+      ECN                 : ECN_Codepoint := ECN_Unavailable;
    end record;
 
    --  Parse a numeric IPv4 or IPv6 address. Name resolution is deliberately
@@ -1308,8 +1310,9 @@ private
    end record;
 
    type Socket_Type is limited record
-      Value       : Interfaces.C.int := -1;
-      Preparation : aliased Interfaces.Unsigned_32 := 0 with Atomic;
+      Value          : Interfaces.C.int := -1;
+      Preparation    : aliased Interfaces.Unsigned_32 := 0 with Atomic;
+      Local_Identity : aliased Interfaces.Unsigned_32 := 0 with Atomic;
    end record;
 
    type Scoped_IO_Kind is
@@ -1380,6 +1383,8 @@ private
       Destination_Port    : aliased Interfaces.C.unsigned := 0;
       Destination_Scope   : aliased Interfaces.C.unsigned := 0;
       Datagram_ECN        : aliased Interfaces.C.int := -1;
+      Datagram_Flags      : aliased Interfaces.C.int := 0;
+      Have_Destination    : aliased Interfaces.C.int := 0;
       Datagram_Length     : Natural := 0;
       Select_Source       : Boolean := False;
    end record;

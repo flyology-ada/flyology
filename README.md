@@ -1752,6 +1752,15 @@ adopted socket without traffic-class delivery or a future backend without
 equivalent metadata. Flyology-created datagram sockets enable the required
 options, while
 `Enable_Datagram_Metadata` provides the same setup for adopted descriptors.
+`Metadata_Incomplete` reports a truncated control message or missing packet
+info without discarding the received payload. When packet info is absent,
+`Destination` is `No_Endpoint`; `Source`, copied bytes, original length, and
+payload truncation remain available. The socket caches its bound family and
+port after bind, or on first use for an adopted or automatically bound socket.
+The C bridge retains `msghdr`, `cmsghdr`, and packet-info decoding because
+their layouts and `CMSG_*` traversal are defined by host C headers. It returns
+the kernel's message flags and ancillary presence to Ada, where datagram
+metadata and selected-source validation are classified.
 The scoped receive overloads may add one caller-borrowed latched descriptor
 with an explicit read or write direction to the same bounded readiness set as
 UDP read readiness and the existing readable lifecycle interrupts. The socket
