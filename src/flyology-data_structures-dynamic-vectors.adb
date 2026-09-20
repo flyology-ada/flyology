@@ -440,10 +440,17 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
    end Length;
 
    procedure Cleanup_Retired (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
-      Retired : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Retired             : constant Arena_Provider.Allocation_Handle := Read_Handle (Item.Retired_Address);
+      Injected_Contention : Boolean;
    begin
       if Retired = Arena_Provider.Null_Allocation then
          return;
+      end if;
+      if Flyology.Dynamic_Destroy_Test_Hooks.Enabled then
+         Flyology.Dynamic_Destroy_Test_Hooks.Consume_Retired_Release_Contention (Injected_Contention);
+         if Injected_Contention then
+            raise Busy_Error with "injected dynamic-vector retired release contention";
+         end if;
       end if;
       Arena_Provider.Release (Arena, Retired);
       Mutated := True;
@@ -452,6 +459,15 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       when Handle_Error =>
          raise Layout_Error with "dynamic-vector deferred allocation is stale";
    end Cleanup_Retired;
+
+   procedure Cleanup_Retired_If_Possible
+     (Item : View; Arena : in out Arena_Provider.View; Mutated : in out Boolean) is
+   begin
+      Cleanup_Retired (Item, Arena, Mutated);
+   exception
+      when Busy_Error =>
+         null;
+   end Cleanup_Retired_If_Possible;
 
    procedure Ensure_Capacity
      (Item     : View;
@@ -593,6 +609,7 @@ package body Flyology.Data_Structures.Dynamic.Vectors is
       Acquire (Item);
       begin
          Require_Arena (Item, Arena);
+         Cleanup_Retired_If_Possible (Item, Arena, Mutated);
          Current_Length := Stored_Length (Item);
          if Current_Length >= Interfaces.Unsigned_64 (Natural'Last) then
             Result := Arena_Exhausted;

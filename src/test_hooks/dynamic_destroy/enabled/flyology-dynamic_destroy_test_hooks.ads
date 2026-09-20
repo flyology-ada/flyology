@@ -19,4 +19,9 @@ is
    --  Consume one armed current-allocation release contention.
    procedure Consume_Current_Release_Contention (Armed : out Boolean);
 
+   --  Make one retired-allocation release report arena contention.
+   procedure Arm_Retired_Release_Contention;
+
+   procedure Consume_Retired_Release_Contention (Armed : out Boolean);
+
 end Flyology.Dynamic_Destroy_Test_Hooks;
