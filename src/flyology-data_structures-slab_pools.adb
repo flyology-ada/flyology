@@ -14,6 +14,8 @@ package body Flyology.Data_Structures.Slab_Pools is
    use type Interfaces.Unsigned_32;
 
    Slot_Metadata_Size : constant Byte_Count := 16;
+   Cursor_Offset      : constant Byte_Count := 64;
+   Slots_Offset       : constant Byte_Count := 128;
    Generation_Offset  : constant Byte_Count := 0;
    State_Offset       : constant Byte_Count := 4;
    Next_Offset        : constant Byte_Count := 8;
@@ -52,7 +54,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Stride :=
         Layouts.Align_Up (Layouts.Checked_Add (Payload_Offset, Byte_Count (Element.Size)), Base_Alignment);
       Extent :=
-        Layouts.Checked_Add (Layouts.Header_Size, Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
+        Layouts.Checked_Add (Slots_Offset, Layouts.Checked_Multiply (Byte_Count (Capacity), Stride));
    end Geometry;
 
    function Required_Storage (Capacity : Positive) return Byte_Count is
@@ -73,7 +75,7 @@ package body Flyology.Data_Structures.Slab_Pools is
    is
       Slot_Relative : constant Byte_Count :=
         Layouts.Checked_Add
-          (Layouts.Header_Size, Layouts.Checked_Multiply (Byte_Count (Slot - 1), Item.Stride));
+          (Slots_Offset, Layouts.Checked_Multiply (Byte_Count (Slot - 1), Item.Stride));
    begin
       if Offset > Item.Stride or else Extent > Item.Stride - Offset then
          raise Layout_Error with "slab field exceeds its slot";
@@ -105,7 +107,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Item.Alignment_Value := Alignment;
       Item.Payload_Offset := Payload_Offset;
       Item.Stride := Stride;
-      Item.Allocation_Cursor_Address := Layouts.Address_At (Core, 56, 8, 8);
+      Item.Allocation_Cursor_Address := Layouts.Address_At (Core, Cursor_Offset, 8, 8);
    end Set_View;
 
    procedure Finish_Initialize
@@ -118,6 +120,7 @@ package body Flyology.Data_Structures.Slab_Pools is
       Stride         : Byte_Count) is
    begin
       Set_View (Item, Core, Capacity, Element_Size, Alignment, Payload_Offset, Stride);
+      Atomic.Store_Release_U64 (Item.Allocation_Cursor_Address, 0);
       for Slot in Interfaces.Unsigned_32 range 1 .. Capacity loop
          Bytes.Write_U32 (Generation_Address (Item, Slot), 1);
          Bytes.Write_U32 (State_Address (Item, Slot), Free_State);
@@ -241,6 +244,7 @@ package body Flyology.Data_Structures.Slab_Pools is
         or else Header.Alignment /= U32 (Element.Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Expected_Payload)
         or else Header.Word_1 /= Interfaces.Unsigned_64 (Expected_Stride)
+        or else Header.Word_2 /= 0
         or else Core.Extent /= Expected_Extent
       then
          raise Layout_Error with "slab configuration does not match";
@@ -381,10 +385,6 @@ package body Flyology.Data_Structures.Slab_Pools is
       Layouts.Require_Ready (Item.Core);
       Value := Handles.Null_Handle;
       Cursor := Atomic.Load_Relaxed_U64 (Item.Allocation_Cursor_Address);
-      Expected_Cursor := Cursor;
-      if not Atomic.Compare_Exchange_U64 (Item.Allocation_Cursor_Address, Expected_Cursor, Cursor + 1) then
-         Cursor := Expected_Cursor;
-      end if;
       for Offset in Interfaces.Unsigned_32 range 0 .. Item.Capacity_Value - 1 loop
          Slot := Policy.Allocation_Slot (Cursor, Offset, Policy.Positive_U32 (Item.Capacity_Value));
          State := Atomic.Load_Acquire_U32 (State_Address (Item, Slot));
@@ -428,6 +428,19 @@ package body Flyology.Data_Structures.Slab_Pools is
                end if;
                Value := (Slot => Handles.Slot_Index (Slot), Stamp => Handles.Generation (Generation));
                Result := Allocated;
+               --  Keep the hint at the claimed slot: if it is released, the
+               --  next allocation can reuse it without rescanning live slots.
+               --  A concurrent allocator may have moved the hint already.
+               if Offset /= 0 then
+                  Expected_Cursor := Cursor;
+                  if Atomic.Compare_Exchange_Strong_U64
+                       (Item.Allocation_Cursor_Address,
+                        Expected_Cursor,
+                        Cursor + Interfaces.Unsigned_64 (Offset))
+                  then
+                     null;
+                  end if;
+               end if;
                return;
             else
                Saw_Free_Contention := True;
@@ -694,6 +707,7 @@ package body Flyology.Data_Structures.Slab_Pools is
         or else Header.Alignment /= U32 (Element.Alignment)
         or else Header.Auxiliary /= Interfaces.Unsigned_32 (Expected_Payload)
         or else Header.Word_1 /= Interfaces.Unsigned_64 (Expected_Stride)
+        or else Header.Word_2 /= 0
         or else Core.Extent /= Expected_Extent
       then
          raise Layout_Error with "slab recovery geometry does not match";

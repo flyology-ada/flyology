@@ -1765,13 +1765,12 @@ begin
         (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
          "adaptive pool accepted corrupt chunk state");
 
-      --  The full hint extends each stored table entry, so an older outer
-      --  layout must not be interpreted using the new entry stride.
+      --  The former outer version contains slabs with the old slot offset.
       declare
          Version : constant Interfaces.Unsigned_32 :=
            Read_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4));
       begin
-         Write_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4), 1);
+         Write_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4), 2);
          Failed := False;
          begin
             Adaptive_U64.Attach (Adaptive_Bad, Region_B, Adaptive_Pool_Location, TLSF_B);
@@ -1781,7 +1780,7 @@ begin
          end;
          Write_U32 (Base_B, Raw_Offset (Adaptive_Pool_Location, 4), Version);
          Assert (Failed and then not Adaptive_U64.Is_Attached (Adaptive_Bad),
-                 "adaptive pool accepted an older chunk-table layout");
+                 "adaptive pool accepted the former nested slab layout");
       end;
 
       declare
@@ -2410,24 +2409,53 @@ begin
    end;
 
    declare
+      One       : Slabs.View;
+      Occupied  : Handle_Array (1 .. 7);
+      Free_Slot : Handles.Handle;
+   begin
+      Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 8);
+      for Index in Occupied'Range loop
+         Slabs.Try_Allocate (One, Payload_16, Occupied (Index), Allocation);
+         Assert (Allocation = Slabs.Allocated, "slab cursor fixture did not fill a slot");
+      end loop;
+      Write_U64 (Base_B, Raw_Offset (Scratch_Slab_Location, 64), 0);
+      Slabs.Try_Allocate (One, Payload_16, Free_Slot, Allocation);
+      Assert
+        (Allocation = Slabs.Allocated and then Free_Slot.Slot = 8
+         and then Read_U64 (Base_B, Raw_Offset (Scratch_Slab_Location, 64)) = 7,
+         "slab cursor did not skip the occupied run");
+      Slabs.Release (One, Free_Slot);
+      Slabs.Try_Allocate (One, Payload_16, Free_Slot, Allocation);
+      Assert
+        (Allocation = Slabs.Allocated and then Free_Slot.Slot = 8
+         and then Read_U64 (Base_B, Raw_Offset (Scratch_Slab_Location, 64)) = 7,
+         "slab cursor rescanned the occupied run after release");
+      Slabs.Release (One, Free_Slot);
+      for Handle of Occupied loop
+         Slabs.Release (One, Handle);
+      end loop;
+      Slabs.Destroy (One);
+   end;
+
+   declare
       One         : Slabs.View;
       Last_Handle : Handles.Handle;
       Failed      : Boolean := False;
    begin
       Slabs.Initialize (One, Region_A, Scratch_Slab_Location, 1);
-      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 64), Interfaces.Unsigned_32'Last);
+      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 128), Interfaces.Unsigned_32'Last);
       Slabs.Try_Allocate (One, Payload_16, Last_Handle, Allocation);
       Assert
         (Allocation = Slabs.Allocated and then Last_Handle.Stamp = Handles.Generation'Last,
          "slab did not expose the generation-exhaustion fixture");
-      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 68), 3);
+      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 132), 3);
       begin
          Slabs.Read (One, Last_Handle, Read_16, 0.0);
       exception
          when DS.Timeout_Error =>
             Failed := True;
       end;
-      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 68), 1);
+      Write_U32 (Base_B, Raw_Offset (Scratch_Slab_Location, 132), 1);
       Assert (Failed, "timed slab access ignored an owned slot");
       Failed := False;
       begin
@@ -2702,11 +2730,11 @@ begin
 
    Slabs.Try_Allocate (Slab_A, Payload_16, Poison_Handle, Allocation);
    Assert (Allocation = Slabs.Allocated, "poison test allocation failed");
-   Write_U32 (Base_A, Raw_Offset (Slab_Location, 64 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4), 3);
+   Write_U32 (Base_A, Raw_Offset (Slab_Location, 128 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4), 3);
    declare
       Failed   : Boolean := False;
       State_At : constant C.size_t :=
-        Raw_Offset (Slab_Location, 64 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4);
+        Raw_Offset (Slab_Location, 128 + (Natural (Poison_Handle.Slot) - 1) * 32 + 4);
    begin
       begin
          Slabs.Read (Slab_B, Poison_Handle, Read_16);
@@ -3159,19 +3187,34 @@ begin
    end;
 
    declare
-      Saved  : constant Interfaces.Unsigned_32 := Read_U32 (Base_B, Raw_Offset (Slab_Location, 72));
+      Saved  : constant Interfaces.Unsigned_32 := Read_U32 (Base_B, Raw_Offset (Slab_Location, 136));
       Failed : Boolean := False;
    begin
-      Write_U32 (Base_B, Raw_Offset (Slab_Location, 72), 1);
+      Write_U32 (Base_B, Raw_Offset (Slab_Location, 136), 1);
       begin
          Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
          when DS.Layout_Error =>
             Failed := True;
       end;
-      Write_U32 (Base_B, Raw_Offset (Slab_Location, 72), Saved);
+      Write_U32 (Base_B, Raw_Offset (Slab_Location, 136), Saved);
       Assert (Failed, "corrupt slab slot metadata was accepted");
       Assert (not Slabs.Is_Attached (Slab_Bad), "failed slab attach retained a usable local view");
+   end;
+
+   declare
+      Saved  : constant Interfaces.Unsigned_64 := Read_U64 (Base_B, Raw_Offset (Slab_Location, 56));
+      Failed : Boolean := False;
+   begin
+      Write_U64 (Base_B, Raw_Offset (Slab_Location, 56), 1);
+      begin
+         Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
+      exception
+         when DS.Layout_Error =>
+            Failed := True;
+      end;
+      Write_U64 (Base_B, Raw_Offset (Slab_Location, 56), Saved);
+      Assert (Failed, "slab accepted a nonzero retired cursor field");
    end;
 
    declare
@@ -3193,7 +3236,7 @@ begin
       Saved  : constant Interfaces.Unsigned_32 := Read_U32 (Base_B, Raw_Offset (Slab_Location, 4));
       Failed : Boolean := False;
    begin
-      Write_U32 (Base_B, Raw_Offset (Slab_Location, 4), Saved + 1);
+      Write_U32 (Base_B, Raw_Offset (Slab_Location, 4), 4);
       begin
          Slabs.Attach (Slab_Bad, Region_B, Slab_Location, 8);
       exception
@@ -3201,7 +3244,7 @@ begin
             Failed := True;
       end;
       Write_U32 (Base_B, Raw_Offset (Slab_Location, 4), Saved);
-      Assert (Failed, "bad slab version was accepted");
+      Assert (Failed, "previous slab layout version was accepted");
    end;
 
    declare

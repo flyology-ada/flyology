@@ -45,8 +45,11 @@ package body Flyology.Data_Structures.Atomics is
       return Result;
    end Compare_Exchange_U32;
 
-   function Compare_Exchange_U64
-     (Address : System.Address; Expected : in out Interfaces.Unsigned_64; Desired : Interfaces.Unsigned_64)
+   function Compare_Exchange_U64_With_Mode
+     (Address  : System.Address;
+      Expected : in out Interfaces.Unsigned_64;
+      Desired  : Interfaces.Unsigned_64;
+      Weak     : Boolean)
       return Boolean
    is
       Local  : aliased AP.uint64 := AP.uint64 (Expected);
@@ -57,11 +60,23 @@ package body Flyology.Data_Structures.Atomics is
           (Address,
            Local'Address,
            AP.uint64 (Desired),
-           Weak          => True,
+           Weak          => Weak,
            Success_Model => AP.Acq_Rel,
            Failure_Model => AP.Acquire);
       Expected := Interfaces.Unsigned_64 (Local);
       return Result;
-   end Compare_Exchange_U64;
+   end Compare_Exchange_U64_With_Mode;
+
+   pragma Inline_Always (Compare_Exchange_U64_With_Mode);
+
+   function Compare_Exchange_U64
+     (Address : System.Address; Expected : in out Interfaces.Unsigned_64; Desired : Interfaces.Unsigned_64)
+      return Boolean
+   is (Compare_Exchange_U64_With_Mode (Address, Expected, Desired, True));
+
+   function Compare_Exchange_Strong_U64
+     (Address : System.Address; Expected : in out Interfaces.Unsigned_64; Desired : Interfaces.Unsigned_64)
+      return Boolean
+   is (Compare_Exchange_U64_With_Mode (Address, Expected, Desired, False));
 
 end Flyology.Data_Structures.Atomics;
