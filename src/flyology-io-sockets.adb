@@ -17,6 +17,7 @@ package body Flyology.IO.Sockets is
    use type Interfaces.C.long;
    use type Interfaces.C.unsigned;
    use type Interfaces.C.unsigned_char;
+   use type Interfaces.Unsigned_32;
    use type Flyology.Socket_Policy.Error_Kind;
    use type Flyology.Socket_Policy.IO_Error_Action;
    use type Flyology.Operations.Driver_Event;
@@ -29,6 +30,10 @@ package body Flyology.IO.Sockets is
 
    Unprepared : constant Atomics.uint32 := 0;
    Prepared   : constant Atomics.uint32 := 1;
+
+   procedure Cache_Local_Identity (Socket : Socket_Type);
+   function Local_Identity (Socket : Socket_Type) return Interfaces.Unsigned_32;
+   procedure Validate_Datagram_Source (Socket : Socket_Type; Destination, Source : Endpoint);
 
    function C_Unix_Path_Max return Interfaces.C.unsigned;
    pragma Import (C, C_Unix_Path_Max, "flyology_socket_unix_path_max");
@@ -68,6 +73,12 @@ package body Flyology.IO.Sockets is
 
    function C_Errno_Would_Block return Interfaces.C.int;
    pragma Import (C, C_Errno_Would_Block, "flyology_socket_errno_would_block");
+
+   function C_Payload_Truncated_Flag return Interfaces.C.int;
+   pragma Import (C, C_Payload_Truncated_Flag, "flyology_socket_payload_truncated_flag");
+
+   function C_Control_Truncated_Flag return Interfaces.C.int;
+   pragma Import (C, C_Control_Truncated_Flag, "flyology_socket_control_truncated_flag");
 
    function C_Errno_Interrupted return Interfaces.C.int;
    pragma Import (C, C_Errno_Interrupted, "flyology_socket_errno_interrupted");
@@ -380,9 +391,10 @@ package body Flyology.IO.Sockets is
       Source_Scope        : access Interfaces.C.unsigned;
       Destination_Family  : access Interfaces.C.unsigned_char;
       Destination_Address : System.Address;
-      Destination_Port    : access Interfaces.C.unsigned;
       Destination_Scope   : access Interfaces.C.unsigned;
       ECN                 : access Interfaces.C.int;
+      Message_Flags       : access Interfaces.C.int;
+      Have_Destination    : access Interfaces.C.int;
       Error               : access Interfaces.C.int) return Interfaces.C.long;
    pragma Import (C, C_Receive_Datagram, "flyology_socket_receive_datagram");
 
@@ -413,7 +425,6 @@ package body Flyology.IO.Sockets is
       Select_Source       : Interfaces.C.int;
       Source_Family       : Interfaces.C.int;
       Source_Address      : System.Address;
-      Source_Port         : Interfaces.C.unsigned;
       Source_Scope        : Interfaces.C.unsigned;
       Error               : access Interfaces.C.int) return Interfaces.C.long;
    pragma Import (C, C_Send_Datagram, "flyology_socket_send_datagram");
@@ -1085,8 +1096,12 @@ package body Flyology.IO.Sockets is
       end if;
       Target.Value := Source.Value;
       Set_Preparation_State (Target.Preparation'Address, Preparation_State (Source));
+      Set_Preparation_State
+        (Target.Local_Identity'Address,
+         Atomics.Atomic_Load_32 (Source.Local_Identity'Address, Atomics.Acquire));
       Source.Value := -1;
       Set_Preparation_State (Source.Preparation'Address, Unprepared);
+      Set_Preparation_State (Source.Local_Identity'Address, 0);
    end Move;
 
    procedure Adopt (Source : in out Descriptor; Target : in out Socket_Type) is
@@ -1098,6 +1113,7 @@ package body Flyology.IO.Sockets is
       end if;
       Target.Value := Interfaces.C.int (Source);
       Set_Preparation_State (Target.Preparation'Address, Unprepared);
+      Set_Preparation_State (Target.Local_Identity'Address, 0);
       Source := Invalid_Descriptor;
    end Adopt;
 
@@ -1106,6 +1122,7 @@ package body Flyology.IO.Sockets is
       Target := Descriptor (Source.Value);
       Source.Value := -1;
       Set_Preparation_State (Source.Preparation'Address, Unprepared);
+      Set_Preparation_State (Source.Local_Identity'Address, 0);
    end Release;
 
    procedure Create_Socket
@@ -1125,6 +1142,7 @@ package body Flyology.IO.Sockets is
       end if;
       Socket.Value := Result;
       Set_Preparation_State (Socket.Preparation'Address, Unprepared);
+      Set_Preparation_State (Socket.Local_Identity'Address, 0);
    end Create_Socket;
 
    procedure Create_Unix_Stream_Socket (Socket : in out Socket_Type) is
@@ -1142,6 +1160,7 @@ package body Flyology.IO.Sockets is
       end if;
       Socket.Value := Result;
       Set_Preparation_State (Socket.Preparation'Address, Unprepared);
+      Set_Preparation_State (Socket.Local_Identity'Address, 0);
    end Create_Unix_Stream_Socket;
 
    procedure Create_Socket_Pair
@@ -1167,6 +1186,8 @@ package body Flyology.IO.Sockets is
       Right.Value := C_Right;
       Set_Preparation_State (Left.Preparation'Address, Unprepared);
       Set_Preparation_State (Right.Preparation'Address, Unprepared);
+      Set_Preparation_State (Left.Local_Identity'Address, 0);
+      Set_Preparation_State (Right.Local_Identity'Address, 0);
    end Create_Socket_Pair;
 
    procedure Close_Socket (Socket : in out Socket_Type) is
@@ -1179,6 +1200,7 @@ package body Flyology.IO.Sockets is
       Result := C_Close (Socket.Value, Error'Access);
       Socket.Value := -1;
       Set_Preparation_State (Socket.Preparation'Address, Unprepared);
+      Set_Preparation_State (Socket.Local_Identity'Address, 0);
       if Result /= 0 then
          Raise_Error ("close", Error);
       end if;
@@ -1258,6 +1280,7 @@ package body Flyology.IO.Sockets is
       then
          Raise_Error ("bind", Error);
       end if;
+      Cache_Local_Identity (Socket);
    end Bind_Socket;
 
    procedure Bind_Socket (Socket : Socket_Type; Address : Unix_Path) is
@@ -1314,6 +1337,54 @@ package body Flyology.IO.Sockets is
 
    function Get_Socket_Name (Socket : Socket_Type) return Endpoint
    is (Read_Name (Socket, False));
+
+   function Encoded_Local_Identity (Local : Endpoint) return Interfaces.Unsigned_32 is
+      Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Family_Code (Local.Family));
+   begin
+      return Interfaces.Shift_Left (Code, 16) + Interfaces.Unsigned_32 (Local.Port);
+   end Encoded_Local_Identity;
+
+   procedure Cache_Local_Identity (Socket : Socket_Type) is
+      Local : constant Endpoint := Get_Socket_Name (Socket);
+   begin
+      if Local.Port /= Any_Port then
+         Set_Preparation_State
+           (Socket.Local_Identity'Address, Atomics.uint32 (Encoded_Local_Identity (Local)));
+      end if;
+   end Cache_Local_Identity;
+
+   function Local_Identity (Socket : Socket_Type) return Interfaces.Unsigned_32 is
+      Cached : Interfaces.Unsigned_32 :=
+        Interfaces.Unsigned_32 (Atomics.Atomic_Load_32 (Socket.Local_Identity'Address, Atomics.Acquire));
+   begin
+      if Cached = 0 then
+         declare
+            Local : constant Endpoint := Get_Socket_Name (Socket);
+         begin
+            Cached := Encoded_Local_Identity (Local);
+            if Local.Port /= Any_Port then
+               Set_Preparation_State (Socket.Local_Identity'Address, Atomics.uint32 (Cached));
+            end if;
+         end;
+      end if;
+      return Cached;
+   end Local_Identity;
+
+   procedure Validate_Datagram_Source (Socket : Socket_Type; Destination, Source : Endpoint) is
+   begin
+      if Source.Family /= Destination.Family then
+         raise Socket_Error with "selected datagram source and destination families differ";
+      end if;
+      declare
+         Local : constant Interfaces.Unsigned_32 := Local_Identity (Socket);
+      begin
+         if Interfaces.Shift_Right (Local, 16) /= Interfaces.Unsigned_32 (Family_Code (Source.Family))
+           or else Local mod 65_536 /= Interfaces.Unsigned_32 (Source.Port)
+         then
+            raise Socket_Error with "selected datagram source does not match the bound socket";
+         end if;
+      end;
+   end Validate_Datagram_Source;
 
    function Get_Peer_Name (Socket : Socket_Type) return Endpoint
    is (Read_Name (Socket, True));
@@ -1616,9 +1687,10 @@ package body Flyology.IO.Sockets is
       Source_Scope        : aliased Interfaces.C.unsigned;
       Destination_Family  : aliased Interfaces.C.unsigned_char;
       Destination_Address : aliased IPv6_Octets := (others => 0);
-      Destination_Port    : aliased Interfaces.C.unsigned;
       Destination_Scope   : aliased Interfaces.C.unsigned;
       C_ECN               : aliased Interfaces.C.int;
+      Message_Flags       : aliased Interfaces.C.int;
+      Have_Destination    : aliased Interfaces.C.int;
       Error               : aliased Interfaces.C.int;
       Result              : Interfaces.C.long;
       Buffer              : constant System.Address :=
@@ -1638,9 +1710,10 @@ package body Flyology.IO.Sockets is
               Source_Scope'Access,
               Destination_Family'Access,
               Destination_Address (Destination_Address'First)'Address,
-              Destination_Port'Access,
               Destination_Scope'Access,
               C_ECN'Access,
+              Message_Flags'Access,
+              Have_Destination'Access,
               Error'Access);
          if Result >= 0 then
             Copied := Natural'Min (Natural (Result), Item'Length);
@@ -1649,12 +1722,29 @@ package body Flyology.IO.Sockets is
                then Item'First - 1
                else Item'First + Ada.Streams.Stream_Element_Offset (Copied) - 1);
             Metadata :=
-              (Source          => Make_Endpoint (Source_Family, Source_Address, Source_Port, Source_Scope),
-               Destination     =>
-                 Make_Endpoint (Destination_Family, Destination_Address, Destination_Port, Destination_Scope),
-               Original_Length => Natural (Result),
-               Truncated       => Natural (Result) > Item'Length,
-               ECN             =>
+              (Source              =>
+                 Make_Endpoint (Source_Family, Source_Address, Source_Port, Source_Scope),
+               Destination         =>
+                 (if Have_Destination = 0
+                  then No_Endpoint
+                  else
+                    Make_Endpoint
+                      (Destination_Family,
+                       Destination_Address,
+                       Interfaces.C.unsigned (Local_Identity (Socket) mod 65_536),
+                       Destination_Scope)),
+               Original_Length     => Natural (Result),
+               Truncated           =>
+                 Natural (Result) > Item'Length
+                 or else (Interfaces.Unsigned_32 (Message_Flags)
+                          and Interfaces.Unsigned_32 (C_Payload_Truncated_Flag))
+                         /= 0,
+               Metadata_Incomplete =>
+                 Have_Destination = 0
+                 or else (Interfaces.Unsigned_32 (Message_Flags)
+                          and Interfaces.Unsigned_32 (C_Control_Truncated_Flag))
+                         /= 0,
+               ECN                 =>
                  (case C_ECN is
                     when 0      => Not_ECT,
                     when 1      => ECT_One,
@@ -1786,6 +1876,9 @@ package body Flyology.IO.Sockets is
         (if Item'Length = 0 then System.Null_Address else Item (Item'First)'Address);
    begin
       Prepare (Socket);
+      if Select_Source then
+         Validate_Datagram_Source (Socket, Destination, Source);
+      end if;
       loop
          Result :=
            C_Send_Datagram
@@ -1799,7 +1892,6 @@ package body Flyology.IO.Sockets is
               Boolean'Pos (Select_Source),
               Family_Code (Source.Family),
               Address_Data (Source.Address),
-              Interfaces.C.unsigned (Source.Port),
               Interfaces.C.unsigned (Source.Scope),
               Error'Access);
          if Result >= 0 then
@@ -2012,6 +2104,9 @@ package body Flyology.IO.Sockets is
       Additional_For_Write : Boolean := False) is
    begin
       Prepare (Socket.all);
+      if Kind = Datagram_Send and then Select_Source then
+         Validate_Datagram_Source (Socket.all, Destination, Source);
+      end if;
       Item.Kind := Kind;
       Item.Socket := Socket.all'Unchecked_Access;
       if Array_Item /= null then
@@ -2055,6 +2150,8 @@ package body Flyology.IO.Sockets is
       Item.Destination_Port := 0;
       Item.Destination_Scope := 0;
       Item.Datagram_ECN := -1;
+      Item.Datagram_Flags := 0;
+      Item.Have_Destination := 0;
       Item.Datagram_Length := 0;
       Item.Select_Source := Select_Source;
       if Kind = Datagram_Send then
@@ -2718,7 +2815,6 @@ package body Flyology.IO.Sockets is
                  Boolean'Pos (Item.Select_Source),
                  Interfaces.C.int (Item.Source_Family),
                  Item.Source_Address (Item.Source_Address'First)'Address,
-                 Item.Source_Port,
                  Item.Source_Scope,
                  Error'Access);
          else
@@ -2733,9 +2829,10 @@ package body Flyology.IO.Sockets is
                  Item.Source_Scope'Access,
                  Item.Destination_Family'Access,
                  Item.Destination_Address (Item.Destination_Address'First)'Address,
-                 Item.Destination_Port'Access,
                  Item.Destination_Scope'Access,
                  Item.Datagram_ECN'Access,
+                 Item.Datagram_Flags'Access,
+                 Item.Have_Destination'Access,
                  Error'Access);
          end if;
          exit when Result >= 0;
@@ -2775,6 +2872,9 @@ package body Flyology.IO.Sockets is
       else
          Item.Transferred := Natural'Min (Natural (Result), Data_Length);
          Item.Datagram_Length := Natural (Result);
+         if Item.Have_Destination /= 0 then
+            Item.Destination_Port := Interfaces.C.unsigned (Local_Identity (Item.Socket.all) mod 65_536);
+         end if;
       end if;
       Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
    exception
@@ -3264,21 +3364,33 @@ package body Flyology.IO.Sockets is
             then Operation.Array_First - 1
             else Operation.Array_First + Ada.Streams.Stream_Element_Offset (Operation.Transferred) - 1);
          Metadata :=
-           (Source          =>
+           (Source              =>
               Make_Endpoint
                 (Operation.Source_Family,
                  Operation.Source_Address,
                  Operation.Source_Port,
                  Operation.Source_Scope),
-            Destination     =>
-              Make_Endpoint
-                (Operation.Destination_Family,
-                 Operation.Destination_Address,
-                 Operation.Destination_Port,
-                 Operation.Destination_Scope),
-            Original_Length => Operation.Datagram_Length,
-            Truncated       => Operation.Datagram_Length > Operation.Array_Length,
-            ECN             =>
+            Destination         =>
+              (if Operation.Have_Destination = 0
+               then No_Endpoint
+               else
+                 Make_Endpoint
+                   (Operation.Destination_Family,
+                    Operation.Destination_Address,
+                    Operation.Destination_Port,
+                    Operation.Destination_Scope)),
+            Original_Length     => Operation.Datagram_Length,
+            Truncated           =>
+              Operation.Datagram_Length > Operation.Array_Length
+              or else (Interfaces.Unsigned_32 (Operation.Datagram_Flags)
+                       and Interfaces.Unsigned_32 (C_Payload_Truncated_Flag))
+                      /= 0,
+            Metadata_Incomplete =>
+              Operation.Have_Destination = 0
+              or else (Interfaces.Unsigned_32 (Operation.Datagram_Flags)
+                       and Interfaces.Unsigned_32 (C_Control_Truncated_Flag))
+                      /= 0,
+            ECN                 =>
               (case Operation.Datagram_ECN is
                  when 0      => Not_ECT,
                  when 1      => ECT_One,

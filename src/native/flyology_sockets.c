@@ -373,6 +373,16 @@ int flyology_socket_no_signal_flag(void)
     return MSG_NOSIGNAL;
 }
 
+int flyology_socket_payload_truncated_flag(void)
+{
+    return MSG_TRUNC;
+}
+
+int flyology_socket_control_truncated_flag(void)
+{
+    return MSG_CTRUNC;
+}
+
 int flyology_socket_set_receive_timeout(int fd, double seconds, int *error)
 {
     struct timeval timeout;
@@ -387,22 +397,25 @@ int flyology_socket_set_receive_timeout(int fd, double seconds, int *error)
     return 0;
 }
 
+/* msghdr, cmsghdr, and packet-info layouts are host-header ABI details.
+   Return kernel flags and ancillary presence without classifying them. */
 long flyology_socket_receive_datagram(
     int fd, void *buffer, size_t length,
     unsigned char *source_family, unsigned char *source_address,
     unsigned *source_port, uint32_t *source_scope,
     unsigned char *destination_family, unsigned char *destination_address,
-    unsigned *destination_port, uint32_t *destination_scope,
-    int *ecn, int *error)
+    uint32_t *destination_scope, int *ecn,
+    int *message_flags, int *have_destination, int *error)
 {
     struct sockaddr_storage source_storage;
-    struct sockaddr_storage local_storage;
-    socklen_t local_length = (socklen_t)sizeof(local_storage);
     unsigned char discard[FLYOLOGY_DISCARD_CHUNK];
     struct iovec vectors[1 + FLYOLOGY_DISCARD_VECTORS];
     union {
         struct cmsghdr alignment;
-        unsigned char bytes[256];
+        /* Created IP sockets enable one packet-info and one traffic-class
+           message. Adopted sockets may have further ancillary options. */
+        unsigned char bytes[CMSG_SPACE(sizeof(struct in6_pktinfo)) +
+                            CMSG_SPACE(sizeof(int))];
     } control;
     struct msghdr message;
     struct cmsghdr *header;
@@ -410,11 +423,9 @@ long flyology_socket_receive_datagram(
         ? length : FLYOLOGY_MAX_IP_DATAGRAM;
     size_t remaining = FLYOLOGY_MAX_IP_DATAGRAM - exposed;
     size_t vector_count = 0;
-    int have_destination = 0;
     ssize_t result;
 
     memset(&source_storage, 0, sizeof(source_storage));
-    memset(&local_storage, 0, sizeof(local_storage));
     memset(&control, 0, sizeof(control));
     memset(&message, 0, sizeof(message));
     *source_family = 0;
@@ -423,9 +434,10 @@ long flyology_socket_receive_datagram(
     *source_scope = 0;
     *destination_family = 0;
     memset(destination_address, 0, 16);
-    *destination_port = 0;
     *destination_scope = 0;
     *ecn = -1;
+    *message_flags = 0;
+    *have_destination = 0;
 
     if (exposed > 0) {
         vectors[vector_count].iov_base = buffer;
@@ -453,18 +465,10 @@ long flyology_socket_receive_datagram(
         *error = errno;
         return -1;
     }
-    if ((message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
-        *error = EMSGSIZE;
-        return -1;
-    }
+    *message_flags = message.msg_flags;
     if (flyology_socket_unpack_address(
             (struct sockaddr *)&source_storage, message.msg_namelen,
-            source_family, source_address, source_port, source_scope) < 0 ||
-        getsockname(fd, (struct sockaddr *)&local_storage, &local_length) < 0 ||
-        flyology_socket_unpack_address(
-            (struct sockaddr *)&local_storage, local_length,
-            destination_family, destination_address,
-            destination_port, destination_scope) < 0) {
+            source_family, source_address, source_port, source_scope) < 0) {
         *error = errno;
         return -1;
     }
@@ -481,7 +485,7 @@ long flyology_socket_receive_datagram(
             memcpy(destination_address, &info->ipi_addr, 4);
             memset(destination_address + 4, 0, 12);
             *destination_scope = 0;
-            have_destination = 1;
+            *have_destination = 1;
             continue;
         }
 #endif
@@ -494,7 +498,7 @@ long flyology_socket_receive_datagram(
             *destination_family = 6;
             memcpy(destination_address, &info->ipi6_addr, 16);
             *destination_scope = info->ipi6_ifindex;
-            have_destination = 1;
+            *have_destination = 1;
             continue;
         }
 #endif
@@ -519,10 +523,6 @@ long flyology_socket_receive_datagram(
 #endif
     }
 
-    if (!have_destination) {
-        *error = EPROTO;
-        return -1;
-    }
     *error = 0;
     return (long)result;
 }
@@ -554,21 +554,17 @@ long flyology_linux_guarded_sendfile(int socket_fd, int file_fd,
 }
 #endif
 
+/* Only pack the host sockaddr and source-selection control message. Ada
+   validates the selected source against the bound socket before entry. */
 long flyology_socket_send_datagram(
     int fd, const void *buffer, size_t length,
     int destination_family, const unsigned char *destination_address,
     unsigned destination_port, uint32_t destination_scope,
     int select_source, int source_family, const unsigned char *source_address,
-    unsigned source_port, uint32_t source_scope, int *error)
+    uint32_t source_scope, int *error)
 {
     struct sockaddr_storage destination_storage;
-    struct sockaddr_storage local_storage;
     socklen_t destination_length;
-    socklen_t local_length = (socklen_t)sizeof(local_storage);
-    unsigned char local_family;
-    unsigned char local_address[16];
-    unsigned local_port;
-    uint32_t local_scope;
     struct iovec vector;
     union {
         struct cmsghdr alignment;
@@ -595,23 +591,6 @@ long flyology_socket_send_datagram(
     message.msg_iovlen = 1;
 
     if (select_source) {
-        if (source_family != destination_family) {
-            *error = EINVAL;
-            return -1;
-        }
-        if (getsockname(fd, (struct sockaddr *)&local_storage,
-                        &local_length) < 0 ||
-            flyology_socket_unpack_address(
-                (struct sockaddr *)&local_storage, local_length,
-                &local_family, local_address, &local_port, &local_scope) < 0) {
-            *error = errno;
-            return -1;
-        }
-        if (local_family != (unsigned char)source_family ||
-            local_port != source_port) {
-            *error = EINVAL;
-            return -1;
-        }
         message.msg_control = control.bytes;
         if (source_family == 4) {
 #if defined(IP_PKTINFO)
