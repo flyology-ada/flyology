@@ -217,6 +217,12 @@ package body Flyology.Observability.Stall_Watchdogs is
          begin
             null;
          end;
+         --  GNARL publishes the task result before termination handlers run.
+         --  A positive delay parks a lightweight caller while those handlers
+         --  finish, and avoids a native caller's busy yield loop.
+         while not Object.Monitor.all'Terminated loop
+            delay 0.001;
+         end loop;
          Free_Monitor (Object.Monitor);
       end if;
    end Stop;

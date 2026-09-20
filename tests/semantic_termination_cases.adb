@@ -5,6 +5,7 @@ with Ada.Synchronous_Task_Control;
 with Ada.Task_Identification;
 with Ada.Task_Termination;
 with Ada.Text_IO;
+with Flyology.Task_Results;
 
 package body Semantic_Termination_Cases is
    package Exceptions renames Ada.Exceptions;
@@ -18,6 +19,7 @@ package body Semantic_Termination_Cases is
    use type Task_Ids.Task_Id;
    use type Termination.Cause_Of_Termination;
    use type Termination.Termination_Handler;
+   use type Flyology.Task_Results.Observation_Status;
 
    protected type Signal is
       procedure Set;
@@ -44,7 +46,9 @@ package body Semantic_Termination_Cases is
 
    protected type Termination_Record is
       procedure Handle
-        (Cause : Termination.Cause_Of_Termination; T : Task_Ids.Task_Id; X : Exceptions.Exception_Occurrence);
+        (Cause : Termination.Cause_Of_Termination;
+         T     : Task_Ids.Task_Id;
+         X     : Exceptions.Exception_Occurrence);
       entry Wait;
       function Matches
         (Cause        : Termination.Cause_Of_Termination;
@@ -59,8 +63,9 @@ package body Semantic_Termination_Cases is
 
    protected body Termination_Record is
       procedure Handle
-        (Cause : Termination.Cause_Of_Termination; T : Task_Ids.Task_Id; X : Exceptions.Exception_Occurrence)
-      is
+        (Cause : Termination.Cause_Of_Termination;
+         T     : Task_Ids.Task_Id;
+         X     : Exceptions.Exception_Occurrence) is
       begin
          Seen := True;
          Seen_Cause := Cause;
@@ -77,7 +82,10 @@ package body Semantic_Termination_Cases is
         (Cause        : Termination.Cause_Of_Termination;
          T            : Task_Ids.Task_Id;
          Exception_Id : Exceptions.Exception_Id) return Boolean
-      is (Seen and then Seen_Cause = Cause and then Seen_Task = T and then Seen_Exception = Exception_Id);
+      is (Seen
+          and then Seen_Cause = Cause
+          and then Seen_Task = T
+          and then Seen_Exception = Exception_Id);
    end Termination_Record;
 
    --  Ada.Task_Termination.Termination_Handler is declared at library level,
@@ -85,6 +93,35 @@ package body Semantic_Termination_Cases is
    Normal_Termination   : Termination_Record;
    Failure_Termination  : Termination_Record;
    Abnormal_Termination : Termination_Record;
+
+   Release_Result_Handler : Boolean := False
+   with Atomic;
+   Entered_Result_Handler : Boolean := False
+   with Atomic;
+
+   protected Result_Termination is
+      procedure Handle
+        (Cause : Termination.Cause_Of_Termination;
+         T     : Task_Ids.Task_Id;
+         X     : Exceptions.Exception_Occurrence);
+   end Result_Termination;
+
+   protected body Result_Termination is
+      procedure Handle
+        (Cause : Termination.Cause_Of_Termination;
+         T     : Task_Ids.Task_Id;
+         X     : Exceptions.Exception_Occurrence)
+      is
+         pragma Unreferenced (Cause, T, X);
+      begin
+         --  Hold the task before GNARL marks it terminated, while the test
+         --  caller observes the already-published task result.
+         Entered_Result_Handler := True;
+         while not Release_Result_Handler loop
+            null;
+         end loop;
+      end Handle;
+   end Result_Termination;
 
    procedure Await_Terminated (T : Task_Ids.Task_Id; Context : String) is
       Deadline : constant RT.Time := RT.Clock + RT.Seconds (2);
@@ -109,7 +146,8 @@ package body Semantic_Termination_Cases is
 
       procedure Begin_Case (Item : Check_Id) is
       begin
-         Ada.Text_IO.Put_Line ("semantic termination: " & Label & "/" & Check_Id'Image (Item));
+         Ada.Text_IO.Put_Line
+           ("semantic termination: " & Label & "/" & Check_Id'Image (Item));
       end Begin_Case;
    begin
       --  The server accepts two distinct family members in a fixed order.
@@ -127,7 +165,8 @@ package body Semantic_Termination_Cases is
 
          task Server is
             pragma Task_Info (Subject_Model);
-            entry Visit (Positive range 1 .. 3) (Input : Natural; Output : out Natural);
+            entry Visit (Positive range 1 .. 3)
+              (Input : Natural; Output : out Natural);
          end Server;
 
          task body Server is
@@ -181,7 +220,8 @@ package body Semantic_Termination_Cases is
 
          Two_Done.Wait;
          One_Done.Wait;
-         Outcome (Entry_Family) := Range_Raised and then Two_Result = 22 and then One_Result = 11;
+         Outcome (Entry_Family) :=
+           Range_Raised and then Two_Result = 22 and then One_Result = 11;
       end;
 
       --  The Is_Terminated observation establishes the state before the call;
@@ -272,7 +312,9 @@ package body Semantic_Termination_Cases is
          end Closed_Gate;
 
          type Probe_Kind is (Sibling_Probe, Broken_Probe);
-         type Probe (Kind : Probe_Kind) is new Ada.Finalization.Limited_Controlled with null record;
+         type Probe (Kind : Probe_Kind) is
+           new Ada.Finalization.Limited_Controlled
+         with null record;
          overriding
          procedure Finalize (Object : in out Probe);
 
@@ -386,7 +428,8 @@ package body Semantic_Termination_Cases is
          STC.Set_True (Release_Accept);
          Accept_Completed.Wait;
          Await_Terminated (Caller'Identity, "aborted rendezvous caller");
-         Outcome (Abort_Active_Rendezvous) := Accept_Completed.Is_Set and not Caller_Continued;
+         Outcome (Abort_Active_Rendezvous) :=
+           Accept_Completed.Is_Set and not Caller_Continued;
       end;
 
       --  The trigger task accepts Inner first, then waits for the inner ATC
@@ -506,12 +549,17 @@ package body Semantic_Termination_Cases is
 
             Id : constant Task_Ids.Task_Id := Normal_Task'Identity;
          begin
-            Termination.Set_Specific_Handler (Id, Normal_Termination.Handle'Access);
-            Normal_OK := Termination.Specific_Handler (Id) = Normal_Termination.Handle'Access;
+            Termination.Set_Specific_Handler
+              (Id, Normal_Termination.Handle'Access);
+            Normal_OK :=
+              Termination.Specific_Handler (Id)
+              = Normal_Termination.Handle'Access;
             STC.Set_True (Normal_Gate);
             Normal_Termination.Wait;
             Normal_OK :=
-              Normal_OK and then Normal_Termination.Matches (Termination.Normal, Id, Exceptions.Null_Id);
+              Normal_OK
+              and then Normal_Termination.Matches
+                         (Termination.Normal, Id, Exceptions.Null_Id);
          end;
 
          declare
@@ -527,11 +575,15 @@ package body Semantic_Termination_Cases is
 
             Id : constant Task_Ids.Task_Id := Failure_Task'Identity;
          begin
-            Termination.Set_Specific_Handler (Id, Failure_Termination.Handle'Access);
+            Termination.Set_Specific_Handler
+              (Id, Failure_Termination.Handle'Access);
             STC.Set_True (Failure_Gate);
             Failure_Termination.Wait;
             Failure_OK :=
-              Failure_Termination.Matches (Termination.Unhandled_Exception, Id, Constraint_Error'Identity);
+              Failure_Termination.Matches
+                (Termination.Unhandled_Exception,
+                 Id,
+                 Constraint_Error'Identity);
          end;
 
          declare
@@ -547,14 +599,55 @@ package body Semantic_Termination_Cases is
 
             Id : constant Task_Ids.Task_Id := Abnormal_Task'Identity;
          begin
-            Termination.Set_Specific_Handler (Id, Abnormal_Termination.Handle'Access);
+            Termination.Set_Specific_Handler
+              (Id, Abnormal_Termination.Handle'Access);
             Abnormal_Start.Wait;
             abort Abnormal_Task;
             Abnormal_Termination.Wait;
-            Abnormal_OK := Abnormal_Termination.Matches (Termination.Abnormal, Id, Exceptions.Null_Id);
+            Abnormal_OK :=
+              Abnormal_Termination.Matches
+                (Termination.Abnormal, Id, Exceptions.Null_Id);
          end;
 
-         Outcome (Termination_Handlers) := Normal_OK and Failure_OK and Abnormal_OK;
+         Outcome (Termination_Handlers) :=
+           Normal_OK and Failure_OK and Abnormal_OK;
+      end;
+
+      Begin_Case (Result_Precedes_Termination);
+      Release_Result_Handler := False;
+      Entered_Result_Handler := False;
+      declare
+         Open : STC.Suspension_Object;
+
+         task Subject is
+            pragma Task_Info (Subject_Model);
+         end Subject;
+
+         task body Subject is
+         begin
+            STC.Suspend_Until_True (Open);
+         end Subject;
+
+         Id          : constant Task_Ids.Task_Id := Subject'Identity;
+         Observation : Flyology.Task_Results.Task_Observation;
+         Deadline    : constant RT.Time := RT.Clock + RT.Seconds (2);
+      begin
+         Termination.Set_Specific_Handler
+           (Id, Result_Termination.Handle'Access);
+         STC.Set_True (Open);
+         Observation := Flyology.Task_Results.Wait (Id);
+         while not Entered_Result_Handler and then RT.Clock < Deadline loop
+            delay 0.001;
+         end loop;
+         Outcome (Result_Precedes_Termination) :=
+           Observation.Status = Flyology.Task_Results.Terminal
+           and then Entered_Result_Handler
+           and then not Task_Ids.Is_Terminated (Id);
+         Release_Result_Handler := True;
+      exception
+         when others =>
+            Release_Result_Handler := True;
+            raise;
       end;
 
       return Outcome;

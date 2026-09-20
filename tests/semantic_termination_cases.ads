@@ -13,7 +13,8 @@ package Semantic_Termination_Cases is
       Partial_Activation_Failure,
       Abort_Active_Rendezvous,
       Nested_Asynchronous_Transfer,
-      Termination_Handlers);
+      Termination_Handlers,
+      Result_Precedes_Termination);
 
    type Results is array (Check_Id) of Boolean;
 
