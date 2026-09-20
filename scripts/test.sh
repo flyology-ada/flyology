@@ -618,6 +618,8 @@ connection_tls_upgrade_smoke
 managed_connection_connect_smoke
 descriptor_ownership_smoke'
 
+scheduler_waiter_hook_mains='waiter_work_smoke waiter_mixed_work_smoke'
+
 worker_pool_hook_mains='concurrency_primitives_smoke
 task_scope_faults_smoke'
 
@@ -700,7 +702,10 @@ compile_test_mains "$test_subdir" "$all_test_mains"
 
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 export FLYOLOGY_CONNECTION_TEST_HOOKS
-compile_test_mains "$connection_test_subdir" "$connection_hook_mains"
+compile_test_mains \
+  "$connection_test_subdir" \
+  "$connection_hook_mains
+$scheduler_waiter_hook_mains"
 unset FLYOLOGY_CONNECTION_TEST_HOOKS
 
 FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
@@ -1088,6 +1093,13 @@ linux_abort_readiness_waiter_smoke
 linux_poller_fairness_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+link_test_mains \
+  "$connection_test_subdir" "$project_root/build/rts" \
+  "$connection_hook_mains
+$scheduler_waiter_hook_mains"
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
 FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
 export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 link_test_mains \
@@ -1096,6 +1108,14 @@ link_test_mains \
 unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/accept_transient_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$connection_test_bin/waiter_work_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$connection_test_bin/waiter_work_smoke" 12 6
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$connection_test_bin/waiter_work_smoke" 12 12
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$connection_test_bin/waiter_mixed_work_smoke"
 #  A foreign thread creating a task while the environment task finalizes must
 #  be refused, not admitted into a stopped group. The unfixed scheduler aborts
 #  here on its stop invariant, so the timeout also bounds a regression.

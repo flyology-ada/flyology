@@ -3,6 +3,7 @@ with Interfaces.C;
 --  Disabled connection test seams selected by the owning project. The
 --  imported-only declarations make a missed static guard visible to symbol
 --  inspection without supplying any production implementation.
+
 private package Flyology.Connection_Test_Hooks is
 
    --  Keep this a literal compile-time constant. GNAT removes code guarded by
@@ -20,5 +21,11 @@ private package Flyology.Connection_Test_Hooks is
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_raw_accept";
    function Fail_Next_Capacity_Release_Wake return Boolean
    with Import, External_Name => "flyology_disabled_hook_must_be_elided_connection_capacity_wake";
+
+   procedure Reset_Scheduler_Waiter_Work
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_reset";
+
+   function Scheduler_Waiter_Work (Point : Interfaces.C.int) return Interfaces.C.unsigned
+   with Import, External_Name => "flyology_disabled_hook_must_be_elided_scheduler_waiter_observe";
 
 end Flyology.Connection_Test_Hooks;

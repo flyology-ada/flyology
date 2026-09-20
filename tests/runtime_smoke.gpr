@@ -209,6 +209,8 @@ project Runtime_Smoke is
       "unix_stream_socket_smoke.adb",
       "wake_source_state_model.adb",
       "wait_any_smoke.adb",
+      "waiter_work_smoke.adb",
+      "waiter_mixed_work_smoke.adb",
       "wall_clock_wait_smoke.adb");
    for Create_Missing_Dirs use "True";
 

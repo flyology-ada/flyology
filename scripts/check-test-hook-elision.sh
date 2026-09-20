@@ -192,6 +192,21 @@ compile_probe () {
         exit 1
       fi
     done
+    if [ "$hook" = connection ]; then
+      for symbol in flyology_test_fault_reset flyology_test_fault_calls; do
+        if [ "$state" = enabled ]; then
+          if ! printf '%s\n' "$symbols" | grep -F "$symbol" >/dev/null; then
+            printf '%s\n' \
+              "enabled waiter observation disappeared in $mode combination $combination" >&2
+            exit 1
+          fi
+        elif printf '%s\n' "$symbols" | grep -F "$symbol" >/dev/null; then
+          printf '%s\n' \
+            "disabled waiter observation survived in $mode combination $combination" >&2
+          exit 1
+        fi
+      done
+    fi
     hook_index=$((hook_index * 2))
   done
 

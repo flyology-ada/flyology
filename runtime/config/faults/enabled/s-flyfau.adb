@@ -175,4 +175,11 @@ package body System.Flyology.Faults is
       Test_Note_Descriptor_Cancel_Processed;
    end Note_Descriptor_Cancel_Processed;
 
+   procedure Note_Waiter_Work (Kind : Waiter_Work_Kind) is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
+   begin
+      Ignored := Test_Fault_Hit (Interfaces.C.int (Waiter_Work_Kind'Enum_Rep (Kind)));
+   end Note_Waiter_Work;
+
 end System.Flyology.Faults;
