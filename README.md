@@ -2835,6 +2835,12 @@ actual kernel completion facility and suspends only the calling Ada task.
   partial ring and uses Linux native AIO with `IOCB_FLAG_RESFD` and the same
   eventfd completion path.
 
+Linux native AIO identifies an in-flight request through a bounded,
+generation-stamped slot carried in `IOCB.Data`. Completion checks both that
+slot and the kernel-reported IOCB address before reading the request, then
+removes it from the active list in constant time. Token-based cancellation
+still searches the active list.
+
 Linux interfaces without ordinary libc functions cross a small typed C bridge.
 Its syscall wrappers select `SYS_*` numbers from the target headers, and its
 epoll wrappers translate the host's native `struct epoll_event` into an

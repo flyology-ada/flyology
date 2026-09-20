@@ -679,6 +679,7 @@ lightweight_affinity_smoke
 linux_poller_cloexec_smoke
 linux_abort_readiness_waiter_smoke
 linux_poller_fairness_smoke
+native_aio_slots_smoke
 native_cpu_activation_failure_smoke"
 fi
 
@@ -1090,9 +1091,19 @@ FLYOLOGY_TEST_FAULTS=1 \
 if [ "$(uname -s)" = Linux ]; then
   fault_mains="$fault_mains
 linux_abort_readiness_waiter_smoke
-linux_poller_fairness_smoke"
+linux_poller_fairness_smoke
+native_aio_slots_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
+if [ "$(uname -s)" = Linux ] && \
+   [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = native-aio ]
+then
+  "$project_root/scripts/run-with-timeout.sh" 30 "$test_bin/native_aio_slots_smoke"
+  FLYOLOGY_NATIVE_AIO_FAULT=stale \
+    "$project_root/scripts/run-with-timeout.sh" 30 "$test_bin/native_aio_slots_smoke"
+  FLYOLOGY_NATIVE_AIO_FAULT=object \
+    "$project_root/scripts/run-with-timeout.sh" 30 "$test_bin/native_aio_slots_smoke"
+fi
 FLYOLOGY_CONNECTION_TEST_HOOKS=true
 export FLYOLOGY_CONNECTION_TEST_HOOKS
 link_test_mains \
