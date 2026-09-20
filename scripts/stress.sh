@@ -112,6 +112,10 @@ if [ "$run_faults" = 1 ]; then
   run_timed "$case_timeout" \
     "$project_root/tests/bin/create_finalize_race_smoke"
 
+  #  File fault cases that honor this root keep their fixtures in this
+  #  checkout, including the eager io_uring regression below.
+  FLYOLOGY_TEST_TEMP_ROOT="$project_root/build"
+  export FLYOLOGY_TEST_TEMP_ROOT
   fault_cases='
     fiber-allocation group-storage-allocation fiber-storage-allocation
     context-storage-allocation

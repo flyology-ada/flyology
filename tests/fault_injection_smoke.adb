@@ -1053,9 +1053,8 @@ procedure Fault_Injection_Smoke is
    end Test_File_Dormancy_Exclusion;
 
    procedure Test_Uring_Eager_Batch is
-      Path : constant String :=
-        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
-        "/flyology-uring-eager.data";
+      Root : constant String := Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "");
+      Path : constant String := Root & "/flyology-uring-eager.data";
       File   : Files.File_Descriptor := Files.Invalid_File;
       Passed : Boolean := False with Atomic;
       Sync_Passed     : Boolean := False with Atomic;
@@ -1121,6 +1120,8 @@ procedure Fault_Injection_Smoke is
       if Selected_Linux_Backend /= 1 then
          Ada.Text_IO.Put_Line ("io_uring eager test skipped: backend is not io_uring");
          return;
+      elsif Root'Length = 0 then
+         raise Program_Error with "FLYOLOGY_TEST_TEMP_ROOT is required for the io_uring eager test";
       end if;
       if Ada.Directories.Exists (Path) then
          Ada.Directories.Delete_File (Path);
