@@ -14,13 +14,15 @@ procedure Semantic_Termination_Matrix is
    package Native_Native renames Semantic_Termination_Native_Native;
    package Native_Lightweight renames Semantic_Termination_Native_Lightweight;
    package Lightweight_Native renames Semantic_Termination_Lightweight_Native;
-   package Lightweight_Lightweight renames Semantic_Termination_Lightweight_Lightweight;
+   package Lightweight_Lightweight renames
+     Semantic_Termination_Lightweight_Lightweight;
 
    procedure Check (Name : String; Values : Native_Native.Results) is
    begin
       for Item in Values'Range loop
          if not Values (Item) then
-            raise Program_Error with Name & " failed " & Native_Native.Check_Id'Image (Item);
+            raise Program_Error
+              with Name & " failed " & Native_Native.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
@@ -29,7 +31,9 @@ procedure Semantic_Termination_Matrix is
    begin
       for Item in Values'Range loop
          if not Values (Item) then
-            raise Program_Error with Name & " failed " & Native_Lightweight.Check_Id'Image (Item);
+            raise Program_Error
+              with
+                Name & " failed " & Native_Lightweight.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
@@ -38,7 +42,9 @@ procedure Semantic_Termination_Matrix is
    begin
       for Item in Values'Range loop
          if not Values (Item) then
-            raise Program_Error with Name & " failed " & Lightweight_Native.Check_Id'Image (Item);
+            raise Program_Error
+              with
+                Name & " failed " & Lightweight_Native.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
@@ -47,7 +53,11 @@ procedure Semantic_Termination_Matrix is
    begin
       for Item in Values'Range loop
          if not Values (Item) then
-            raise Program_Error with Name & " failed " & Lightweight_Lightweight.Check_Id'Image (Item);
+            raise Program_Error
+              with
+                Name
+                & " failed "
+                & Lightweight_Lightweight.Check_Id'Image (Item);
          end if;
       end loop;
    end Check;
@@ -78,7 +88,8 @@ procedure Semantic_Termination_Matrix is
       task Server
         with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
-         entry Transform (Positive range 1 .. 2) (Input : Natural; Output : out Natural);
+         entry Transform (Positive range 1 .. 2)
+           (Input : Natural; Output : out Natural);
       end Server;
 
       task body Server is
@@ -113,5 +124,6 @@ begin
    pragma Assert (Groups.Configured_Pool_Size >= 3);
    Check_Cross_Group_Entry_Family;
    Ada.Text_IO.Put_Line
-     ("semantic termination matrix: 28 lane-pair checks and one " & "cross-group entry-family check passed");
+     ("semantic termination matrix: 32 lane-pair checks and one "
+      & "cross-group entry-family check passed");
 end Semantic_Termination_Matrix;

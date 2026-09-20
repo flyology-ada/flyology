@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
+with Flyology.Task_Results;
 
 package body Flyology.Observability.Stall_Watchdogs is
    package RT renames Ada.Real_Time;
@@ -209,8 +210,18 @@ package body Flyology.Observability.Stall_Watchdogs is
                   null;
             end;
          end if;
+         declare
+            Observation : constant Flyology.Task_Results.Task_Observation :=
+              Flyology.Task_Results.Wait (Object.Monitor.all'Identity);
+            pragma Unreferenced (Observation);
+         begin
+            null;
+         end;
+         --  GNARL publishes the task result before termination handlers run.
+         --  A positive delay parks a lightweight caller while those handlers
+         --  finish, and avoids a native caller's busy yield loop.
          while not Object.Monitor.all'Terminated loop
-            delay 0.0;
+            delay 0.001;
          end loop;
          Free_Monitor (Object.Monitor);
       end if;

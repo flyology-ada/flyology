@@ -3129,8 +3129,10 @@ deliberately not a runtime scheduling policy.
 `Flyology.Observability.Stall_Watchdogs` can monitor one group from a dedicated
 native Ada task. Merely declaring a `Watchdog` is inert. `Start` creates the
 native monitor, but observing a group that does not exist still does not create
-that group or any event-runtime resource. `Stop` waits for the monitor to exit;
-the limited controlled object also stops it during finalization, and a stopped
+that group or any event-runtime resource. `Stop` waits for the monitor to exit,
+checking actual task termination at 1 ms intervals after its terminal report.
+Each timed check suspends a lightweight caller or sleeps a native caller. The
+limited controlled object also stops it during finalization, and a stopped
 object can be restarted.
 
 ```ada

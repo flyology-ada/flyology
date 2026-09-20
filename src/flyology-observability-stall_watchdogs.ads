@@ -89,8 +89,11 @@ package Flyology.Observability.Stall_Watchdogs is
    --  @exception Tasking_Error Native monitor task activation fails
    procedure Start (Object : in out Watchdog; Config : Watchdog_Config := (others => <>));
 
-   --  Stop and join the native monitor task. The final Monitor_Stopped report
-   --  remains queryable. Calling before Start or after Stop is harmless.
+   --  Stop and join the native monitor task. After its terminal report, Stop
+   --  checks actual task termination with 1 ms timed suspensions, so a
+   --  lightweight caller parks its fiber and a native caller sleeps. The final
+   --  Monitor_Stopped report remains queryable. Calling before Start or after
+   --  Stop is harmless.
    --  @param Object Watchdog to stop
    procedure Stop (Object : in out Watchdog);
 
