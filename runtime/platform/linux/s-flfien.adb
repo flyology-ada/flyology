@@ -26,6 +26,7 @@ package body System.Flyology.File_Engine is
    use type AP.uint8;
    use type AP.uint16;
    use type AP.uint32;
+   use type AP.uint64;
    use type Send_ZC_Policy.Completion_Phase;
    use System.Storage_Elements;
 
@@ -320,6 +321,18 @@ package body System.Flyology.File_Engine is
        Active_Owner at 96 range 0 .. 63;
      end record;
 
+   --  IOCB.Data carries a bounded slot and a nonwrapping generation. The
+   --  kernel's IOCB address is checked against the live slot, never converted
+   --  into an Ada access value before validation.
+   subtype Native_Slot_Number is Positive range 1 .. Natural (Ring_Entries);
+   type Native_Request_Slot is record
+      Request    : Native_AIO_Request_Access := null;
+      Generation : U64 := 0;
+      Next_Free  : Natural := 0;
+   end record;
+   type Native_Request_Slots is array (Native_Slot_Number) of Native_Request_Slot;
+   Last_Native_Generation : constant U64 := U64'Last / U64 (Ring_Entries);
+
    --  io_uring cancellation has two independent completions: one for the
    --  data operation and one for the administrative cancel request. Keep a
    --  request identity alive until both have arrived. A fiber address is not
@@ -388,6 +401,9 @@ package body System.Flyology.File_Engine is
       Test_Backpressure_Observed : Boolean := False;
       Free_Requests              : Native_AIO_Request_Access;
       Active_Requests            : Native_AIO_Request_Access;
+      Native_Slots               : Native_Request_Slots;
+      Next_New_Native_Slot       : Natural := Native_Slot_Number'First;
+      First_Free_Native_Slot     : Natural := 0;
       Active_Count               : Natural := 0 with Atomic;
       Free_Uring_Requests        : IO_Uring_Request_Access;
       Active_Uring_Requests      : IO_Uring_Request_Access;
@@ -506,8 +522,14 @@ package body System.Flyology.File_Engine is
 
    function Acquire_Request (State : not null Engine_State_Access) return Native_AIO_Request_Access;
 
+   function Reserve_Native_Slot
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access) return Boolean;
+
    procedure Recycle_Request
      (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access);
+
+   function Native_Request_For_Event
+     (State : not null Engine_State_Access; Event : IO_Event) return Native_AIO_Request_Access;
 
    procedure Unlink_Active
      (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access);
@@ -571,23 +593,89 @@ package body System.Flyology.File_Engine is
       Request : constant Native_AIO_Request_Access := State.Free_Requests;
    begin
       if Request = null then
-         return new Native_AIO_Request;
+         declare
+            Fresh : constant Native_AIO_Request_Access := new Native_AIO_Request;
+         begin
+            Fresh.Control.Data := 0;
+            return Fresh;
+         end;
       end if;
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
+      Request.Control.Data := 0;
       Request.Next_Active := null;
       Request.Previous_Active := null;
       Request.Active_Owner := System.Null_Address;
       return Request;
    end Acquire_Request;
 
-   procedure Recycle_Request
-     (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access) is
+   function Reserve_Native_Slot
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access) return Boolean
+   is
+      Number : Natural;
    begin
+      if State.First_Free_Native_Slot /= 0 then
+         Number := State.First_Free_Native_Slot;
+         State.First_Free_Native_Slot := State.Native_Slots (Number).Next_Free;
+         State.Native_Slots (Number).Next_Free := 0;
+      elsif State.Next_New_Native_Slot <= Native_Slot_Number'Last then
+         Number := State.Next_New_Native_Slot;
+         State.Next_New_Native_Slot := Number + 1;
+      else
+         return False;
+      end if;
+      if State.Native_Slots (Number).Request /= null
+        or else State.Native_Slots (Number).Generation = Last_Native_Generation
+      then
+         raise Program_Error with "invalid Linux native-AIO slot reservation";
+      end if;
+      State.Native_Slots (Number).Generation := State.Native_Slots (Number).Generation + 1;
+      State.Native_Slots (Number).Request := Request;
+      Request.Control.Data := State.Native_Slots (Number).Generation * U64 (Ring_Entries) + U64 (Number - 1);
+      return True;
+   end Reserve_Native_Slot;
+
+   procedure Recycle_Request
+     (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access)
+   is
+      Number : Natural;
+   begin
+      if Request.Control.Data /= 0 then
+         Number := Natural (Request.Control.Data mod U64 (Ring_Entries)) + 1;
+         if State.Native_Slots (Number).Request /= Request
+           or else State.Native_Slots (Number).Generation /= Request.Control.Data / U64 (Ring_Entries)
+         then
+            raise Program_Error with "invalid Linux native-AIO slot release";
+         end if;
+         State.Native_Slots (Number).Request := null;
+         if State.Native_Slots (Number).Generation < Last_Native_Generation then
+            State.Native_Slots (Number).Next_Free := State.First_Free_Native_Slot;
+            State.First_Free_Native_Slot := Number;
+         end if;
+         Request.Control.Data := 0;
+      end if;
       Request.Next_Free := State.Free_Requests;
       State.Free_Requests := Request;
       Request := null;
    end Recycle_Request;
+
+   function Native_Request_For_Event
+     (State : not null Engine_State_Access; Event : IO_Event) return Native_AIO_Request_Access
+   is
+      Number  : constant Natural := Natural (Event.Data mod U64 (Ring_Entries)) + 1;
+      Request : constant Native_AIO_Request_Access := State.Native_Slots (Number).Request;
+   begin
+      if Event.Data = 0
+        or else Request = null
+        or else State.Native_Slots (Number).Generation /= Event.Data / U64 (Ring_Entries)
+        or else Request.Control.Data /= Event.Data
+        or else Request.Active_Owner /= State_Address (State)
+        or else SSE.To_Integer (Request.Control'Address) /= SSE.Integer_Address (Event.Object)
+      then
+         raise Program_Error with "unknown Linux native-AIO completion";
+      end if;
+      return Request;
+   end Native_Request_For_Event;
 
    procedure Unlink_Active
      (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access)
@@ -789,7 +877,13 @@ package body System.Flyology.File_Engine is
         or else State.Uring_In_Flight /= 0
       then
          raise Program_Error with "FLYOLOGY finalized with active Linux file requests";
-      elsif State.Backend = Native_AIO then
+      end if;
+      for Slot of State.Native_Slots loop
+         if Slot.Request /= null then
+            raise Program_Error with "FLYOLOGY finalized with an active Linux native-AIO slot";
+         end if;
+      end loop;
+      if State.Backend = Native_AIO then
          if State.AIO_Context /= 0 then
             Result := Linux_IO_Destroy (State.AIO_Context);
             pragma Unreferenced (Result);
@@ -1202,7 +1296,7 @@ package body System.Flyology.File_Engine is
          begin
             Request.all :=
               (Control         =>
-                 (Data       => U64 (SSE.To_Integer (Token)),
+                 (Data       => 0,
                   Key        => 0,
                   Read_Flags => 0,
                   Opcode     => (if For_Write then IOCB_CMD_PWRITE else IOCB_CMD_PREAD),
@@ -1219,6 +1313,11 @@ package body System.Flyology.File_Engine is
                Next_Active     => null,
                Previous_Active => null,
                Active_Owner    => System.Null_Address);
+            if not Reserve_Native_Slot (State, Request) then
+               Error_Code := (if State.Active_Count = Natural (Ring_Entries) then EAGAIN else ENOMEM);
+               Recycle_Request (State, Request);
+               return False;
+            end if;
             loop
                Result := Linux_IO_Submit (State.AIO_Context, 1, Controls'Address);
                exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
@@ -1516,32 +1615,26 @@ package body System.Flyology.File_Engine is
             end if;
             Count := Natural (Result);
             for Index in 1 .. Count loop
-               Values (Values'First + Index - 1) :=
-                 (Token      => SSE.To_Address (SSE.Integer_Address (Events (Index).Data)),
-                  Result     =>
-                    (if Events (Index).Result >= 0 then C.long_long (Events (Index).Result) else 0),
-                  Error_Code =>
-                    (if Events (Index).Result < 0
-                     then C.int (-Events (Index).Result)
-                     elsif Events (Index).Extra < 0
-                     then C.int (-Events (Index).Extra)
-                     else 0));
-               declare
-                  Request : Native_AIO_Request_Access := State.Active_Requests;
-               begin
-                  --  The kernel supplies an address, not an Ada access value.
-                  --  Check it against live records before dereferencing it.
-                  while Request /= null
-                    and then SSE.To_Integer (Request.all'Address)
-                             /= SSE.Integer_Address (Events (Index).Object)
-                  loop
-                     Request := Request.Next_Active;
-                  end loop;
-                  if Request = null
-                    or else SSE.To_Integer (Request.Token) /= SSE.Integer_Address (Events (Index).Data)
-                  then
-                     raise Program_Error with "unknown Linux native-AIO completion";
+               if Faults.Enabled then
+                  if Faults.Fail (Faults.File_Native_AIO_Stale_Data) then
+                     Events (Index).Data := Events (Index).Data - U64 (Ring_Entries);
+                  elsif Faults.Fail (Faults.File_Native_AIO_Bad_Object) then
+                     Events (Index).Object := 0;
                   end if;
+               end if;
+               declare
+                  Request : Native_AIO_Request_Access := Native_Request_For_Event (State, Events (Index));
+               begin
+                  Values (Values'First + Index - 1) :=
+                    (Token      => Request.Token,
+                     Result     =>
+                       (if Events (Index).Result >= 0 then C.long_long (Events (Index).Result) else 0),
+                     Error_Code =>
+                       (if Events (Index).Result < 0
+                        then C.int (-Events (Index).Result)
+                        elsif Events (Index).Extra < 0
+                        then C.int (-Events (Index).Extra)
+                        else 0));
                   Unlink_Active (State, Request);
                   State.Active_Count := State.Active_Count - 1;
                   Recycle_Request (State, Request);
