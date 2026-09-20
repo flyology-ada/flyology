@@ -38,7 +38,7 @@ package Flyology.Data_Structures.Slab_Pools with Preelaborate is
      xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Element.Version), 32);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 4;
+   Layout_Version : constant Interfaces.Unsigned_32 := 5;
 
    --  Complete stable layout identity for envelope instances and tooling.
    Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);

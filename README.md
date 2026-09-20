@@ -1097,6 +1097,19 @@ committed allocation that the slab cannot identify as abandoned; applications
 that need recovery for that window must journal handle ownership externally or
 reinitialize the whole pool under exclusive authority.
 
+Slab layout version 5 places the allocation cursor at byte 64, separate from
+the lifecycle word, and starts slots at byte 128. An uncontended allocation
+leaves the cursor at the claimed slot, so an allocate/release cycle with one
+free slot does not repeatedly scan the live run. Version 4 slabs cannot be
+attached as version 5.
+Adaptive pool layout version 3 likewise rejects version 2 pools because its
+arena-backed chunks contain slabs with the old layout. To discard an old image,
+exclude all users and reinitialize the slab, or reinitialize the adaptive
+pool's backing arena followed by the pool. To retain values, export them and
+their handle associations using the old-layout implementation, import them
+into new storage, and replace the old handles before retiring the old image.
+There is no in-place migration.
+
 SPSC and MPMC counters occupy separate 64-byte control lines, and both use
 power-of-two capacities for masked slot selection. MPMC capacity is at least
 two so a slot's ready and free sequence phases cannot alias. MPMC `Try`

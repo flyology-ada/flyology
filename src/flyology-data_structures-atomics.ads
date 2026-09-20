@@ -19,6 +19,9 @@ is
    function Compare_Exchange_U64
      (Address : System.Address; Expected : in out Interfaces.Unsigned_64; Desired : Interfaces.Unsigned_64)
       return Boolean;
+   function Compare_Exchange_Strong_U64
+     (Address : System.Address; Expected : in out Interfaces.Unsigned_64; Desired : Interfaces.Unsigned_64)
+      return Boolean;
    pragma
      Inline_Always
        (Supported,
@@ -28,5 +31,6 @@ is
         Store_Release_U32,
         Store_Release_U64,
         Compare_Exchange_U32,
-        Compare_Exchange_U64);
+        Compare_Exchange_U64,
+        Compare_Exchange_Strong_U64);
 end Flyology.Data_Structures.Atomics;

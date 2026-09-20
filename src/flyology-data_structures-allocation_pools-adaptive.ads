@@ -56,7 +56,7 @@ package Flyology.Data_Structures.Allocation_Pools.Adaptive with Preelaborate is
      xor Interfaces.Shift_Left (Interfaces.Unsigned_64 (Maximum_Chunks), 32);
 
    --  Leaf-specific stored-layout version.
-   Layout_Version : constant Interfaces.Unsigned_32 := 2;
+   Layout_Version : constant Interfaces.Unsigned_32 := 3;
 
    --  Complete persisted pool identity.
    Identity : constant Layout_Identity := (Magic => Magic, Version => Layout_Version, Schema => Schema);
