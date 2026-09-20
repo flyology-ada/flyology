@@ -34,6 +34,7 @@ package body System.Flyology.Poller is
    EFD_NONBLOCK : constant C.int := 16#0000_0800#;
    EFD_CLOEXEC  : constant C.int := 16#0008_0000#;
    EAGAIN       : constant C.int := 11;
+   ENOSYS       : constant C.int := 38;
 
    type Epoll_Event is record
       Events     : C.unsigned;
@@ -85,6 +86,10 @@ package body System.Flyology.Poller is
      (Epoll_FD : C.int; Events : System.Address; Max_Events : C.int; Timeout_MS : C.int) return C.int;
    pragma Import (C, Epoll_Wait, "flyology_linux_epoll_wait");
 
+   function Epoll_Pwait2
+     (Epoll_FD : C.int; Events : System.Address; Max_Events : C.int; Timeout : System.Address) return C.int;
+   pragma Import (C, Epoll_Pwait2, "flyology_linux_epoll_pwait2");
+
    function Eventfd (Initial_Value : C.unsigned; Flags : C.int) return C.int;
    pragma Import (C, Eventfd, "eventfd");
 
@@ -113,6 +118,9 @@ package body System.Flyology.Poller is
    function Control (Item : Poller; Operation : C.int; Descriptor : C.int; Events : C.unsigned) return C.int;
 
    function Timeout_Milliseconds (Timeout : Duration) return C.int;
+
+   function Kernel_Wait
+     (Item : in out Poller; Events : System.Address; Max_Events : C.int; Timeout : Duration) return C.int;
 
    function Drain_File_Events
      (Item       : in out Poller;
@@ -309,6 +317,29 @@ package body System.Flyology.Poller is
       Value := C.long_long (Limit.tv_sec) * 1_000 + (C.long_long (Limit.tv_nsec) + 999_999) / 1_000_000;
       return C.int (Value);
    end Timeout_Milliseconds;
+
+   function Kernel_Wait
+     (Item : in out Poller; Events : System.Address; Max_Events : C.int; Timeout : Duration) return C.int
+   is
+      Limit  : aliased Time_ABI.Timespec;
+      Result : C.int;
+   begin
+      if Item.High_Resolution_Wait_Available then
+         if Timeout < 0.0 then
+            Result := Epoll_Pwait2 (Item.Descriptor, Events, Max_Events, System.Null_Address);
+         else
+            Limit := Time_ABI.To_Timespec (Timeout);
+            Result := Epoll_Pwait2 (Item.Descriptor, Events, Max_Events, Limit'Address);
+         end if;
+         if Result >= 0 or else C.int (OSI.errno) /= ENOSYS then
+            return Result;
+         end if;
+         --  An older kernel (or a sandbox rejecting the syscall) retains the
+         --  former ceiling-to-milliseconds behavior for every later wait.
+         Item.High_Resolution_Wait_Available := False;
+      end if;
+      return Epoll_Wait (Item.Descriptor, Events, Max_Events, Timeout_Milliseconds (Timeout));
+   end Kernel_Wait;
 
    function Drain_File_Events
      (Item       : in out Poller;
@@ -717,13 +748,13 @@ package body System.Flyology.Poller is
       --  preserve source alternation. A retained drain obligation must not
       --  sleep on a consumed edge, but epoll still observes new wakes.
       Kernel_Count :=
-        Epoll_Wait
-          (Item.Descriptor,
+        Kernel_Wait
+          (Item,
            Kernel_Events'Address,
            C.int (Epoll_Capacity),
            (if Capacity > 1 and then Count = 0 and then not Item.File_Drain_State.Pending
-            then Timeout_Milliseconds (Timeout)
-            else 0));
+            then Timeout
+            else 0.0));
       if Kernel_Count < 0 then
          if OSI.errno /= OSI.EINTR then
             return False;
@@ -749,9 +780,7 @@ package body System.Flyology.Poller is
          elsif Item.File_Drain_State.Pending then
             return True;
          end if;
-         Kernel_Count :=
-           Epoll_Wait
-             (Item.Descriptor, Kernel_Events'Address, C.int (Epoll_Capacity), Timeout_Milliseconds (Timeout));
+         Kernel_Count := Kernel_Wait (Item, Kernel_Events'Address, C.int (Epoll_Capacity), Timeout);
          if Kernel_Count < 0 then
             return OSI.errno = OSI.EINTR;
          end if;

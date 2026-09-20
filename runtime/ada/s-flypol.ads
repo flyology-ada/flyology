@@ -132,12 +132,14 @@ package System.Flyology.Poller is
 
 private
    type Poller is limited record
-      Descriptor       : Interfaces.C.int := Interfaces.C.int (-1);
-      Wake_Descriptor  : Interfaces.C.int := Interfaces.C.int (-1);
-      State            : System.Address := System.Null_Address;
-      File_State       : System.Flyology.File_Engine.Engine;
+      Descriptor                     : Interfaces.C.int := Interfaces.C.int (-1);
+      Wake_Descriptor                : Interfaces.C.int := Interfaces.C.int (-1);
+      State                          : System.Address := System.Null_Address;
+      File_State                     : System.Flyology.File_Engine.Engine;
       --  Linux retains a drain obligation after consuming the shared eventfd.
       --  A one-result caller alternates sources while that obligation remains.
-      File_Drain_State : System.Flyology.Poller_Policy.Drain_State;
+      File_Drain_State               : System.Flyology.Poller_Policy.Drain_State;
+      --  Linux disables epoll_pwait2 after ENOSYS on this owning thread.
+      High_Resolution_Wait_Available : Boolean := True;
    end record;
 end System.Flyology.Poller;

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <time.h>
 #include <unistd.h>
 
 long flyology_linux_io_setup(unsigned entries, unsigned long *context);
@@ -29,6 +30,10 @@ int flyology_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
 int flyology_linux_epoll_wait(int epoll_fd,
                              struct flyology_epoll_event *events,
                              int max_events, int timeout_ms);
+int flyology_linux_epoll_pwait2(int epoll_fd,
+                               struct flyology_epoll_event *events,
+                               int max_events,
+                               const struct timespec *timeout);
 
 static int failed_as_syscall(long result) {
     return result == -1 && errno != 0;
@@ -89,6 +94,29 @@ static int check_epoll_translation(void) {
         events[2].descriptor != -123) {
         fprintf(stderr, "epoll bridge overwrote the adjacent output record\n");
         failed = 1;
+    }
+
+    {
+        const struct timespec immediate = { 0, 0 };
+
+        if (flyology_linux_epoll_ctl(epoll_fd, EPOLL_CTL_MOD, first,
+                                    EPOLLIN | EPOLLONESHOT) != 0 ||
+            write(first, &one, sizeof(one)) != (ssize_t)sizeof(one)) {
+            perror("epoll_pwait2 translation setup");
+            failed = 1;
+        } else {
+            count = flyology_linux_epoll_pwait2(epoll_fd, events, 2,
+                                                &immediate);
+            if (count < 0 && errno == ENOSYS) {
+                /* The Ada poller exercises the epoll_wait fallback here. */
+            } else if (count != 1 || events[0].descriptor != first ||
+                       (events[0].events & EPOLLIN) == 0 ||
+                       events[2].events != UINT32_C(0xdeadbeef) ||
+                       events[2].descriptor != -123) {
+                fprintf(stderr, "epoll_pwait2 bridge corrupted an event\n");
+                failed = 1;
+            }
+        }
     }
 
 cleanup:

@@ -121,6 +121,7 @@ project Runtime_Smoke is
       "lifecycle_churn_smoke.adb",
       "lightweight_affinity_smoke.adb",
       "linux_poller_cloexec_smoke.adb",
+      "linux_poller_timeout_smoke.adb",
       "linux_abort_readiness_waiter_smoke.adb",
       "linux_poller_fairness_smoke.adb",
       "loop_pool_smoke.adb",

@@ -677,6 +677,7 @@ if [ "$(uname -s)" = Linux ]; then
   all_test_mains="$all_test_mains
 lightweight_affinity_smoke
 linux_poller_cloexec_smoke
+linux_poller_timeout_smoke
 linux_abort_readiness_waiter_smoke
 linux_poller_fairness_smoke
 native_aio_slots_smoke
@@ -774,6 +775,7 @@ if [ "$(uname -s)" = Linux ]; then
   native_mains="$native_mains
 lightweight_affinity_smoke
 linux_poller_cloexec_smoke
+linux_poller_timeout_smoke
 native_cpu_activation_failure_smoke"
 fi
 link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
@@ -782,6 +784,10 @@ if [ "$(uname -s)" = Linux ]; then
     "$test_bin/lightweight_affinity_smoke"
   "$project_root/scripts/run-with-timeout.sh" 10 \
     "$test_bin/linux_poller_cloexec_smoke"
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/linux_poller_timeout_smoke" high-resolution
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/linux_poller_timeout_smoke" fallback
   "$project_root/scripts/run-with-timeout.sh" 10 \
     "$test_bin/native_cpu_activation_failure_smoke"
 fi
