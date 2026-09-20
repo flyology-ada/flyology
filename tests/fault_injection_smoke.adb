@@ -1052,6 +1052,137 @@ procedure Fault_Injection_Smoke is
          raise;
    end Test_File_Dormancy_Exclusion;
 
+   procedure Test_Uring_Eager_Batch is
+      Path : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-uring-eager.data";
+      File   : Files.File_Descriptor := Files.Invalid_File;
+      Passed : Boolean := False with Atomic;
+      Sync_Passed     : Boolean := False with Atomic;
+      Spinner_Started : Boolean := False with Atomic;
+      Stop_Spinner    : Boolean := False with Atomic;
+
+      task type Spinner is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Spinner;
+
+      task body Spinner is
+      begin
+         Spinner_Started := True;
+         while not Stop_Spinner loop
+            delay 0.0;
+         end loop;
+      end Spinner;
+
+      task type Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Left_Data  : aliased Ada.Streams.Stream_Element_Array := [1 => 1, 2 => 2, 3 => 3, 4 => 4];
+         Right_Data : aliased Ada.Streams.Stream_Element_Array := [1 => 5, 2 => 6, 3 => 7, 4 => 8];
+         Last       : Ada.Streams.Stream_Element_Offset;
+      begin
+         declare
+            Set   : aliased Operations.Completion_Set (2);
+            Left  : Files.Write_Operation := Files.Write_At (Set'Access, File, 0, Left_Data'Access, 1.0);
+            Right : Files.Write_Operation := Files.Write_At (Set'Access, File, 4, Right_Data'Access, 1.0);
+         begin
+            Operations.Wait_All (Set);
+            Files.Finish (Left, Last);
+            Passed := Last = Left_Data'Last;
+            Files.Finish (Right, Last);
+            Passed := Passed and then Last = Right_Data'Last;
+         end;
+      exception
+         when others =>
+            Passed := False;
+      end Writer;
+
+      task type Sync_Writer is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Sync_Writer;
+
+      task body Sync_Writer is
+         Item : constant Ada.Streams.Stream_Element_Array := [1 => 9];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         Files.Write_At (File, 8, Item, Last);
+         Sync_Passed := Last = Item'Last;
+      exception
+         when others =>
+            Sync_Passed := False;
+      end Sync_Writer;
+
+      Data : Ada.Streams.Stream_Element_Array (1 .. 9);
+      Last : Ada.Streams.Stream_Element_Offset;
+   begin
+      Warm_Group;
+      if Selected_Linux_Backend /= 1 then
+         Ada.Text_IO.Put_Line ("io_uring eager test skipped: backend is not io_uring");
+         return;
+      end if;
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      --  A perpetually ready fiber exercises the eight-dispatch progress cut.
+      --  Both scoped first submissions begin on one owner turn without
+      --  artificial queue pressure; the synchronous request also must finish.
+      declare
+         Spin : Spinner;
+      begin
+         begin
+            declare
+               Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+            begin
+               while not Spinner_Started loop
+                  if Ada.Real_Time.Clock >= Limit then
+                     raise Program_Error with "eager io_uring spinner did not start";
+                  end if;
+                  delay 0.001;
+               end loop;
+            end;
+            declare
+               Item : Writer;
+            begin
+               null;
+            end;
+            declare
+               Item : Sync_Writer;
+            begin
+               null;
+            end;
+            Stop_Spinner := True;
+         exception
+            when others =>
+               Stop_Spinner := True;
+               raise;
+         end;
+      end;
+      if not Passed or else not Sync_Passed then
+         raise Program_Error with "eager io_uring file operations failed";
+      elsif Fault_Control.Calls (Fault_Control.File_Uring_Multi_Submit) = 0 then
+         raise Program_Error with "eager io_uring files did not share a kernel submission";
+      end if;
+      Files.Read_At (File, 0, Data, Last);
+      if Last /= Data'Last or else Data /= [1, 2, 3, 4, 5, 6, 7, 8, 9] then
+         raise Program_Error with "eager io_uring file results were corrupted";
+      end if;
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_Uring_Eager_Batch;
+
    procedure Test_Uring_CQ_Backpressure is
       Path : constant String :=
         Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
@@ -2129,6 +2260,8 @@ begin
       Test_Scoped_File_Saturation;
    elsif Case_Name = "file-dormancy-exclusion" then
       Test_File_Dormancy_Exclusion;
+   elsif Case_Name = "file-uring-eager-batch" then
+      Test_Uring_Eager_Batch;
    elsif Case_Name = "file-uring-cq-backpressure" then
       Test_Uring_CQ_Backpressure;
    elsif Case_Name = "file-uring-probe-fallback" then

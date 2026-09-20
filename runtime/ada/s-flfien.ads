@@ -37,6 +37,10 @@ package System.Flyology.File_Engine is
    --  socket send and retain its buffer through the reuse notification.
    function Supports_Send_ZC (Item : Engine) return Boolean;
 
+   --  True only when a first positional request may be retained in the
+   --  scheduler queue and later submitted with other requests in one entry.
+   function Supports_File_Batching (Item : Engine) return Boolean;
+
    --  False with EAGAIN denotes temporary kernel queue pressure and is safe
    --  for the owning scheduler to retry without releasing Buffer. Linux also
    --  normalizes io_uring EBUSY to this retry contract.

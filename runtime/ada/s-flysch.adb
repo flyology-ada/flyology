@@ -626,6 +626,19 @@ package body System.Flyology.Scheduler is
       Item  : Fiber_Access;
       Value : Async_File_Node_Access;
       Error : C.int := 0;
+      procedure Queue_Request;
+
+      procedure Queue_Request is
+      begin
+         Value.State := Async_File_Queued;
+         if Group.Pending_Async_File_Tail = null then
+            Group.Pending_Async_File_Head := Value;
+         else
+            Group.Pending_Async_File_Tail.Next := Node;
+         end if;
+         Group.Pending_Async_File_Tail := Value;
+         Group.Pending_Async_File_Count := Group.Pending_Async_File_Count + 1;
+      end Queue_Request;
    begin
       if not Is_Event_Thread
         or else Group = null
@@ -667,7 +680,11 @@ package body System.Flyology.Scheduler is
       Value.Cancel_Requested := 0;
       Value.Next := System.Null_Address;
       Value.State := Async_File_Submitted;
-      if not Pollers.Submit_File
+      if Pollers.Supports_File_Batching (Group.Scheduler_Poller) then
+         --  The owner has established a live queued request before Start
+         --  returns. It can be cancelled without kernel buffer ownership.
+         Queue_Request;
+      elsif not Pollers.Submit_File
                (Group.Scheduler_Poller,
                 Descriptor,
                 Buffer,
@@ -678,14 +695,7 @@ package body System.Flyology.Scheduler is
                 Error)
       then
          if Error = C.int (OSI.EAGAIN) then
-            Value.State := Async_File_Queued;
-            if Group.Pending_Async_File_Tail = null then
-               Group.Pending_Async_File_Head := Value;
-            else
-               Group.Pending_Async_File_Tail.Next := Node;
-            end if;
-            Group.Pending_Async_File_Tail := Value;
-            Group.Pending_Async_File_Count := Group.Pending_Async_File_Count + 1;
+            Queue_Request;
          else
             Value.Error_Code := Error;
             Value.Descriptor := -1;
@@ -1750,7 +1760,11 @@ package body System.Flyology.Scheduler is
             end if;
          end if;
       end loop;
-      Submit_Pending_Files_Locked (Group);
+      if Group.Pending_File_Head /= null
+        and then not Pollers.Supports_File_Batching (Group.Scheduler_Poller)
+      then
+         Submit_Pending_Files_Locked (Group);
+      end if;
       if Group.File_Cancel_Head /= null and then not Pollers.Wake (Group.Scheduler_Poller) then
          Fatal (Poller_Failure);
       end if;
@@ -4253,7 +4267,9 @@ package body System.Flyology.Scheduler is
          end if;
          Register_IO_Wait_Locked (Group, Item, Cancel_FD, Pollers.Readable, Primary_IO, 0);
       end if;
-      if not (if For_Send_ZC
+      if not For_Send_ZC and then Pollers.Supports_File_Batching (Group.Scheduler_Poller) then
+         Queue_Pending_File_Locked (Group, Item);
+      elsif not (if For_Send_ZC
               then
                 Pollers.Submit_Send_ZC
                   (Group.Scheduler_Poller, Descriptor, Buffer, Length, Fiber_To_Address (Item), Error)
@@ -4737,6 +4753,8 @@ package body System.Flyology.Scheduler is
 
    procedure Scheduler_Main (Argument : System.Address) is
       Group                        : constant Loop_Group_Access := Address_To_Group (Argument);
+      Eager_Batch_Dispatch_Budget  : constant Positive := 8;
+      Eager_Batch_Dispatches       : Natural := 0;
       Dispatches_Until_Timer_Check : Natural := 0;
       Timeout                      : Duration;
       Next                         : Fiber_Access;
@@ -4775,8 +4793,24 @@ package body System.Flyology.Scheduler is
             end if;
          end if;
 
-         Submit_Pending_Files_Locked (Group);
-         Submit_Pending_Async_Files_Locked (Group);
+         if Group.Pending_File_Head = null and then Group.Pending_Async_File_Head = null then
+            Eager_Batch_Dispatches := 0;
+         elsif not Pollers.Supports_File_Batching (Group.Scheduler_Poller)
+           or else (Group.Pending_File_Head /= null and then Group.Pending_File_Head.File_Send_ZC)
+           or else not Ready_Present (Group)
+           or else Eager_Batch_Dispatches >= Eager_Batch_Dispatch_Budget
+         then
+            --  A lone request enters before the poller can block. With ready
+            --  fibers, bound the collection window by dispatch count; after
+            --  pressure, retry on every turn until the queue clears.
+            Submit_Pending_Files_Locked (Group);
+            Submit_Pending_Async_Files_Locked (Group);
+            Eager_Batch_Dispatches :=
+              (if Group.Pending_File_Head = null and then Group.Pending_Async_File_Head = null
+               then 0 else Eager_Batch_Dispatch_Budget);
+         else
+            Eager_Batch_Dispatches := Eager_Batch_Dispatches + 1;
+         end if;
          if (Group.Pending_File_Head /= null or else Group.Pending_Async_File_Head /= null)
            and then (Pollers.Needs_File_Submission_Retry
                      or else Pollers.File_Quiescent (Group.Scheduler_Poller))

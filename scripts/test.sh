@@ -1215,6 +1215,9 @@ if [ "$(uname -s)" = Linux ] && \
 then
   "$project_root/scripts/run-with-timeout.sh" 30 \
     "$test_bin/fault_injection_smoke" \
+    file-uring-eager-batch
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
     file-uring-probe-fallback
   "$project_root/scripts/run-with-timeout.sh" 30 \
     "$test_bin/fault_injection_smoke" \

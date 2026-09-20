@@ -118,7 +118,7 @@ if [ "$run_faults" = 1 ]; then
     stack-map stack-protect stack-discard group-startup
     watch-error eintr file-saturation file-backpressure-wait
     file-transient-submission file-dormancy-exclusion
-    file-uring-cq-backpressure file-uring-probe-fallback
+    file-uring-eager-batch file-uring-cq-backpressure file-uring-probe-fallback
     file-uring-post-setup-fallback
     file-cancellation file-abort file-pre-park-abort file-backend-cancel
     file-cancel-fallback file-uring-identity file-uring-last-fiber'

@@ -2880,11 +2880,15 @@ that cannot yet be submitted remains suspended in a per-group FIFO. The engine
 also detects a kernel overflow backlog and asks `io_uring_enter` to flush it
 before admitting more work. After consuming the shared eventfd, the poller
 retains a file-drain obligation until it observes spare completion capacity.
-Queued positional file operations are submitted in bounded FIFO runs: the
-engine publishes consecutive SQEs and enters the kernel once per accepted
-run, retaining any unaccepted suffix for retry. Eager first submissions,
-zero-copy sends, cancellation, and the native-AIO fallback retain their
-individual submission paths.
+Positional file operations enter owner-held pending queues before submission on
+`io_uring`. While other fibers are ready, the event loop allows at most eight
+dispatches to collect a run, then publishes consecutive SQEs and enters the
+kernel once. A lone request is submitted before the loop blocks in the poller;
+after kernel pressure, pending requests are retried each turn. An unaccepted suffix
+remains queued without kernel buffer ownership. The bound counts cooperative
+dispatches, not elapsed time: a fiber that does not yield can still delay its
+group. Zero-copy sends and the native-AIO and Darwin AIO paths retain their
+individual eager submissions.
 Under continuous descriptor readiness, one slot in each 64-event scheduler
 batch is reserved for that drain; one-event callers alternate sources. No Ada
 worker task, pthread pool, or blocking

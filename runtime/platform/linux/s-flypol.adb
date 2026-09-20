@@ -637,6 +637,9 @@ package body System.Flyology.Poller is
    function Supports_Send_ZC (Item : Poller) return Boolean
    is (File_Engines.Supports_Send_ZC (Item.File_State));
 
+   function Supports_File_Batching (Item : Poller) return Boolean
+   is (File_Engines.Supports_File_Batching (Item.File_State));
+
    function Submit_Send_ZC
      (Item       : in out Poller;
       Descriptor : C.int;

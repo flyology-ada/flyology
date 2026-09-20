@@ -1316,6 +1316,12 @@ package body System.Flyology.File_Engine is
       return State /= null and then State.Backend = IO_Uring and then State.Send_ZC_Supported;
    end Supports_Send_ZC;
 
+   function Supports_File_Batching (Item : Engine) return Boolean is
+      State : constant Engine_State_Access := To_State (Item.State);
+   begin
+      return State /= null and then State.Backend = IO_Uring;
+   end Supports_File_Batching;
+
    function Submit_Send_ZC
      (Item       : in out Engine;
       Descriptor : C.int;
