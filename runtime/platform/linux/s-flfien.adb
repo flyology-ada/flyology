@@ -23,6 +23,7 @@ package body System.Flyology.File_Engine is
    use type C.unsigned_long;
    use type Interfaces.Integer_32;
    use type Interfaces.Integer_64;
+   use type Interfaces.Unsigned_64;
    use type AP.uint8;
    use type AP.uint16;
    use type AP.uint32;
@@ -86,6 +87,9 @@ package body System.Flyology.File_Engine is
    IOCB_CMD_PREAD  : constant U16 := 0;
    IOCB_CMD_PWRITE : constant U16 := 1;
    IOCB_FLAG_RESFD : constant U32 := 1;
+
+   Cancel_Bucket_Count : constant := 1_021;
+   subtype Cancel_Bucket is Natural range 0 .. Cancel_Bucket_Count - 1;
 
    type SQ_Ring_Offsets is record
       Head         : U32;
@@ -309,8 +313,11 @@ package body System.Flyology.File_Engine is
       Next_Active     : Native_AIO_Request_Access;
       Previous_Active : Native_AIO_Request_Access;
       Active_Owner    : System.Address;
+      Cancel_Next     : Native_AIO_Request_Access;
+      Cancel_Previous : Native_AIO_Request_Access;
+      Cancel_Owner    : System.Address;
    end record
-   with Size => 832, Alignment => 8;
+   with Size => 1_024, Alignment => 8;
    for Native_AIO_Request use
      record
        Control at 0 range 0 .. 511;
@@ -319,7 +326,13 @@ package body System.Flyology.File_Engine is
        Next_Active at 80 range 0 .. 63;
        Previous_Active at 88 range 0 .. 63;
        Active_Owner at 96 range 0 .. 63;
+       Cancel_Next at 104 range 0 .. 63;
+       Cancel_Previous at 112 range 0 .. 63;
+       Cancel_Owner at 120 range 0 .. 63;
      end record;
+
+   --  Bucket heads retain the newest matching token first.
+   type Native_Cancel_Buckets is array (Cancel_Bucket) of Native_AIO_Request_Access;
 
    --  IOCB.Data carries a bounded slot and a nonwrapping generation. The
    --  kernel's IOCB address is checked against the live slot, never converted
@@ -359,8 +372,13 @@ package body System.Flyology.File_Engine is
       Previous_Active       : IO_Uring_Request_Access;
       Active_Owner          : System.Address;
       Next_Deferred         : IO_Uring_Request_Access;
+      Cancel_Next           : IO_Uring_Request_Access;
+      Cancel_Previous       : IO_Uring_Request_Access;
+      Cancel_Owner          : System.Address;
    end record
    with Alignment => 8;
+
+   type Uring_Cancel_Buckets is array (Cancel_Bucket) of IO_Uring_Request_Access;
 
    type Backend_Kind is (IO_Uring, Native_AIO);
 
@@ -401,12 +419,14 @@ package body System.Flyology.File_Engine is
       Test_Backpressure_Observed : Boolean := False;
       Free_Requests              : Native_AIO_Request_Access;
       Active_Requests            : Native_AIO_Request_Access;
+      Native_Cancel_Index        : Native_Cancel_Buckets := (others => null);
       Native_Slots               : Native_Request_Slots;
       Next_New_Native_Slot       : Natural := Native_Slot_Number'First;
       First_Free_Native_Slot     : Natural := 0;
       Active_Count               : Natural := 0 with Atomic;
       Free_Uring_Requests        : IO_Uring_Request_Access;
       Active_Uring_Requests      : IO_Uring_Request_Access;
+      Uring_Cancel_Index         : Uring_Cancel_Buckets := (others => null);
       Deferred_Admin_Submit_Head : IO_Uring_Request_Access;
    end record;
    type Engine_State_Access is access all Engine_State;
@@ -534,6 +554,15 @@ package body System.Flyology.File_Engine is
    procedure Unlink_Active
      (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access);
 
+   procedure Index_Native_Cancel
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access);
+
+   procedure Remove_Native_Cancel
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access);
+
+   function Find_Native_Cancel
+     (State : not null Engine_State_Access; Token : System.Address) return Native_AIO_Request_Access;
+
    function Acquire_Uring_Request (State : not null Engine_State_Access) return IO_Uring_Request_Access;
 
    procedure Recycle_Uring_Request
@@ -541,6 +570,15 @@ package body System.Flyology.File_Engine is
 
    procedure Unlink_Active_Uring
      (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access);
+
+   procedure Index_Uring_Cancel
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access);
+
+   procedure Remove_Uring_Cancel
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access);
+
+   function Find_Uring_Cancel
+     (State : not null Engine_State_Access; Token : System.Address) return IO_Uring_Request_Access;
 
    function Submit_Uring_Cancel
      (State      : not null Engine_State_Access;
@@ -568,13 +606,18 @@ package body System.Flyology.File_Engine is
    function Address_At (Base : System.Address; Offset : U32) return System.Address
    is (Base + Storage_Offset (Offset));
 
+   function Cancel_Bucket_For (Token : System.Address) return Cancel_Bucket
+   is (Cancel_Bucket
+         (Interfaces.Shift_Right (Interfaces.Unsigned_64 (SSE.To_Integer (Token)), 3)
+          mod Interfaces.Unsigned_64 (Cancel_Bucket_Count)));
+
    function Retryable_Submit_Error (Error_Code : C.int) return C.int
    is (if Error_Code in EAGAIN | EBUSY then EAGAIN else Error_Code);
 
+   --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
    function Load
      (Address : System.Address; Model : AP.Mem_Model := AP.Acquire)
       return U32
-   --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
    is (AP.Atomic_Load_32 (Address, Model));
 
    procedure Store (Address : System.Address; Value : U32; Model : AP.Mem_Model := AP.Release)
@@ -606,6 +649,9 @@ package body System.Flyology.File_Engine is
       Request.Next_Active := null;
       Request.Previous_Active := null;
       Request.Active_Owner := System.Null_Address;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
       return Request;
    end Acquire_Request;
 
@@ -703,6 +749,61 @@ package body System.Flyology.File_Engine is
       Request.Active_Owner := System.Null_Address;
    end Unlink_Active;
 
+   procedure Index_Native_Cancel
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access)
+   is
+      Bucket : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+   begin
+      if Request.Cancel_Owner /= System.Null_Address then
+         raise Program_Error with "duplicate Linux native-AIO cancellation index insertion";
+      end if;
+      Request.Cancel_Next := State.Native_Cancel_Index (Bucket);
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := State_Address (State);
+      if Request.Cancel_Next /= null then
+         Request.Cancel_Next.Cancel_Previous := Request;
+      end if;
+      State.Native_Cancel_Index (Bucket) := Request;
+   end Index_Native_Cancel;
+
+   procedure Remove_Native_Cancel
+     (State : not null Engine_State_Access; Request : not null Native_AIO_Request_Access)
+   is
+      Bucket    : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+      Previous  : constant Native_AIO_Request_Access := Request.Cancel_Previous;
+      Following : constant Native_AIO_Request_Access := Request.Cancel_Next;
+   begin
+      if Request.Cancel_Owner /= State_Address (State)
+        or else (if Previous = null
+                 then State.Native_Cancel_Index (Bucket) /= Request
+                 else Previous.Cancel_Next /= Request)
+        or else (Following /= null and then Following.Cancel_Previous /= Request)
+      then
+         raise Program_Error with "unknown Linux native-AIO cancellation index entry";
+      elsif Previous = null then
+         State.Native_Cancel_Index (Bucket) := Following;
+      else
+         Previous.Cancel_Next := Following;
+      end if;
+      if Following /= null then
+         Following.Cancel_Previous := Previous;
+      end if;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
+   end Remove_Native_Cancel;
+
+   function Find_Native_Cancel
+     (State : not null Engine_State_Access; Token : System.Address) return Native_AIO_Request_Access
+   is
+      Request : Native_AIO_Request_Access := State.Native_Cancel_Index (Cancel_Bucket_For (Token));
+   begin
+      while Request /= null and then Request.Token /= Token loop
+         Request := Request.Cancel_Next;
+      end loop;
+      return Request;
+   end Find_Native_Cancel;
+
    function Acquire_Uring_Request (State : not null Engine_State_Access) return IO_Uring_Request_Access is
       Request : constant IO_Uring_Request_Access := State.Free_Uring_Requests;
    begin
@@ -715,6 +816,9 @@ package body System.Flyology.File_Engine is
       Request.Previous_Active := null;
       Request.Active_Owner := System.Null_Address;
       Request.Next_Deferred := null;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
       return Request;
    end Acquire_Uring_Request;
 
@@ -751,6 +855,61 @@ package body System.Flyology.File_Engine is
       Request.Previous_Active := null;
       Request.Active_Owner := System.Null_Address;
    end Unlink_Active_Uring;
+
+   procedure Index_Uring_Cancel
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access)
+   is
+      Bucket : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+   begin
+      if Request.Cancel_Owner /= System.Null_Address then
+         raise Program_Error with "duplicate Linux io_uring cancellation index insertion";
+      end if;
+      Request.Cancel_Next := State.Uring_Cancel_Index (Bucket);
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := State_Address (State);
+      if Request.Cancel_Next /= null then
+         Request.Cancel_Next.Cancel_Previous := Request;
+      end if;
+      State.Uring_Cancel_Index (Bucket) := Request;
+   end Index_Uring_Cancel;
+
+   procedure Remove_Uring_Cancel
+     (State : not null Engine_State_Access; Request : not null IO_Uring_Request_Access)
+   is
+      Bucket    : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+      Previous  : constant IO_Uring_Request_Access := Request.Cancel_Previous;
+      Following : constant IO_Uring_Request_Access := Request.Cancel_Next;
+   begin
+      if Request.Cancel_Owner /= State_Address (State)
+        or else (if Previous = null
+                 then State.Uring_Cancel_Index (Bucket) /= Request
+                 else Previous.Cancel_Next /= Request)
+        or else (Following /= null and then Following.Cancel_Previous /= Request)
+      then
+         raise Program_Error with "unknown Linux io_uring cancellation index entry";
+      elsif Previous = null then
+         State.Uring_Cancel_Index (Bucket) := Following;
+      else
+         Previous.Cancel_Next := Following;
+      end if;
+      if Following /= null then
+         Following.Cancel_Previous := Previous;
+      end if;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
+   end Remove_Uring_Cancel;
+
+   function Find_Uring_Cancel
+     (State : not null Engine_State_Access; Token : System.Address) return IO_Uring_Request_Access
+   is
+      Request : IO_Uring_Request_Access := State.Uring_Cancel_Index (Cancel_Bucket_For (Token));
+   begin
+      while Request /= null and then Request.Token /= Token loop
+         Request := Request.Cancel_Next;
+      end loop;
+      return Request;
+   end Find_Uring_Cancel;
 
    function Signal_Drain_Retry (State : not null Engine_State_Access) return Boolean is
       Value  : aliased C.unsigned_long_long := 1;
@@ -1211,7 +1370,10 @@ package body System.Flyology.File_Engine is
             Next_Active           => null,
             Previous_Active       => null,
             Active_Owner          => System.Null_Address,
-            Next_Deferred         => null);
+            Next_Deferred         => null,
+            Cancel_Next           => null,
+            Cancel_Previous       => null,
+            Cancel_Owner          => System.Null_Address);
          Identity := SSE.To_Integer (Uring_Request.all'Address);
          if Identity mod 2 /= 0 then
             Error_Code := EINVAL;
@@ -1257,6 +1419,7 @@ package body System.Flyology.File_Engine is
             State.Active_Uring_Requests.Previous_Active := Uring_Request;
          end if;
          State.Active_Uring_Requests := Uring_Request;
+         Index_Uring_Cancel (State, Uring_Request);
          State.Active_Count := State.Active_Count + 1;
          State.Uring_In_Flight := State.Uring_In_Flight + 2;
          Uring_Request := null;
@@ -1312,7 +1475,10 @@ package body System.Flyology.File_Engine is
                Token           => Token,
                Next_Active     => null,
                Previous_Active => null,
-               Active_Owner    => System.Null_Address);
+               Active_Owner    => System.Null_Address,
+               Cancel_Next     => null,
+               Cancel_Previous => null,
+               Cancel_Owner    => System.Null_Address);
             if not Reserve_Native_Slot (State, Request) then
                Error_Code := (if State.Active_Count = Natural (Ring_Entries) then EAGAIN else ENOMEM);
                Recycle_Request (State, Request);
@@ -1334,6 +1500,7 @@ package body System.Flyology.File_Engine is
                State.Active_Requests.Previous_Active := Request;
             end if;
             State.Active_Requests := Request;
+            Index_Native_Cancel (State, Request);
             State.Active_Count := State.Active_Count + 1;
             Error_Code := 0;
             return True;
@@ -1385,7 +1552,10 @@ package body System.Flyology.File_Engine is
             Next_Active           => null,
             Previous_Active       => null,
             Active_Owner          => System.Null_Address,
-            Next_Deferred         => null);
+            Next_Deferred         => null,
+            Cancel_Next           => null,
+            Cancel_Previous       => null,
+            Cancel_Owner          => System.Null_Address);
          Identity := SSE.To_Integer (Uring_Request.all'Address);
          if Faults.Enabled then
             Older := State.Active_Uring_Requests;
@@ -1450,6 +1620,7 @@ package body System.Flyology.File_Engine is
             State.Active_Uring_Requests.Previous_Active := Uring_Request;
          end if;
          State.Active_Uring_Requests := Uring_Request;
+         Index_Uring_Cancel (State, Uring_Request);
          State.Active_Count := State.Active_Count + 1;
          State.Uring_In_Flight := State.Uring_In_Flight + 1;
          Uring_Request := null;
@@ -1485,12 +1656,9 @@ package body System.Flyology.File_Engine is
          return Cancellation_Failed;
       elsif State.Backend = Native_AIO then
          declare
-            Request : Native_AIO_Request_Access := State.Active_Requests;
+            Request : constant Native_AIO_Request_Access := Find_Native_Cancel (State, Token);
             Event   : aliased IO_Event;
          begin
-            while Request /= null and then Request.Token /= Token loop
-               Request := Request.Next_Active;
-            end loop;
             if Request = null then
                Note (State, Already_Completing, False);
                return Already_Completing;
@@ -1542,11 +1710,8 @@ package body System.Flyology.File_Engine is
       --  the administrative CQE. The request remains allocated until both
       --  CQEs have arrived, so a resumed fiber cannot reuse the target value.
       declare
-         Request : IO_Uring_Request_Access := State.Active_Uring_Requests;
+         Request : constant IO_Uring_Request_Access := Find_Uring_Cancel (State, Token);
       begin
-         while Request /= null and then Request.Token /= Token loop
-            Request := Request.Next_Active;
-         end loop;
          if Request = null or else Request.Operation_Complete then
             Note (State, Already_Completing, False);
             return Already_Completing;
@@ -1635,6 +1800,7 @@ package body System.Flyology.File_Engine is
                         elsif Events (Index).Extra < 0
                         then C.int (-Events (Index).Extra)
                         else 0));
+                  Remove_Native_Cancel (State, Request);
                   Unlink_Active (State, Request);
                   State.Active_Count := State.Active_Count - 1;
                   Recycle_Request (State, Request);
@@ -1790,6 +1956,11 @@ package body System.Flyology.File_Engine is
                            Request.Operation_Complete := True;
                         end if;
 
+                        if Request.Operation_Complete then
+                           --  The token may be reused before a later cancel
+                           --  administrative CQE releases this request.
+                           Remove_Uring_Cancel (State, Request);
+                        end if;
                         if Request.Operation_Complete
                           and then (not Request.Cancel_Submitted or else Request.Admin_Complete)
                         then
