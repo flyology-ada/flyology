@@ -1221,6 +1221,14 @@ if [ "$(uname -s)" = Linux ]; then
     file-backend-cancel
 fi
 
+if [ "$(uname -s)" = Linux ] && \
+   [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]
+then
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-identity
+fi
+
 #  Pin Linux descriptor-event translation while a native abort targets another
 #  waiter, then exercise the batch boundary with a queued file completion,
 #  socket readiness, and a cross-thread eventfd wake. Both deterministic cases

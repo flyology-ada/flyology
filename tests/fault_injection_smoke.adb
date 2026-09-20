@@ -1573,10 +1573,13 @@ procedure Fault_Injection_Smoke is
    end Test_File_Cancel_Fallback;
 
    procedure Test_Uring_Request_Identity is
-      Path  : constant String := "/tmp/flyology-uring-identity.data";
-      File  : Files.File_Descriptor := Files.Invalid_File;
-      Token : aliased Files.Cancellation_Token;
-      Stage : Natural := 0
+      Path         : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-uring-identity.data";
+      File         : Files.File_Descriptor := Files.Invalid_File;
+      Token        : aliased Files.Cancellation_Token;
+      Second_Token : aliased Files.Cancellation_Token;
+      Stage        : Natural := 0
       with Atomic;
 
       task type Writer is
@@ -1596,8 +1599,19 @@ procedure Fault_Injection_Smoke is
             when Files.Operation_Cancelled =>
                Stage := 1;
          end;
-         Files.Write_At (File, 1_048_576, Second_Data, Last);
-         Stage := (if Last = Second_Data'Last then 2 else 91);
+         if Stage /= 1 then
+            raise Program_Error with "first io_uring operation escaped cancellation";
+         end if;
+         --  Keep the second data CQE pending while the owner requests its
+         --  cancellation. Both operations use this fiber as the engine token.
+         Fault_Control.Arm (Fault_Control.Poller_File_Drain_Pause, Count => 1_000_000_000);
+         begin
+            Files.Write_At (File, 1_048_576, Second_Data, Last, Second_Token'Access);
+            Stage := 91;
+         exception
+            when Files.Operation_Cancelled =>
+               Stage := 2;
+         end;
       exception
          when others =>
             Stage := 99;
@@ -1609,7 +1623,8 @@ procedure Fault_Injection_Smoke is
    begin
       --  This ordering exists only on io_uring: defer submitting the cancel
       --  SQE, resume the fiber from operation one, and let that same fiber
-      --  submit operation two while request one still owns its user_data.
+      --  submit and cancel operation two while request one still owns its
+      --  user_data. Cancellation must select the live second request.
       if Selected_Linux_Backend /= 1 then
          return;
       end if;
@@ -1646,6 +1661,17 @@ procedure Fault_Injection_Smoke is
             end if;
             delay 0.001;
          end loop;
+         Second_Token.Request;
+         while Fault_Control.File_Cancel_Count
+                 (Fault_Control.Linux_IO_Uring, Fault_Control.Submitted, False)
+           < 2
+         loop
+            if Ada.Real_Time.Clock >= Limit then
+               raise Program_Error with "io_uring follow-up cancellation missed the live request";
+            end if;
+            delay 0.001;
+         end loop;
+         Fault_Control.Disarm (Fault_Control.Poller_File_Drain_Pause);
          Fault_Control.Disarm (Fault_Control.File_Cancel_Admin_Delay);
          while not Item.all'Terminated loop
             if Ada.Real_Time.Clock >= Limit then
@@ -1653,9 +1679,9 @@ procedure Fault_Injection_Smoke is
             end if;
             delay 0.001;
          end loop;
-         while Fault_Control.Uring_Admin_Complete_Count = 0 loop
+         while Fault_Control.Uring_Admin_Complete_Count < 2 loop
             if Ada.Real_Time.Clock >= Limit then
-               raise Program_Error with "delayed io_uring cancellation did not become terminal";
+               raise Program_Error with "delayed io_uring cancellations did not become terminal";
             end if;
             delay 0.001;
          end loop;
