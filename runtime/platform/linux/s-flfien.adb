@@ -1653,6 +1653,10 @@ package body System.Flyology.File_Engine is
          return;
       elsif State.Backend = Native_AIO then
          for Request of Requests loop
+            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+               Error_Code := EAGAIN;
+               exit;
+            end if;
             exit when not Submit
               (Item, Request.Descriptor, Request.Buffer, Request.Length,
                Request.Offset, Request.For_Write, Request.Token, Error_Code);
@@ -1683,11 +1687,17 @@ package body System.Flyology.File_Engine is
       begin
          if Head /= Tail then
             --  Never retract an SQ tail past an earlier producer's entries.
+            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+               null;
+            end if;
             Error_Code := EAGAIN;
             return;
          end if;
          for Position in Prepared'Range loop
-            if Has_Overflow_Backlog (State)
+            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+               Error_Code := EAGAIN;
+               exit;
+            elsif Has_Overflow_Backlog (State)
               or else State.Uring_In_Flight + U32 (Count) >= State.CQ_Capacity
               or else Tail + U32 (Count) - Head >= Entries
             then
@@ -1761,16 +1771,14 @@ package body System.Flyology.File_Engine is
               (State.SQ_Array + Storage_Offset (Index) * Storage_Offset (U32'Size / 8), Index, AP.Relaxed);
             Count := Count + 1;
             Prepared (Count) := Request;
+            if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Submit_EBUSY) then
+               Recycle_Uring_Request (State, Prepared (Count));
+               Count := Count - 1;
+               Error_Code := EAGAIN;
+               exit;
+            end if;
          end loop;
          if Count = 0 then
-            return;
-         end if;
-
-         if Faults.Enabled and then Faults.Fail (Faults.File_Uring_Submit_EBUSY) then
-            for Position in 1 .. Count loop
-               Recycle_Uring_Request (State, Prepared (Position));
-            end loop;
-            Error_Code := EAGAIN;
             return;
          end if;
 

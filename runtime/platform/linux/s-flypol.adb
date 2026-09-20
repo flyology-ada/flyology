@@ -599,29 +599,8 @@ package body System.Flyology.Poller is
       Requests   : File_Engines.File_Submission_Array;
       Submitted  : out Natural;
       Error_Code : out C.int) is
-      Available : Natural := Requests'Length;
    begin
-      if Faults.Enabled then
-         --  Preserve the submission-pressure hook's per-request count. A
-         --  rejected member ends the prefix; earlier members may still be
-         --  batched and the scheduler retains the rejected suffix.
-         for Position in Requests'Range loop
-            if Faults.Fail (Faults.File_Submission_Full) then
-               Available := Position - Requests'First;
-               exit;
-            end if;
-         end loop;
-      end if;
-      if Available = 0 then
-         Submitted := 0;
-         Error_Code := EAGAIN;
-         return;
-      end if;
-      File_Engines.Submit_Batch
-        (Item.File_State, Requests (Requests'First .. Requests'First + Available - 1), Submitted, Error_Code);
-      if Submitted = Available and then Available < Requests'Length then
-         Error_Code := EAGAIN;
-      end if;
+      File_Engines.Submit_Batch (Item.File_State, Requests, Submitted, Error_Code);
    end Submit_File_Batch;
 
    function Supports_Send_ZC (Item : Poller) return Boolean
