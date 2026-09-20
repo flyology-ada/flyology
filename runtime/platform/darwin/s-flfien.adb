@@ -1,5 +1,6 @@
 with Ada.Unchecked_Conversion;
 with Ada.Unchecked_Deallocation;
+with Interfaces;
 with System.Flyology.Faults;
 with System.OS_Interface;
 with System.Storage_Elements;
@@ -14,6 +15,7 @@ package body System.Flyology.File_Engine is
    use type C.long;
    use type C.long_long;
    use type C.unsigned_short;
+   use type Interfaces.Unsigned_64;
 
    SIGEV_KEVENT : constant C.int := 4;
    EVFILT_USER  : constant C.short := C.short (-10);
@@ -34,6 +36,8 @@ package body System.Flyology.File_Engine is
    --  consumes them or the owning poller is destroyed. Bound the exceptional
    --  path so a persistently broken kqueue cannot grow memory without limit.
    Max_Retired_Requests : constant Natural := 1_024;
+   Cancel_Bucket_Count  : constant := 1_021;
+   subtype Cancel_Bucket is Natural range 0 .. Cancel_Bucket_Count - 1;
 
    type Extension_Array is array (1 .. 2) of C.long_long;
    pragma Convention (C, Extension_Array);
@@ -91,13 +95,17 @@ package body System.Flyology.File_Engine is
    type AIO_Request_Access is access all AIO_Request;
 
    type AIO_Request is record
-      Control     : aliased AIO_Control_Block;
-      Token       : System.Address;
-      Synthetic   : Boolean;
-      Next_Free   : AIO_Request_Access;
-      Next_Active : AIO_Request_Access;
+      Control         : aliased AIO_Control_Block;
+      Token           : System.Address;
+      Synthetic       : Boolean;
+      Next_Free       : AIO_Request_Access;
+      Next_Active     : AIO_Request_Access;
+      Previous_Active : AIO_Request_Access;
+      Cancel_Next     : AIO_Request_Access;
+      Cancel_Previous : AIO_Request_Access;
+      Cancel_Owner    : System.Address;
    end record
-   with Size => 896, Alignment => 8;
+   with Size => 1_152, Alignment => 8;
    for AIO_Request use
      record
        Control at 0 range 0 .. 639;
@@ -105,12 +113,20 @@ package body System.Flyology.File_Engine is
        Synthetic at 88 range 0 .. 7;
        Next_Free at 96 range 0 .. 63;
        Next_Active at 104 range 0 .. 63;
+       Previous_Active at 112 range 0 .. 63;
+       Cancel_Next at 120 range 0 .. 63;
+       Cancel_Previous at 128 range 0 .. 63;
+       Cancel_Owner at 136 range 0 .. 63;
      end record;
+
+   --  Bucket heads retain the newest matching token and descriptor first.
+   type Cancel_Buckets is array (Cancel_Bucket) of AIO_Request_Access;
 
    type Engine_State is record
       Kqueue_FD        : C.int := -1;
       Free_Requests    : AIO_Request_Access;
       Active_Requests  : AIO_Request_Access;
+      Cancel_Index     : Cancel_Buckets := (others => null);
       Active_Count     : Natural with Atomic;
       Retired_Requests : AIO_Request_Access;
       Retired_Count    : Natural := 0;
@@ -131,12 +147,22 @@ package body System.Flyology.File_Engine is
 
    procedure Recycle_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
 
-   procedure Unlink_Active
-     (State    : not null Engine_State_Access;
-      Request  : not null AIO_Request_Access;
-      Previous : AIO_Request_Access);
+   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access);
+
+   procedure Index_Cancel (State : not null Engine_State_Access; Request : not null AIO_Request_Access);
+
+   procedure Remove_Cancel (State : not null Engine_State_Access; Request : not null AIO_Request_Access);
+
+   function Find_Cancel
+     (State : not null Engine_State_Access; Token : System.Address; Descriptor : C.int)
+      return AIO_Request_Access;
 
    procedure Retire_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access);
+
+   function Cancel_Bucket_For (Token : System.Address) return Cancel_Bucket
+   is (Cancel_Bucket
+         (Interfaces.Shift_Right (Interfaces.Unsigned_64 (SSE.To_Integer (Token)), 3)
+          mod Interfaces.Unsigned_64 (Cancel_Bucket_Count)));
 
    function Acquire_Request (State : not null Engine_State_Access) return AIO_Request_Access is
       Request : constant AIO_Request_Access := State.Free_Requests;
@@ -147,6 +173,10 @@ package body System.Flyology.File_Engine is
       State.Free_Requests := Request.Next_Free;
       Request.Next_Free := null;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
       return Request;
    end Acquire_Request;
 
@@ -157,20 +187,78 @@ package body System.Flyology.File_Engine is
       Request := null;
    end Recycle_Request;
 
-   procedure Unlink_Active
-     (State    : not null Engine_State_Access;
-      Request  : not null AIO_Request_Access;
-      Previous : AIO_Request_Access) is
+   procedure Unlink_Active (State : not null Engine_State_Access; Request : not null AIO_Request_Access) is
+      Previous  : constant AIO_Request_Access := Request.Previous_Active;
+      Following : constant AIO_Request_Access := Request.Next_Active;
    begin
-      if (if Previous = null then State.Active_Requests /= Request else Previous.Next_Active /= Request) then
+      if (if Previous = null then State.Active_Requests /= Request else Previous.Next_Active /= Request)
+        or else (Following /= null and then Following.Previous_Active /= Request)
+      then
          raise Program_Error with "unknown Darwin AIO completion";
       elsif Previous = null then
-         State.Active_Requests := Request.Next_Active;
+         State.Active_Requests := Following;
       else
-         Previous.Next_Active := Request.Next_Active;
+         Previous.Next_Active := Following;
+      end if;
+      if Following /= null then
+         Following.Previous_Active := Previous;
       end if;
       Request.Next_Active := null;
+      Request.Previous_Active := null;
    end Unlink_Active;
+
+   procedure Index_Cancel (State : not null Engine_State_Access; Request : not null AIO_Request_Access) is
+      Bucket : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+   begin
+      if Request.Cancel_Owner /= System.Null_Address then
+         raise Program_Error with "duplicate Darwin AIO cancellation index insertion";
+      end if;
+      Request.Cancel_Next := State.Cancel_Index (Bucket);
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := To_Address (State);
+      if Request.Cancel_Next /= null then
+         Request.Cancel_Next.Cancel_Previous := Request;
+      end if;
+      State.Cancel_Index (Bucket) := Request;
+   end Index_Cancel;
+
+   procedure Remove_Cancel (State : not null Engine_State_Access; Request : not null AIO_Request_Access) is
+      Bucket    : constant Cancel_Bucket := Cancel_Bucket_For (Request.Token);
+      Previous  : constant AIO_Request_Access := Request.Cancel_Previous;
+      Following : constant AIO_Request_Access := Request.Cancel_Next;
+   begin
+      if Request.Cancel_Owner /= To_Address (State)
+        or else (if Previous = null
+                 then State.Cancel_Index (Bucket) /= Request
+                 else Previous.Cancel_Next /= Request)
+        or else (Following /= null and then Following.Cancel_Previous /= Request)
+      then
+         raise Program_Error with "unknown Darwin AIO cancellation index entry";
+      elsif Previous = null then
+         State.Cancel_Index (Bucket) := Following;
+      else
+         Previous.Cancel_Next := Following;
+      end if;
+      if Following /= null then
+         Following.Cancel_Previous := Previous;
+      end if;
+      Request.Cancel_Next := null;
+      Request.Cancel_Previous := null;
+      Request.Cancel_Owner := System.Null_Address;
+   end Remove_Cancel;
+
+   function Find_Cancel
+     (State : not null Engine_State_Access; Token : System.Address; Descriptor : C.int)
+      return AIO_Request_Access
+   is
+      Request : AIO_Request_Access := State.Cancel_Index (Cancel_Bucket_For (Token));
+   begin
+      while Request /= null and then (Request.Token /= Token or else Request.Control.Descriptor /= Descriptor)
+      loop
+         Request := Request.Cancel_Next;
+      end loop;
+      return Request;
+   end Find_Cancel;
 
    procedure Retire_Request (State : not null Engine_State_Access; Request : in out AIO_Request_Access) is
    begin
@@ -234,6 +322,7 @@ package body System.Flyology.File_Engine is
           (Kqueue_FD        => Poller_FD,
            Free_Requests    => null,
            Active_Requests  => null,
+           Cancel_Index     => (others => null),
            Active_Count     => 0,
            Retired_Requests => null,
            Retired_Count    => 0);
@@ -307,7 +396,7 @@ package body System.Flyology.File_Engine is
 
       Request := Acquire_Request (State);
       Request.all :=
-        (Control     =>
+        (Control         =>
            (Descriptor  => Descriptor,
             Offset      => Offset,
             Buffer      => Buffer,
@@ -320,10 +409,14 @@ package body System.Flyology.File_Engine is
                Notify_Function   => System.Null_Address,
                Notify_Attributes => System.Null_Address),
             List_Opcode => 0),
-         Token       => Token,
-         Synthetic   => False,
-         Next_Free   => null,
-         Next_Active => null);
+         Token           => Token,
+         Synthetic       => False,
+         Next_Free       => null,
+         Next_Active     => null,
+         Previous_Active => null,
+         Cancel_Next     => null,
+         Cancel_Previous => null,
+         Cancel_Owner    => System.Null_Address);
       if Faults.Enabled and then Faults.Fail (Faults.File_Cancel_Synthetic) then
          Request.Synthetic := True;
          Result := 0;
@@ -337,7 +430,12 @@ package body System.Flyology.File_Engine is
          return False;
       end if;
       Request.Next_Active := State.Active_Requests;
+      Request.Previous_Active := null;
+      if State.Active_Requests /= null then
+         State.Active_Requests.Previous_Active := Request;
+      end if;
       State.Active_Requests := Request;
+      Index_Cancel (State, Request);
       State.Active_Count := State.Active_Count + 1;
       Error_Code := 0;
       return True;
@@ -357,7 +455,6 @@ package body System.Flyology.File_Engine is
    is
       State                : constant Engine_State_Access := To_State (Item.State);
       Request              : AIO_Request_Access;
-      Previous             : AIO_Request_Access := null;
       Result               : C.int;
       Returned             : C.long;
       Registration_Removed : Boolean := True;
@@ -370,12 +467,7 @@ package body System.Flyology.File_Engine is
          return Cancellation_Failed;
       end if;
 
-      Request := State.Active_Requests;
-      while Request /= null and then (Request.Token /= Token or else Request.Control.Descriptor /= Descriptor)
-      loop
-         Previous := Request;
-         Request := Request.Next_Active;
-      end loop;
+      Request := Find_Cancel (State, Token, Descriptor);
       if Request = null then
          Note (Already_Completing, False);
          return Already_Completing;
@@ -427,7 +519,8 @@ package body System.Flyology.File_Engine is
             Returned := (if Request.Synthetic then 0 else AIO_Return (Request.Control'Access));
             pragma Unreferenced (Returned);
             Value := (Token => Request.Token, Result => 0, Error_Code => 0);
-            Unlink_Active (State, Request, Previous);
+            Remove_Cancel (State, Request);
+            Unlink_Active (State, Request);
             State.Active_Count := State.Active_Count - 1;
             if Registration_Removed then
                Recycle_Request (State, Request);
@@ -556,7 +649,8 @@ package body System.Flyology.File_Engine is
             elsif C.int (OSI.errno) = C.int (OSI.EINVAL)
             then Kernel_Error
             else C.int (OSI.errno)));
-      Unlink_Active (State, Request, Previous);
+      Remove_Cancel (State, Request);
+      Unlink_Active (State, Request);
       State.Active_Count := State.Active_Count - 1;
       Recycle_Request (State, Request);
       return Completion_Produced;

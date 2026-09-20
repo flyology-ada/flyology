@@ -2888,6 +2888,14 @@ retain their direct `pread`/`pwrite` behavior: a token is checked before the
 syscall, but an already-running native syscall is not interrupted by a hidden
 worker or polling thread.
 
+Each file engine indexes submitted requests by cancellation token. Lookup
+visits only the token's hash bucket, and removal uses links in the request.
+Repeated tokens select the newest matching request; Darwin also checks the
+descriptor. An `io_uring` request leaves the index at data completion even
+when a later administrative cancellation completion retains its request
+identity. A subsequent operation may therefore reuse
+the same task token without making the older request a cancellation target.
+
 `Flyology.IO.Files.Transfers.Send_Chunk` sends a positional file region without
 changing the file descriptor position. Native tasks use the host `sendfile`
 operation. The Darwin binding imports `sendfile` directly in Ada; the Linux

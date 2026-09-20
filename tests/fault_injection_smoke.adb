@@ -1,5 +1,6 @@
 with Ada.Command_Line;
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Real_Time;
 with Ada.Streams;
 with Ada.Text_IO;
@@ -1380,7 +1381,9 @@ procedure Fault_Injection_Smoke is
    end Test_File_Pre_Park_Abort;
 
    procedure Test_File_Backend_Cancel is
-      Path    : constant String := "/tmp/flyology-backend-cancel.data";
+      Path    : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-backend-cancel.data";
       File    : Files.File_Descriptor := Files.Invalid_File;
       Backend : Fault_Control.File_Cancel_Backend := Fault_Control.Darwin_AIO;
 
@@ -1775,7 +1778,9 @@ procedure Fault_Injection_Smoke is
    end Test_Uring_Last_Fiber_Admin;
 
    procedure Test_Darwin_Cancel_Cleanup (Delete_Fault : Fault_Control.Point) is
-      Path : constant String := "/tmp/flyology-darwin-cancel-cleanup.data";
+      Path : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-darwin-cancel-cleanup.data";
       File : Files.File_Descriptor := Files.Invalid_File;
 
       task type Writer is
