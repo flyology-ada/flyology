@@ -67,6 +67,11 @@ package System.Flyology.Poller is
    --  releases that bookkeeping.
    function Retains_Orphaned_One_Shots return Boolean;
 
+   --  True when another group's completion can free process-wide file
+   --  submission capacity without waking this poller. Such a backlog needs
+   --  a bounded retry even when this group has no other event pending.
+   function Needs_File_Submission_Retry return Boolean;
+
    --  Enqueue positional file I/O and arrange for a File_Event carrying Token
    --  to be returned by Wait_Batch. The buffer must remain valid until that
    --  completion is delivered.

@@ -503,7 +503,7 @@ procedure Fault_Injection_Smoke is
          is (All_OK);
       end Progress;
 
-      task type Writer (Index : Positive) is
+      task type Writer (Index : Positive) with CPU => 1 is
          pragma Task_Info (Flyology.Lightweight_Task);
       end Writer;
 
@@ -528,7 +528,9 @@ procedure Fault_Injection_Smoke is
       end if;
       File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
       Fault_Control.Reset;
-      Fault_Control.Arm (Fault_Control.File_Submission_Full, Count => Count * 3);
+      --  A single transient rejection leaves another request in flight on
+      --  this group; its completion must resubmit the queued request.
+      Fault_Control.Arm (Fault_Control.File_Submission_Full);
       for Index in Writers'Range loop
          Writers (Index) := new Writer (Index);
       end loop;
@@ -542,7 +544,7 @@ procedure Fault_Injection_Smoke is
          end loop;
          Free_Writer (Item);
       end loop;
-      if Fault_Control.Calls (Fault_Control.File_Submission_Full) <= Count * 3 then
+      if Fault_Control.Calls (Fault_Control.File_Submission_Full) <= 1 then
          raise Program_Error with "file saturation did not reach recovery";
       end if;
       Fault_Control.Reset;
@@ -557,6 +559,172 @@ procedure Fault_Injection_Smoke is
          end if;
          raise;
    end Test_File_Saturation;
+
+   procedure Test_File_Backpressure_Wait is
+      Path   : constant String := "flyology-file-backpressure-smoke.data";
+      File   : Files.File_Descriptor := Files.Invalid_File;
+      Token  : aliased Files.Cancellation_Token;
+      Stage  : Natural := 0 with Atomic;
+      Before : Observation.Group_Snapshot;
+      After  : Observation.Group_Snapshot;
+
+      task type Writer with CPU => 1 is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Writer;
+
+      task body Writer is
+         Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
+         Last : Ada.Streams.Stream_Element_Offset;
+      begin
+         begin
+            Files.Write_At (File, 0, Data, Last, Token'Access);
+            Stage := 2;
+         exception
+            when Files.Operation_Cancelled =>
+               Stage := 1;
+         end;
+      exception
+         when others =>
+            Stage := 3;
+      end Writer;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+      Fault_Control.Reset;
+      Fault_Control.Arm (Fault_Control.File_Submission_Full, Count => 1_000_000);
+      declare
+         Item : Writer;
+      begin
+         declare
+            Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+         begin
+            loop
+               if Observation.Snapshot (1, Before) and then Before.Pending_File_Submissions = 1 then
+                  exit;
+               end if;
+               if Ada.Real_Time.Clock >= Limit then
+                  raise Program_Error with "file request never entered the pending queue";
+               end if;
+               delay 0.001;
+            end loop;
+         end;
+         --  With no submitted file operation, neither platform has a local
+         --  completion to drive the queue. The bounded retry must continue
+         --  until cancellation releases the borrowed data.
+         delay 0.200;
+         if not Observation.Snapshot (1, After) or else After.Pending_File_Submissions /= 1 then
+            raise Program_Error with "backpressured file request changed state";
+         elsif After.Poll_Batches < Before.Poll_Batches + 5 then
+            raise Program_Error with "file backlog did not retry without a local completion";
+         end if;
+         Token.Request;
+         while not Item'Terminated loop
+            delay 0.001;
+         end loop;
+      exception
+         when others =>
+            Token.Request;
+            raise;
+      end;
+      if Stage /= 1 then
+         raise Program_Error with "queued file cancellation did not terminalize";
+      end if;
+      Fault_Control.Reset;
+      Files.Close (File);
+      Ada.Directories.Delete_File (Path);
+   exception
+      when others =>
+         Token.Request;
+         Fault_Control.Reset;
+         Files.Close (File);
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         raise;
+   end Test_File_Backpressure_Wait;
+
+   procedure Test_File_Transient_Submission is
+      procedure Run (Reject_Count : Positive) is
+         Path      : constant String := "flyology-file-transient-submission.data";
+         File      : Files.File_Descriptor := Files.Invalid_File;
+         Token     : aliased Files.Cancellation_Token;
+         Stage     : Natural := 0 with Atomic;
+         Read_Data : Ada.Streams.Stream_Element_Array (1 .. 1);
+         Read_Last : Ada.Streams.Stream_Element_Offset;
+
+         task type Writer with CPU => 1 is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Writer;
+
+         task body Writer is
+            Data : constant Ada.Streams.Stream_Element_Array := [1 => 42];
+            Last : Ada.Streams.Stream_Element_Offset;
+         begin
+            Files.Write_At (File, 0, Data, Last, Token'Access);
+            Stage := (if Last = Data'Last then 2 else 3);
+         exception
+            when Files.Operation_Cancelled =>
+               Stage := 1;
+            when others =>
+               Stage := 3;
+         end Writer;
+      begin
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+         File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
+         Fault_Control.Reset;
+         Fault_Control.Arm (Fault_Control.File_Submission_Full, Count => Reject_Count);
+         declare
+            Item : Writer;
+         begin
+            declare
+               Limit : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+            begin
+               while Stage = 0 loop
+                  if Ada.Real_Time.Clock >= Limit then
+                     Token.Request;
+                     raise Program_Error with "single file request did not recover from transient EAGAIN";
+                  end if;
+                  delay 0.001;
+               end loop;
+            end;
+            if Stage /= 2
+              or else Fault_Control.Calls (Fault_Control.File_Submission_Full) <= Reject_Count
+            then
+               raise Program_Error with "single file request did not complete after EAGAIN";
+            end if;
+         exception
+            when others =>
+               Token.Request;
+               raise;
+         end;
+         Files.Read_At (File, 0, Read_Data, Read_Last);
+         if Read_Last /= Read_Data'Last or else Read_Data (1) /= 42 then
+            raise Program_Error with "recovered file request lost its result";
+         end if;
+         Fault_Control.Reset;
+         Files.Close (File);
+         Ada.Directories.Delete_File (Path);
+      exception
+         when others =>
+            Token.Request;
+            Fault_Control.Reset;
+            Files.Close (File);
+            if Ada.Directories.Exists (Path) then
+               Ada.Directories.Delete_File (Path);
+            end if;
+            raise;
+      end Run;
+   begin
+      --  One rejection covers the ordinary transient case. A longer finite
+      --  pressure episode outlasts startup wakes, leaving one queued request
+      --  and no in-flight completion; only the bounded retry can finish it.
+      Run (1);
+      Run (16);
+   end Test_File_Transient_Submission;
 
    procedure Test_Scoped_File_Saturation is
       Path   : constant String := "/tmp/flyology-scoped-file-saturation.data";
@@ -575,13 +743,15 @@ procedure Fault_Injection_Smoke is
          --  A transiently full submission queue must retain the operation and
          --  eventually publish its ordinary completion.
          declare
-            Set   : aliased Operations.Completion_Set (1);
+            Set   : aliased Operations.Completion_Set (2);
             Write : Files.Write_Operation := Files.Write_At (Set'Access, File, 0, Data'Access, 1.0);
-            Batch : Operations.Completion_Batch (Set.Capacity);
+            Other : Files.Write_Operation := Files.Write_At (Set'Access, File, 0, Data'Access, 1.0);
          begin
-            Operations.Wait_For_Success (Set, Batch);
+            Operations.Wait_All (Set);
             Files.Finish (Write, Last);
             Passed := Last = Data'Last;
+            Files.Finish (Other, Last);
+            Passed := Passed and then Last = Data'Last;
          end;
 
          --  Cancellation of a queued write must terminalize the operation
@@ -769,7 +939,7 @@ procedure Fault_Injection_Smoke is
       end if;
       File := Files.Open (Path, Mode => Files.Read_Write, Create => True, Truncate => True);
       Fault_Control.Reset;
-      Fault_Control.Arm (Fault_Control.File_Submission_Full, Count => 8);
+      Fault_Control.Arm (Fault_Control.File_Submission_Full);
       declare
          Item : Writer;
          pragma Unreferenced (Item);
@@ -1947,6 +2117,10 @@ begin
       Test_EINTR;
    elsif Case_Name = "file-saturation" then
       Test_File_Saturation;
+   elsif Case_Name = "file-backpressure-wait" then
+      Test_File_Backpressure_Wait;
+   elsif Case_Name = "file-transient-submission" then
+      Test_File_Transient_Submission;
    elsif Case_Name = "scoped-file-saturation" then
       Test_Scoped_File_Saturation;
    elsif Case_Name = "file-dormancy-exclusion" then

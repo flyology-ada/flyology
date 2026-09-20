@@ -116,7 +116,8 @@ if [ "$run_faults" = 1 ]; then
     fiber-allocation group-storage-allocation fiber-storage-allocation
     context-storage-allocation
     stack-map stack-protect stack-discard group-startup
-    watch-error eintr file-saturation file-dormancy-exclusion
+    watch-error eintr file-saturation file-backpressure-wait
+    file-transient-submission file-dormancy-exclusion
     file-uring-cq-backpressure file-uring-probe-fallback
     file-uring-post-setup-fallback
     file-cancellation file-abort file-pre-park-abort file-backend-cancel
