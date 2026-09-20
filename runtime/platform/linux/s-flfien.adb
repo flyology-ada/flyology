@@ -1687,8 +1687,8 @@ package body System.Flyology.File_Engine is
       begin
          if Head /= Tail then
             --  Never retract an SQ tail past an earlier producer's entries.
-            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
-               null;
+            if Faults.Enabled then
+               Faults.Note (Faults.File_Submission_Full);
             end if;
             Error_Code := EAGAIN;
             return;
@@ -1703,9 +1703,7 @@ package body System.Flyology.File_Engine is
             then
                if Faults.Enabled and then State.Uring_In_Flight + U32 (Count) >= State.CQ_Capacity then
                   State.Test_Backpressure_Observed := True;
-                  if Faults.Fail (Faults.File_Uring_Backpressure) then
-                     null;
-                  end if;
+                  Faults.Note (Faults.File_Uring_Backpressure);
                end if;
                Error_Code := EAGAIN;
                exit;
