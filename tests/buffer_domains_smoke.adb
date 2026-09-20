@@ -471,6 +471,67 @@ procedure Buffer_Domains_Smoke is
       Domains.Release (Target);
    end Run_Transfer_Rollback;
 
+   procedure Run_Abort_Ownership is
+      Local     : aliased Domains.Buffer_Domain :=
+        Domains.Create ([(Block_Size => 8, Capacity => 1, Maximum_Claims => 1)]);
+      Reference : constant Domains.Pool_Reference := Domains.Pool_At (Local, 1);
+   begin
+      for Attempt in 1 .. 32 loop
+         declare
+            protected Progress is
+               procedure Note;
+               entry Reached;
+            private
+               Completed : Natural := 0;
+            end Progress;
+
+            protected body Progress is
+               procedure Note is
+               begin
+                  Completed := Completed + 1;
+               end Note;
+
+               entry Reached when Completed >= 4 is
+               begin
+                  null;
+               end Reached;
+            end Progress;
+
+            task Worker;
+
+            task body Worker is
+               Source : Domains.Owned_Buffer (Local'Access);
+               Target : Domains.Owned_Buffer (Local'Access);
+               Owner  : Capability_Owner (Local'Access, 2);
+            begin
+               loop
+                  Acquire (Source, Reference);
+                  Domains.Move (Source, Target);
+                  Drivers.Move_From (Local'Access, Target, Owner.Items (1));
+                  Drivers.Move (Local'Access, Owner.Items (1), Owner.Items (2));
+                  Drivers.Move_To (Local'Access, Owner.Items (2), Source);
+                  Domains.Release (Source);
+                  Progress.Note;
+               end loop;
+            end Worker;
+         begin
+            Progress.Reached;
+            abort Worker;
+         end;
+         Assert
+           (Domains.Current (Local, Reference) = (Available => 1, Outstanding => 0),
+            "abort during domain ownership transfer leaked or duplicated a buffer");
+         declare
+            Probe  : Domains.Owned_Buffer (Local'Access);
+            Result : Domains.Acquisition_Result;
+         begin
+            Domains.Try_Acquire (Probe, Reference, Result);
+            Assert (Result = Domains.Buffer_Acquired, "abort retained a buffer pool claim");
+            Domains.Release (Probe);
+         end;
+      end loop;
+   end Run_Abort_Ownership;
+
    procedure Run_Construction_Rollback is
       Baseline : constant Natural := Testing.Live_Pools;
       Failed   : Boolean := False;
@@ -773,6 +834,7 @@ begin
    Run_Capability_Owner_Finalization;
    Run_Domain_Finalization;
    Run_Transfer_Rollback;
+   Run_Abort_Ownership;
    Run_Construction_Rollback;
    Run_Post_Commit_Failures;
    Run_Release_Rollback;

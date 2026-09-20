@@ -1,5 +1,6 @@
 with Ada.Unchecked_Deallocation;
 with Flyology.Buffer_Test_Hooks;
+with System.Soft_Links;
 
 package body Flyology.Buffers.Domains is
    use type Interfaces.Unsigned_64;
@@ -285,35 +286,6 @@ package body Flyology.Buffers.Domains is
       end if;
    end Finalize;
 
-   protected type Transfer_Committer is
-      procedure Commit
-        (Source_Reference : not null access Pool_Reference;
-         Source_Reservation : not null access Pool_Reservation;
-         Source_Token     : not null access Buffer_Token;
-         Target_Reference : not null access Pool_Reference;
-         Target_Reservation : not null access Pool_Reservation;
-         Target_Token     : not null access Buffer_Token);
-   end Transfer_Committer;
-
-   protected body Transfer_Committer is
-      procedure Commit
-        (Source_Reference : not null access Pool_Reference;
-         Source_Reservation : not null access Pool_Reservation;
-         Source_Token     : not null access Buffer_Token;
-         Target_Reference : not null access Pool_Reference;
-         Target_Reservation : not null access Pool_Reservation;
-         Target_Token     : not null access Buffer_Token)
-      is
-      begin
-         Target_Reference.all := Source_Reference.all;
-         Target_Reservation.all := Source_Reservation.all;
-         Target_Token.all := Source_Token.all;
-         Source_Reference.all := Invalid_Pool;
-         Source_Reservation.all := Invalid_Reservation;
-         Source_Token.all := No_Token;
-      end Commit;
-   end Transfer_Committer;
-
    procedure Commit_Transfer
      (Source_Reference : not null access Pool_Reference;
       Source_Reservation : not null access Pool_Reservation;
@@ -322,15 +294,17 @@ package body Flyology.Buffers.Domains is
       Target_Reservation : not null access Pool_Reservation;
       Target_Token     : not null access Buffer_Token)
    is
-      Committer : Transfer_Committer;
    begin
-      Committer.Commit
-        (Source_Reference,
-         Source_Reservation,
-         Source_Token,
-         Target_Reference,
-         Target_Reservation,
-         Target_Token);
+      --  These are fixed same-subtype value copies. Defer abort only while the
+      --  source and target ownership fields change together.
+      System.Soft_Links.Abort_Defer.all;
+      Target_Reference.all := Source_Reference.all;
+      Target_Reservation.all := Source_Reservation.all;
+      Target_Token.all := Source_Token.all;
+      Source_Reference.all := Invalid_Pool;
+      Source_Reservation.all := Invalid_Reservation;
+      Source_Token.all := No_Token;
+      System.Soft_Links.Abort_Undefer.all;
    end Commit_Transfer;
 
    type Acquisition_Claim_Guard (Domain : not null access Buffer_Domain)
