@@ -614,10 +614,10 @@ package body System.Flyology.File_Engine is
    function Retryable_Submit_Error (Error_Code : C.int) return C.int
    is (if Error_Code in EAGAIN | EBUSY then EAGAIN else Error_Code);
 
+   --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
    function Load
      (Address : System.Address; Model : AP.Mem_Model := AP.Acquire)
       return U32
-             --  Atomic_Primitives imports GCC's __atomic_load_n intrinsic directly.
    is (AP.Atomic_Load_32 (Address, Model));
 
    procedure Store (Address : System.Address; Value : U32; Model : AP.Mem_Model := AP.Release)
