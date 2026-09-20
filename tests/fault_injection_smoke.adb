@@ -1053,7 +1053,9 @@ procedure Fault_Injection_Smoke is
    end Test_File_Dormancy_Exclusion;
 
    procedure Test_Uring_CQ_Backpressure is
-      Path : constant String := "/tmp/flyology-uring-capacity.data";
+      Path : constant String :=
+        Ada.Environment_Variables.Value ("FLYOLOGY_TEST_TEMP_ROOT", "/tmp") &
+        "/flyology-uring-capacity.data";
       File : Files.File_Descriptor := Files.Invalid_File;
    begin
       Warm_Group;
