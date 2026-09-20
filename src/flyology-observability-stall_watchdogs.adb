@@ -1,5 +1,6 @@
 with Ada.Real_Time;
 with Ada.Unchecked_Deallocation;
+with Flyology.Task_Results;
 
 package body Flyology.Observability.Stall_Watchdogs is
    package RT renames Ada.Real_Time;
@@ -209,9 +210,13 @@ package body Flyology.Observability.Stall_Watchdogs is
                   null;
             end;
          end if;
-         while not Object.Monitor.all'Terminated loop
-            delay 0.0;
-         end loop;
+         declare
+            Observation : constant Flyology.Task_Results.Task_Observation :=
+              Flyology.Task_Results.Wait (Object.Monitor.all'Identity);
+            pragma Unreferenced (Observation);
+         begin
+            null;
+         end;
          Free_Monitor (Object.Monitor);
       end if;
    end Stop;

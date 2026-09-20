@@ -1,6 +1,7 @@
 with Ada.Real_Time;
 with Flyology;
 with Flyology.Observability.Stall_Watchdogs;
+with Flyology.Task_Results;
 
 procedure Stall_Watchdog_Smoke is
    package RT renames Ada.Real_Time;
@@ -8,6 +9,8 @@ procedure Stall_Watchdog_Smoke is
 
    use type RT.Time;
    use type Flyology.Observability.Counter;
+   use type Flyology.Task_Results.Exit_Cause;
+   use type Flyology.Task_Results.Observation_Status;
    use type Watchdogs.Group_Condition;
 
    protected Control is
@@ -127,7 +130,9 @@ begin
       declare
          Deadline : constant RT.Time := RT.Clock + RT.Seconds (2);
       begin
-         while Watchdogs.Latest_Report (Busy_Watchdog).Stall_Episodes = 0 and then RT.Clock < Deadline loop
+         while Watchdogs.Latest_Report (Busy_Watchdog).Stall_Episodes = 0
+           and then RT.Clock < Deadline
+         loop
             delay 0.010;
          end loop;
       end;
@@ -137,7 +142,8 @@ begin
       end if;
 
       delay 0.100;
-      if Watchdogs.Latest_Report (Waiting_Watchdog).Condition /= Watchdogs.Waiting
+      if Watchdogs.Latest_Report (Waiting_Watchdog).Condition
+        /= Watchdogs.Waiting
         or else Watchdogs.Latest_Report (Waiting_Watchdog).Stall_Episodes /= 0
       then
          raise Program_Error with "parked group was reported as stalled";
@@ -155,4 +161,44 @@ begin
    Watchdogs.Stop (Busy_Watchdog);
    Watchdogs.Stop (Waiting_Watchdog);
    Watchdogs.Stop (Idle_Watchdog);
+
+   declare
+      task Lightweight_Stop
+        with CPU => 2 is
+         pragma Task_Info (Flyology.Lightweight_Task);
+      end Lightweight_Stop;
+
+      task body Lightweight_Stop is
+      begin
+         declare
+            Monitor : Watchdogs.Watchdog;
+         begin
+            Watchdogs.Start (Monitor, Config);
+            Watchdogs.Stop (Monitor);
+            if Watchdogs.Is_Running (Monitor)
+              or else Watchdogs.Latest_Report (Monitor).Condition
+                      /= Watchdogs.Monitor_Stopped
+            then
+               raise Program_Error
+                 with "lightweight watchdog stop did not join the monitor";
+            end if;
+
+            --  The second monitor is joined by controlled finalization.
+            Watchdogs.Start (Monitor, Config);
+         end;
+      end Lightweight_Stop;
+   begin
+      declare
+         Observation : constant Flyology.Task_Results.Task_Observation :=
+           Flyology.Task_Results.Wait (Lightweight_Stop'Identity);
+      begin
+         if Observation.Status /= Flyology.Task_Results.Terminal
+           or else Observation.Result.Cause
+                   /= Flyology.Task_Results.Normal_Completion
+         then
+            raise Program_Error
+              with "lightweight watchdog stop or finalization failed";
+         end if;
+      end;
+   end;
 end Stall_Watchdog_Smoke;
