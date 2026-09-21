@@ -25,6 +25,11 @@ package body Flyology.IO is
    pragma Convention (C, Poll_Descriptor);
    type Poll_Descriptor_Array is array (Positive range <>) of aliased Poll_Descriptor with Convention => C;
 
+   type Probe_Snapshot (Count : Natural) is record
+      Result : C.int := -1;
+      Items  : Poll_Descriptor_Array (1 .. Count);
+   end record;
+
    type Runtime_Wait_Request is record
       FD        : C.int;
       For_Write : C.int;
@@ -86,9 +91,12 @@ package body Flyology.IO is
    end Wait;
 
    function Wait_Any_Internal
-     (Requests : Wait_Request_Array; Timeout : Duration; Interrupt_Wait : Boolean) return Natural
+     (Requests       : Wait_Request_Array;
+      Timeout        : Duration;
+      Interrupt_Wait : Boolean;
+      Snapshot       : access Probe_Snapshot := null) return Natural
    is
-      Started    : constant Duration := Clock;
+      Started    : Duration := 0.0;
       Result     : C.int;
       Error_Code : C.int := 0;
    begin
@@ -96,6 +104,11 @@ package body Flyology.IO is
          return 0;
       elsif Requests'Length > Max_Wait_Requests then
          raise Device_Error with "too many readiness descriptors";
+      end if;
+
+      --  Only a finite native wait can retry against an elapsed deadline.
+      if Timeout > 0.0 and then not Is_Lightweight_Task then
+         Started := Clock;
       end if;
 
       declare
@@ -179,6 +192,10 @@ package body Flyology.IO is
                   Probe  : constant C.int := Poll (Poll_Items'Address, C.unsigned (Poll_Items'Length), 0);
                   Lowest : Natural;
                begin
+                  if Probe >= 0 and then Snapshot /= null then
+                     Snapshot.Result := Probe;
+                     Snapshot.Items := Poll_Items;
+                  end if;
                   if Probe > 0 then
                      Lowest := Lowest_Ready;
                      if Lowest /= 0 then
@@ -200,8 +217,8 @@ package body Flyology.IO is
                Poll_Items (Index).Returned_Events := 0;
             end loop;
             declare
-               Elapsed   : constant Duration := Clock - Started;
-               Remaining : constant Duration := Time_Math.Remaining (Timeout, Elapsed);
+               Remaining : constant Duration :=
+                 (if Timeout > 0.0 then Time_Math.Remaining (Timeout, Clock - Started) else Timeout);
             begin
                if Flyology.Wall_Clock_IO_Testing.Enabled
                  and then Flyology.Wall_Clock_IO_Testing.Take_EINTR
@@ -251,7 +268,6 @@ package body Flyology.IO is
    procedure Wait_Some
      (Requests : Wait_Request_Array; Completed : out Wait_Batch; Timeout : Duration := Infinite)
    is
-      Selected : Natural;
    begin
       Completed.Count := 0;
       Completed.Indexes := (others => Positive'First);
@@ -259,30 +275,36 @@ package body Flyology.IO is
          return;
       end if;
 
-      Selected := Wait_Any_Internal (Requests, Timeout, False);
-      if Selected = 0 then
-         return;
-      end if;
-
       declare
+         Snapshot   : aliased Probe_Snapshot (Requests'Length);
          Poll_Items : Poll_Descriptor_Array (1 .. Requests'Length);
          Ready      : array (Requests'Range) of Boolean := (others => False);
          Position   : Positive := Poll_Items'First;
          Result     : C.int;
+         Selected   : Natural;
       begin
-         Ready (Selected) := True;
-         for Index in Requests'Range loop
-            if Requests (Index).FD < 0 then
-               raise Device_Error with "invalid descriptor";
-            end if;
-            Poll_Items (Position) :=
-              (FD              => Requests (Index).FD,
-               Events          => (if Requests (Index).Condition = For_Read then POLLIN else POLLOUT),
-               Returned_Events => 0);
-            Position := Position + 1;
-         end loop;
+         Selected := Wait_Any_Internal (Requests, Timeout, False, Snapshot'Access);
+         if Selected = 0 then
+            return;
+         end if;
 
-         Result := Poll (Poll_Items'Address, C.unsigned (Poll_Items'Length), 0);
+         Ready (Selected) := True;
+         if Snapshot.Result >= 0 then
+            --  The lightweight parity probe was already the terminal
+            --  zero-time probe for this batch.
+            Poll_Items := Snapshot.Items;
+            Result := Snapshot.Result;
+         else
+            for Index in Requests'Range loop
+               Poll_Items (Position) :=
+                 (FD              => Requests (Index).FD,
+                  Events          => (if Requests (Index).Condition = For_Read then POLLIN else POLLOUT),
+                  Returned_Events => 0);
+               Position := Position + 1;
+            end loop;
+            Result := Poll (Poll_Items'Address, C.unsigned (Poll_Items'Length), 0);
+         end if;
+
          if Result < 0 and then C.int (GNAT.OS_Lib.Errno) /= C.int (System.OS_Constants.EINTR) then
             raise Device_Error with "readiness batch probe failed";
          elsif Result > 0 then

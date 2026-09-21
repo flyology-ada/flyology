@@ -11,6 +11,7 @@ procedure Wait_Any_Smoke is
    use type Ada.Real_Time.Time;
    use type Ada.Real_Time.Time_Span;
    use type Flyology.IO.Wait_Outcome;
+   use type Flyology.IO.Wait_Index_Array;
 
    protected Result is
       procedure Set (Passed : Boolean);
@@ -78,6 +79,26 @@ procedure Wait_Any_Smoke is
       --  before this event-loop maintenance pass. Lowest caller index wins,
       --  independent of kernel event ordering.
       Flyology.IO.Sockets.Send_Socket (Right_1, Data, Last);
+      declare
+         Left_3, Right_3 : Flyology.IO.Sockets.Socket_Type;
+      begin
+         Flyology.IO.Sockets.Create_Socket_Pair (Left_3, Right_3);
+         Flyology.IO.Sockets.Prepare (Left_3);
+         declare
+            Requests : constant Flyology.IO.Wait_Request_Array (5 .. 7) :=
+              [5 => (Flyology.IO.Sockets.Native_Descriptor (Left_3), Flyology.IO.For_Read),
+               6 => (Flyology.IO.Sockets.Native_Descriptor (Left_2), Flyology.IO.For_Read),
+               7 => (Flyology.IO.Sockets.Native_Descriptor (Left_1), Flyology.IO.For_Read)];
+            Batch : Flyology.IO.Wait_Batch (Requests'Length);
+         begin
+            Flyology.IO.Wait_Some (Requests, Batch, 1.0);
+            Passed :=
+              Passed and then Batch.Count = 2 and then Batch.Indexes (1 .. Batch.Count) = [6, 7];
+         end;
+         Flyology.IO.Sockets.Close_Socket (Left_3);
+         Flyology.IO.Sockets.Close_Socket (Right_3);
+      end;
+
       declare
          Requests : constant Flyology.IO.Wait_Request_Array (7 .. 8) :=
            [7 => (Flyology.IO.Sockets.Native_Descriptor (Left_1), Flyology.IO.For_Read),
