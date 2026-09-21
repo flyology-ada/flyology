@@ -502,8 +502,17 @@ private
    type Lease_Result is (Lease_Busy, Lease_Acquired, Lease_Cancelled);
    type Operation_State is (Unregistered, Registered, Acquired);
 
+   type Wake_Claim;
+   type Adoption_Claim;
+   type Lease_Drain_Claim;
+   type Wake_Source_Access is access all Flyology.Wake_Sources.Source;
+
    protected type Descriptor_Controller is
-      procedure Adopt (FD : Descriptor);
+      --  This claim excludes another adopter until outside-lock source
+      --  creation commits or abort cleanup cancels it.
+      procedure Begin_Adoption (Claim : not null access Adoption_Claim);
+      procedure Cancel_Adoption;
+      procedure Adopt (FD : Descriptor; Prepared : not null access Boolean);
       procedure Start_Operation
         (Generation   : not null access Descriptor_Generation;
          State        : not null access Operation_State;
@@ -515,13 +524,27 @@ private
          State               : not null access Operation_State;
          Result              : out Lease_Result;
          FD                  : in out Descriptor;
-         Close_Source        : in out Descriptor);
+         Close_Source        : in out Descriptor;
+         Drain               : not null access Lease_Drain_Claim);
       procedure Abandon_Operation
-        (Generation : Descriptor_Generation; State : not null access Operation_State);
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim);
       procedure Check_Operation (Generation : Descriptor_Generation);
-      procedure Release (Generation : Descriptor_Generation; State : not null access Operation_State);
+      procedure Release
+        (Generation : Descriptor_Generation;
+         State      : not null access Operation_State;
+         Wake       : not null access Wake_Claim);
       procedure Begin_Close
-        (FD : out Descriptor; Generation : out Descriptor_Generation; Leader : out Boolean);
+        (FD         : out Descriptor;
+         Generation : out Descriptor_Generation;
+         Leader     : out Boolean;
+         Wake       : not null access Wake_Claim);
+      procedure Complete_Signal (Armed : not null access Boolean);
+      procedure Cancel_Close;
+      --  Close has drained all registrations and write claims before the
+      --  caller borrows and releases these source objects.
+      procedure Close_Wakes (Lease, Close : out Wake_Source_Access);
       entry Await_Drained;
       entry Await_Closed;
       procedure Finish_Close (Generation : Descriptor_Generation);
@@ -531,19 +554,72 @@ private
    private
       Current_FD         : Descriptor := Invalid_Descriptor;
       Current_Generation : Descriptor_Generation := 0;
+      Preparing          : Boolean := False;
       Active             : Boolean := False;
       Close_In_Progress  : Boolean := False;
       Started_Operations : Natural := 0;
+      Pending_Signals    : Natural := 0;
       Lease_Signalled    : Boolean := False;
-      Lease_Wake         : Flyology.Wake_Sources.Source;
-      Close_Wake         : Flyology.Wake_Sources.Source;
+      Lease_Wake         : aliased Flyology.Wake_Sources.Source;
+      Close_Wake         : aliased Flyology.Wake_Sources.Source;
    end Descriptor_Controller;
+
+   type Wake_Claim is new Ada.Finalization.Limited_Controlled with record
+      State       : access Descriptor_Controller := null;
+      Descriptor  : Flyology.IO.Descriptor := Invalid_Descriptor;
+      Armed       : aliased Boolean := False;
+      Delivered   : Boolean := False;
+      Lease_Owner : access Connection'Class := null;
+   end record;
+   --  @exclude Controlled wake-claim finalization hook
+   --  @param Item Wake claim to complete without raising
+   overriding
+   procedure Finalize (Item : in out Wake_Claim);
+
+   type Adoption_Claim is new Ada.Finalization.Limited_Controlled with record
+      State : access Descriptor_Controller := null;
+      Lease : Wake_Source_Access := null;
+      Close : Wake_Source_Access := null;
+      Armed : aliased Boolean := False;
+   end record;
+   --  @exclude Controlled adoption-claim finalization hook
+   --  @param Item Adoption claim to roll back without raising
+   overriding
+   procedure Finalize (Item : in out Adoption_Claim);
+
+   type Lease_Drain_Claim is new Ada.Finalization.Limited_Controlled with record
+      Wake  : Wake_Source_Access := null;
+      Armed : Boolean := False;
+   end record;
+   --  @exclude Controlled lease-drain finalization hook
+   --  @param Item Lease-drain claim to cancel without raising
+   overriding
+   procedure Finalize (Item : in out Lease_Drain_Claim);
 
    type Connection is new Ada.Finalization.Limited_Controlled with record
       Socket     : Flyology.IO.Sockets.Socket_Type;
       Session    : Session_Access := null;
-      Controller : Descriptor_Controller;
+      Controller : aliased Descriptor_Controller;
    end record;
+
+   --  @exclude Internal TLS connection-adoption helper
+   --  @param Item TLS connection that receives the descriptor
+   --  @param FD Descriptor to adopt
+   procedure Adopt_TLS_Connection (Item : in out Connection; FD : Descriptor);
+   --  @exclude Internal TLS connection-lease acquisition helper
+   --  @param Item TLS connection whose current state is inspected
+   --  @param Expected_Generation Descriptor generation required by the caller
+   --  @param State State value returned to the caller
+   --  @param Result Lease acquisition result
+   --  @param FD Descriptor returned on success
+   --  @param Close_Source Close wake source returned on success
+   procedure Try_Acquire_Lease
+     (Item                : in out Connection'Class;
+      Expected_Generation : Descriptor_Generation;
+      State               : not null access Operation_State;
+      Result              : out Lease_Result;
+      FD                  : in out Descriptor;
+      Close_Source        : in out Descriptor);
 
    type Connection_Access is access all Connection'Class;
 

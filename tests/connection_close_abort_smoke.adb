@@ -1,4 +1,5 @@
 with Ada.Real_Time;
+with Ada.Streams;
 with Ada.Text_IO;
 with Flyology;
 with Flyology.IO.Connections;
@@ -22,9 +23,13 @@ procedure Connection_Close_Abort_Smoke is
    use type Interfaces.C.int;
 
    function Open_FD_Count return Interfaces.C.int
-   with Import, Convention => C, External_Name => "flyology_test_open_fd_count";
+   with
+     Import,
+     Convention    => C,
+     External_Name => "flyology_test_open_fd_count";
 
-   Termination_Limit : constant Ada.Real_Time.Time_Span := Ada.Real_Time.Seconds (5);
+   Termination_Limit : constant Ada.Real_Time.Time_Span :=
+     Ada.Real_Time.Seconds (5);
    Close_Limit       : constant Duration := 5.0;
 
    --  A wedged controller strands every later Close in an abort-deferred
@@ -32,7 +37,8 @@ procedure Connection_Close_Abort_Smoke is
    --  Report the defect and leave the process before that can happen.
    procedure Fail_Fast (Message : String) is
    begin
-      Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, "connection close abort: " & Message);
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error, "connection close abort: " & Message);
       Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
       GNAT.OS_Lib.OS_Exit (1);
    end Fail_Fast;
@@ -52,14 +58,21 @@ procedure Connection_Close_Abort_Smoke is
    begin
       if After /= Before then
          raise Program_Error
-           with Label & " leaked descriptors: before=" & Before'Image & ", after=" & After'Image;
+           with
+             Label
+             & " leaked descriptors: before="
+             & Before'Image
+             & ", after="
+             & After'Image;
       end if;
    end Assert_Descriptors;
 
    --  The leader closes a connection that outlives it, so the aborted task
    --  itself always terminates. The wedge is observed by the surviving
    --  owner: its Close must still complete and its permit must come back.
-   procedure Run_Shared_Connection (Model : Flyology.Execution_Model; Lane : String) is
+   procedure Run_Shared_Connection
+     (Model : Flyology.Execution_Model; Lane : String)
+   is
       Before : constant Interfaces.C.int := Open_FD_Count;
       Label  : constant String := "shared connection " & Lane;
    begin
@@ -92,11 +105,13 @@ procedure Connection_Close_Abort_Smoke is
             Testing.Wait_Reached (Testing.Close_Leadership_Taken);
             abort Leader;
             declare
-               Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Termination_Limit;
+               Deadline : constant Ada.Real_Time.Time :=
+                 Ada.Real_Time.Clock + Termination_Limit;
             begin
                while not Leader'Terminated loop
                   if Ada.Real_Time.Clock >= Deadline then
-                     Fail_Fast (Label & ": aborted close leader never terminated");
+                     Fail_Fast
+                       (Label & ": aborted close leader never terminated");
                   end if;
                   delay 0.005;
                end loop;
@@ -126,21 +141,212 @@ procedure Connection_Close_Abort_Smoke is
          if Close_Fail then
             Fail_Fast (Label & ": close after an aborted leader failed");
          elsif not Closed then
-            Fail_Fast (Label & ": close after an aborted leader never completed");
+            Fail_Fast
+              (Label & ": close after an aborted leader never completed");
          elsif Connections.Is_Open (Item) then
             Fail_Fast (Label & ": connection stayed open after close");
          elsif Manager.Active /= 0 then
-            Fail_Fast (Label & ": aborted close leader leaked its admission permit");
+            Fail_Fast
+              (Label & ": aborted close leader leaked its admission permit");
+         end if;
+         Close_If_Open (Peer);
+
+         --  The next generation must recreate both wake sources after the
+         --  aborted leader has completed its close cleanup.
+         Sockets.Create_Socket_Pair (Owned, Peer);
+         Connections.Take (Manager, Owned, Item);
+         Connections.Close (Item);
+         if Connections.Is_Open (Item) or else Manager.Active /= 0 then
+            Fail_Fast
+              (Label
+               & ": reuse after aborted close did not release ownership");
          end if;
          Close_If_Open (Peer);
       end;
       Assert_Descriptors (Before, Label);
    end Run_Shared_Connection;
 
+   --  Abort after the controller reserves wake preparation but before either
+   --  descriptor is created. The claim must roll back so the same socket and
+   --  connection can be adopted by the surviving task.
+   procedure Run_Adoption_Abort
+     (Model : Flyology.Execution_Model; Lane : String)
+   is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Label  : constant String := "wake preparation " & Lane;
+   begin
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Item    : Connections.Connection;
+         Owned   : Sockets.Socket_Type;
+         Peer    : Sockets.Socket_Type;
+      begin
+         Sockets.Create_Socket_Pair (Owned, Peer);
+         Testing.Reset_Barriers;
+         Testing.Arm (Testing.Wake_Preparation_Claimed);
+         declare
+            task Worker is
+               pragma Task_Info (Model);
+            end Worker;
+
+            task body Worker is
+            begin
+               Connections.Take (Manager, Owned, Item);
+            end Worker;
+         begin
+            Testing.Wait_Reached (Testing.Wake_Preparation_Claimed);
+            abort Worker;
+            declare
+               Deadline : constant Ada.Real_Time.Time :=
+                 Ada.Real_Time.Clock + Termination_Limit;
+            begin
+               while not Worker'Terminated loop
+                  if Ada.Real_Time.Clock >= Deadline then
+                     Fail_Fast
+                       (Label
+                        & ": aborted wake preparation did not terminate");
+                  end if;
+                  delay 0.005;
+               end loop;
+            end;
+            Testing.Release (Testing.Wake_Preparation_Claimed);
+         exception
+            when others =>
+               Testing.Release (Testing.Wake_Preparation_Claimed);
+               raise;
+         end;
+
+         if Connections.Is_Open (Item)
+           or else Manager.Active /= 0
+           or else not Sockets.Is_Open (Owned)
+         then
+            Fail_Fast (Label & ": aborted preparation retained ownership");
+         end if;
+         Connections.Take (Manager, Owned, Item);
+         Connections.Close (Item);
+         if Connections.Is_Open (Item) or else Manager.Active /= 0 then
+            Fail_Fast (Label & ": adoption after abort did not finish");
+         end if;
+         Close_If_Open (Peer);
+      end;
+      Assert_Descriptors (Before, Label);
+   end Run_Adoption_Abort;
+
+   --  A close notification is committed before its write. Fail that first
+   --  write and require the caller-owned guard to retry before close waits
+   --  for the active receiver to release its descriptor lease.
+   procedure Run_Close_Wake_Retry
+     (Model : Flyology.Execution_Model; Lane : String)
+   is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Label  : constant String := "close wake retry " & Lane;
+   begin
+      declare
+         Manager : aliased Connections.Server (Capacity => 1);
+         Item    : Connections.Connection;
+         Owned   : Sockets.Socket_Type;
+         Peer    : Sockets.Socket_Type;
+
+         protected Result is
+            procedure Finished (Cancelled : Boolean);
+            function Done return Boolean;
+            function Passed return Boolean;
+         private
+            Finished_Flag  : Boolean := False;
+            Cancelled_Flag : Boolean := False;
+         end Result;
+
+         protected body Result is
+            procedure Finished (Cancelled : Boolean) is
+            begin
+               Cancelled_Flag := Cancelled;
+               Finished_Flag := True;
+            end Finished;
+            function Done return Boolean
+            is (Finished_Flag);
+            function Passed return Boolean
+            is (Cancelled_Flag);
+         end Result;
+
+         task Watchdog is
+            entry Disarm;
+         end Watchdog;
+
+         task body Watchdog is
+         begin
+            select
+               accept Disarm;
+            or
+               delay Close_Limit;
+               Fail_Fast
+                 (Label
+                  & ": close or receiver stayed blocked after wake retry");
+            end select;
+         end Watchdog;
+      begin
+         Sockets.Create_Socket_Pair (Owned, Peer);
+         Connections.Take (Manager, Owned, Item);
+         declare
+            task Receiver is
+               pragma Task_Info (Model);
+            end Receiver;
+
+            task body Receiver is
+               Data      : Ada.Streams.Stream_Element_Array (1 .. 1);
+               Cancelled : Boolean := False;
+            begin
+               begin
+                  Item.Receive_Exactly (Data, Timeout => Close_Limit);
+               exception
+                  when Connections.Operation_Cancelled =>
+                     Cancelled := True;
+               end;
+               Result.Finished (Cancelled);
+            end Receiver;
+         begin
+            declare
+               Deadline : constant Ada.Real_Time.Time :=
+                 Ada.Real_Time.Clock + Termination_Limit;
+            begin
+               while not Testing.Operation_Active (Item) loop
+                  if Ada.Real_Time.Clock >= Deadline then
+                     Fail_Fast (Label & ": receiver never acquired its lease");
+                  end if;
+                  delay 0.001;
+               end loop;
+            end;
+            Testing.Fail_Next_Controller_Wake;
+            Connections.Close (Item);
+            declare
+               Deadline : constant Ada.Real_Time.Time :=
+                 Ada.Real_Time.Clock + Termination_Limit;
+            begin
+               while not Result.Done loop
+                  if Ada.Real_Time.Clock >= Deadline then
+                     Fail_Fast (Label & ": receiver did not observe close");
+                  end if;
+                  delay 0.001;
+               end loop;
+            end;
+         end;
+         Watchdog.Disarm;
+         if not Result.Passed
+           or else Connections.Is_Open (Item)
+           or else Manager.Active /= 0
+         then
+            Fail_Fast (Label & ": close retry did not discharge ownership");
+         end if;
+         Close_If_Open (Peer);
+      end;
+      Assert_Descriptors (Before, Label);
+   end Run_Close_Wake_Retry;
+
    --  The connection lives in the aborted task, so abort unwinding runs its
    --  finalization. A wedged controller makes that abort-deferred Close wait
    --  for a completion that can never arrive and the task never terminates.
-   procedure Run_Owned_Connection (Model : Flyology.Execution_Model; Lane : String) is
+   procedure Run_Owned_Connection
+     (Model : Flyology.Execution_Model; Lane : String)
+   is
       Before : constant Interfaces.C.int := Open_FD_Count;
       Label  : constant String := "owned connection " & Lane;
    begin
@@ -171,7 +377,8 @@ procedure Connection_Close_Abort_Smoke is
             Testing.Wait_Reached (Testing.Close_Leadership_Taken);
             abort Worker;
             declare
-               Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Termination_Limit;
+               Deadline : constant Ada.Real_Time.Time :=
+                 Ada.Real_Time.Clock + Termination_Limit;
             begin
                while not Worker'Terminated loop
                   if Ada.Real_Time.Clock >= Deadline then
@@ -215,6 +422,10 @@ begin
 
    Run_Shared_Connection (Flyology.Native_Task, "native");
    Run_Shared_Connection (Flyology.Lightweight_Task, "lightweight");
+   Run_Adoption_Abort (Flyology.Native_Task, "native");
+   Run_Adoption_Abort (Flyology.Lightweight_Task, "lightweight");
+   Run_Close_Wake_Retry (Flyology.Native_Task, "native");
+   Run_Close_Wake_Retry (Flyology.Lightweight_Task, "lightweight");
    Run_Owned_Connection (Flyology.Native_Task, "native");
    Run_Owned_Connection (Flyology.Lightweight_Task, "lightweight");
    Testing.Reset_Barriers;

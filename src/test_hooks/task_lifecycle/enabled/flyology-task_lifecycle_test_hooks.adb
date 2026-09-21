@@ -1,3 +1,4 @@
+with Ada.Task_Identification;
 with System.Atomic_Primitives;
 with Flyology.Atomic_Primitives;
 
@@ -5,6 +6,7 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
 
    package Atomics renames System.Atomic_Primitives;
    use type Atomics.uint32;
+   use type Ada.Task_Identification.Task_Id;
 
    type Boolean_Array is array (Barrier_Point) of Boolean with Atomic_Components;
 
@@ -19,6 +21,39 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
    with Atomic;
    Force_Family_Manager_Failure : Boolean := False
    with Atomic;
+   protected Supervision_Signal_Fault is
+      procedure Reset;
+      procedure Arm;
+      procedure Consume (Injected : out Boolean);
+      function Pending return Boolean;
+   private
+      Owner : Ada.Task_Identification.Task_Id := Ada.Task_Identification.Null_Task_Id;
+      Armed : Boolean := False;
+   end Supervision_Signal_Fault;
+
+   protected body Supervision_Signal_Fault is
+      procedure Reset is
+      begin
+         Armed := False;
+         Owner := Ada.Task_Identification.Null_Task_Id;
+      end Reset;
+
+      procedure Arm is
+      begin
+         Owner := Ada.Task_Identification.Current_Task;
+         Armed := True;
+      end Arm;
+
+      procedure Consume (Injected : out Boolean) is
+      begin
+         Injected := Armed and then Owner = Ada.Task_Identification.Current_Task;
+         if Injected then
+            Armed := False;
+         end if;
+      end Consume;
+
+      function Pending return Boolean is (Armed);
+   end Supervision_Signal_Fault;
 
    procedure Reset is
    begin
@@ -29,6 +64,7 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Force_Prepared_Monitor_End := False;
       Interrupt_Admission_Signal := False;
       Force_Family_Manager_Failure := False;
+      Supervision_Signal_Fault.Reset;
    end Reset;
 
    procedure Arm (Point : Barrier_Point) is
@@ -137,5 +173,20 @@ package body Flyology.Task_Lifecycle_Test_Hooks is
       Force_Family_Manager_Failure := False;
       return Result;
    end Consume_Family_Manager_Failure;
+
+   procedure Force_Next_Supervision_Signal_Failure is
+   begin
+      Supervision_Signal_Fault.Arm;
+   end Force_Next_Supervision_Signal_Failure;
+
+   function Consume_Supervision_Signal_Failure return Boolean is
+      Injected : Boolean;
+   begin
+      Supervision_Signal_Fault.Consume (Injected);
+      return Injected;
+   end Consume_Supervision_Signal_Failure;
+
+   function Supervision_Signal_Failure_Pending return Boolean
+   is (Supervision_Signal_Fault.Pending);
 
 end Flyology.Task_Lifecycle_Test_Hooks;

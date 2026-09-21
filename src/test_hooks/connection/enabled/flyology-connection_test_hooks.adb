@@ -19,6 +19,9 @@ package body Flyology.Connection_Test_Hooks is
    function Test_Fail_Next_Capacity_Wake return Interfaces.C.int
    with Import, Convention => C, External_Name => "flyology_test_connection_fail_next_capacity_release_wake";
 
+   function Test_Fail_Next_Controller_Wake return Interfaces.C.int
+   with Import, Convention => C, External_Name => "flyology_test_connection_fail_next_controller_wake";
+
    procedure Barrier (Point : Interfaces.C.int) is
    begin
       if Test_Barrier_Arrive (Point) /= 0 then
@@ -47,5 +50,8 @@ package body Flyology.Connection_Test_Hooks is
 
    function Fail_Next_Capacity_Wake return Boolean
    is (Test_Fail_Next_Capacity_Wake /= 0);
+
+   function Fail_Next_Controller_Wake return Boolean
+   is (Test_Fail_Next_Controller_Wake /= 0);
 
 end Flyology.Connection_Test_Hooks;

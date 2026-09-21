@@ -14,6 +14,10 @@ package body Flyology.IO.Connections.Drivers is
    use type TLS.Session_Access;
    use type TLS.Step_Status;
 
+   procedure Wait_Outbound_Source
+     (Item : in out Outbound_Wakeup; FD : out Descriptor; Already_Pending : out Boolean);
+   procedure Consume_Outbound (Item : in out Outbound_Wakeup);
+
    procedure Reset (Item : in out Capability) is
    begin
       Item.Item := null;
@@ -60,8 +64,9 @@ package body Flyology.IO.Connections.Drivers is
          raise Program_Error with "connection capability is not awaiting acquisition";
       end if;
       Interrupt_Sources (IO.Owner, IO.Token, Interrupts, Count);
-      IO.Item.Controller.Try_Acquire
-        (IO.Guard.Generation,
+      Try_Acquire_Lease
+        (IO.Item.all,
+         IO.Guard.Generation,
          IO.Guard.State'Access,
          Lease,
          IO.FD,
@@ -224,12 +229,12 @@ package body Flyology.IO.Connections.Drivers is
    begin
       Validate_Transport_Arm (IO, Required);
 
-      Outbound.Controller.Wait_Source (Outbound_FD, Already_Pending);
+      Wait_Outbound_Source (Outbound, Outbound_FD, Already_Pending);
       if Already_Pending then
          --  Consume before rescheduling so the resumed protocol owner cannot
          --  spin on a stale signal. It must observe every currently published
          --  output item before it calls Arm_Transport again.
-         Outbound.Controller.Consume;
+         Consume_Outbound (Outbound);
          Flyology.Operations.Drivers.Reschedule (Operation);
          return;
       end if;
@@ -263,11 +268,11 @@ package body Flyology.IO.Connections.Drivers is
       Validate_Transport_Arm (IO, Required);
       Validate_Additional (Additional);
 
-      Outbound.Controller.Wait_Source (Outbound_FD, Already_Pending);
+      Wait_Outbound_Source (Outbound, Outbound_FD, Already_Pending);
       if Already_Pending then
          --  Keep the existing consume-before-reschedule rule. Additional is a
          --  caller-owned latch and is never consumed here.
-         Outbound.Controller.Consume;
+         Consume_Outbound (Outbound);
          Flyology.Operations.Drivers.Reschedule (Operation);
          return;
       end if;
@@ -293,46 +298,221 @@ package body Flyology.IO.Connections.Drivers is
       end if;
    end Arm_Deadline;
 
-   protected body Wakeup_Controller is
-      procedure Signal is
-      begin
-         if Pending then
-            return;
-         end if;
-         --  Publish the logical event before the fallible descriptor signal.
-         --  A failed signal is still observed synchronously by Wait_Source.
-         Pending := True;
-         Wake_Sources.Signal (Wake);
-         Signalled := True;
-      end Signal;
+   overriding
+   procedure Finalize (Item : in out Wake_Claim) is
+   begin
+      if Item.Armed then
+         begin
+            Wake_Sources.Signal_Borrowed (Item.Descriptor);
+            Item.Delivered := True;
+         exception
+            when others =>
+               null;
+         end;
+         Item.State.Complete_Signal (Item.Delivered);
+         Item.Armed := False;
+      end if;
+   end Finalize;
 
-      procedure Wait_Source (FD : out Descriptor; Already_Pending : out Boolean) is
+   overriding
+   procedure Finalize (Item : in out Initialization_Claim) is
+   begin
+      if Item.Armed then
+         Item.State.Cancel_Initialization;
+         Item.Armed := False;
+      end if;
+   end Finalize;
+
+   overriding
+   procedure Finalize (Item : in out Drain_Claim) is
+      Delivered : Boolean := False;
+   begin
+      if Item.Armed then
+         if Item.Has_Signal then
+            begin
+               Wake_Sources.Drain (Item.Wake.all);
+            exception
+               when others =>
+                  null;
+            end;
+         end if;
+         Item.State.Complete_Consume (Item.Armed'Access, Item.Signal_Armed'Access, Item.Signal_FD'Access);
+      end if;
+      if Item.Signal_Armed then
+         begin
+            Wake_Sources.Signal_Borrowed (Item.Signal_FD);
+            Delivered := True;
+         exception
+            when others =>
+               null;
+         end;
+         Item.State.Complete_Signal (Delivered);
+         Item.Signal_Armed := False;
+      end if;
+   end Finalize;
+
+   protected body Wakeup_Controller is
+      procedure Record_Signal (Claim : not null access Wake_Claim) is
+      begin
+         if not Pending then
+            Pending := True;
+            if Write_FD >= 0 then
+               Signalling := True;
+               Claim.Descriptor := Write_FD;
+               Claim.Armed := True;
+            end if;
+         elsif Draining then
+            --  A new protocol event during the outside-lock drain needs its
+            --  own readable notification after that drain completes.
+            Resignal_Required := True;
+         elsif not Signalling and then not Signalled and then Write_FD >= 0 then
+            --  Retry a hard failure reported by the previous caller.
+            Signalling := True;
+            Claim.Descriptor := Write_FD;
+            Claim.Armed := True;
+         end if;
+      end Record_Signal;
+
+      procedure Complete_Signal (Delivered : Boolean) is
+      begin
+         if Signalling then
+            Signalling := False;
+            Signalled := Delivered;
+         end if;
+      end Complete_Signal;
+
+      procedure Begin_Wait
+        (Claim : not null access Initialization_Claim; FD : out Descriptor; Already_Pending : out Boolean) is
       begin
          Already_Pending := Pending;
-         if Pending then
-            FD := Invalid_Descriptor;
-         else
-            Wake_Sources.Ensure (Wake);
-            FD := Wake_Sources.Descriptor (Wake);
+         FD := (if Pending then Invalid_Descriptor else Read_FD);
+         if not Pending and then Read_FD < 0 and then not Initializing then
+            Initializing := True;
+            Claim.Armed := True;
          end if;
-      end Wait_Source;
+      end Begin_Wait;
 
-      procedure Consume is
+      entry Await_Ready when not Initializing is
+      begin
+         null;
+      end Await_Ready;
+
+      procedure Publish_Source (FD, Signal_FD : Descriptor) is
+      begin
+         if not Initializing or else Read_FD >= 0 or else FD < 0 or else Signal_FD < 0 then
+            raise Program_Error with "invalid outbound wake source publication";
+         end if;
+         Read_FD := FD;
+         Write_FD := Signal_FD;
+         Initializing := False;
+      end Publish_Source;
+
+      procedure Cancel_Initialization is
+      begin
+         Initializing := False;
+      end Cancel_Initialization;
+
+      procedure Begin_Consume (Claim : not null access Drain_Claim) is
       begin
          if not Pending then
             raise Program_Error with "no protocol wakeup is pending";
+         elsif Signalling or else Draining then
+            return;
          end if;
-         if Signalled then
-            Wake_Sources.Consume (Wake);
+         Draining := True;
+         Claim.Has_Signal := Signalled;
+         Claim.Armed := True;
+      end Begin_Consume;
+
+      entry Await_Signal when not Signalling and then not Draining is
+      begin
+         null;
+      end Await_Signal;
+
+      procedure Complete_Consume
+        (Armed        : not null access Boolean;
+         Signal_Armed : not null access Boolean;
+         Signal_FD    : not null access Descriptor) is
+      begin
+         if Draining and then Armed.all then
+            Draining := False;
+            Signalled := False;
+            if Resignal_Required then
+               Resignal_Required := False;
+               if Write_FD >= 0 then
+                  Signalling := True;
+                  Signal_FD.all := Write_FD;
+                  Signal_Armed.all := True;
+               end if;
+            else
+               Pending := False;
+            end if;
+            Armed.all := False;
          end if;
-         Pending := False;
-         Signalled := False;
-      end Consume;
+      end Complete_Consume;
    end Wakeup_Controller;
 
-   procedure Signal (Item : in out Outbound_Wakeup) is
+   procedure Wait_Outbound_Source
+     (Item : in out Outbound_Wakeup; FD : out Descriptor; Already_Pending : out Boolean) is
    begin
-      Item.Controller.Signal;
+      loop
+         declare
+            Claim : aliased Initialization_Claim;
+         begin
+            Claim.State := Item.Controller'Unchecked_Access;
+            Item.Controller.Begin_Wait (Claim'Access, FD, Already_Pending);
+            if Already_Pending or else FD >= 0 then
+               return;
+            elsif Claim.Armed then
+               Wake_Sources.Ensure (Item.Wake);
+               Item.Controller.Publish_Source
+                 (Wake_Sources.Descriptor (Item.Wake), Wake_Sources.Signal_Descriptor (Item.Wake));
+               Claim.Armed := False;
+            else
+               Item.Controller.Await_Ready;
+            end if;
+         end;
+      end loop;
+   end Wait_Outbound_Source;
+
+   procedure Consume_Outbound (Item : in out Outbound_Wakeup) is
+   begin
+      loop
+         declare
+            Claim : aliased Drain_Claim;
+         begin
+            Claim.State := Item.Controller'Unchecked_Access;
+            Claim.Wake := Item.Wake'Unchecked_Access;
+            Item.Controller.Begin_Consume (Claim'Access);
+            if Claim.Armed then
+               if Claim.Has_Signal then
+                  Wake_Sources.Drain (Item.Wake);
+               end if;
+               Item.Controller.Complete_Consume
+                 (Claim.Armed'Access, Claim.Signal_Armed'Access, Claim.Signal_FD'Access);
+               if Claim.Signal_Armed then
+                  Wake_Sources.Signal_Borrowed (Claim.Signal_FD);
+                  Item.Controller.Complete_Signal (Delivered => True);
+                  Claim.Signal_Armed := False;
+               end if;
+               return;
+            end if;
+         end;
+         Item.Controller.Await_Signal;
+      end loop;
+   end Consume_Outbound;
+
+   procedure Signal (Item : in out Outbound_Wakeup) is
+      Claim : aliased Wake_Claim;
+   begin
+      Claim.State := Item.Controller'Unchecked_Access;
+      Item.Controller.Record_Signal (Claim'Access);
+      if Claim.Armed then
+         Wake_Sources.Signal_Borrowed (Claim.Descriptor);
+         Claim.Delivered := True;
+         Item.Controller.Complete_Signal (Claim.Delivered);
+         Claim.Armed := False;
+      end if;
    end Signal;
 
    procedure Check (Item : in out Capability) is
@@ -459,9 +639,9 @@ package body Flyology.IO.Connections.Drivers is
       end Append;
    begin
       Check (Item);
-      Outbound.Controller.Wait_Source (Outbound_FD, Outbound_Pending);
+      Wait_Outbound_Source (Outbound, Outbound_FD, Outbound_Pending);
       if Outbound_Pending then
-         Outbound.Controller.Consume;
+         Consume_Outbound (Outbound);
          Result := Outbound_Ready;
          return;
       end if;
@@ -499,7 +679,7 @@ package body Flyology.IO.Connections.Drivers is
 
       Check (Item);
       if Ready_Index = Outbound_Index then
-         Outbound.Controller.Consume;
+         Consume_Outbound (Outbound);
          Result := Outbound_Ready;
       elsif Ready_Index <= Outbound_Index + Boolean'Pos (Interest.Readable) + Boolean'Pos (Interest.Writable)
       then

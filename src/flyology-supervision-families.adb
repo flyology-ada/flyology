@@ -102,6 +102,80 @@ package body Flyology.Supervision.Families is
       return Value;
    end Failure_Summary;
 
+   --  Family_State records changes under its lock. Delivery is best effort
+   --  after publication: a failed source retains Pending for later attempts.
+   procedure Flush_Notifications (Item : in out Family) is
+      procedure Attempt is
+         Failed  : Boolean := False;
+         Failure : Ada.Exceptions.Exception_Occurrence;
+      begin
+         for Slot in Slot_Index loop
+            begin
+               Item.Signals (Slot).Flush;
+            exception
+               when Occurrence : others =>
+                  if not Failed then
+                     Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                     Failed := True;
+                  end if;
+            end;
+         end loop;
+         begin
+            Item.Dispatch.Flush;
+         exception
+            when Occurrence : others =>
+               if not Failed then
+                  Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                  Failed := True;
+               end if;
+         end;
+         if Failed then
+            Ada.Exceptions.Reraise_Occurrence (Failure);
+         end if;
+      end Attempt;
+   begin
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled
+        and then Flyology.Task_Lifecycle_Test_Hooks.Consume_Supervision_Signal_Failure
+      then
+         raise Program_Error with "injected supervision wake failure";
+      end if;
+      Attempt;
+   exception
+      when others =>
+         --  Retry immediately after a transient failure. The controlled guard
+         --  also retries on scope exit without changing committed ownership.
+         begin
+            Attempt;
+         exception
+            when others =>
+               null;
+         end;
+   end Flush_Notifications;
+
+   type Notification_Guard
+     (Signals  : not null access Signal_Array;
+      Dispatch : not null access Change_Signal)
+   is new Ada.Finalization.Limited_Controlled with null record;
+
+   overriding
+   procedure Finalize (Guard : in out Notification_Guard) is
+   begin
+      for Slot in Slot_Index loop
+         begin
+            Guard.Signals (Slot).Flush;
+         exception
+            when others =>
+               null;
+         end;
+      end loop;
+      begin
+         Guard.Dispatch.Flush;
+      exception
+         when others =>
+            null;
+      end;
+   end Finalize;
+
    function Logical_Id (Slot : Slot_Index) return Child_Id
    is (Child_Id (Interfaces.Unsigned_64 (First_Child_Id) + Interfaces.Unsigned_64 (Slot - Slot_Index'First)));
 
@@ -342,11 +416,11 @@ package body Flyology.Supervision.Families is
          end if;
          if Signals /= null then
             for Candidate in Slot_Index loop
-               Signals (Candidate).Notify;
+               Signals (Candidate).Mark_Pending;
             end loop;
          end if;
          if Dispatch /= null then
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
          end if;
          if Event_Sequence_Exhausted then
             return;
@@ -465,7 +539,7 @@ package body Flyology.Supervision.Families is
          Queue_Tail := Next_Slot (Queue_Tail);
          Queue_Length := Queue_Length + 1;
          Active.all := False;
-         Dispatch.Notify;
+         Dispatch.Mark_Pending;
       end Commit;
 
       procedure Rollback (Slot : Slot_Index; Handle : Child_Handle) is
@@ -475,7 +549,7 @@ package body Flyology.Supervision.Families is
          then
             Reserved_Children := Reserved_Children - 1;
             Slots (Slot) := Free;
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
          end if;
       end Rollback;
 
@@ -577,7 +651,7 @@ package body Flyology.Supervision.Families is
          then
             Reserved_Children := Reserved_Children - 1;
             Slots (Slot) := Free;
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
          end if;
          Active.all := False;
       end Rollback_Prepared;
@@ -643,7 +717,7 @@ package body Flyology.Supervision.Families is
          Queue_Length := Queue_Length + 1;
          Released.all := True;
          Succeeded.all := True;
-         Dispatch.Notify;
+         Dispatch.Mark_Pending;
          Completed.all := True;
       end Release_Prepared;
 
@@ -685,13 +759,13 @@ package body Flyology.Supervision.Families is
 
             when Released_Queued | Released_Managed =>
                Stop_Requested (Slot) := True;
-               Family_State.Signals (Slot).Notify;
+               Family_State.Signals (Slot).Mark_Pending;
                Completed := False;
 
             when Released_Reapable                  =>
                Slots (Slot) := Reapable;
                Live_Managers := Live_Managers - 1;
-               Dispatch.Notify;
+               Dispatch.Mark_Pending;
                Released.all := False;
                Active.all := False;
 
@@ -738,7 +812,7 @@ package body Flyology.Supervision.Families is
          then
             Slots (Slot) := Reapable;
             Live_Managers := Live_Managers - 1;
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
             Released.all := False;
             Active.all := False;
          end if;
@@ -804,7 +878,7 @@ package body Flyology.Supervision.Families is
          then
             Stop_Requested (Slot) := True;
             Applied.all := True;
-            Signals (Slot).Notify;
+            Signals (Slot).Mark_Pending;
          end if;
       end Stop_One;
 
@@ -867,7 +941,7 @@ package body Flyology.Supervision.Families is
          if Valid then
             Intervention (Slot) := Termination;
             Recovery_Requested (Slot) := True;
-            Signals (Slot).Notify;
+            Signals (Slot).Mark_Pending;
          end if;
       end Request_Intervention;
 
@@ -2156,7 +2230,9 @@ package body Flyology.Supervision.Families is
          end if;
       end Finalize;
 
-      Guard : Reservation_Guard;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Guard         : Reservation_Guard;
    begin
       --  The guard exists before Reserve publishes anything. Its aliased
       --  evidence is armed before the protected action permits pending abort.
@@ -2167,6 +2243,7 @@ package body Flyology.Supervision.Families is
       end if;
       Item.Inputs (Guard.Slot) := Input;
       Item.State.Commit (Guard.Slot, Guard.Handle, Guard.Active'Access);
+      Flush_Notifications (Item);
       if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
          Flyology.Task_Lifecycle_Test_Hooks.Barrier
            (Flyology.Task_Lifecycle_Test_Hooks.Family_Start_Committed);
@@ -2175,40 +2252,52 @@ package body Flyology.Supervision.Families is
    end Start;
 
    procedure Stop (Item : in out Family; Handle : Child_Handle) is
-      Applied : aliased Boolean := False;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Applied       : aliased Boolean := False;
    begin
       Item.State.Stop_One (Handle, Applied'Access);
+      Flush_Notifications (Item);
       if not Applied then
          raise Stale_Handle;
       end if;
    end Stop;
 
    procedure Restart (Item : in out Family; Handle : Child_Handle) is
-      Valid : Boolean;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Valid         : Boolean;
    begin
       if Policy.Restart = Never or else Policy.Impact = Escalate or else not Policy.Restart_Safe then
          raise Program_Error with "manual restart requires a restart-safe replacement policy";
       end if;
       Item.State.Request_Intervention
         (Handle, Diagnostic_Summary (Restart_Requested, "manual restart requested"), Valid);
+      Flush_Notifications (Item);
       if not Valid then
          raise Stale_Handle with "manual restart requires the current running generation";
       end if;
    end Restart;
 
    procedure Report_Unhealthy (Item : in out Family; Handle : Child_Handle; Diagnostic : String) is
-      Summary : constant Termination_Summary := Diagnostic_Summary (Unhealthy, Diagnostic);
-      Valid   : Boolean;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Summary       : constant Termination_Summary := Diagnostic_Summary (Unhealthy, Diagnostic);
+      Valid         : Boolean;
    begin
       Item.State.Request_Intervention (Handle, Summary, Valid);
+      Flush_Notifications (Item);
       if not Valid then
          raise Stale_Handle with "health report requires the current running generation";
       end if;
    end Report_Unhealthy;
 
    procedure Request_Shutdown (Item : in out Family) is
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
    begin
       Item.State.Request_Stop;
+      Flush_Notifications (Item);
    end Request_Shutdown;
 
    function Accepting (Item : Family) return Boolean
@@ -2327,12 +2416,15 @@ package body Flyology.Supervision.Families is
       Parent_Stop : access Flyology.Cancellation.Token;
       Result      : out Supervisor_Result)
    is
-      Identity : Controller_Id;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Identity      : Controller_Id;
    begin
       Validate;
       Identity := New_Controller;
       Item.State.Configure
         (Identity, Inherited, Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      Flush_Notifications (Item.all);
       declare
          task type Manager with CPU => Control_Group is
             pragma Task_Info (Flyology.Lightweight_Task);
@@ -2371,10 +2463,13 @@ package body Flyology.Supervision.Families is
          end Finish_Managers;
 
          task body Manager is
-            Managed_Slot : Slot_Index := Slot_Index'First;
-            Value        : Child_Handle :=
+            Notifications :
+              Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+            pragma Unreferenced (Notifications);
+            Managed_Slot  : Slot_Index := Slot_Index'First;
+            Value         : Child_Handle :=
               (Controller => Controller_Id'First, Id => First_Child_Id, Generation => Generation'First);
-            Input        : Request;
+            Input         : Request;
 
             procedure Run_Generation
               (Current  : Child_Handle;
@@ -2390,6 +2485,7 @@ package body Flyology.Supervision.Families is
                Signals          : aliased Monitor_Signal_Guard (Item);
             begin
                Item.State.Publish_Starting (Managed_Slot, Current, Incident, Signals'Access, Started);
+               Flush_Notifications (Item.all);
                if Started then
                   Value := Current;
                end if;
@@ -2487,6 +2583,7 @@ package body Flyology.Supervision.Families is
                      if not Ready and then Is_Ready (Control) then
                         Ready := True;
                         Item.State.Publish_Ready (Managed_Slot, Current, Now);
+                        Flush_Notifications (Item.all);
                      end if;
                      if not Incident_Closed
                        and then Item.State.Incident_Can_Close (Managed_Slot, Current, Now)
@@ -2496,6 +2593,7 @@ package body Flyology.Supervision.Families is
                      end if;
                      exit when Done;
                      Item.State.Stop_Status (Managed_Slot, Current, Stop_Now, Shutdown, Decision_Override);
+                     Flush_Notifications (Item.all);
                      if Decision_Override.Kind /= No_Termination then
                         Override := Decision_Override;
                      end if;
@@ -2523,6 +2621,7 @@ package body Flyology.Supervision.Families is
                         then
                            Stuck_Published := True;
                            Item.State.Publish_Stuck (Managed_Slot, Current);
+                           Flush_Notifications (Item.all);
                         end if;
                      end if;
                      Next_Due := Ada.Real_Time.Time_Last;
@@ -2545,6 +2644,7 @@ package body Flyology.Supervision.Families is
                                    Policy.Stopping.Abort_Observation));
                         end if;
                      end if;
+                     Flush_Notifications (Item.all);
                      Wait_Change (Signal_FD, Next_Due);
                   end loop;
                   Generation_Value.Incident := Recovery_Incident (Control);
@@ -2598,6 +2698,7 @@ package body Flyology.Supervision.Families is
                      Next,
                      Recovery,
                      Signals'Access);
+                  Flush_Notifications (Item.all);
                   Flush_Monitor_Signals (Signals);
                   if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                      Flyology.Task_Lifecycle_Test_Hooks.Barrier
@@ -2668,6 +2769,7 @@ package body Flyology.Supervision.Families is
                      begin
                         Item.State.Manager_Failed
                           (Managed_Slot, Value, Failure_Summary (Occurrence), Signals'Access);
+                        Flush_Notifications (Item.all);
                         Flush_Monitor_Signals (Signals);
                      end;
                end;
@@ -2679,6 +2781,7 @@ package body Flyology.Supervision.Families is
                   Signals : aliased Monitor_Signal_Guard (Item);
                begin
                   Item.State.Manager_Done (Managed_Slot, Value, Signals'Access);
+                  Flush_Notifications (Item.all);
                   Flush_Monitor_Signals (Signals);
                end;
             end loop;
@@ -2701,6 +2804,7 @@ package body Flyology.Supervision.Families is
             Item.Dispatch.Consume;
             if Parent_Stop /= null and then Parent_Stop.Requested and then not Stop_Sent then
                Item.State.Request_Stop;
+               Flush_Notifications (Item.all);
                Stop_Sent := True;
             end if;
             if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
@@ -2708,6 +2812,7 @@ package body Flyology.Supervision.Families is
                  (Flyology.Task_Lifecycle_Test_Hooks.Family_Before_Take_Start);
             end if;
             Item.State.Take_Start (Available, Slot, Handle, Incident);
+            Flush_Notifications (Item.all);
             if Available then
                begin
                   if Managers (Slot) = null then
@@ -2720,6 +2825,7 @@ package body Flyology.Supervision.Families is
                         Signals : aliased Monitor_Signal_Guard (Item);
                      begin
                         Item.State.Manager_Done (Slot, Handle, Signals'Access);
+                        Flush_Notifications (Item.all);
                         Flush_Monitor_Signals (Signals);
                      end;
                      raise;
@@ -2727,6 +2833,7 @@ package body Flyology.Supervision.Families is
             end if;
 
             exit when Item.State.Is_Finished;
+            Flush_Notifications (Item.all);
             if Parent_Stop = null then
                Item.State.Await_Start_Or_Finished;
             elsif Stop_Sent or else Parent_Already then
@@ -2749,6 +2856,7 @@ package body Flyology.Supervision.Families is
       exception
          when others =>
             Item.State.Request_Stop;
+            Flush_Notifications (Item.all);
             Finish_Managers;
             raise;
       end;

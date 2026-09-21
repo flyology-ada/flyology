@@ -7,20 +7,27 @@ package body Flyology.IO.TLS.Testing is
 
    package Test_Hooks renames Flyology.TLS_Test_Hooks;
 
-   function Generation (Item : in out Connection) return Interfaces.Unsigned_64 is
+   function Generation (Item : in out Connection) return Interfaces.Unsigned_64
+   is
       Snapshot     : aliased Descriptor_Generation;
       State        : aliased Operation_State := Unregistered;
       FD           : Descriptor;
       Lease_Source : Descriptor;
       Close_Source : Descriptor;
+      Wake         : aliased Wake_Claim;
    begin
-      Item.Controller.Start_Operation (Snapshot'Access, State'Access, FD, Lease_Source, Close_Source);
-      Item.Controller.Abandon_Operation (Snapshot, State'Access);
+      Item.Controller.Start_Operation
+        (Snapshot'Access, State'Access, FD, Lease_Source, Close_Source);
+      Wake.State := Item.Controller'Unchecked_Access;
+      Item.Controller.Abandon_Operation (Snapshot, State'Access, Wake'Access);
+      Finalize (Wake);
       return Interfaces.Unsigned_64 (Snapshot);
    end Generation;
 
    procedure Attempt_Stale_Acquisition
-     (Item : in out Connection; Snapshot : Interfaces.Unsigned_64; Was_Replaced : out Boolean)
+     (Item         : in out Connection;
+      Snapshot     : Interfaces.Unsigned_64;
+      Was_Replaced : out Boolean)
    is
       FD           : Descriptor;
       Actual       : aliased Descriptor_Generation;
@@ -28,20 +35,31 @@ package body Flyology.IO.TLS.Testing is
       Lease_Source : Descriptor;
       Close_Source : Descriptor;
       Result       : Lease_Result;
+      Wake         : aliased Wake_Claim;
    begin
-      Item.Controller.Start_Operation (Actual'Access, State'Access, FD, Lease_Source, Close_Source);
-      Item.Controller.Try_Acquire (Descriptor_Generation (Snapshot), State'Access, Result, FD, Close_Source);
+      Item.Controller.Start_Operation
+        (Actual'Access, State'Access, FD, Lease_Source, Close_Source);
+      Try_Acquire_Lease
+        (Item,
+         Descriptor_Generation (Snapshot),
+         State'Access,
+         Result,
+         FD,
+         Close_Source);
       Was_Replaced := Result = Lease_Cancelled;
+      Wake.State := Item.Controller'Unchecked_Access;
       case State is
          when Unregistered =>
             null;
 
          when Registered   =>
-            Item.Controller.Abandon_Operation (Actual, State'Access);
+            Item.Controller.Abandon_Operation
+              (Actual, State'Access, Wake'Access);
 
          when Acquired     =>
-            Item.Controller.Release (Actual, State'Access);
+            Item.Controller.Release (Actual, State'Access, Wake'Access);
       end case;
+      Finalize (Wake);
    end Attempt_Stale_Acquisition;
 
    procedure Reset_Take_Barriers is
@@ -55,7 +73,8 @@ package body Flyology.IO.TLS.Testing is
    end Arm;
 
    procedure Wait_Reached (Point : Take_Barrier_Point) is
-      Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
    begin
       while not Test_Hooks.Reached (Take_Barrier_Point'Pos (Point)) loop
          if Ada.Real_Time.Clock >= Deadline then
@@ -73,7 +92,8 @@ package body Flyology.IO.TLS.Testing is
    procedure Check_Take_Barrier_State_Machine is
       type Invalid_Point_Array is array (Positive range <>) of Integer;
       First_Invalid : constant Integer := -1;
-      Last_Invalid  : constant Integer := Take_Barrier_Point'Pos (Take_Barrier_Point'Last) + 1;
+      Last_Invalid  : constant Integer :=
+        Take_Barrier_Point'Pos (Take_Barrier_Point'Last) + 1;
       Did_Arrive    : Boolean;
    begin
       --  Static C storage began zeroed before the first reset.

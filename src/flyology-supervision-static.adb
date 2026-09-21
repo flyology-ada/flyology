@@ -99,6 +99,75 @@ package body Flyology.Supervision.Static is
       return Result;
    end Failure_Summary;
 
+   --  Lifecycle records changes under its lock. Delivery is best effort
+   --  after publication: a failed source retains Pending for later attempts.
+   procedure Flush_Notifications (Item : in out Supervisor) is
+      procedure Attempt is
+         Failed  : Boolean := False;
+         Failure : Ada.Exceptions.Exception_Occurrence;
+      begin
+         for Child in Child_Kind loop
+            begin
+               Item.Signals (Child).Flush;
+            exception
+               when Occurrence : others =>
+                  if not Failed then
+                     Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                     Failed := True;
+                  end if;
+            end;
+         end loop;
+         begin
+            Item.Dispatch.Flush;
+         exception
+            when Occurrence : others =>
+               if not Failed then
+                  Ada.Exceptions.Save_Occurrence (Failure, Occurrence);
+                  Failed := True;
+               end if;
+         end;
+         if Failed then
+            Ada.Exceptions.Reraise_Occurrence (Failure);
+         end if;
+      end Attempt;
+   begin
+      Attempt;
+   exception
+      when others =>
+         --  Keep the committed transition visible while retrying the wake.
+         --  Notification_Guard makes another attempt on scope exit.
+         begin
+            Attempt;
+         exception
+            when others =>
+               null;
+         end;
+   end Flush_Notifications;
+
+   type Notification_Guard
+     (Signals  : not null access Signal_Array;
+      Dispatch : not null access Change_Signal)
+   is new Ada.Finalization.Limited_Controlled with null record;
+
+   overriding
+   procedure Finalize (Guard : in out Notification_Guard) is
+   begin
+      for Child in Child_Kind loop
+         begin
+            Guard.Signals (Child).Flush;
+         exception
+            when others =>
+               null;
+         end;
+      end loop;
+      begin
+         Guard.Dispatch.Flush;
+      exception
+         when others =>
+            null;
+      end;
+   end Finalize;
+
    protected body Lifecycle is
       procedure Complete_Monitors (Child : Child_Kind; Status : Generation_Observation_Status) is
       begin
@@ -212,11 +281,11 @@ package body Flyology.Supervision.Static is
          end if;
          if Signals /= null then
             for Candidate in Child_Kind loop
-               Signals (Candidate).Notify;
+               Signals (Candidate).Mark_Pending;
             end loop;
          end if;
          if Dispatch /= null then
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
          end if;
          if Event_Sequence_Exhausted then
             return;
@@ -289,7 +358,7 @@ package body Flyology.Supervision.Static is
          end loop;
          if Phase = Stopping_Children and then Stop_Position > Child_Total then
             Phase := Finished;
-            Dispatch.Notify;
+            Dispatch.Mark_Pending;
          end if;
       end Advance_Stop_Order;
 
@@ -637,7 +706,7 @@ package body Flyology.Supervision.Static is
          Intervention (Child) := Termination;
          Intervention_Pending (Child) := True;
          Result := Intervention_Accepted;
-         Signals (Child).Notify;
+         Signals (Child).Mark_Pending;
       end Request_Intervention;
 
       procedure Classify_Restart
@@ -1330,15 +1399,21 @@ package body Flyology.Supervision.Static is
    end Validate_Configuration;
 
    procedure Request_Shutdown (Item : in out Supervisor) is
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
    begin
       Item.State.Request_Stop;
+      Flush_Notifications (Item);
    end Request_Shutdown;
 
    procedure Restart (Item : in out Supervisor; Child : Child_Kind; Handle : Child_Handle) is
-      Status : Intervention_Result;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Status        : Intervention_Result;
    begin
       Item.State.Request_Intervention
         (Child, Handle, Diagnostic_Summary (Restart_Requested, "manual restart requested"), Status);
+      Flush_Notifications (Item);
       case Status is
          when Intervention_Accepted    =>
             null;
@@ -1354,10 +1429,13 @@ package body Flyology.Supervision.Static is
    procedure Report_Unhealthy
      (Item : in out Supervisor; Child : Child_Kind; Handle : Child_Handle; Diagnostic : String)
    is
-      Summary : constant Termination_Summary := Diagnostic_Summary (Unhealthy, Diagnostic);
-      Status  : Intervention_Result;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Summary       : constant Termination_Summary := Diagnostic_Summary (Unhealthy, Diagnostic);
+      Status        : Intervention_Result;
    begin
       Item.State.Request_Intervention (Child, Handle, Summary, Status);
+      Flush_Notifications (Item);
       if Status /= Intervention_Accepted then
          raise Stale_Handle with "health report requires the current running generation";
       end if;
@@ -1462,13 +1540,15 @@ package body Flyology.Supervision.Static is
       Parent_Stop : access Flyology.Cancellation.Token;
       Result      : out Supervisor_Result)
    is
-      Specs        : Specification_Array;
-      Ids          : Logical_Id_Array;
-      Dependencies : Dependency_Matrix;
-      Cohorts      : Cohort_Matrix;
-      Start_Order  : Child_Order;
-      Stop_Order   : Child_Order;
-      Identity     : Controller_Id;
+      Notifications : Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+      pragma Unreferenced (Notifications);
+      Specs         : Specification_Array;
+      Ids           : Logical_Id_Array;
+      Dependencies  : Dependency_Matrix;
+      Cohorts       : Cohort_Matrix;
+      Start_Order   : Child_Order;
+      Stop_Order    : Child_Order;
+      Identity      : Controller_Id;
    begin
       Validate_Configuration (Specs, Ids, Dependencies, Cohorts, Start_Order, Stop_Order);
       Identity := New_Controller;
@@ -1483,6 +1563,7 @@ package body Flyology.Supervision.Static is
          Inherited,
          Item.Signals'Unchecked_Access,
          Item.Dispatch'Unchecked_Access);
+      Flush_Notifications (Item);
 
       if Item.State.Manager_Should_Exit then
          Result := Item.State.Read_Result;
@@ -1520,6 +1601,9 @@ package body Flyology.Supervision.Static is
          end Manager;
 
          task body Manager is
+            Notifications :
+              Notification_Guard (Item.Signals'Unchecked_Access, Item.Dispatch'Unchecked_Access);
+            pragma Unreferenced (Notifications);
             Managed_Child : Child_Kind := Child_Kind'First;
             Activated     : Boolean := False;
 
@@ -1585,6 +1669,7 @@ package body Flyology.Supervision.Static is
 
                      if not Ready_Published and then Is_Ready (Control) then
                         Item.State.Publish_Ready (Managed_Child, Value, Now);
+                        Flush_Notifications (Item);
                         Ready_Published := True;
                      end if;
                      if not Incident_Closed and then Item.State.Incident_Can_Close (Managed_Child, Value, Now)
@@ -1596,6 +1681,7 @@ package body Flyology.Supervision.Static is
 
                      Item.State.Stop_Decision
                        (Managed_Child, Value, Stop_Now, Shutdown_Stop, Stop_Config, Decision_Override);
+                     Flush_Notifications (Item);
                      if Decision_Override.Kind /= No_Termination then
                         Override := Decision_Override;
                      end if;
@@ -1639,6 +1725,7 @@ package body Flyology.Supervision.Static is
                         then
                            Stuck_Published := True;
                            Item.State.Publish_Stuck (Managed_Child, Value);
+                           Flush_Notifications (Item);
                         end if;
                      end if;
                      Next_Due := Ada.Real_Time.Time_Last;
@@ -1661,6 +1748,7 @@ package body Flyology.Supervision.Static is
                                    Stop_Config.Abort_Observation));
                         end if;
                      end if;
+                     Flush_Notifications (Item);
                      Wait_Change (Signal_FD, Next_Due);
                   end loop;
 
@@ -1712,6 +1800,7 @@ package body Flyology.Supervision.Static is
                   end if;
                   Item.State.Publish_Termination
                     (Managed_Child, Value, Result_Value.Termination, Cascade, Finished_At);
+                  Flush_Notifications (Item);
                   if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                      Flyology.Task_Lifecycle_Test_Hooks.Barrier
                        (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
@@ -1746,6 +1835,7 @@ package body Flyology.Supervision.Static is
                             else Unhandled_Exception)),
                         Cascade,
                         Failed_At);
+                     Flush_Notifications (Item);
                      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                         Flyology.Task_Lifecycle_Test_Hooks.Barrier
                           (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
@@ -1776,6 +1866,7 @@ package body Flyology.Supervision.Static is
                while Activated and then not Item.State.Manager_Should_Exit loop
                   Item.Signals (Managed_Child).Consume;
                   Item.State.Try_Start (Managed_Child, Ada.Real_Time.Clock, Started, Value, Spec, Incident);
+                  Flush_Notifications (Item);
                   if Started then
                      if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
                         Flyology.Task_Lifecycle_Test_Hooks.Barrier
@@ -1784,15 +1875,18 @@ package body Flyology.Supervision.Static is
                      Run_Generation (Value, Spec, Incident);
                   else
                      Due := Item.State.Next_Start_Due;
+                     Flush_Notifications (Item);
                      Wait_Change (Signal_FD, Due);
                   end if;
                end loop;
             end;
             Item.State.Manager_Finished;
+            Flush_Notifications (Item);
          exception
             when Occurrence : others =>
                Item.State.Manager_Failed (Managed_Child, Failure_Summary (Occurrence));
                Item.State.Manager_Finished;
+               Flush_Notifications (Item);
          end Manager;
 
          type Manager_Array is array (Child_Kind) of Manager;
@@ -1802,6 +1896,7 @@ package body Flyology.Supervision.Static is
             Managers (Child).Start (Child);
          end loop;
          if Parent_Stop = null then
+            Flush_Notifications (Item);
             Item.State.Await_Finished;
          else
             declare
@@ -1818,11 +1913,14 @@ package body Flyology.Supervision.Static is
                   end if;
                   if Stop_Sent then
                      Item.State.Request_Stop;
+                     Flush_Notifications (Item);
                   end if;
                   exit when Item.State.Manager_Should_Exit;
                   if Stop_Sent then
+                     Flush_Notifications (Item);
                      Wait_Change (Dispatch_FD, Ada.Real_Time.Time_Last);
                   else
+                     Flush_Notifications (Item);
                      declare
                         Woken : constant Natural :=
                           Flyology.IO.Wait_Any
@@ -1837,11 +1935,13 @@ package body Flyology.Supervision.Static is
                end loop;
             end;
          end if;
+         Flush_Notifications (Item);
          Item.State.Await_Managers;
          Result := Item.State.Read_Result;
       exception
          when others =>
             Item.State.Request_Stop;
+            Flush_Notifications (Item);
             raise;
       end;
    end Run_Internal;

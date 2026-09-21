@@ -366,7 +366,13 @@ begin
       end if;
    end;
 
+   --  A failed wake after Commit must not hide the admitted handle. The flush
+   --  retries the pending notification before Start returns.
+   Flyology.Task_Lifecycle_Testing.Force_Next_Supervision_Signal_Failure;
    Families.Start (Item, 2, Second);
+   if Flyology.Task_Lifecycle_Testing.Supervision_Signal_Failure_Pending then
+      raise Program_Error with "family Start did not exercise the wake failure";
+   end if;
    loop
       exit when Families.Current (Item, Second).Ready;
       if Ada.Real_Time.Clock >= Deadline then
