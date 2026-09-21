@@ -5,6 +5,7 @@ with Flyology.Process_Generations.Command_Lines;
 with Flyology.Process_Generations.Protocol;
 with Flyology.Process_Generations.Transport;
 with Flyology.Subprocesses.Bootstrap;
+with Flyology.Wake_Sources;
 
 package body Flyology.Process_Generations.Agents is
    package Bootstrap renames Flyology.Subprocesses.Bootstrap;
@@ -13,10 +14,11 @@ package body Flyology.Process_Generations.Agents is
    package Transport renames Flyology.Process_Generations.Transport;
 
    use type Ada.Real_Time.Time;
+   use type Flyology.IO.Wait_Outcome;
    use type Messages.Decode_Result;
    use type Protocol.Message_Kind;
 
-   Poll_Interval : constant Duration := 0.005;
+   Ready_Probe_Interval : constant Duration := 0.005;
 
    function Expired (Started : Ada.Real_Time.Time; Timeout : Duration) return Boolean
    is (Timeout >= 0.0 and then Ada.Real_Time.To_Duration (Ada.Real_Time.Clock - Started) >= Timeout);
@@ -118,6 +120,10 @@ package body Flyology.Process_Generations.Agents is
          Timeout => Control_Timeout);
 
       declare
+         Server_Wake        : Flyology.Wake_Sources.Source;
+         Server_Wake_Read   : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+         Server_Wake_Signal : Flyology.IO.Descriptor := Flyology.IO.Invalid_Descriptor;
+
          protected Server_Result is
             procedure Finish (Failed : Boolean);
             procedure Snapshot (Finished, Failed : out Boolean);
@@ -156,6 +162,7 @@ package body Flyology.Process_Generations.Agents is
                   when others =>
                      Server_Result.Finish (True);
                end;
+               Flyology.Wake_Sources.Signal_Borrowed (Server_Wake_Signal);
             or
                terminate;
             end select;
@@ -165,13 +172,31 @@ package body Flyology.Process_Generations.Agents is
 
          procedure Await_Server_Stop is
             Began : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+            Finished, Failed : Boolean;
          begin
-            while not Server'Terminated loop
+            loop
+               Server_Result.Snapshot (Finished, Failed);
+               exit when Finished and then Server'Terminated;
                if Expired (Began, Drain_Timeout) then
                   Send_Failure_Text ("candidate server did not drain before its deadline");
                   raise Agent_Error with "candidate server did not drain before its deadline";
                end if;
-               delay Poll_Interval;
+               if Finished then
+                  --  The wake is published from the server task's last body
+                  --  statement. Yield until GNARL marks that task terminated.
+                  delay 0.0;
+               elsif not Flyology.IO.Wait
+                   (Server_Wake_Read,
+                    Flyology.IO.For_Read,
+                    Remaining (Began, Drain_Timeout))
+               then
+                  --  Recheck completion before classifying a simultaneous deadline.
+                  Server_Result.Snapshot (Finished, Failed);
+                  if not Finished then
+                     Send_Failure_Text ("candidate server did not drain before its deadline");
+                     raise Agent_Error with "candidate server did not drain before its deadline";
+                  end if;
+               end if;
             end loop;
          end Await_Server_Stop;
 
@@ -213,7 +238,7 @@ package body Flyology.Process_Generations.Agents is
          procedure Receive_Command is
             Began            : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
             Finished, Failed : Boolean;
-            Slice            : Duration;
+            Outcome          : Flyology.IO.Wait_Outcome;
          begin
             if Started then
                loop
@@ -227,11 +252,24 @@ package body Flyology.Process_Generations.Agents is
                   elsif Expired (Began, Control_Timeout) then
                      raise Flyology.IO.Timeout_Error with "control command deadline expired";
                   end if;
-                  Slice :=
-                    (if Control_Timeout < 0.0
-                     then Poll_Interval
-                     else Duration'Min (Poll_Interval, Remaining (Began, Control_Timeout)));
-                  exit when Transport.Message_Available (Control, Timeout => Slice);
+                  Outcome :=
+                    Transport.Wait_Message_Or_Completion
+                       (Control,
+                       Server_Wake_Read,
+                       Remaining (Began, Control_Timeout));
+                  exit when Outcome = Flyology.IO.Ready;
+                  if Outcome = Flyology.IO.Timed_Out then
+                     --  Completion can race the terminal timeout sample.
+                     Server_Result.Snapshot (Finished, Failed);
+                     if Finished then
+                        raise Agent_Error
+                          with
+                            (if Failed
+                             then "managed server failed after readiness"
+                             else "managed server stopped before a drain command");
+                     end if;
+                     raise Flyology.IO.Timeout_Error with "control command deadline expired";
+                  end if;
                end loop;
                Transport.Receive (Control, Frame, Timeout => Remaining (Began, Control_Timeout));
             else
@@ -239,6 +277,9 @@ package body Flyology.Process_Generations.Agents is
             end if;
          end Receive_Command;
       begin
+         Flyology.Wake_Sources.Ensure (Server_Wake);
+         Server_Wake_Read := Flyology.Wake_Sources.Descriptor (Server_Wake);
+         Server_Wake_Signal := Flyology.Wake_Sources.Signal_Descriptor (Server_Wake);
          loop
             Receive_Command;
             case Frame.Kind is
@@ -274,7 +315,20 @@ package body Flyology.Process_Generations.Agents is
                            elsif Expired (Began, Ready_Timeout) then
                               raise Agent_Error with "candidate readiness deadline expired";
                            end if;
-                           delay Poll_Interval;
+                           --  Ready has no wake descriptor. Keep its bounded
+                           --  probe, but let server completion or a control
+                           --  command interrupt each interval immediately.
+                           declare
+                              Slice : constant Duration :=
+                                (if Ready_Timeout < 0.0
+                                 then Ready_Probe_Interval
+                                 else Duration'Min (Ready_Probe_Interval, Remaining (Began, Ready_Timeout)));
+                              Ignored : constant Flyology.IO.Wait_Outcome :=
+                                Transport.Wait_Message_Or_Completion
+                                  (Control, Server_Wake_Read, Slice);
+                           begin
+                              null;
+                           end;
                         end loop;
                      end;
                      Messages.Encode_Topology_Proof

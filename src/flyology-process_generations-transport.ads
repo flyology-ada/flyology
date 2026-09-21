@@ -59,6 +59,18 @@ package Flyology.Process_Generations.Transport is
       Timeout : Duration := Flyology.IO.Infinite;
       Token   : access Flyology.Cancellation.Token := null) return Boolean;
 
+   --  Wait for a control frame or a caller-owned completion source. Neither
+   --  descriptor is consumed, so the caller must inspect its completion state
+   --  and receive a readable frame separately. The source outlives this wait.
+   --  @param Item Open authority-bound channel
+   --  @param Completion Readable descriptor signaled by the other event
+   --  @param Timeout Maximum readiness wait
+   --  @return Ready for a frame, Interrupted for completion, or Timed_Out
+   function Wait_Message_Or_Completion
+     (Item       : Control_Channel;
+      Completion : Flyology.IO.Descriptor;
+      Timeout    : Duration := Flyology.IO.Infinite) return Flyology.IO.Wait_Outcome;
+
    --  Send one frame with a bounded payload.
    --  @param Item Authority-bound destination channel
    --  @param Kind Control message kind

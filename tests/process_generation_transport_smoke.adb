@@ -3,6 +3,7 @@ with Flyology.IO.Sockets;
 with Flyology.Process_Generations;
 with Flyology.Process_Generations.Protocol;
 with Flyology.Process_Generations.Transport;
+with Flyology.Wake_Sources;
 with Interfaces;
 
 procedure Process_Generation_Transport_Smoke is
@@ -13,6 +14,7 @@ procedure Process_Generation_Transport_Smoke is
 
    use type Protocol.Message_Kind;
    use type Protocol.Octet;
+   use type Flyology.IO.Wait_Outcome;
    use type Generations.Image_Generation;
    use type Interfaces.Unsigned_64;
 
@@ -97,8 +99,56 @@ procedure Process_Generation_Transport_Smoke is
       pragma Assert (not Transport.Is_Open (Right));
    end Timeout_Poisons;
 
+   procedure Completion_Interrupts_Control_Wait is
+      Left_Socket  : Sockets.Socket_Type;
+      Right_Socket : Sockets.Socket_Type;
+      Left         : Transport.Control_Channel;
+      Right        : Transport.Control_Channel;
+      Wake         : Flyology.Wake_Sources.Source;
+      Wake_FD      : Flyology.IO.Descriptor;
+      Frame        : Protocol.Frame;
+   begin
+      Sockets.Create_Socket_Pair (Left_Socket, Right_Socket);
+      Transport.Adopt (Left, Left_Socket, Authority);
+      Transport.Adopt (Right, Right_Socket, Authority);
+      Flyology.Wake_Sources.Ensure (Wake);
+      Wake_FD := Flyology.Wake_Sources.Descriptor (Wake);
+
+      declare
+         Signal_FD : constant Flyology.IO.Descriptor := Flyology.Wake_Sources.Signal_Descriptor (Wake);
+         task Complete_Server;
+         task body Complete_Server is
+         begin
+            delay 0.02;
+            Flyology.Wake_Sources.Signal_Borrowed (Signal_FD);
+         end Complete_Server;
+      begin
+         if Transport.Wait_Message_Or_Completion (Right, Wake_FD, 1.0) /= Flyology.IO.Interrupted then
+            raise Program_Error with "server completion did not interrupt control wait";
+         end if;
+      end;
+
+      if not Transport.Is_Open (Right) then
+         raise Program_Error with "completion wait changed control channel ownership";
+      end if;
+      Transport.Send (Left, Protocol.Hello, Timeout => 1.0);
+      if Transport.Wait_Message_Or_Completion (Right, Wake_FD, 0.0) /= Flyology.IO.Ready then
+         raise Program_Error with "control readiness lost to concurrent server completion";
+      end if;
+      Transport.Receive (Right, Frame, Timeout => 1.0);
+      if Frame.Kind /= Protocol.Hello then
+         raise Program_Error with "completion wait consumed control frame";
+      end if;
+
+      Flyology.Wake_Sources.Consume_All (Wake);
+      if Transport.Wait_Message_Or_Completion (Right, Wake_FD, 0.01) /= Flyology.IO.Timed_Out then
+         raise Program_Error with "idle control wait ignored deadline";
+      end if;
+   end Completion_Interrupts_Control_Wait;
+
 begin
    Round_Trip;
    Reject_Stale_Authority;
    Timeout_Poisons;
+   Completion_Interrupts_Control_Wait;
 end Process_Generation_Transport_Smoke;
