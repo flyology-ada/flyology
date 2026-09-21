@@ -64,7 +64,9 @@ package Fault_Control is
       Cross_To_Shard_Window,
       File_Native_AIO_Stale_Data,
       File_Native_AIO_Bad_Object,
-      File_Uring_Multi_Submit);
+      File_Uring_Multi_Submit,
+      File_Native_AIO_Multi_Submit,
+      File_Native_AIO_Short_Submit);
 
    for Point use
      (Fiber_Allocation               => 1,
@@ -121,7 +123,9 @@ package Fault_Control is
       Cross_To_Shard_Window          => 52,
       File_Native_AIO_Stale_Data     => 53,
       File_Native_AIO_Bad_Object     => 54,
-      File_Uring_Multi_Submit        => 55);
+      File_Uring_Multi_Submit        => 55,
+      File_Native_AIO_Multi_Submit   => 56,
+      File_Native_AIO_Short_Submit   => 57);
 
    function Enabled return Boolean;
    procedure Reset;

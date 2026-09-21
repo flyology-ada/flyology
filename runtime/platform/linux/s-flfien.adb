@@ -593,6 +593,13 @@ package body System.Flyology.File_Engine is
 
    function Has_Overflow_Backlog (State : not null Engine_State_Access) return Boolean;
 
+   procedure Prepare_Native_Request
+     (State          : not null Engine_State_Access;
+      Request        : not null Native_AIO_Request_Access;
+      Submission     : File_Submission;
+      Prepared_Count : Natural;
+      Error_Code     : out C.int);
+
    procedure Release_State (State : in out Engine_State_Access);
 
    function Supports_File_Operations (Descriptor : C.int; Send_ZC_Supported : out Boolean) return Boolean;
@@ -680,6 +687,43 @@ package body System.Flyology.File_Engine is
       Request.Control.Data := State.Native_Slots (Number).Generation * U64 (Ring_Entries) + U64 (Number - 1);
       return True;
    end Reserve_Native_Slot;
+
+   procedure Prepare_Native_Request
+     (State          : not null Engine_State_Access;
+      Request        : not null Native_AIO_Request_Access;
+      Submission     : File_Submission;
+      Prepared_Count : Natural;
+      Error_Code     : out C.int) is
+   begin
+      Request.all :=
+        (Control         =>
+           (Data       => 0,
+            Key        => 0,
+            Read_Flags => 0,
+            Opcode     => (if Submission.For_Write then IOCB_CMD_PWRITE else IOCB_CMD_PREAD),
+            Priority   => 0,
+            Descriptor => U32 (Submission.Descriptor),
+            Buffer     => U64 (SSE.To_Integer (Submission.Buffer)),
+            Length     => U64 (Submission.Length),
+            Offset     => S64 (Submission.Offset),
+            Reserved   => 0,
+            Flags      => IOCB_FLAG_RESFD,
+            Result_FD  => U32 (State.Wake_FD)),
+         Next_Free       => null,
+         Token           => Submission.Token,
+         Next_Active     => null,
+         Previous_Active => null,
+         Active_Owner    => System.Null_Address,
+         Cancel_Next     => null,
+         Cancel_Previous => null,
+         Cancel_Owner    => System.Null_Address);
+      Error_Code :=
+        (if Reserve_Native_Slot (State, Request)
+         then 0
+         elsif State.Active_Count + Prepared_Count = Natural (Ring_Entries)
+         then EAGAIN
+         else ENOMEM);
+   end Prepare_Native_Request;
 
    procedure Recycle_Request
      (State : not null Engine_State_Access; Request : in out Native_AIO_Request_Access)
@@ -1463,30 +1507,9 @@ package body System.Flyology.File_Engine is
             Request  : Native_AIO_Request_Access := Acquire_Request (State);
             Controls : aliased IOCB_Address_Array (1 .. 1) := [1 => Request.Control'Address];
          begin
-            Request.all :=
-              (Control         =>
-                 (Data       => 0,
-                  Key        => 0,
-                  Read_Flags => 0,
-                  Opcode     => (if For_Write then IOCB_CMD_PWRITE else IOCB_CMD_PREAD),
-                  Priority   => 0,
-                  Descriptor => U32 (Descriptor),
-                  Buffer     => U64 (SSE.To_Integer (Buffer)),
-                  Length     => U64 (Length),
-                  Offset     => S64 (Offset),
-                  Reserved   => 0,
-                  Flags      => IOCB_FLAG_RESFD,
-                  Result_FD  => U32 (State.Wake_FD)),
-               Next_Free       => null,
-               Token           => Token,
-               Next_Active     => null,
-               Previous_Active => null,
-               Active_Owner    => System.Null_Address,
-               Cancel_Next     => null,
-               Cancel_Previous => null,
-               Cancel_Owner    => System.Null_Address);
-            if not Reserve_Native_Slot (State, Request) then
-               Error_Code := (if State.Active_Count = Natural (Ring_Entries) then EAGAIN else ENOMEM);
+            Prepare_Native_Request
+              (State, Request, (Descriptor, Buffer, Length, Offset, For_Write, Token), 0, Error_Code);
+            if Error_Code /= 0 then
                Recycle_Request (State, Request);
                return False;
             end if;
@@ -1658,19 +1681,85 @@ package body System.Flyology.File_Engine is
          Error_Code := EINVAL;
          return;
       elsif State.Backend = Native_AIO then
-         for Request of Requests loop
-            if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
-               Error_Code := EAGAIN;
-               exit;
+         declare
+            --  Match the scheduler's maximum queued run without growing
+            --  either pointer array beyond a small event-loop stack frame.
+            Native_Batch_Limit : constant Positive := 64;
+            type Request_Array is array (Positive range <>) of Native_AIO_Request_Access;
+            Prepared           : Request_Array (1 .. Natural'Min (Requests'Length, Native_Batch_Limit)) :=
+              (others => null);
+            Controls           : aliased IOCB_Address_Array (Prepared'Range);
+            Count              : Natural := 0;
+            To_Submit          : Natural;
+            Result             : C.long;
+            Request            : Native_AIO_Request_Access;
+         begin
+            for Position in Prepared'Range loop
+               if Faults.Enabled and then Faults.Fail (Faults.File_Submission_Full) then
+                  Error_Code := EAGAIN;
+                  exit;
+               end if;
+               begin
+                  Request := Acquire_Request (State);
+               exception
+                  when Storage_Error =>
+                     Error_Code := ENOMEM;
+                     exit;
+               end;
+               Prepare_Native_Request
+                 (State, Request, Requests (Requests'First + Position - 1), Count, Error_Code);
+               if Error_Code /= 0 then
+                  Recycle_Request (State, Request);
+                  exit;
+               end if;
+               Count := Count + 1;
+               Prepared (Count) := Request;
+               Controls (Count) := Request.Control'Address;
+            end loop;
+            if Count = 0 then
+               return;
             end if;
-            exit when not Submit
-              (Item, Request.Descriptor, Request.Buffer, Request.Length,
-               Request.Offset, Request.For_Write, Request.Token, Error_Code);
-            Submitted := Submitted + 1;
-         end loop;
-         if Submitted = Requests'Length then
-            Error_Code := 0;
-         end if;
+
+            To_Submit := Count;
+            if Faults.Enabled and then Count > 1 and then Faults.Fail (Faults.File_Native_AIO_Short_Submit)
+            then
+               --  Exercise a real accepted prefix while leaving the rest
+               --  unsubmitted, independent of kernel queue pressure.
+               To_Submit := 1;
+            end if;
+            if Faults.Enabled and then To_Submit > 1 then
+               Faults.Note (Faults.File_Native_AIO_Multi_Submit);
+            end if;
+            loop
+               Result := Linux_IO_Submit (State.AIO_Context, C.long (To_Submit), Controls'Address);
+               exit when Result >= 0 or else OSI.errno /= OSI.EINTR;
+            end loop;
+            if Result > C.long (To_Submit) then
+               raise Program_Error with "native AIO accepted beyond submitted file batch";
+            end if;
+            Submitted := (if Result >= 0 then Natural (Result) else 0);
+            if Submitted < Count then
+               Error_Code := (if Result < 0 then Retryable_Submit_Error (C.int (OSI.errno)) else EAGAIN);
+            elsif Count < Requests'Length and then Error_Code = 0 then
+               Error_Code := EAGAIN;
+            end if;
+            for Position in 1 .. Count loop
+               Request := Prepared (Position);
+               if Position <= Submitted then
+                  Request.Next_Active := State.Active_Requests;
+                  Request.Previous_Active := null;
+                  Request.Active_Owner := State_Address (State);
+                  if State.Active_Requests /= null then
+                     State.Active_Requests.Previous_Active := Request;
+                  end if;
+                  State.Active_Requests := Request;
+                  Index_Native_Cancel (State, Request);
+                  State.Active_Count := State.Active_Count + 1;
+               else
+                  Recycle_Request (State, Request);
+               end if;
+            end loop;
+         end;
          return;
       end if;
 
