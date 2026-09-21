@@ -1,4 +1,5 @@
 with Flyology.Operations;
+private with Ada.Finalization;
 private with Interfaces.C;
 with System;
 
@@ -6,8 +7,15 @@ with System;
 --
 --  The channel owns no task and allocates no storage after elaboration.
 --  Multiple producers and consumers may call it concurrently. Blocking uses
---  protected entries, preserving the same synchronous API for lightweight and
---  native tasks.
+--  private protected entries, preserving synchronous calls for lightweight
+--  and native tasks. Mutating wrapper calls must not be made from an enclosing
+--  protected action: the wrapper may signal a scoped waiter after its private
+--  lock exits, while the caller's outer lock would still be held. GNARL's
+--  blocking check rejects detectable cases before the channel changes state,
+--  but native builds without Detect_Blocking may not maintain that counter.
+--  External selective delay calls on Send and Receive migrate to Timed_Send
+--  and Timed_Receive; other selective alternatives need caller-side redesign.
+--  The wrapper changes Channel's ABI; rebuild callers.
 --
 --  Element assignment and finalization execute as part of channel protected
 --  operations. Element_Type operations must therefore not block, reenter the
@@ -63,60 +71,64 @@ package Flyology.Channels.Bounded is
    --  @exclude Internal fixed storage for Channel.
    type Element_Array is array (Positive range <>) of Element_Type;
 
-   --  Fixed-capacity MPMC FIFO. Close is terminal. Values accepted before
+   --  Fixed-capacity MPMC FIFO wrapper. Close is terminal. Values accepted before
    --  Close remain available in FIFO order; blocked and later senders are
    --  rejected, while receivers finish draining the buffer.
-   protected type Channel
-     (Capacity : Positive)  --  Maximum buffered value count
-   is
-      --  Idempotently reject new sends and let accepted values drain.
-      procedure Close;
+   --  @field Capacity Maximum buffered value count
+   type Channel (Capacity : Positive) is tagged limited private;
 
-      --  Append Value, waiting while the open channel is full.
-      --  @param Value Value copied into the channel
-      --  @exception Channel_Closed Close occurs before the value is accepted
-      entry Send (Value : Element_Type);
+   --  Idempotently reject new sends and let accepted values drain.
+   --  @param Item Channel to close
+   procedure Close (Item : in out Channel);
 
-      --  Remove the oldest value, waiting while the open channel is empty.
-      --  @param Value Receives the oldest buffered value
-      --  @exception Channel_Closed The closed channel has been fully drained
-      entry Receive (Value : out Element_Type);
+   --  Append Value, waiting while the open channel is full.
+   --  @param Item Destination channel
+   --  @param Value Value copied into the channel
+   --  @exception Channel_Closed Close occurs before the value is accepted
+   procedure Send (Item : in out Channel; Value : Element_Type);
 
-      --  Attempt to append without waiting.
-      --  @param Value Value to copy if capacity is available
-      --  @param Result Item_Sent, Channel_Full, or Send_Closed
-      procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result);
+   --  Remove the oldest value, waiting while the open channel is empty.
+   --  @param Item Source channel
+   --  @param Value Receives the oldest buffered value
+   --  @exception Channel_Closed The closed channel has been fully drained
+   procedure Receive (Item : in out Channel; Value : out Element_Type);
 
-      --  @exclude Internal half of the abort-stable package-level Try_Send.
-      --  Accepted must already be False. On success it becomes True only after
-      --  the complete item and queue state have been installed.
-      --  @param Value Value to copy if capacity is available
-      --  @param Accepted Caller-owned evidence that the channel accepted Value
-      --  @param Result Item_Sent, Channel_Full, or Send_Closed
-      procedure Try_Send_After_Clear
-        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result)
-      with Pre => not Accepted.all;
+   --  Attempt to append without waiting.
+   --  @param Item Destination channel
+   --  @param Value Value to copy if capacity is available
+   --  @param Result Item_Sent, Channel_Full, or Send_Closed
+   procedure Try_Send (Item : in out Channel; Value : Element_Type; Result : out Try_Send_Result);
 
-      --  Attempt to remove the oldest value without waiting. Value is assigned
-      --  only when Result is Item_Received.
-      --  @param Value Receives the oldest buffered value on success
-      --  @param Result Item_Received, Channel_Empty, or Receive_Closed
-      procedure Try_Receive (Value : in out Element_Type; Result : out Try_Receive_Result);
+   --  @exclude Internal half of the abort-stable package-level Try_Send.
+   --  Accepted must already be False. On success it becomes True only after
+   --  the complete item and queue state have been installed.
+   --  @param Item Destination channel
+   --  @param Value Value to copy if capacity is available
+   --  @param Accepted Caller-owned evidence that the channel accepted Value
+   --  @param Result Item_Sent, Channel_Full, or Send_Closed
+   procedure Try_Send_After_Clear
+     (Item     : in out Channel;
+      Value    : Element_Type;
+      Accepted : not null access Boolean;
+      Result   : out Try_Send_Result)
+   with Pre => not Accepted.all;
 
-      --  Wait until Close has occurred and the buffer is empty.
-      entry Await_Drained;
+   --  Attempt to remove the oldest value without waiting. Value is assigned
+   --  only when Result is Item_Received.
+   --  @param Item Source channel
+   --  @param Value Receives the oldest buffered value on success
+   --  @param Result Item_Received, Channel_Empty, or Receive_Closed
+   procedure Try_Receive
+     (Item : in out Channel; Value : in out Element_Type; Result : out Try_Receive_Result);
 
-      --  Read channel state under its protected lock.
-      --  @return Current close, buffer, and waiter counts
-      function Current return Snapshot;
-   private
-      procedure Signal_Scoped (For_Receive : Boolean; Wake_All : Boolean := False);
-      Buffer  : Element_Array (1 .. Capacity) := (others => Empty_Value);  --  Circular FIFO storage
-      Head    : Positive := 1;  --  Next element to receive
-      Tail    : Positive := 1;  --  Next slot to send into
-      Count   : Natural := 0;  --  Occupied slots
-      Stopped : Boolean := False;  --  Terminal close state
-   end Channel;
+   --  Wait until Close has occurred and the buffer is empty.
+   --  @param Item Channel to observe
+   procedure Await_Drained (Item : in out Channel);
+
+   --  Read channel state under its protected lock.
+   --  @param Item Channel to inspect
+   --  @return Current close, buffer, and waiter counts
+   function Current (Item : Channel) return Snapshot;
 
    --  Attempt to append without waiting and publish abort-stable ownership
    --  evidence. Accepted is cleared before attempting to enter the protected
@@ -175,7 +187,7 @@ package Flyology.Channels.Bounded is
    --  @return Started limited send operation
    function Send
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Item    : not null access Channel;
+      Item    : not null access Channel'Class;
       Value   : Element_Type;
       Timeout : Duration := -1.0) return Send_Operation;
 
@@ -185,7 +197,7 @@ package Flyology.Channels.Bounded is
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh or consumed send operation
    procedure Send
-     (Item      : not null access Channel;
+     (Item      : not null access Channel'Class;
       Value     : Element_Type;
       Timeout   : Duration := -1.0;
       Operation : in out Send_Operation)
@@ -201,7 +213,7 @@ package Flyology.Channels.Bounded is
    --  @return Started limited receive operation
    function Receive
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Item    : not null access Channel;
+      Item    : not null access Channel'Class;
       Timeout : Duration := -1.0) return Receive_Operation;
 
    --  Start or restart a receive in an established operation object.
@@ -209,7 +221,7 @@ package Flyology.Channels.Bounded is
    --  @param Timeout Relative operation deadline in seconds
    --  @param Operation Fresh or consumed receive operation
    procedure Receive
-     (Item : not null access Channel; Timeout : Duration := -1.0; Operation : in out Receive_Operation)
+     (Item : not null access Channel'Class; Timeout : Duration := -1.0; Operation : in out Receive_Operation)
    with
      Pre =>
        not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
@@ -228,14 +240,67 @@ private
    type Scoped_Kind is (Scoped_Send, Scoped_Receive);
    type Scoped_Failure is (No_Failure, Channel_Closed_Failure, Timeout_Failure, Driver_Failure);
 
+   type Notification_Guard is new Ada.Finalization.Limited_Controlled with record
+      Target              : System.Address := System.Null_Address;
+      Drain_Target        : System.Address := System.Null_Address;
+      Channel_Address     : System.Address := System.Null_Address;
+      Descriptor          : Interfaces.C.int := Interfaces.C.int (-1);
+      Kind                : Scoped_Kind := Scoped_Receive;
+      Wake_All            : Boolean := False;
+      Retry_After_Failure : Boolean := False;
+   end record;
+
+   --  @exclude
+   --  @param Item Internal notification guard to finalize
+   overriding
+   procedure Finalize (Item : in out Notification_Guard);
+
+   protected type Channel_State (Capacity : Positive) is
+      entry Send (Value : Element_Type; Guard : not null access Notification_Guard);
+      entry Receive (Value : out Element_Type; Guard : not null access Notification_Guard);
+      procedure Try_Send_After_Clear
+        (Value    : Element_Type;
+         Accepted : not null access Boolean;
+         Result   : out Try_Send_Result;
+         Guard    : not null access Notification_Guard);
+      procedure Try_Receive
+        (Value  : in out Element_Type;
+         Result : out Try_Receive_Result;
+         Guard  : not null access Notification_Guard);
+      procedure Close (Guard : not null access Notification_Guard);
+      entry Await_Drained;
+      function Current return Snapshot;
+   private
+      procedure Claim_Scoped (Guard : not null access Notification_Guard; For_Receive : Boolean);
+      Buffer  : Element_Array (1 .. Capacity) := (others => Empty_Value);
+      Head    : Positive := 1;
+      Tail    : Positive := 1;
+      Count   : Natural := 0;
+      Stopped : Boolean := False;
+   end Channel_State;
+
+   type Channel (Capacity : Positive) is tagged limited record
+      State : Channel_State (Capacity);
+   end record;
+
+   protected type Signal_Claim is
+      procedure Start;
+      procedure Done;
+      entry Wait;
+   private
+      In_Flight : Boolean := False;
+   end Signal_Claim;
+
    type Channel_Operation is abstract new Flyology.Operations.Operation with record
-      Item              : access Channel := null;
+      Item              : access Channel'Class := null;
       Kind              : Scoped_Kind := Scoped_Receive;
       Value             : Element_Type := Empty_Value;
       Next              : System.Address := System.Null_Address;
       Previous          : System.Address := System.Null_Address;
       Signal_Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Claim             : Signal_Claim;
       Subscribed        : Boolean := False;
+      In_Flight         : Boolean := False;
       Notified          : Boolean := False;
       Failure           : Scoped_Failure := No_Failure;
    end record;

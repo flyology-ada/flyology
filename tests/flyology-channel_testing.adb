@@ -87,4 +87,43 @@ package body Flyology.Channel_Testing is
       Flyology.Channel_Test_Hooks.Arm_Next_Buffer_Signal_Failure;
    end Arm_Next_Buffer_Signal_Failure;
 
+   procedure Arm_Next_Bounded_Signal_Interrupt is
+   begin
+      Flyology.Channel_Test_Hooks.Arm_Next_Bounded_Signal_Interrupt;
+   end Arm_Next_Bounded_Signal_Interrupt;
+
+   function Bounded_Signal_Interrupt_Observed return Boolean
+   is (Flyology.Channel_Test_Hooks.Bounded_Signal_Interrupt_Observed);
+
+   procedure Arm_Next_Bounded_Signal_Failure is
+   begin
+      Flyology.Channel_Test_Hooks.Arm_Next_Bounded_Signal_Failure;
+   end Arm_Next_Bounded_Signal_Failure;
+
+   function Bounded_Signal_Failure_Observed return Boolean
+   is (Flyology.Channel_Test_Hooks.Bounded_Signal_Failure_Observed);
+
+   procedure Arm_After_Bounded_Failure_Ack is
+   begin
+      Flyology.Channel_Test_Hooks.Arm_After_Bounded_Failure_Ack;
+   end Arm_After_Bounded_Failure_Ack;
+
+   procedure Wait_After_Bounded_Failure_Ack is
+      Deadline : constant Ada.Real_Time.Time :=
+        Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+   begin
+      while not Flyology.Channel_Test_Hooks.Bounded_Failure_Ack_Reached loop
+         if Ada.Real_Time.Clock >= Deadline then
+            raise Program_Error
+              with "bounded channel failed-ack barrier was not reached";
+         end if;
+         delay 0.001;
+      end loop;
+   end Wait_After_Bounded_Failure_Ack;
+
+   procedure Release_After_Bounded_Failure_Ack is
+   begin
+      Flyology.Channel_Test_Hooks.Release_After_Bounded_Failure_Ack;
+   end Release_After_Bounded_Failure_Ack;
+
 end Flyology.Channel_Testing;

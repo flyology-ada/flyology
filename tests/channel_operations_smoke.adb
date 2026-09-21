@@ -12,6 +12,7 @@ procedure Channel_Operations_Smoke is
 
    use type Integer_Channels.Try_Receive_Result;
    use type Integer_Channels.Try_Send_Result;
+   use type Flyology.Execution_Model;
 
    function Ref
      (Item : Flyology.Operations.Operation'Class)
@@ -54,6 +55,36 @@ procedure Channel_Operations_Smoke is
    task body Runner is
       Passed : Boolean := True;
    begin
+      --  The prepared lightweight runtime tracks protected nesting. Reject
+      --  the wrapper call before it commits a value or reaches post-lock I/O.
+      if Model = Flyology.Lightweight_Task then
+         declare
+            Channel  : Integer_Channels.Channel (Capacity => 1);
+            Status   : Integer_Channels.Try_Send_Result;
+            Rejected : Boolean := False;
+
+            protected Probe is
+               procedure Attempt;
+            end Probe;
+
+            protected body Probe is
+               procedure Attempt is
+               begin
+                  Channel.Try_Send (91, Status);
+               end Attempt;
+            end Probe;
+         begin
+            begin
+               Probe.Attempt;
+            exception
+               when Program_Error =>
+                  Rejected := True;
+            end;
+            Passed :=
+              Passed and then Rejected and then Channel.Current.Pending = 0;
+         end;
+      end if;
+
       --  Clearing happens before the protected call can queue. Aborting at
       --  that exact boundary therefore leaves authoritative false evidence
       --  and no buffered value, even when the token arrived stale and true.
@@ -346,6 +377,267 @@ procedure Channel_Operations_Smoke is
             Seen (Value) := True;
          end loop;
          Passed := Passed and then (for all Delivered of Seen => Delivered);
+      end;
+
+      --  A synthetic interrupted write retries after the channel lock is
+      --  released, then delivers the scoped completion notification.
+      declare
+         Channel : aliased Integer_Channels.Channel (Capacity => 1);
+         Set     : aliased Flyology.Operations.Completion_Set (1);
+         Get     : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Set'Access, Channel'Access, 5.0);
+         Status  : Integer_Channels.Try_Send_Result;
+         Value   : Integer := 0;
+      begin
+         Flyology.Channel_Testing.Reset;
+         Flyology.Channel_Testing.Arm_Next_Bounded_Signal_Interrupt;
+         Channel.Try_Send (47, Status);
+         Flyology.Operations.Wait_All (Set);
+         Integer_Channels.Finish (Get, Value);
+         Passed :=
+           Passed
+           and then Status = Integer_Channels.Item_Sent
+           and then Value = 47
+           and then Flyology.Channel_Testing.Bounded_Signal_Interrupt_Observed;
+         Flyology.Channel_Testing.Reset;
+      end;
+
+      --  A failed borrowed write stays local to its subscriber. The producer
+      --  still reports its committed send and hands the item to a second set.
+      declare
+         Channel   : aliased Integer_Channels.Channel (Capacity => 1);
+         Left_Set  : aliased Flyology.Operations.Completion_Set (1);
+         Right_Set : aliased Flyology.Operations.Completion_Set (1);
+         Left      : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Left_Set'Access, Channel'Access, 5.0);
+         Right     : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Right_Set'Access, Channel'Access, 5.0);
+         Status    : Integer_Channels.Try_Send_Result;
+         Value     : Integer := 0;
+         Delivered : Boolean := False;
+         Cancelled : Boolean := False;
+      begin
+         Flyology.Channel_Testing.Reset;
+         Flyology.Channel_Testing.Arm_Next_Bounded_Signal_Failure;
+         Channel.Try_Send (67, Status);
+         Flyology.Operations.Wait_All (Right_Set);
+         Integer_Channels.Finish (Right, Value);
+         Delivered := Value = 67;
+         Flyology.Operations.Cancel (Left);
+         begin
+            Integer_Channels.Finish (Left, Value);
+         exception
+            when Integer_Channels.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         Passed :=
+           Passed
+           and then Status = Integer_Channels.Item_Sent
+           and then Delivered
+           and then Cancelled
+           and then Flyology.Channel_Testing.Bounded_Signal_Failure_Observed;
+         Flyology.Channel_Testing.Reset;
+      end;
+
+      --  An abort after a failed write is acknowledged must preserve the
+      --  pending handoff to a second valid completion set.
+      declare
+         Channel   : aliased Integer_Channels.Channel (Capacity => 1);
+         Left_Set  : aliased Flyology.Operations.Completion_Set (1);
+         Right_Set : aliased Flyology.Operations.Completion_Set (1);
+         Left      : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Left_Set'Access, Channel'Access, 5.0);
+         Right     : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Right_Set'Access, Channel'Access, 5.0);
+         Value     : Integer := 0;
+         Delivered : Boolean := False;
+         Cancelled : Boolean := False;
+
+         task Sender is
+            entry Go;
+         end Sender;
+
+         task body Sender is
+            Status : Integer_Channels.Try_Send_Result;
+         begin
+            accept Go;
+            Channel.Try_Send (71, Status);
+         end Sender;
+      begin
+         Flyology.Channel_Testing.Reset;
+         Flyology.Channel_Testing.Arm_Next_Bounded_Signal_Failure;
+         Flyology.Channel_Testing.Arm_After_Bounded_Failure_Ack;
+         Sender.Go;
+         Flyology.Channel_Testing.Wait_After_Bounded_Failure_Ack;
+         abort Sender;
+         while not Sender'Terminated loop
+            delay 0.0;
+         end loop;
+         Flyology.Operations.Wait_All (Right_Set);
+         Integer_Channels.Finish (Right, Value);
+         Delivered := Value = 71;
+         Flyology.Operations.Cancel (Left);
+         begin
+            Integer_Channels.Finish (Left, Value);
+         exception
+            when Integer_Channels.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         Passed :=
+           Passed
+           and then Delivered
+           and then Cancelled
+           and then Flyology.Channel_Testing.Bounded_Signal_Failure_Observed;
+         Flyology.Channel_Testing.Reset;
+      end;
+
+      --  A producer aborted after the protected commit still flushes its
+      --  caller-owned claim before the pending operation can be reclaimed.
+      declare
+         Channel : aliased Integer_Channels.Channel (Capacity => 1);
+         Set     : aliased Flyology.Operations.Completion_Set (1);
+         Get     : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Set'Access, Channel'Access, 5.0);
+         Value   : Integer := 0;
+         Status  : Integer_Channels.Try_Send_Result;
+
+         function Arm return Boolean is
+         begin
+            Flyology.Channel_Testing.Reset;
+            Flyology.Channel_Testing.Arm_After_Signal_Claim;
+            return True;
+         end Arm;
+
+         Armed : constant Boolean := Arm;
+         pragma Unreferenced (Armed);
+
+         task Sender;
+
+         task body Sender is
+         begin
+            Channel.Try_Send (73, Status);
+         end Sender;
+      begin
+         Flyology.Channel_Testing.Wait_After_Signal_Claim;
+         abort Sender;
+         while not Sender'Terminated loop
+            delay 0.0;
+         end loop;
+         Flyology.Operations.Wait_All (Set);
+         Integer_Channels.Finish (Get, Value);
+         Passed := Passed and then Value = 73;
+         Flyology.Channel_Testing.Reset;
+      end;
+
+      --  Cancellation may unlink an in-flight node, but it cannot reclaim
+      --  the operation or its borrowed descriptor until the producer acks.
+      declare
+         Channel         : aliased Integer_Channels.Channel (Capacity => 1);
+         Set             : aliased Flyology.Operations.Completion_Set (1);
+         Get             : Integer_Channels.Receive_Operation :=
+           Integer_Channels.Receive (Set'Access, Channel'Access, 5.0);
+         Status          : Integer_Channels.Try_Send_Result;
+         Received        : Integer_Channels.Try_Receive_Result;
+         Value           : Integer := 0;
+         Cancelled       : Boolean := False;
+         Cancel_Returned : Boolean := False
+         with Atomic;
+         Wait_Observed   : Boolean := False
+         with Atomic;
+
+         task Sender is
+            entry Go;
+         end Sender;
+
+         task body Sender is
+         begin
+            accept Go;
+            Channel.Try_Send (51, Status);
+         end Sender;
+
+         task Releaser is
+            entry Go;
+         end Releaser;
+
+         task body Releaser is
+         begin
+            accept Go;
+            delay 0.02;
+            Wait_Observed := not Cancel_Returned;
+            Flyology.Channel_Testing.Release_After_Signal_Claim;
+         end Releaser;
+      begin
+         Flyology.Channel_Testing.Reset;
+         Flyology.Channel_Testing.Arm_After_Signal_Claim;
+         Sender.Go;
+         Flyology.Channel_Testing.Wait_After_Signal_Claim;
+         Releaser.Go;
+         Flyology.Operations.Cancel (Get);
+         Cancel_Returned := True;
+         while not Sender'Terminated or else not Releaser'Terminated loop
+            delay 0.0;
+         end loop;
+         begin
+            Integer_Channels.Finish (Get, Value);
+         exception
+            when Integer_Channels.Operation_Cancelled =>
+               Cancelled := True;
+         end;
+         Channel.Try_Receive (Value, Received);
+         Passed :=
+           Passed
+           and then Wait_Observed
+           and then Cancelled
+           and then Status = Integer_Channels.Item_Sent
+           and then Received = Integer_Channels.Item_Received
+           and then Value = 51;
+         Flyology.Channel_Testing.Reset;
+      end;
+
+      --  An aborted closer must flush every terminal claim, including the
+      --  ones selected after the first post-lock signal.
+      declare
+         Channel : aliased Integer_Channels.Channel (Capacity => 1);
+         Set     : aliased Flyology.Operations.Completion_Set (8);
+         type Operation_Array is
+           array (Positive range <>)
+           of aliased Integer_Channels.Receive_Operation (Set'Access);
+         Pending : Operation_Array (1 .. 8);
+         Value   : Integer := 0;
+         Closed  : Natural := 0;
+
+         task Closer is
+            entry Go;
+         end Closer;
+
+         task body Closer is
+         begin
+            accept Go;
+            Channel.Close;
+         end Closer;
+      begin
+         for Index in Pending'Range loop
+            Integer_Channels.Receive (Channel'Access, 5.0, Pending (Index));
+         end loop;
+         Flyology.Channel_Testing.Reset;
+         Flyology.Channel_Testing.Arm_After_Signal_Claim;
+         Closer.Go;
+         Flyology.Channel_Testing.Wait_After_Signal_Claim;
+         abort Closer;
+         while not Closer'Terminated loop
+            delay 0.0;
+         end loop;
+         Flyology.Operations.Wait_All (Set);
+         for Index in Pending'Range loop
+            begin
+               Integer_Channels.Finish (Pending (Index), Value);
+            exception
+               when Integer_Channels.Channel_Closed =>
+                  Closed := Closed + 1;
+            end;
+         end loop;
+         Passed := Passed and then Closed = Pending'Length;
+         Flyology.Channel_Testing.Reset;
       end;
 
       --  Separate completion sets need separate notifications. Each send

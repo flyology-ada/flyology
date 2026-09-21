@@ -825,22 +825,39 @@ resource-empty value for unoccupied slots. Each channel is a fixed-storage MPMC
 FIFO with blocking and nonblocking operations, relative-deadline wrappers,
 current-state snapshots, and terminal close-and-drain behavior. Closing rejects
 queued and later senders but preserves FIFO delivery of values already
-accepted. The channel owns no task and performs no allocation after
-elaboration. A dequeue clears its occupied slot immediately, so controlled
+accepted. `Channel` is a tagged limited wrapper around private protected
+state. Ordinary `Queue.Send`, `Queue.Receive`, `Queue.Try_Send`, and
+`Queue.Close` calls remain available. A caller using an external selective
+entry call such as `select Queue.Send (...) or delay ...` must use
+`Timed_Send` or `Timed_Receive` instead. Selects with other alternatives need
+caller-side redesign. The protected-to-wrapper change also requires an ABI
+rebuild. Mutating channel calls must not occur inside an
+enclosing protected action, because a scoped completion wake may run after the
+channel's private lock exits while that outer lock remains held. The runtime
+rejects protected nesting where GNARL tracks it, but native builds without
+Detect_Blocking may not expose that nesting to the check.
+
+The channel owns no task and performs no allocation after elaboration. A
+dequeue clears its occupied slot immediately, so controlled
 components and reference-bearing values are not retained until a later send
-reuses the slot. Element assignment and finalization run under the channel's
-protected lock and must not block, reenter the same channel, or propagate an
+reuses the slot. Element assignment and finalization run under the private
+protected state lock and must not block, reenter the same channel, or propagate an
 exception. Dequeue state is committed before slot clearing, so a raising
 finalizer cannot make an already copied value available a second time.
 The package-level nonblocking `Try_Send` overload with a caller-aliased
-`Accepted` token sets that token false before it attempts to enter the protected
-channel, and true only after it installs the complete value and queue state.
-The token therefore remains authoritative when abort occurs before protected
+`Accepted` token sets that token false before it attempts to enter the private
+protected state, and true only after it installs the complete value and queue
+state. The token therefore remains authoritative when abort occurs before
 entry or prevents ordinary `out` copy-out: true transfers ownership of exactly
-one queued value, while false transfers none. The familiar protected
-result-only overload uses the same protected transition. Once true is
-published, a later internal notification failure does not revoke that ownership
-even when the ordinary result is unavailable.
+one queued value, while false transfers none. The result-only overload uses
+the same protected transition. A caller-owned guard signals selected scoped
+subscribers after that transition releases the lock and drains its claim
+during abort finalization. Once true is published, a later internal notification
+failure does not revoke that ownership even when the ordinary result is unavailable.
+An invalid borrowed wake descriptor cannot wake its own subscriber; the channel
+isolates that failure and tries another ready subscriber so a valid completion
+set can still receive the committed item. Normal operation requires each
+completion set to outlive its scoped operations and borrowed signal claims.
 The production dequeue consumes one SPARK-proved scalar transition that returns
 the old-head position while advancing the head and decrementing the count. It
 then replaces that returned slot with `Empty_Value`. The proof ties the three
@@ -1836,8 +1853,8 @@ positional file reads and writes over aliased arrays or ownership-transferred
 unique buffers, plus nonrecursive and recursive file-watcher `Next`, standalone
 TLS handshake, receive, send, and shutdown, and retained task-result `Wait`.
 Instances of `Flyology.Channels.Bounded` likewise add operation-producing
-`Send` and `Receive` overloads without changing their protected entries or
-nonblocking calls. `Flyology.Buffers.Channels` adds ownership-transferring
+`Send` and `Receive` overloads alongside the synchronous wrapper calls.
+`Flyology.Buffers.Channels` adds ownership-transferring
 `Send_Move` and `Receive_Move` operations with the same completion-set and gate
 protocol.
 Initiation does not create a helper task,

@@ -28,4 +28,15 @@ private package Flyology.Channel_Test_Hooks is
    procedure Arm_Next_Buffer_Signal_Failure;
    function Fail_Next_Buffer_Signal return Boolean;
 
+   procedure Arm_Next_Bounded_Signal_Interrupt;
+   function Take_Bounded_Signal_Interrupt return Boolean;
+   function Bounded_Signal_Interrupt_Observed return Boolean;
+   procedure Arm_Next_Bounded_Signal_Failure;
+   function Take_Bounded_Signal_Failure return Boolean;
+   function Bounded_Signal_Failure_Observed return Boolean;
+   procedure Arm_After_Bounded_Failure_Ack;
+   procedure After_Bounded_Failure_Ack_Barrier;
+   function Bounded_Failure_Ack_Reached return Boolean;
+   procedure Release_After_Bounded_Failure_Ack;
+
 end Flyology.Channel_Test_Hooks;

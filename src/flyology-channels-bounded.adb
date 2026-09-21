@@ -3,6 +3,7 @@ with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
 with Flyology.Wake_Sources;
+with System.Tasking;
 with System.Storage_Elements;
 
 package body Flyology.Channels.Bounded is
@@ -14,6 +15,7 @@ package body Flyology.Channels.Bounded is
    use type Flyology.Operations.Driver_Event;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
+   use type Flyology.Wake_Sources.Signal_Attempt_Result;
 
    type Channel_Operation_Access is access all Channel_Operation;
    function To_Operation is new Ada.Unchecked_Conversion (System.Address, Channel_Operation_Access);
@@ -27,6 +29,13 @@ package body Flyology.Channels.Bounded is
    type Queue_Array is array (Bucket_Index) of Subscription_Queue;
    type Subscription_Count_Array is array (Bucket_Index) of Interfaces.C.unsigned with Atomic_Components;
    Active_Subscriptions : Subscription_Count_Array := (others => 0);
+
+   procedure Check_Outer_Protected_Action is
+   begin
+      if System.Tasking.Self.Common.Protected_Action_Nesting > 0 then
+         raise Program_Error with "potentially blocking operation";
+      end if;
+   end Check_Outer_Protected_Action;
 
    function Bucket (Address : System.Address) return Bucket_Index
    is (Bucket_Index
@@ -76,8 +85,10 @@ package body Flyology.Channels.Bounded is
       Target.Previous := System.Null_Address;
    end Remove;
 
-   procedure Notify
-     (Ready, Notified : in out Subscription_Queue; Channel_Address : System.Address; Wake_All : Boolean)
+   procedure Claim_First
+     (Ready, In_Flight : in out Subscription_Queue;
+      Channel_Address  : System.Address;
+      Guard            : in out Notification_Guard)
    is
       Cursor : System.Address := Ready.Head;
    begin
@@ -87,27 +98,69 @@ package body Flyology.Channels.Bounded is
             Next   : constant System.Address := Target.Next;
          begin
             if Target.Item /= null and then Target.Item.all'Address = Channel_Address then
-               Flyology.Wake_Sources.Signal_Borrowed (Target.Signal_Descriptor);
                Remove (Ready, Cursor);
-               Append (Notified, Cursor);
-               Target.Notified := True;
-               exit when not Wake_All;
+               Append (In_Flight, Cursor);
+               Target.In_Flight := True;
+               Target.Claim.Start;
+               Guard.Target := Cursor;
+               Guard.Descriptor := Target.Signal_Descriptor;
+               Guard.Kind := Target.Kind;
+               Guard.Channel_Address := Channel_Address;
+               return;
             end if;
             Cursor := Next;
          end;
       end loop;
-   end Notify;
+   end Claim_First;
+
+   protected body Signal_Claim is
+      procedure Start is
+      begin
+         if In_Flight then
+            raise Program_Error with "channel signal claim already in flight";
+         end if;
+         In_Flight := True;
+      end Start;
+
+      procedure Done is
+      begin
+         In_Flight := False;
+      end Done;
+
+      entry Wait when not In_Flight is
+      begin
+         null;
+      end Wait;
+   end Signal_Claim;
+
+   procedure Flush (Guard : in out Notification_Guard);
+
+   procedure After_Claim_Barrier (Guard : Notification_Guard) is
+   begin
+      if Flyology.Channel_Test_Hooks.Enabled then
+         if Guard.Target /= System.Null_Address then
+            Flyology.Channel_Test_Hooks.After_Signal_Claim_Barrier;
+         end if;
+      end if;
+   end After_Claim_Barrier;
 
    protected Subscriptions is
       procedure Link (Operation : System.Address);
-      procedure Unlink (Operation : System.Address);
+      procedure Unlink (Operation : System.Address; Guard : in out Notification_Guard);
       procedure Clear_Notification (Operation : System.Address);
-      procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean);
+      procedure Claim
+        (Channel_Address : System.Address;
+         Kind            : Scoped_Kind;
+         Guard           : in out Notification_Guard;
+         Wake_All        : Boolean := False);
+      procedure Acknowledge (Guard : in out Notification_Guard);
    private
-      Ready_Sends       : Queue_Array;
-      Ready_Receives    : Queue_Array;
-      Notified_Sends    : Queue_Array;
-      Notified_Receives : Queue_Array;
+      Ready_Sends        : Queue_Array;
+      Ready_Receives     : Queue_Array;
+      In_Flight_Sends    : Queue_Array;
+      In_Flight_Receives : Queue_Array;
+      Notified_Sends     : Queue_Array;
+      Notified_Receives  : Queue_Array;
    end Subscriptions;
 
    protected body Subscriptions is
@@ -129,7 +182,7 @@ package body Flyology.Channels.Bounded is
          Active_Subscriptions (Index) := Active_Subscriptions (Index) + 1;
       end Link;
 
-      procedure Unlink (Operation : System.Address) is
+      procedure Unlink (Operation : System.Address; Guard : in out Notification_Guard) is
          Target : constant Channel_Operation_Access := To_Operation (Operation);
          Index  : Bucket_Index;
       begin
@@ -138,18 +191,22 @@ package body Flyology.Channels.Bounded is
          end if;
          Index := Bucket (Target.Item.all'Address);
          if Target.Kind = Scoped_Send then
-            if Target.Notified then
+            if Target.In_Flight then
+               Remove (In_Flight_Sends (Index), Operation);
+            elsif Target.Notified then
                Remove (Notified_Sends (Index), Operation);
             else
                Remove (Ready_Sends (Index), Operation);
             end if;
+         elsif Target.In_Flight then
+            Remove (In_Flight_Receives (Index), Operation);
          elsif Target.Notified then
             Remove (Notified_Receives (Index), Operation);
          else
             Remove (Ready_Receives (Index), Operation);
          end if;
          declare
-            Handoff : constant Boolean := Target.Notified;
+            Handoff : constant Boolean := Target.Notified or else Target.In_Flight;
             Kind    : constant Scoped_Kind := Target.Kind;
             Address : constant System.Address := Target.Item.all'Address;
          begin
@@ -159,7 +216,8 @@ package body Flyology.Channels.Bounded is
             --  A cancelled or timed-out operation may have claimed the only
             --  wake for a buffered item. Pass that claim to another waiter.
             if Handoff then
-               Signal (Address, Kind, Wake_All => False);
+               Guard.Channel_Address := Address;
+               Claim (Address, Kind, Guard);
             end if;
          end;
       end Unlink;
@@ -182,42 +240,168 @@ package body Flyology.Channels.Bounded is
          Target.Notified := False;
       end Clear_Notification;
 
-      procedure Signal (Channel_Address : System.Address; Kind : Scoped_Kind; Wake_All : Boolean) is
+      procedure Claim
+        (Channel_Address : System.Address;
+         Kind            : Scoped_Kind;
+         Guard           : in out Notification_Guard;
+         Wake_All        : Boolean := False)
+      is
          Index : constant Bucket_Index := Bucket (Channel_Address);
       begin
-         if Wake_All then
-            Notify (Ready_Sends (Index), Notified_Sends (Index), Channel_Address, True);
-            Notify (Ready_Receives (Index), Notified_Receives (Index), Channel_Address, True);
-         elsif Kind = Scoped_Send then
-            Notify (Ready_Sends (Index), Notified_Sends (Index), Channel_Address, False);
-         else
-            Notify (Ready_Receives (Index), Notified_Receives (Index), Channel_Address, False);
+         if Guard.Target /= System.Null_Address then
+            raise Program_Error with "channel notification guard already holds a claim";
          end if;
-      end Signal;
+         if Wake_All then
+            Claim_First (Ready_Sends (Index), In_Flight_Sends (Index), Channel_Address, Guard);
+            if Guard.Target = System.Null_Address then
+               Claim_First (Ready_Receives (Index), In_Flight_Receives (Index), Channel_Address, Guard);
+            end if;
+         elsif Kind = Scoped_Send then
+            Claim_First (Ready_Sends (Index), In_Flight_Sends (Index), Channel_Address, Guard);
+         else
+            Claim_First (Ready_Receives (Index), In_Flight_Receives (Index), Channel_Address, Guard);
+         end if;
+      end Claim;
+
+      procedure Acknowledge (Guard : in out Notification_Guard) is
+         Operation : constant System.Address := Guard.Target;
+         Target    : constant Channel_Operation_Access := To_Operation (Operation);
+         Index     : Bucket_Index;
+      begin
+         if Target = null or else not Target.In_Flight then
+            raise Program_Error with "invalid channel signal acknowledgment";
+         end if;
+         if Target.Subscribed then
+            Index := Bucket (Target.Item.all'Address);
+            if Target.Kind = Scoped_Send then
+               Remove (In_Flight_Sends (Index), Operation);
+               Append (Notified_Sends (Index), Operation);
+            else
+               Remove (In_Flight_Receives (Index), Operation);
+               Append (Notified_Receives (Index), Operation);
+            end if;
+            Target.Notified := True;
+         end if;
+         Target.In_Flight := False;
+         --  Clear the caller's only retained pointer before the waiter can
+         --  reclaim this operation after Claim.Done opens its entry.
+         Guard.Target := System.Null_Address;
+         Guard.Descriptor := -1;
+         Target.Claim.Done;
+      end Acknowledge;
    end Subscriptions;
 
-   protected body Channel is
-      procedure Signal_Scoped (For_Receive : Boolean; Wake_All : Boolean := False) is
-         --  Channel'Address names the protected data part on GNAT, whereas an
-         --  access-to-Channel designates the complete protected object. Form
-         --  the same complete-object identity used by operation initiation.
-         Channel_Address : constant System.Address := Channel'Unchecked_Access.all'Address;
-         Index           : constant Bucket_Index := Bucket (Channel_Address);
+   procedure Flush (Guard : in out Notification_Guard) is
+      Failed : Boolean;
+   begin
+      loop
+         if Guard.Target = System.Null_Address then
+            exit when not Guard.Wake_All and then not Guard.Retry_After_Failure;
+            Subscriptions.Claim
+              (Guard.Channel_Address,
+               (if Guard.Wake_All then Scoped_Send else Guard.Kind),
+               Guard,
+               Wake_All => Guard.Wake_All);
+            Guard.Retry_After_Failure := False;
+            exit when Guard.Target = System.Null_Address;
+         end if;
+         Failed := False;
+         begin
+            declare
+               Result : Flyology.Wake_Sources.Signal_Attempt_Result;
+            begin
+               loop
+                  if Flyology.Channel_Test_Hooks.Enabled then
+                     if Flyology.Channel_Test_Hooks.Take_Bounded_Signal_Failure then
+                        Result := Flyology.Wake_Sources.Signal_Failed;
+                     elsif Flyology.Channel_Test_Hooks.Take_Bounded_Signal_Interrupt then
+                        Result := Flyology.Wake_Sources.Signal_Interrupted;
+                     else
+                        Result := Flyology.Wake_Sources.Try_Signal_Borrowed (Guard.Descriptor);
+                     end if;
+                  else
+                     Result := Flyology.Wake_Sources.Try_Signal_Borrowed (Guard.Descriptor);
+                  end if;
+                  exit when Result /= Flyology.Wake_Sources.Signal_Interrupted;
+               end loop;
+               if Result = Flyology.Wake_Sources.Signal_Failed then
+                  Failed := True;
+               end if;
+            end;
+         exception
+            --  The channel transition is already committed. An invalid
+            --  descriptor belongs to this subscriber, not the producer.
+            when others =>
+               Failed := True;
+         end;
+         --  Preserve the handoff obligation across acknowledgment. An abort
+         --  after Acknowledge clears Target must still retry in Finalize.
+         Guard.Retry_After_Failure := Failed and then not Guard.Wake_All;
+         Subscriptions.Acknowledge (Guard);
+         if Flyology.Channel_Test_Hooks.Enabled then
+            if Guard.Retry_After_Failure then
+               Flyology.Channel_Test_Hooks.After_Bounded_Failure_Ack_Barrier;
+            end if;
+         end if;
+         exit when not Guard.Wake_All and then not Guard.Retry_After_Failure;
+      end loop;
+      Guard.Wake_All := False;
+   end Flush;
+
+   overriding
+   procedure Finalize (Item : in out Notification_Guard) is
+   begin
+      begin
+         Flush (Item);
+         if Item.Drain_Target /= System.Null_Address then
+            To_Operation (Item.Drain_Target).Claim.Wait;
+            Item.Drain_Target := System.Null_Address;
+         end if;
+      exception
+         when others =>
+            null;
+      end;
+   end Finalize;
+
+   procedure Unlink_Scoped (Operation : System.Address) is
+      Guard : Notification_Guard;
+   begin
+      Guard.Drain_Target := Operation;
+      Subscriptions.Unlink (Operation, Guard);
+      Flush (Guard);
+      To_Operation (Operation).Claim.Wait;
+      Guard.Drain_Target := System.Null_Address;
+   end Unlink_Scoped;
+
+   procedure Clear_Scoped (Operation : System.Address) is
+      Guard : Notification_Guard;
+   begin
+      Guard.Drain_Target := Operation;
+      To_Operation (Operation).Claim.Wait;
+      Guard.Drain_Target := System.Null_Address;
+      Subscriptions.Clear_Notification (Operation);
+   end Clear_Scoped;
+
+   protected body Channel_State is
+      procedure Claim_Scoped (Guard : not null access Notification_Guard; For_Receive : Boolean) is
+         Index : constant Bucket_Index := Bucket (Guard.Channel_Address);
       begin
          if Active_Subscriptions (Index) /= 0 then
-            Subscriptions.Signal
-              (Channel_Address, (if For_Receive then Scoped_Receive else Scoped_Send), Wake_All);
+            Subscriptions.Claim
+              (Guard.Channel_Address, (if For_Receive then Scoped_Receive else Scoped_Send), Guard.all);
          end if;
-      end Signal_Scoped;
+      end Claim_Scoped;
 
-      entry Send (Value : Element_Type) when Policy.Send_Entry_Open (Stopped, Count, Capacity) is
+      entry Send (Value : Element_Type; Guard : not null access Notification_Guard)
+        when Policy.Send_Entry_Open (Stopped, Count, Capacity)
+      is
       begin
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send  =>
                Buffer (Tail) := Value;
                Tail := Policy.Advance (Tail, Capacity);
                Count := Policy.Count_After_Send (Count, Capacity);
-               Signal_Scoped (For_Receive => True);
+               Claim_Scoped (Guard, For_Receive => True);
 
             when Policy.Reject_Send  =>
                raise Channel_Closed with "send on closed channel";
@@ -227,7 +411,9 @@ package body Flyology.Channels.Bounded is
          end case;
       end Send;
 
-      entry Receive (Value : out Element_Type) when Policy.Receive_Entry_Open (Stopped, Count) is
+      entry Receive (Value : out Element_Type; Guard : not null access Notification_Guard)
+        when Policy.Receive_Entry_Open (Stopped, Count)
+      is
          Position : Positive;
       begin
          case Policy.Classify_Receive (Stopped, Count) is
@@ -239,7 +425,7 @@ package body Flyology.Channels.Bounded is
                --  ordering prevents a violating finalizer from making the
                --  already-copied item deliverable twice.
                Buffer (Position) := Empty_Value;
-               Signal_Scoped (For_Receive => False);
+               Claim_Scoped (Guard, For_Receive => False);
 
             when Policy.Reject_Receive  =>
                raise Channel_Closed with "receive from drained channel";
@@ -249,14 +435,11 @@ package body Flyology.Channels.Bounded is
          end case;
       end Receive;
 
-      procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result) is
-         Ignored : aliased Boolean := False;
-      begin
-         Try_Send_After_Clear (Value, Ignored'Access, Result);
-      end Try_Send;
-
       procedure Try_Send_After_Clear
-        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result) is
+        (Value    : Element_Type;
+         Accepted : not null access Boolean;
+         Result   : out Try_Send_Result;
+         Guard    : not null access Notification_Guard) is
       begin
          case Policy.Classify_Send (Stopped, Count, Capacity) is
             when Policy.Accept_Send  =>
@@ -265,7 +448,7 @@ package body Flyology.Channels.Bounded is
                Count := Policy.Count_After_Send (Count, Capacity);
                Result := Item_Sent;
                Accepted.all := True;
-               Signal_Scoped (For_Receive => True);
+               Claim_Scoped (Guard, For_Receive => True);
 
             when Policy.Wait_To_Send =>
                Result := Channel_Full;
@@ -275,7 +458,11 @@ package body Flyology.Channels.Bounded is
          end case;
       end Try_Send_After_Clear;
 
-      procedure Try_Receive (Value : in out Element_Type; Result : out Try_Receive_Result) is
+      procedure Try_Receive
+        (Value  : in out Element_Type;
+         Result : out Try_Receive_Result;
+         Guard  : not null access Notification_Guard)
+      is
          Position : Positive;
       begin
          case Policy.Classify_Receive (Stopped, Count) is
@@ -284,7 +471,7 @@ package body Flyology.Channels.Bounded is
                Policy.Apply_Dequeue (Head, Count, Capacity, Position);
                Buffer (Position) := Empty_Value;
                Result := Item_Received;
-               Signal_Scoped (For_Receive => False);
+               Claim_Scoped (Guard, For_Receive => False);
 
             when Policy.Wait_To_Receive =>
                Result := Channel_Empty;
@@ -294,10 +481,11 @@ package body Flyology.Channels.Bounded is
          end case;
       end Try_Receive;
 
-      procedure Close is
+      procedure Close (Guard : not null access Notification_Guard) is
       begin
+         Guard.Wake_All := True;
          Stopped := True;
-         Signal_Scoped (For_Receive => True, Wake_All => True);
+         Subscriptions.Claim (Guard.Channel_Address, Scoped_Receive, Guard.all, Wake_All => True);
       end Close;
 
       entry Await_Drained when Policy.Is_Drained (Stopped, Count) is
@@ -308,9 +496,81 @@ package body Flyology.Channels.Bounded is
       function Current return Snapshot
       is (Closed            => Stopped,
           Pending           => Count,
-          Waiting_Senders   => Channel.Send'Count,
-          Waiting_Receivers => Channel.Receive'Count);
-   end Channel;
+          Waiting_Senders   => Channel_State.Send'Count,
+          Waiting_Receivers => Channel_State.Receive'Count);
+   end Channel_State;
+
+   procedure Close (Item : in out Channel) is
+      Guard : aliased Notification_Guard;
+   begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
+      Item.State.Close (Guard'Access);
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
+   end Close;
+
+   procedure Send (Item : in out Channel; Value : Element_Type) is
+      Guard : aliased Notification_Guard;
+   begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
+      Item.State.Send (Value, Guard'Access);
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
+   end Send;
+
+   procedure Receive (Item : in out Channel; Value : out Element_Type) is
+      Guard : aliased Notification_Guard;
+   begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
+      Item.State.Receive (Value, Guard'Access);
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
+   end Receive;
+
+   procedure Try_Send_After_Clear
+     (Item     : in out Channel;
+      Value    : Element_Type;
+      Accepted : not null access Boolean;
+      Result   : out Try_Send_Result)
+   is
+      Guard : aliased Notification_Guard;
+   begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
+      Item.State.Try_Send_After_Clear (Value, Accepted, Result, Guard'Access);
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
+   end Try_Send_After_Clear;
+
+   procedure Try_Send (Item : in out Channel; Value : Element_Type; Result : out Try_Send_Result) is
+      Accepted : aliased Boolean := False;
+   begin
+      Try_Send_After_Clear (Item, Value, Accepted'Access, Result);
+   end Try_Send;
+
+   procedure Try_Receive (Item : in out Channel; Value : in out Element_Type; Result : out Try_Receive_Result)
+   is
+      Guard : aliased Notification_Guard;
+   begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
+      Item.State.Try_Receive (Value, Result, Guard'Access);
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
+   end Try_Receive;
+
+   procedure Await_Drained (Item : in out Channel) is
+   begin
+      Item.State.Await_Drained;
+   end Await_Drained;
+
+   function Current (Item : Channel) return Snapshot is
+   begin
+      return Item.State.Current;
+   end Current;
 
    procedure Try_Send
      (Object   : in out Channel;
@@ -326,31 +586,41 @@ package body Flyology.Channels.Bounded is
    end Try_Send;
 
    procedure Timed_Send (Item : in out Channel; Value : Element_Type; Timeout : Duration) is
+      Guard : aliased Notification_Guard;
    begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
       if Timeout < 0.0 then
-         Item.Send (Value);
+         Item.State.Send (Value, Guard'Access);
       else
          select
-            Item.Send (Value);
+            Item.State.Send (Value, Guard'Access);
          or
             delay Timeout;
             raise Timeout_Error with "channel send timed out";
          end select;
       end if;
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
    end Timed_Send;
 
    procedure Timed_Receive (Item : in out Channel; Value : out Element_Type; Timeout : Duration) is
+      Guard : aliased Notification_Guard;
    begin
+      Check_Outer_Protected_Action;
+      Guard.Channel_Address := Item'Address;
       if Timeout < 0.0 then
-         Item.Receive (Value);
+         Item.State.Receive (Value, Guard'Access);
       else
          select
-            Item.Receive (Value);
+            Item.State.Receive (Value, Guard'Access);
          or
             delay Timeout;
             raise Timeout_Error with "channel receive timed out";
          end select;
       end if;
+      After_Claim_Barrier (Guard);
+      Flush (Guard);
    end Timed_Receive;
 
    procedure Try_Scoped (Operation : in out Channel_Operation; Result : out Try_Receive_Result) is
@@ -386,7 +656,7 @@ package body Flyology.Channels.Bounded is
 
    procedure Start_Scoped
      (Operation : in out Channel_Operation;
-      Item      : not null access Channel;
+      Item      : not null access Channel'Class;
       Kind      : Scoped_Kind;
       Value     : Element_Type;
       Timeout   : Duration)
@@ -405,6 +675,7 @@ package body Flyology.Channels.Bounded is
       Operation.Previous := System.Null_Address;
       Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
+      Operation.In_Flight := False;
       Operation.Notified := False;
       Operation.Failure := No_Failure;
 
@@ -417,7 +688,7 @@ package body Flyology.Channels.Bounded is
          Subscriptions.Link (Operation'Address);
          Try_Scoped (Operation, Result);
          if Result /= Channel_Empty then
-            Subscriptions.Unlink (Operation'Address);
+            Unlink_Scoped (Operation'Address);
          end if;
       end if;
       case Result is
@@ -442,7 +713,7 @@ package body Flyology.Channels.Bounded is
    exception
       when others =>
          if Operation.Subscribed then
-            Subscriptions.Unlink (Operation'Address);
+            Unlink_Scoped (Operation'Address);
          end if;
          Operation.Value := Empty_Value;
          Operation.Item := null;
@@ -453,7 +724,7 @@ package body Flyology.Channels.Bounded is
    end Start_Scoped;
 
    procedure Send
-     (Item      : not null access Channel;
+     (Item      : not null access Channel'Class;
       Value     : Element_Type;
       Timeout   : Duration := -1.0;
       Operation : in out Send_Operation) is
@@ -463,7 +734,7 @@ package body Flyology.Channels.Bounded is
 
    function Send
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Item    : not null access Channel;
+      Item    : not null access Channel'Class;
       Value   : Element_Type;
       Timeout : Duration := -1.0) return Send_Operation is
    begin
@@ -473,14 +744,15 @@ package body Flyology.Channels.Bounded is
    end Send;
 
    procedure Receive
-     (Item : not null access Channel; Timeout : Duration := -1.0; Operation : in out Receive_Operation) is
+     (Item : not null access Channel'Class; Timeout : Duration := -1.0; Operation : in out Receive_Operation)
+   is
    begin
       Start_Scoped (Channel_Operation (Operation), Item, Scoped_Receive, Empty_Value, Timeout);
    end Receive;
 
    function Receive
      (Set     : not null access Flyology.Operations.Completion_Set'Class;
-      Item    : not null access Channel;
+      Item    : not null access Channel'Class;
       Timeout : Duration := -1.0) return Receive_Operation is
    begin
       return Result : Receive_Operation (Set) do
@@ -500,14 +772,14 @@ package body Flyology.Channels.Bounded is
          when Flyology.Operations.Source_Ready                                                =>
             --  Clear before rechecking. A concurrent channel transition can
             --  then signal again if this operation loses the race for data.
-            Subscriptions.Clear_Notification (Item'Address);
+            Clear_Scoped (Item'Address);
             Try_Scoped (Item, Result);
             if Result /= Channel_Empty then
-               Subscriptions.Unlink (Item'Address);
+               Unlink_Scoped (Item'Address);
             end if;
 
          when Flyology.Operations.Deadline_Reached                                            =>
-            Subscriptions.Unlink (Item'Address);
+            Unlink_Scoped (Item'Address);
             Try_Scoped (Item, Result);
             if Result = Channel_Empty then
                Item.Value := Empty_Value;
@@ -536,7 +808,7 @@ package body Flyology.Channels.Bounded is
    exception
       when others =>
          if Item.Subscribed then
-            Subscriptions.Unlink (Item'Address);
+            Unlink_Scoped (Item'Address);
          end if;
          Item.Value := Empty_Value;
          Item.Failure := Driver_Failure;
@@ -547,7 +819,7 @@ package body Flyology.Channels.Bounded is
    procedure Request_Cancellation (Item : in out Channel_Operation) is
    begin
       if Item.Subscribed then
-         Subscriptions.Unlink (Item'Address);
+         Unlink_Scoped (Item'Address);
       end if;
       Item.Value := Empty_Value;
       Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Cancelled);
@@ -561,6 +833,7 @@ package body Flyology.Channels.Bounded is
       Operation.Previous := System.Null_Address;
       Operation.Signal_Descriptor := -1;
       Operation.Subscribed := False;
+      Operation.In_Flight := False;
       Operation.Notified := False;
       Operation.Failure := No_Failure;
    end Reset;
