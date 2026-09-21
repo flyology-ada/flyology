@@ -283,11 +283,11 @@ end Drain_Stdout;</code></pre>
           <section id="deadlines">
             <span class="step-label">CONTROL 06</span>
             <h2>Distinguish waiting from cleanup policy.</h2>
-            <p>Pipe operations and <code>Wait</code> accept a relative monotonic timeout and an optional <a href="../../api/51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287.html"><code>Flyology.Cancellation.Token</code></a>. A low-level timeout or cancellation ends only that operation. It does not signal or close the process.</p>
+            <p>Pipe operations and <code>Wait</code> accept a relative monotonic timeout and an optional <a href="../../api/80460ee1eee26eb0b52768b2f53b1ca5e65ec852eb5ba8bca123a84d213ca447.html#51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287"><code>Flyology.Cancellation.Token</code></a>. A low-level timeout or cancellation ends only that operation. It does not signal or close the process.</p>
             <p>Each low-level call starts its own deadline. Repeating a five-second read can wait five seconds on every iteration. Compute a remaining duration from one application deadline when the complete protocol needs a shared bound, or use <code>Capture.Run</code>.</p>
             <p>A negative timeout waits without a deadline. A zero timeout permits only an immediate transfer or readiness observation.</p>
             <p><code>Capture.Run</code> starts one command-progress deadline before spawn. Synchronous spawn cannot be interrupted by that deadline. After spawn returns, capture checks the deadline and cancellation between readiness operations, even while output remains continuously ready.</p>
-            <p>Any task can call <a href="../../api/51c61ace40425660cc99e654ee242a7b7a1be129c9414a007676fcefb177c287.html#6d76b0e47aafe39be5e91925cca4e6915d6ff9bf0983e47430f72a3c6fe03bdd"><code>Token.Request</code></a>. Pass the token with <code>Token =&gt; Stop'Access</code> to a pipe operation, <code>Wait</code>, or capture.</p>
+            <p>Any task can call <a href="../../api/80460ee1eee26eb0b52768b2f53b1ca5e65ec852eb5ba8bca123a84d213ca447.html#29a59d115151cbe4e3b29081487e655e8affa7e49824d278f6a8a76211cfb7e6"><code>Token.Request</code></a>. Pass the token with <code>Token =&gt; Stop'Access</code> to a pipe operation, <code>Wait</code>, or capture.</p>
             <aside class="callout">
               <span class="callout-symbol" aria-hidden="true">!</span>
               <p><strong>Keep cancellation sources alive.</strong> A token owns a wake descriptor borrowed by an active wait. The token must outlive every operation that receives its access value.</p>
