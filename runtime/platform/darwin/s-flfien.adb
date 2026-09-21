@@ -362,6 +362,12 @@ package body System.Flyology.File_Engine is
       return False;
    end Supports_Send_ZC;
 
+   function Supports_File_Batching (Item : Engine) return Boolean is
+      pragma Unreferenced (Item);
+   begin
+      return False;
+   end Supports_File_Batching;
+
    function Submit_Send_ZC
      (Item       : in out Engine;
       Descriptor : C.int;

@@ -99,6 +99,10 @@ package System.Flyology.Poller is
    --  zero-copy socket send.
    function Supports_Send_ZC (Item : Poller) return Boolean;
 
+   --  True when eager positional requests may be deferred to a bounded
+   --  scheduler batch. False for the native-AIO and Darwin AIO paths.
+   function Supports_File_Batching (Item : Poller) return Boolean;
+
    --  Enqueue a zero-copy socket send and arrange for one terminal File_Event
    --  after the kernel no longer owns Buffer.
    function Submit_Send_ZC

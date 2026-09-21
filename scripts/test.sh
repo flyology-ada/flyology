@@ -1213,6 +1213,10 @@ done
 if [ "$(uname -s)" = Linux ] && \
    [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]
 then
+  FLYOLOGY_TEST_TEMP_ROOT="$project_root/build" \
+    "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-eager-batch
   "$project_root/scripts/run-with-timeout.sh" 30 \
     "$test_bin/fault_injection_smoke" \
     file-uring-probe-fallback
