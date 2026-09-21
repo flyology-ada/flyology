@@ -530,6 +530,49 @@ procedure Connection_Admission_Smoke is
       end if;
    end Run_Release_Wake_Failure;
 
+   procedure Run_Drain_Wake_Failure is
+      Manager     : Connections.Server (Capacity => 1);
+      FD          : Flyology.IO.Descriptor;
+      Accepted    : Boolean;
+      Can_Acquire : Boolean;
+   begin
+      Testing.Reset_Barriers;
+      Manager.Acquire (Accepted);
+      if not Accepted then
+         raise Program_Error with "capacity drain test did not acquire initial permit";
+      end if;
+      Manager.Acquire_Wait_Source (FD, Can_Acquire);
+      if FD < 0 or else Can_Acquire then
+         raise Program_Error with "capacity drain test did not initialize admission source";
+      end if;
+      Manager.Release;
+      if not Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0) then
+         raise Program_Error with "capacity release did not signal admission source";
+      end if;
+
+      Testing.Fail_Next_Drain_Wake;
+      Manager.Acquire (Accepted);
+      if not Accepted or else Manager.Active /= 1 then
+         raise Program_Error with "failed drain obscured accepted permit";
+      end if;
+      if Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0) then
+         raise Program_Error with "failed drain was not retried on guard finalization";
+      end if;
+
+      Manager.Release;
+      if not Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0) then
+         raise Program_Error with "later release did not re-signal admission source";
+      end if;
+      Manager.Acquire (Accepted);
+      if not Accepted or else Flyology.IO.Wait (FD, Flyology.IO.For_Read, 0.0) then
+         raise Program_Error with "later acquisition did not drain admission source";
+      end if;
+      Manager.Release;
+      Manager.Request_Shutdown;
+      Manager.Await_Drained;
+      Testing.Reset_Barriers;
+   end Run_Drain_Wake_Failure;
+
 begin
    Run (Flyology.Lightweight_Task);
    Run (Flyology.Native_Task);
@@ -539,4 +582,5 @@ begin
    Run_Raw_Accept_Abort (Flyology.Native_Task);
    Run_Release_Wake_Failure (Flyology.Lightweight_Task);
    Run_Release_Wake_Failure (Flyology.Native_Task);
+   Run_Drain_Wake_Failure;
 end Connection_Admission_Smoke;

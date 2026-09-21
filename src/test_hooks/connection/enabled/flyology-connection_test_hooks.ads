@@ -13,7 +13,7 @@ private package Flyology.Connection_Test_Hooks is
    procedure One_Shot_Barrier (Point : Interfaces.C.int);
    function Receive_Limit (Requested : Interfaces.C.int) return Interfaces.C.int;
    procedure Raw_Accept_Return_Barrier;
-   function Fail_Next_Capacity_Release_Wake return Boolean;
+   function Fail_Next_Capacity_Wake return Boolean;
 
    procedure Reset_Scheduler_Waiter_Work
    with Import, Convention => C, External_Name => "flyology_test_fault_reset";

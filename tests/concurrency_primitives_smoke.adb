@@ -8,6 +8,7 @@ with Flyology.IO;
 with Flyology.Native_Executors;
 with Flyology.Worker_Pools;
 with Interfaces;
+with Interfaces.C;
 with System.Multiprocessors;
 with Worker_Pool_Test_Control;
 
@@ -175,6 +176,7 @@ procedure Concurrency_Primitives_Smoke is
 
    procedure Exercise_Task_Waits is
       use type Flyology.Capacity.Acquire_Result;
+      use type Interfaces.C.int;
 
       Gate     : aliased Flyology.Capacity.Gate (Capacity => 1);
       Accepted : Boolean;
@@ -217,6 +219,35 @@ procedure Concurrency_Primitives_Smoke is
          pragma Assert (Gate.Shutdown_Requested);
          Gate.Try_Acquire (Attempt);
          pragma Assert (Attempt = Flyology.Capacity.Gate_Closed);
+      end;
+
+      --  The admission source is readable while a permit is available and
+      --  drained when the last permit is acquired. Shutdown wakes both source
+      --  kinds even when the gate is full.
+      declare
+         Wake_Gate    : Flyology.Capacity.Gate (Capacity => 1);
+         Acquire_FD   : Flyology.IO.Descriptor;
+         Shutdown_FD  : Flyology.IO.Descriptor;
+         Can_Acquire  : Boolean;
+         Is_Stopping  : Boolean;
+      begin
+         Wake_Gate.Acquire (Accepted);
+         pragma Assert (Accepted);
+         Wake_Gate.Acquire_Wait_Source (Acquire_FD, Can_Acquire);
+         Wake_Gate.Wait_Source (Shutdown_FD, Is_Stopping);
+         pragma Assert (Acquire_FD >= 0 and then Shutdown_FD >= 0);
+         pragma Assert (not Can_Acquire and then not Is_Stopping);
+         pragma Assert (not Flyology.IO.Wait (Acquire_FD, Flyology.IO.For_Read, 0.0));
+         Wake_Gate.Release;
+         pragma Assert (Flyology.IO.Wait (Acquire_FD, Flyology.IO.For_Read, 0.0));
+         Wake_Gate.Acquire (Accepted);
+         pragma Assert (Accepted);
+         pragma Assert (not Flyology.IO.Wait (Acquire_FD, Flyology.IO.For_Read, 0.0));
+         Wake_Gate.Request_Shutdown;
+         pragma Assert (Flyology.IO.Wait (Acquire_FD, Flyology.IO.For_Read, 0.0));
+         pragma Assert (Flyology.IO.Wait (Shutdown_FD, Flyology.IO.For_Read, 0.0));
+         Wake_Gate.Release;
+         Wake_Gate.Await_Drained;
       end;
 
       declare

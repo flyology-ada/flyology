@@ -263,7 +263,7 @@ package body Flyology.Task_Scopes is
       --  scope costs no timer wakeups while it lives.
       if not Stopped and then Parent_Source /= null then
          select
-            Parent_Source.Await_Request;
+            Parent_Source.Wait_Event.Await_Request;
             begin
                if not Child_Source.Requested then
                   Child_Source.Request;

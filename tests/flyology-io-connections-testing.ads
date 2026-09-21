@@ -44,6 +44,10 @@ package Flyology.IO.Connections.Testing is
 
    procedure Fail_Next_Release_Wake;
 
+   --  Fail the first attempt to drain a capacity wake after permit transfer.
+   --  The gate must preserve the accepted permit and retry on finalization.
+   procedure Fail_Next_Drain_Wake;
+
    --  Restrict each connection receive to at most Maximum bytes and reset the
    --  observed receive-call count. Zero removes the test-only restriction.
    procedure Set_Receive_Cap (Maximum : Natural);

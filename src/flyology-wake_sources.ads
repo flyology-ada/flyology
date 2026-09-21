@@ -64,6 +64,11 @@ package Flyology.Wake_Sources is
    --  @param Item Serialized source with at least one pending signal
    --  @exception Program_Error No signal is pending or reading fails
    procedure Consume_All (Item : in out Source);
+   --  Drain all currently pending signals. An empty initialized source is a
+   --  success, so an aborted caller may safely repeat this outside a lock.
+   --  @param Item Serialized initialized source
+   --  @exception Program_Error Descriptor is absent or reading fails
+   procedure Drain (Item : in out Source);
    --  Close both owned descriptors. Repeated calls are harmless. A later
    --  Ensure creates a new descriptor generation.
    --  @param Item Serialized source whose descriptors are released

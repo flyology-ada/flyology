@@ -941,13 +941,13 @@ package body Flyology.Native_Executors is
             end if;
          elsif Deadline = Ada.Real_Time.Time_Last then
             select
-               Token.Await_Request;
+               Token.Wait_Event.Await_Request;
             then abort
                Item.Gates (Handle.Guard.Slot).Wait;
             end select;
          else
             select
-               Token.Await_Request;
+               Token.Wait_Event.Await_Request;
             then abort
                select
                   delay until Deadline;

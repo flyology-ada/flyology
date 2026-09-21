@@ -1,13 +1,12 @@
+private with Ada.Finalization;
 with Flyology.Wake_Sources;
 with Interfaces.C;
 
---  Bounds concurrent work without owning or creating tasks.
---
---  A Gate admits at most Capacity holders. Waiting on Acquire uses ordinary
---  Ada protected-entry semantics, so lightweight tasks suspend cooperatively
---  while native tasks block through GNARL. Shutdown is terminal: it rejects
---  new acquisitions, releases queued callers, and permits existing holders to
---  drain.
+--  Bounds concurrent work without owning or creating tasks. A Gate admits at
+--  most Capacity holders. Waiting uses a private protected entry, so
+--  lightweight tasks suspend cooperatively while native tasks use GNARL.
+--  Shutdown rejects new acquisitions, releases queued callers, and lets
+--  existing holders drain.
 
 package Flyology.Capacity is
 
@@ -18,112 +17,191 @@ package Flyology.Capacity is
    --  @enum Acquire_Timed_Out A timed attempt reached its deadline
    type Acquire_Result is (Permit_Acquired, Gate_Full, Gate_Closed, Acquire_Timed_Out);
 
-   --  Thread-safe bounded admission controller. The object must outlive every
-   --  holder that has successfully acquired a permit. The optional
-   --  Cleanup_Armed parameters let a controlled caller publish its cleanup
-   --  obligation in the same protected action as permit ownership changes.
-   protected type Gate
-     (Capacity : Positive)  --  Maximum number of active permits
-   is
-      --  Idempotently reject new acquisitions and release queued callers.
-      --  Borrowed shutdown and admission readiness descriptors are signalled.
-      --  Program_Error is raised when a borrowed wake descriptor cannot be
-      --  signalled; shutdown remains recorded.
-      procedure Request_Shutdown;
+   --  Thread-safe bounded admission controller. The Gate must outlive every
+   --  holder and every borrowed wake descriptor. Capacity is the maximum
+   --  number of active permits. Optional Cleanup_Armed parameters publish a
+   --  controlled caller's obligation in the same cut as permit ownership.
+   --  Descriptor initialization, signaling, and EINTR retries occur outside
+   --  the private protected state lock. These operations must not be called
+   --  from another protected action. Borrowers must not close a wake
+   --  descriptor. A failed drain after admission does not revoke or hide the
+   --  transferred permit; the caller's guard retries before it leaves scope.
+   --  @field Capacity Maximum number of active permits
+   type Gate (Capacity : Positive) is tagged limited private;
 
-      --  Wait until a permit is available or shutdown has been requested.
-      --  @param Accepted True when one permit was acquired; False on shutdown
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
-      --     non-null it must designate False on call. It remains False when
-      --     Accepted is False and becomes True in the protected action that
-      --     acquires the permit. The caller must then release or atomically
-      --     transfer that obligation.
-      --  @exception Program_Error Cleanup_Armed designates True on call, or a
-      --     pending admission readiness signal cannot be consumed
-      entry Acquire (Accepted : out Boolean; Cleanup_Armed : access Boolean := null);
+   --  Publish terminal shutdown, then wake descriptor waiters. A wake error
+   --  may raise Program_Error after shutdown has committed.
+   --  @param Item Gate to shut down
+   procedure Request_Shutdown (Item : in out Gate);
 
-      --  Attempt to acquire without waiting.
-      --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
-      --     non-null it must designate False on call. It remains False for
-      --     Gate_Full or Gate_Closed and becomes True in the protected action
-      --     that returns Permit_Acquired. The caller must then release or
-      --     atomically transfer that obligation.
-      --  @exception Program_Error Cleanup_Armed designates True on call, or a
-      --     pending admission readiness signal cannot be consumed
-      procedure Try_Acquire (Result : out Acquire_Result; Cleanup_Armed : access Boolean := null);
+   --  Wait for capacity or terminal shutdown. An accepted call transfers one
+   --  permit; the caller must Release it.
+   --  @param Item Gate from which to acquire one permit
+   --  @param Accepted True when a permit was acquired; False on shutdown
+   --  @param Cleanup_Armed Optional caller-owned obligation. It must be False
+   --     on call and becomes True in the admission state cut on success.
+   --  @exception Program_Error Cleanup_Armed is already True
+   procedure Acquire (Item : in out Gate; Accepted : out Boolean; Cleanup_Armed : access Boolean := null);
 
-      --  Release one acquired permit. If an Acquire_Wait_Source has been
-      --  borrowed, releasing the permit also wakes its waiters.
-      --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
-      --     non-null it must designate True on call and becomes False in the
-      --     protected action that releases the permit, before any fallible
-      --     wake. It remains False if wake signalling then fails.
-      --  @exception Program_Error Cleanup_Armed designates False on call, no
-      --     permit is active, or the admission readiness source cannot be
-      --     signalled. A signalling failure leaves the permit released.
-      procedure Release (Cleanup_Armed : access Boolean := null);
+   --  Attempt admission without waiting.
+   --  @param Item Gate from which to attempt one acquisition
+   --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
+   --  @param Cleanup_Armed Optional caller-owned obligation. It must be False
+   --     on call and becomes True in the admission state cut on success.
+   --  @exception Program_Error Cleanup_Armed is already True
+   procedure Try_Acquire
+     (Item : in out Gate; Result : out Acquire_Result; Cleanup_Armed : access Boolean := null);
 
-      --  Wait until shutdown has been requested and every permit is released.
-      entry Await_Drained;
+   --  Release a held permit. A wake error may raise after release commits;
+   --  Cleanup_Armed, when supplied, is cleared in the state cut.
+   --  @param Item Gate to which the permit is returned
+   --  @param Cleanup_Armed Optional caller-owned obligation; it must be True
+   --     on call and becomes False when the permit is released.
+   --  @exception Program_Error No permit is active, Cleanup_Armed is False,
+   --     or an admission wake fails after release
+   procedure Release (Item : in out Gate; Cleanup_Armed : access Boolean := null);
 
-      --  Report whether shutdown has been requested.
-      --  @return True after Request_Shutdown
-      function Shutdown_Requested return Boolean;
+   --  Wait until shutdown has begun and all permits have been released.
+   --  @param Item Gate whose holders must drain
+   procedure Await_Drained (Item : in out Gate);
 
-      --  Return the number of active permits.
-      --  @return Current active count
-      function Active return Natural;
+   --  Report whether terminal shutdown has begun.
+   --  @param Item Gate to inspect
+   --  @return True once Request_Shutdown records terminal shutdown
+   function Shutdown_Requested (Item : Gate) return Boolean;
 
-      --  Return the number of callers queued at Acquire.
-      --  @return Current Acquire entry count
-      function Waiting return Natural;
+   --  Return the number of currently held permits.
+   --  @param Item Gate to inspect
+   --  @return Current active permit count
+   function Active (Item : Gate) return Natural;
 
-      --  Borrow a readable descriptor that becomes ready on shutdown. This is
-      --  intended for composing a Gate with task-aware descriptor waits; the
-      --  caller must not close it and the Gate must outlive the wait.
-      --  @param FD Borrowed descriptor, or -1 after shutdown
-      --  @param Already_Requested Whether shutdown already started
-      --  @exception Program_Error Wake descriptor creation fails
-      procedure Wait_Source (FD : out Interfaces.C.int; Already_Requested : out Boolean);
+   --  Return the number of callers queued at Acquire.
+   --  @param Item Gate to inspect
+   --  @return Current number of queued acquisition callers
+   function Waiting (Item : Gate) return Natural;
 
-      --  Borrow a descriptor for composing nonblocking Try_Acquire with an
-      --  interruptible wait. When Can_Acquire is False, FD becomes readable
-      --  after a permit is released or shutdown starts. When Can_Acquire is
-      --  True, retry Try_Acquire without waiting and FD is -1. The caller must
-      --  not read or close FD, and the Gate must outlive the wait.
-      --  @param FD Borrowed readiness descriptor, or -1 when a retry is ready
-      --  @param Can_Acquire Whether Try_Acquire can make progress immediately
-      --  @exception Program_Error Wake descriptor creation fails
-      procedure Acquire_Wait_Source (FD : out Interfaces.C.int; Can_Acquire : out Boolean);
-   private
-      Active_Count      : Natural := 0;  --  Currently held permits
-      Stopping          : Boolean := False;  --  Terminal shutdown state
-      Shutdown_Wake     : Flyology.Wake_Sources.Source;  --  Terminal wake source
-      Acquire_Wake      : Flyology.Wake_Sources.Source;  --  Permit-state wake
-      Acquire_Signalled : Boolean := False;  --  Pending permit-state signal
-   end Gate;
+   --  Borrow a readable descriptor that becomes ready on shutdown. The caller
+   --  must not close it and Gate must outlive the wait.
+   --  @param Item Gate that owns the borrowed descriptor
+   --  @param FD Borrowed descriptor, or -1 after shutdown
+   --  @param Already_Requested Whether shutdown already started
+   --  @exception Program_Error Wake descriptor creation fails
+   procedure Wait_Source (Item : in out Gate; FD : out Interfaces.C.int; Already_Requested : out Boolean);
+
+   --  Borrow a descriptor for composing Try_Acquire with a descriptor wait.
+   --  When Can_Acquire is False, FD becomes readable after a release or
+   --  shutdown. Otherwise retry Try_Acquire immediately and FD is -1. The
+   --  caller must not read or close FD, and Gate must outlive the wait.
+   --  @param Item Gate that owns the borrowed descriptor
+   --  @param FD Borrowed readiness descriptor, or -1 when retry is ready
+   --  @param Can_Acquire Whether Try_Acquire can make progress immediately
+   --  @exception Program_Error Wake descriptor creation fails
+   procedure Acquire_Wait_Source (Item : in out Gate; FD : out Interfaces.C.int; Can_Acquire : out Boolean);
 
    --  Acquire within one relative deadline. Negative Timeout waits
-   --  indefinitely and zero is an immediate attempt. Once the protected entry
-   --  is accepted, acquisition wins over a simultaneous deadline.
+   --  indefinitely and zero is an immediate attempt. Once the private entry
+   --  accepts the call, acquisition wins over a simultaneous deadline.
+   --  Cleanup_Armed is published in the state cut that transfers ownership;
+   --  an aborted caller must use that obligation rather than the unavailable
+   --  Result to decide whether it owes Release.
    --  @param Item Gate from which to acquire one permit
-   --  @param Timeout Deadline interval in seconds
+   --  @param Timeout Relative deadline in seconds
    --  @param Result Permit_Acquired, Gate_Closed, or Acquire_Timed_Out
-   --  @param Cleanup_Armed Optional caller-owned cleanup obligation. When
-   --     non-null it must designate False on call. It remains False for
-   --     Gate_Closed or Acquire_Timed_Out and becomes True in the protected
-   --     action that acquires the permit, so an abort after that action still
-   --     leaves the caller's controlled guard responsible for the permit. The
-   --     caller must then release or atomically transfer that obligation.
-   --     Result is not written when the caller is aborted, so an abort-safe
-   --     caller must treat this obligation, not Result, as authoritative.
-   --  @exception Program_Error Cleanup_Armed designates True on call, or a
-   --     pending admission readiness signal cannot be consumed
+   --  @param Cleanup_Armed Optional caller-owned obligation. It must be False
+   --     on call and becomes True when a permit is acquired.
+   --  @exception Program_Error Cleanup_Armed is already True
    procedure Timed_Acquire
      (Item          : in out Gate;
       Timeout       : Duration;
       Result        : out Acquire_Result;
       Cleanup_Armed : access Boolean := null);
 
+private
+   type Wake_Action is (No_Action, Signal_Shutdown, Signal_Acquire, Drain_Acquire);
+   type Acquire_Wake_Phase is (Wake_Quiet, Wake_Signalling, Wake_Signalled, Wake_Draining);
+   type Initialization_Kind is (Shutdown_Source, Acquire_Source);
+
+   type Wake_Claim is record
+      Descriptor : Interfaces.C.int := Interfaces.C.int (-1);
+      Kind       : aliased Wake_Action := No_Action;
+      Armed      : aliased Boolean := False;
+   end record;
+   type Initialization_Guard;
+
+   protected type Gate_State (Capacity : Positive) is
+      entry Take_Permit
+        (Accepted : out Boolean;
+         Cleanup_Armed : access Boolean;
+         Guard : not null access Wake_Claim);
+      procedure Try_Acquire
+        (Result : out Acquire_Result;
+         Cleanup_Armed : access Boolean;
+         Guard : not null access Wake_Claim);
+      procedure Release (Cleanup_Armed : access Boolean; Guard : not null access Wake_Claim);
+      procedure Request_Shutdown
+        (Shutdown_Guard, Acquire_Guard : not null access Wake_Claim);
+      entry Await_Drained;
+      function Shutdown_Requested return Boolean;
+      function Active return Natural;
+      function Waiting return Natural;
+      procedure Begin_Shutdown_Wait
+        (Guard : not null access Initialization_Guard;
+         FD : out Interfaces.C.int;
+         Already_Requested : out Boolean);
+      procedure Begin_Acquire_Wait
+        (Guard : not null access Initialization_Guard;
+         FD : out Interfaces.C.int;
+         Can_Acquire, Stable : out Boolean);
+      entry Wait_Shutdown_Ready;
+      entry Wait_Acquire_Ready;
+      procedure Publish_Source (Kind : Initialization_Kind; FD, Signal_FD : Interfaces.C.int);
+      procedure Cancel_Initialization (Kind : Initialization_Kind);
+      procedure Complete_Signal
+        (Kind : not null access Wake_Action; Armed : not null access Boolean);
+      procedure Complete_Drain
+        (Kind : not null access Wake_Action; Armed : not null access Boolean);
+      procedure Fail_Action
+        (Kind : not null access Wake_Action; Armed : not null access Boolean);
+   private
+      Active_Count         : Natural := 0;
+      Stopping             : Boolean := False;
+      Shutdown_Initializing : Boolean := False;
+      Acquire_Initializing : Boolean := False;
+      Shutdown_Read_FD     : Interfaces.C.int := Interfaces.C.int (-1);
+      Shutdown_Write_FD    : Interfaces.C.int := Interfaces.C.int (-1);
+      Acquire_Read_FD      : Interfaces.C.int := Interfaces.C.int (-1);
+      Acquire_Write_FD     : Interfaces.C.int := Interfaces.C.int (-1);
+      Acquire_Phase        : Acquire_Wake_Phase := Wake_Quiet;
+   end Gate_State;
+
+   type State_Access is access all Gate_State;
+   type Source_Access is access all Flyology.Wake_Sources.Source;
+
+   type Action_Guard is new Ada.Finalization.Limited_Controlled with record
+      State  : State_Access := null;
+      Source : Source_Access := null;
+      Claim  : aliased Wake_Claim;
+   end record;
+
+   --  @exclude Controlled wake-claim finalization hook
+   --  @param Guard Wake claim to complete without raising
+   overriding
+   procedure Finalize (Guard : in out Action_Guard);
+
+   type Initialization_Guard is new Ada.Finalization.Limited_Controlled with record
+      State : State_Access := null;
+      Kind  : Initialization_Kind := Shutdown_Source;
+      Armed : Boolean := False;
+   end record;
+
+   --  @exclude Controlled initialization-claim finalization hook
+   --  @param Guard Initialization claim to cancel without raising
+   overriding
+   procedure Finalize (Guard : in out Initialization_Guard);
+
+   type Gate (Capacity : Positive) is tagged limited record
+      State         : aliased Gate_State (Capacity);
+      Shutdown_Wake : aliased Flyology.Wake_Sources.Source;
+      Acquire_Wake  : aliased Flyology.Wake_Sources.Source;
+   end record;
 end Flyology.Capacity;
