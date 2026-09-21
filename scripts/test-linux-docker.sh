@@ -80,6 +80,7 @@ trap 'exit 143' TERM
 
 docker build \
   --platform "linux/$linux_arch" \
+  --build-arg "TARGETARCH=$linux_arch" \
   --build-arg "GNAT_PROVIDER=$gnat_provider" \
   --build-arg "GNAT_VERSION=$gnat_version" \
   --build-arg "GPRBUILD_VERSION=$gprbuild_version" \
