@@ -332,6 +332,8 @@ private
       Delivered  : Boolean := False;
    end record;
 
+   --  @exclude Controlled wake-claim finalization hook
+   --  @param Item Wake claim to complete without raising
    overriding
    procedure Finalize (Item : in out Wake_Claim);
 
@@ -340,6 +342,8 @@ private
       Armed : Boolean := False;
    end record;
 
+   --  @exclude Controlled initialization-claim finalization hook
+   --  @param Item Initialization claim to cancel without raising
    overriding
    procedure Finalize (Item : in out Initialization_Claim);
 
@@ -352,6 +356,8 @@ private
       Signal_Armed : aliased Boolean := False;
    end record;
 
+   --  @exclude Controlled drain-claim finalization hook
+   --  @param Item Drain claim to cancel without raising
    overriding
    procedure Finalize (Item : in out Drain_Claim);
 

@@ -571,6 +571,8 @@ private
       Delivered   : Boolean := False;
       Lease_Owner : access Connection'Class := null;
    end record;
+   --  @exclude Controlled wake-claim finalization hook
+   --  @param Item Wake claim to complete without raising
    overriding
    procedure Finalize (Item : in out Wake_Claim);
 
@@ -580,6 +582,8 @@ private
       Close : Wake_Source_Access := null;
       Armed : aliased Boolean := False;
    end record;
+   --  @exclude Controlled adoption-claim finalization hook
+   --  @param Item Adoption claim to roll back without raising
    overriding
    procedure Finalize (Item : in out Adoption_Claim);
 
@@ -587,6 +591,8 @@ private
       Wake  : Wake_Source_Access := null;
       Armed : Boolean := False;
    end record;
+   --  @exclude Controlled lease-drain finalization hook
+   --  @param Item Lease-drain claim to cancel without raising
    overriding
    procedure Finalize (Item : in out Lease_Drain_Claim);
 
@@ -596,7 +602,17 @@ private
       Controller : aliased Descriptor_Controller;
    end record;
 
+   --  @exclude Internal TLS connection-adoption helper
+   --  @param Item TLS connection that receives the descriptor
+   --  @param FD Descriptor to adopt
    procedure Adopt_TLS_Connection (Item : in out Connection; FD : Descriptor);
+   --  @exclude Internal TLS connection-lease acquisition helper
+   --  @param Item TLS connection whose current state is inspected
+   --  @param Expected_Generation Descriptor generation required by the caller
+   --  @param State State value returned to the caller
+   --  @param Result Lease acquisition result
+   --  @param FD Descriptor returned on success
+   --  @param Close_Source Close wake source returned on success
    procedure Try_Acquire_Lease
      (Item                : in out Connection'Class;
       Expected_Generation : Descriptor_Generation;

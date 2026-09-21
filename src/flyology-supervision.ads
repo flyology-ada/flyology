@@ -632,6 +632,8 @@ private
       Armed      : Boolean := False;
       Delivered  : Boolean := False;
    end record;
+   --  @exclude Controlled change wake-claim finalization hook
+   --  @param Item Change wake claim to complete without raising
    overriding
    procedure Finalize (Item : in out Change_Wake_Claim);
 
@@ -639,6 +641,8 @@ private
       State : access Change_Signal_State := null;
       Armed : Boolean := False;
    end record;
+   --  @exclude Controlled change initialization-claim finalization hook
+   --  @param Item Change initialization claim to cancel without raising
    overriding
    procedure Finalize (Item : in out Change_Initialization_Claim);
 
@@ -650,15 +654,28 @@ private
       Signal_FD    : aliased Interfaces.C.int := Interfaces.C.int (-1);
       Signal_Armed : aliased Boolean := False;
    end record;
+   --  @exclude Controlled change drain-claim finalization hook
+   --  @param Item Change drain claim to cancel without raising
    overriding
    procedure Finalize (Item : in out Change_Drain_Claim);
 
+   --  @exclude Internal change-signal initialization helper
+   --  @param Item Change signal to initialize
+   --  @param Descriptor Read descriptor returned to the caller
    procedure Arm (Item : in out Change_Signal; Descriptor : out Interfaces.C.int);
    --  Mark_Pending may be called by a surrounding protected controller. Its owner
    --  must call Flush after leaving that protected action.
+   --  @exclude Internal deferred change-notification helper
+   --  @param Item Change signal to mark pending
    procedure Mark_Pending (Item : in out Change_Signal);
+   --  @exclude Internal deferred change-notification flush helper
+   --  @param Item Change signal whose pending notification is flushed
    procedure Flush (Item : in out Change_Signal);
+   --  @exclude Internal change-notification helper
+   --  @param Item Change signal to notify
    procedure Notify (Item : in out Change_Signal);
+   --  @exclude Internal change-notification consumption helper
+   --  @param Item Change signal whose notification is consumed
    procedure Consume (Item : in out Change_Signal);
 
    type Signal_Access is access all Change_Signal;
