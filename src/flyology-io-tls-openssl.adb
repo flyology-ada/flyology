@@ -1,3 +1,5 @@
+with Ada.Finalization;
+with Interfaces.C.Strings;
 with Flyology.TLS_OpenSSL_Policy;
 with Flyology.TLS_OpenSSL_Raw;
 
@@ -140,6 +142,19 @@ package body Flyology.IO.TLS.OpenSSL is
       end;
    end Encode;
 
+   --  A task abort can arrive between the C constructor and an explicit release.
+   --  Controlled cleanup keeps the temporary provider reference balanced.
+   type Provider_Reference is new Ada.Finalization.Limited_Controlled with record
+      Handle : System.Address := System.Null_Address;
+   end record;
+
+   overriding
+   procedure Finalize (Item : in out Provider_Reference) is
+   begin
+      C_Provider_Release (Item.Handle);
+      Item.Handle := System.Null_Address;
+   end Finalize;
+
    protected body Provider_State is
       procedure Install (Value : System.Address; Side : Role) is
       begin
@@ -150,13 +165,10 @@ package body Flyology.IO.TLS.OpenSSL is
          Provider_State.Side := Side;
       end Install;
 
-      procedure Release is
-         Value : constant System.Address := Handle;
+      procedure Release (Value : out System.Address) is
       begin
+         Value := Handle;
          Handle := System.Null_Address;
-         if Value /= System.Null_Address then
-            C_Provider_Release (Value);
-         end if;
       end Release;
 
       function Version return String is
@@ -169,32 +181,18 @@ package body Flyology.IO.TLS.OpenSSL is
       function Is_Available return Boolean
       is (Handle /= System.Null_Address);
 
-      procedure Create_Session
-        (FD              : C.int;
-         Side            : Role;
-         Server_Name     : CS.chars_ptr;
-         Protocols       : System.Address;
-         Protocol_Length : C.unsigned;
-         Error           : System.Address;
-         Error_Size      : C.size_t;
-         Value           : out System.Address) is
+      procedure Retain_For_Session (Side : Role; Value : out System.Address) is
       begin
          if Handle = System.Null_Address then
             raise TLS_Error with "OpenSSL provider is not initialized";
          elsif Provider_State.Side /= Side then
             raise TLS_Error with "OpenSSL provider role does not match session";
          end if;
-         Value :=
-           C_Session_Create
-             (Handle,
-              FD,
-              (if Side = Client then 0 else 1),
-              Server_Name,
-              Protocols,
-              Protocol_Length,
-              Error,
-              Error_Size);
-      end Create_Session;
+         Value := C_Provider_Retain (Handle);
+         if Value = System.Null_Address then
+            raise TLS_Error with "OpenSSL provider is not initialized";
+         end if;
+      end Retain_For_Session;
 
       procedure Retain (Value : out System.Address; Side : out Role) is
       begin
@@ -353,25 +351,29 @@ package body Flyology.IO.TLS.OpenSSL is
       Server_Name : String;
       Protocols   : ALPN.Protocol_List) return Session_Access
    is
-      Name    : CS.chars_ptr := CS.Null_Ptr;
-      Error   : aliased Error_Buffer := (others => C.nul);
-      Value   : System.Address := System.Null_Address;
-      Encoded : aliased constant Ada.Streams.Stream_Element_Array := Encode (Protocols);
+      Name            : CS.chars_ptr := CS.Null_Ptr;
+      Error           : aliased Error_Buffer := (others => C.nul);
+      Value           : System.Address := System.Null_Address;
+      Provider_Handle : Provider_Reference;
+      Encoded         : aliased constant Ada.Streams.Stream_Element_Array := Encode (Protocols);
    begin
       Reject_Nul (Server_Name, "TLS server name");
       if Side = Server and then Encoded'Length /= 0 then
          raise Program_Error with "OpenSSL server sessions use provider-level ALPN protocols";
       end if;
       Name := CS.New_String (Server_Name);
-      Item.State.Create_Session
-        (C.int (FD),
-         Side,
-         Name,
-         (if Encoded'Length = 0 then System.Null_Address else Encoded'Address),
-         C.unsigned (Encoded'Length),
-         Error'Address,
-         Error'Length,
-         Value);
+      Item.State.Retain_For_Session (Side, Provider_Handle.Handle);
+      --  C_Session_Create takes a separate provider reference for a successful session.
+      Value :=
+        C_Session_Create
+          (Provider_Handle.Handle,
+           C.int (FD),
+           (if Side = Client then 0 else 1),
+           Name,
+           (if Encoded'Length = 0 then System.Null_Address else Encoded'Address),
+           C.unsigned (Encoded'Length),
+           Error'Address,
+           Error'Length);
       CS.Free (Name);
       if Value = System.Null_Address then
          raise TLS_Error with "OpenSSL: " & Image (Error);
@@ -466,8 +468,10 @@ package body Flyology.IO.TLS.OpenSSL is
 
    overriding
    procedure Finalize (Item : in out OpenSSL_Provider) is
+      Handle : System.Address;
    begin
-      Item.State.Release;
+      Item.State.Release (Handle);
+      C_Provider_Release (Handle);
    end Finalize;
 
 end Flyology.IO.TLS.OpenSSL;
