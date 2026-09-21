@@ -74,22 +74,27 @@ package Flyology.Channels.Bounded is
    --  Fixed-capacity MPMC FIFO wrapper. Close is terminal. Values accepted before
    --  Close remain available in FIFO order; blocked and later senders are
    --  rejected, while receivers finish draining the buffer.
+   --  @param Capacity Maximum buffered value count
    type Channel (Capacity : Positive) is tagged limited private;
 
    --  Idempotently reject new sends and let accepted values drain.
+   --  @param Item Channel to close
    procedure Close (Item : in out Channel);
 
    --  Append Value, waiting while the open channel is full.
+   --  @param Item Destination channel
    --  @param Value Value copied into the channel
    --  @exception Channel_Closed Close occurs before the value is accepted
    procedure Send (Item : in out Channel; Value : Element_Type);
 
    --  Remove the oldest value, waiting while the open channel is empty.
+   --  @param Item Source channel
    --  @param Value Receives the oldest buffered value
    --  @exception Channel_Closed The closed channel has been fully drained
    procedure Receive (Item : in out Channel; Value : out Element_Type);
 
    --  Attempt to append without waiting.
+   --  @param Item Destination channel
    --  @param Value Value to copy if capacity is available
    --  @param Result Item_Sent, Channel_Full, or Send_Closed
    procedure Try_Send (Item : in out Channel; Value : Element_Type; Result : out Try_Send_Result);
@@ -97,6 +102,7 @@ package Flyology.Channels.Bounded is
    --  @exclude Internal half of the abort-stable package-level Try_Send.
    --  Accepted must already be False. On success it becomes True only after
    --  the complete item and queue state have been installed.
+   --  @param Item Destination channel
    --  @param Value Value to copy if capacity is available
    --  @param Accepted Caller-owned evidence that the channel accepted Value
    --  @param Result Item_Sent, Channel_Full, or Send_Closed
@@ -109,15 +115,18 @@ package Flyology.Channels.Bounded is
 
    --  Attempt to remove the oldest value without waiting. Value is assigned
    --  only when Result is Item_Received.
+   --  @param Item Source channel
    --  @param Value Receives the oldest buffered value on success
    --  @param Result Item_Received, Channel_Empty, or Receive_Closed
    procedure Try_Receive
      (Item : in out Channel; Value : in out Element_Type; Result : out Try_Receive_Result);
 
    --  Wait until Close has occurred and the buffer is empty.
+   --  @param Item Channel to observe
    procedure Await_Drained (Item : in out Channel);
 
    --  Read channel state under its protected lock.
+   --  @param Item Channel to inspect
    --  @return Current close, buffer, and waiter counts
    function Current (Item : Channel) return Snapshot;
 
@@ -241,6 +250,7 @@ private
       Retry_After_Failure : Boolean := False;
    end record;
 
+   --  @exclude Internal notification-claim cleanup.
    overriding
    procedure Finalize (Item : in out Notification_Guard);
 
