@@ -66,6 +66,9 @@ esac
 printf '%s\n' "bench: idle path"
 "$bench_bin/idle_wait_rate" "${FLYOLOGY_BENCH_IDLE_WINDOW:-2.0}"
 
+printf '%s\n' "bench: native executor slots"
+"$bench_bin/native_executor_slots"
+
 #  Memory is reported as the difference between fibers that hold a callback and
 #  fibers that do not, which isolates the trampoline page from the fiber stack.
 printf '%s\n' "bench: memory"

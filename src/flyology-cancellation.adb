@@ -94,6 +94,16 @@ package body Flyology.Cancellation is
       begin
          Initializing := False;
       end Cancel_Initialization;
+
+      procedure Reset_For_Reuse is
+      begin
+         if Initializing then
+            raise Program_Error with "cancellation token still has an initializing borrower";
+         end if;
+         Is_Requested := False;
+         Read_FD := -1;
+         Write_FD := -1;
+      end Reset_For_Reuse;
    end Token_State;
 
    procedure Request (Item : in out Token) is

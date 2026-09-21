@@ -48,6 +48,12 @@ macOS/AArch64 host the untouched cases in `runtime_callback_bench` vary by about
 2% between runs and `poller_idle_cycle` by tens of percent, against an expected
 effect near 0.6%. Pass a measurement window in seconds; the default is 2.
 
+`native_executor_slots` measures complete native submit/await round trips
+with one free slot at capacities 1 and 1024. At capacity 1024, the other 1023
+results remain retained, so a slot-table scan would inspect nearly every
+entry on each submit. The timing also includes worker dispatch, wakes,
+execution, and result transfer; it does not isolate the slot lookup cost.
+
 `fiber_trampoline_memory` holds `count` lightweight tasks suspended with, and
 without, a live callback and reports the resident-set difference. Subtracting
 the two runs isolates trampoline storage from the fiber stack. Set
