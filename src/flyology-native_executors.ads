@@ -316,6 +316,8 @@ private
       Generation : Generation_Number := 0;
       Armed      : Boolean := False;
    end record;
+   --  @exclude
+   --  @param Guard Reservation being cleaned up
    overriding
    procedure Finalize (Guard : in out Preparation_Guard);
 
@@ -325,6 +327,8 @@ private
       Generation : Generation_Number := 0;
       Armed      : Boolean := False;
    end record;
+   --  @exclude
+   --  @param Guard Result-copy claim being cleaned up
    overriding
    procedure Finalize (Guard : in out Await_Copy_Guard);
 
