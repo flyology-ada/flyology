@@ -1,17 +1,16 @@
 with Ada.Unchecked_Conversion;
+with Flyology.Channel_Buckets;
 with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
 with Flyology.Wake_Sources;
 with System.Tasking;
-with System.Storage_Elements;
 
 package body Flyology.Channels.Bounded is
 
    package Policy renames Flyology.Channel_Policy;
 
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
    use type Flyology.Operations.Driver_Event;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
@@ -20,8 +19,7 @@ package body Flyology.Channels.Bounded is
    type Channel_Operation_Access is access all Channel_Operation;
    function To_Operation is new Ada.Unchecked_Conversion (System.Address, Channel_Operation_Access);
 
-   Bucket_Count         : constant := 32;
-   subtype Bucket_Index is Positive range 1 .. Bucket_Count;
+   subtype Bucket_Index is Flyology.Channel_Buckets.Bucket_Index;
    type Subscription_Queue is record
       Head : System.Address := System.Null_Address;
       Tail : System.Address := System.Null_Address;
@@ -38,10 +36,7 @@ package body Flyology.Channels.Bounded is
    end Check_Outer_Protected_Action;
 
    function Bucket (Address : System.Address) return Bucket_Index
-   is (Bucket_Index
-         (System.Storage_Elements.To_Integer (Address)
-          mod System.Storage_Elements.Integer_Address (Bucket_Count)
-          + 1));
+   is (Flyology.Channel_Buckets.Bucket (Address, Channel'Alignment));
 
    --  Queue links are mutated only while Subscriptions is protected.
    procedure Append (Queue : in out Subscription_Queue; Operation : System.Address) is

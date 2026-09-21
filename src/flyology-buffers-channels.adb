@@ -1,10 +1,10 @@
 with Ada.Unchecked_Conversion;
+with Flyology.Channel_Buckets;
 with Flyology.Channel_Test_Hooks;
 with Flyology.Channel_Policy;
 with Flyology.Operations.Drivers;
 with Flyology.Wake_Sources;
 with Interfaces;
-with System.Storage_Elements;
 
 package body Flyology.Buffers.Channels is
    package Policy renames Flyology.Channel_Policy;
@@ -13,22 +13,17 @@ package body Flyology.Buffers.Channels is
    use type Interfaces.C.unsigned;
    use type Interfaces.C.int;
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
 
    type Channel_Operation_Access is access all Channel_Operation;
    function To_Operation is new Ada.Unchecked_Conversion (System.Address, Channel_Operation_Access);
 
-   Bucket_Count         : constant := 32;
-   subtype Bucket_Index is Positive range 1 .. Bucket_Count;
+   subtype Bucket_Index is Flyology.Channel_Buckets.Bucket_Index;
    type Bucket_Array is array (Bucket_Index) of System.Address;
    type Subscription_Count_Array is array (Bucket_Index) of Interfaces.C.unsigned with Atomic_Components;
    Active_Subscriptions : Subscription_Count_Array := (others => 0);
 
    function Bucket (Address : System.Address) return Bucket_Index
-   is (Bucket_Index
-         (System.Storage_Elements.To_Integer (Address)
-          mod System.Storage_Elements.Integer_Address (Bucket_Count)
-          + 1));
+   is (Flyology.Channel_Buckets.Bucket (Address, Channel_State'Alignment));
 
    function Source_Address (Item : not null Channel_Access) return System.Address
    is (Item.State'Address);

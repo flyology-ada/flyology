@@ -447,6 +447,7 @@ buffer_domain_reservations_smoke
 buffers_smoke
 channel_reentrancy_child
 channel_operations_smoke
+flyology-channel_bucket_smoke
 channel_retention_smoke
 closed_descriptor_wait_smoke
 connection_admission_smoke

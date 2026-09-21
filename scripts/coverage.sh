@@ -125,6 +125,7 @@ operation_return_boundary_smoke
 connection_operations_smoke
 buffer_channel_operations_smoke
 channel_operations_smoke
+flyology-channel_bucket_smoke
 priority_semantics_smoke
 process_exit_live_task_smoke
 process_exec_child_smoke
