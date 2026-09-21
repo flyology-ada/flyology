@@ -74,7 +74,7 @@ package Flyology.Channels.Bounded is
    --  Fixed-capacity MPMC FIFO wrapper. Close is terminal. Values accepted before
    --  Close remain available in FIFO order; blocked and later senders are
    --  rejected, while receivers finish draining the buffer.
-   --  @param Capacity Maximum buffered value count
+   --  @field Capacity Maximum buffered value count
    type Channel (Capacity : Positive) is tagged limited private;
 
    --  Idempotently reject new sends and let accepted values drain.
@@ -250,7 +250,8 @@ private
       Retry_After_Failure : Boolean := False;
    end record;
 
-   --  @exclude Internal notification-claim cleanup.
+   --  @exclude
+   --  @param Item Internal notification guard to finalize
    overriding
    procedure Finalize (Item : in out Notification_Guard);
 
