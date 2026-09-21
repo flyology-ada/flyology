@@ -468,6 +468,10 @@ at which the listener is closed, handlers are joined, and compensation is safe
 to begin. If the server returns before any drain command, the agent reports a
 lifecycle failure and exits; the next serialized coordinator operation or
 snapshot reconciles that terminal process state.
+While the server runs, the agent waits on control-socket readiness and a
+server-completion wake source. The application-specific `Ready` hook has no
+readiness descriptor, so startup probes it at a bounded interval until it
+reports ready or its deadline expires.
 
 ## Driving the coordinator
 

@@ -252,6 +252,24 @@ package body Flyology.Process_Generations.Transport is
          raise Transport_Error with "control readiness wait failed";
    end Message_Available;
 
+   function Wait_Message_Or_Completion
+     (Item       : Control_Channel;
+      Completion : Flyology.IO.Descriptor;
+      Timeout    : Duration := Flyology.IO.Infinite) return Flyology.IO.Wait_Outcome
+   is
+      Interrupts : constant Flyology.IO.Interrupt_Set (1 .. 1) := (1 => Completion);
+   begin
+      if not Is_Open (Item) then
+         raise Validation_Error with "control channel is closed";
+      end if;
+      return
+        Flyology.IO.Wait_Interruptibly
+          (Sockets.Native_Descriptor (Item.Socket), Flyology.IO.For_Read, Timeout, Interrupts);
+   exception
+      when Flyology.IO.Device_Error =>
+         raise Transport_Error with "control readiness wait failed";
+   end Wait_Message_Or_Completion;
+
    procedure Send
      (Item    : in out Control_Channel;
       Kind    : Protocol.Message_Kind;
