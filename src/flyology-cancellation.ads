@@ -21,6 +21,8 @@ package Flyology.Cancellation is
    --  Entry-bearing view for an abortable select. The Token must outlive the
    --  selected call. Use Stop.Wait_Event.Await_Request as the trigger.
    type Request_Waiter is synchronized interface;
+   --  Wait until the one-shot request state becomes terminal.
+   --  @param Item Entry-bearing cancellation state to wait on
    procedure Await_Request (Item : in out Request_Waiter) is abstract;
    pragma Implemented (Await_Request, By_Entry);
 
@@ -33,10 +35,12 @@ package Flyology.Cancellation is
    --  Program_Error is raised when an existing borrowed wake descriptor
    --  cannot be signalled. Cancellation remains recorded when signalling
    --  fails. The signal and any EINTR retry occur after the state lock exits.
+   --  @param Item Token on which to record cancellation
    procedure Request (Item : in out Token);
 
    --  Wait until Request records terminal cancellation. Task-only waiting
    --  does not allocate a descriptor.
+   --  @param Item Token on which to wait
    procedure Await_Request (Item : in out Token);
 
    --  Borrow the protected entry for an abortable select.
@@ -45,6 +49,7 @@ package Flyology.Cancellation is
    function Wait_Event (Item : aliased in out Token) return not null access Request_Waiter'Class;
 
    --  Inspect the one-shot state without allocating a wake descriptor.
+   --  @param Item Token to inspect
    --  @return True once Request records cancellation, including when wake
    --     signaling subsequently fails
    function Requested (Item : Token) return Boolean;
@@ -53,6 +58,7 @@ package Flyology.Cancellation is
    --  callers must not close it, and Token must outlive the wait. No
    --  descriptor is allocated when cancellation was already requested.
    --  Descriptor creation occurs outside the protected state lock.
+   --  @param Item Token that owns the borrowed descriptor
    --  @param FD Borrowed descriptor, or -1 when already requested
    --  @param Already_Requested True when Request preceded this call
    --  @exception Program_Error Wake descriptor creation fails
@@ -64,6 +70,8 @@ private
       Armed      : Boolean := False;
    end record;
 
+   --  @exclude Controlled signal-claim finalization hook
+   --  @param Guard Signal claim to complete without raising
    overriding
    procedure Finalize (Guard : in out Signal_Guard);
 
@@ -92,6 +100,8 @@ private
       Armed : Boolean := False;
    end record;
 
+   --  @exclude Controlled initialization-claim finalization hook
+   --  @param Guard Initialization claim to cancel without raising
    overriding
    procedure Finalize (Guard : in out Initialization_Guard);
 

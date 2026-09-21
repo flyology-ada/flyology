@@ -26,14 +26,17 @@ package Flyology.Capacity is
    --  from another protected action. Borrowers must not close a wake
    --  descriptor. A failed drain after admission does not revoke or hide the
    --  transferred permit; the caller's guard retries before it leaves scope.
+   --  @field Capacity Maximum number of active permits
    type Gate (Capacity : Positive) is tagged limited private;
 
    --  Publish terminal shutdown, then wake descriptor waiters. A wake error
    --  may raise Program_Error after shutdown has committed.
+   --  @param Item Gate to shut down
    procedure Request_Shutdown (Item : in out Gate);
 
    --  Wait for capacity or terminal shutdown. An accepted call transfers one
    --  permit; the caller must Release it.
+   --  @param Item Gate from which to acquire one permit
    --  @param Accepted True when a permit was acquired; False on shutdown
    --  @param Cleanup_Armed Optional caller-owned obligation. It must be False
    --     on call and becomes True in the admission state cut on success.
@@ -41,6 +44,7 @@ package Flyology.Capacity is
    procedure Acquire (Item : in out Gate; Accepted : out Boolean; Cleanup_Armed : access Boolean := null);
 
    --  Attempt admission without waiting.
+   --  @param Item Gate from which to attempt one acquisition
    --  @param Result Permit_Acquired, Gate_Full, or Gate_Closed
    --  @param Cleanup_Armed Optional caller-owned obligation. It must be False
    --     on call and becomes True in the admission state cut on success.
@@ -50,6 +54,7 @@ package Flyology.Capacity is
 
    --  Release a held permit. A wake error may raise after release commits;
    --  Cleanup_Armed, when supplied, is cleared in the state cut.
+   --  @param Item Gate to which the permit is returned
    --  @param Cleanup_Armed Optional caller-owned obligation; it must be True
    --     on call and becomes False when the permit is released.
    --  @exception Program_Error No permit is active, Cleanup_Armed is False,
@@ -57,19 +62,27 @@ package Flyology.Capacity is
    procedure Release (Item : in out Gate; Cleanup_Armed : access Boolean := null);
 
    --  Wait until shutdown has begun and all permits have been released.
+   --  @param Item Gate whose holders must drain
    procedure Await_Drained (Item : in out Gate);
 
    --  Report whether terminal shutdown has begun.
+   --  @param Item Gate to inspect
+   --  @return True once Request_Shutdown records terminal shutdown
    function Shutdown_Requested (Item : Gate) return Boolean;
 
    --  Return the number of currently held permits.
+   --  @param Item Gate to inspect
+   --  @return Current active permit count
    function Active (Item : Gate) return Natural;
 
    --  Return the number of callers queued at Acquire.
+   --  @param Item Gate to inspect
+   --  @return Current number of queued acquisition callers
    function Waiting (Item : Gate) return Natural;
 
    --  Borrow a readable descriptor that becomes ready on shutdown. The caller
    --  must not close it and Gate must outlive the wait.
+   --  @param Item Gate that owns the borrowed descriptor
    --  @param FD Borrowed descriptor, or -1 after shutdown
    --  @param Already_Requested Whether shutdown already started
    --  @exception Program_Error Wake descriptor creation fails
@@ -79,6 +92,7 @@ package Flyology.Capacity is
    --  When Can_Acquire is False, FD becomes readable after a release or
    --  shutdown. Otherwise retry Try_Acquire immediately and FD is -1. The
    --  caller must not read or close FD, and Gate must outlive the wait.
+   --  @param Item Gate that owns the borrowed descriptor
    --  @param FD Borrowed readiness descriptor, or -1 when retry is ready
    --  @param Can_Acquire Whether Try_Acquire can make progress immediately
    --  @exception Program_Error Wake descriptor creation fails
@@ -169,6 +183,8 @@ private
       Claim  : aliased Wake_Claim;
    end record;
 
+   --  @exclude Controlled wake-claim finalization hook
+   --  @param Guard Wake claim to complete without raising
    overriding
    procedure Finalize (Guard : in out Action_Guard);
 
@@ -178,6 +194,8 @@ private
       Armed : Boolean := False;
    end record;
 
+   --  @exclude Controlled initialization-claim finalization hook
+   --  @param Guard Initialization claim to cancel without raising
    overriding
    procedure Finalize (Guard : in out Initialization_Guard);
 
