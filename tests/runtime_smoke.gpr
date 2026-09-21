@@ -30,6 +30,7 @@ project Runtime_Smoke is
       "cancellation_wake_smoke.adb",
       "channel_reentrancy_child.adb",
       "channel_operations_smoke.adb",
+      "flyology-channel_bucket_smoke.adb",
       "channel_retention_smoke.adb",
       "connection_admission_smoke.adb",
       "connection_close_abort_smoke.adb",
