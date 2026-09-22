@@ -2274,11 +2274,11 @@ scheduling quantum; active provider readiness waits use wake descriptors and
 do not poll at that quantum. Each queued call retains the connection generation
 it observed at entry and is cancelled if the object is closed and reused before
 acquisition.
-On Linux, each OpenSSL call temporarily blocks `SIGPIPE` on its pthread, removes
-one newly pending signal when none was pending before the call, and restores the
-exact prior mask before returning to Ada. Darwin applies `SO_NOSIGPIPE` to the
-owned socket. A task never suspends while the temporary Linux signal mask is
-installed.
+On Linux, the OpenSSL adapter uses a borrowed socket BIO for reads and a
+borrowed write BIO that calls `send` with `MSG_NOSIGNAL`. TLS handshake, data,
+alert, and shutdown writes therefore leave the caller's signal mask untouched.
+Darwin applies `SO_NOSIGPIPE` to the owned socket. The TLS connection remains
+the descriptor's sole closing owner on both platforms.
 
 ### DNS resolution
 

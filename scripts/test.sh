@@ -219,6 +219,8 @@ assert_archive_includes \
   "$project_root/lib/libFlyology.a" flyology_socket_pack_unix_path
 "$project_root/scripts/check-subprocess-c-boundary.sh" \
   "$project_root/lib/libFlyology.a"
+"$project_root/scripts/check-tls-openssl-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
 mkdir -p "$project_root/build/tests"
 cc -std=c11 -Wall -Wextra -Werror -pthread \
   "$project_root/tests/probes/atomic_store_abi_probe.c" \
