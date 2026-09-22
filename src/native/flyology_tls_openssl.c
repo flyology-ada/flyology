@@ -4,18 +4,20 @@
  *
  * This file contains no cryptography.  It loads one matched libssl/libcrypto
  * installation and translates the stable OpenSSL 3 API to a small provider
- * ABI.  Module mappings follow the provider/session reference lifetime. */
+ * ABI.  Module mappings follow the provider/session reference lifetime.
+ * Linux's custom BIO remains here because OpenSSL calls opaque C callback
+ * methods through runtime-resolved function pointers.  The callback only
+ * performs a flagged socket send and sets OpenSSL's retry bits; Ada retains
+ * TLS status, readiness, deadline, and descriptor-closing policy. */
 
 #include <dlfcn.h>
-#include <pthread.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
-#include <signal.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "flyology_tls_signal.h"
 
 #define FLY_COMPLETE 0
 #define FLY_FAILED -1
@@ -32,9 +34,20 @@
 #define SSL_TLSEXT_ERR_NOACK 3
 #define TLS1_2_VERSION 0x0303
 #define OPENSSL_VERSION 0
+#if defined(__linux__)
+#define BIO_TYPE_SOURCE_SINK 0x0400
+#define BIO_CTRL_FLUSH 11
+#define BIO_FLAGS_WRITE 0x02
+#define BIO_FLAGS_RWS 0x07
+#define BIO_FLAGS_SHOULD_RETRY 0x08
+#endif
 
 typedef struct ssl_ctx_st SSL_CTX;
 typedef struct ssl_st SSL;
+#if defined(__linux__)
+typedef struct bio_st BIO;
+typedef struct bio_method_st BIO_METHOD;
+#endif
 typedef struct ssl_method_st SSL_METHOD;
 typedef struct x509_store_ctx_st X509_STORE_CTX;
 typedef int (*SSL_verify_cb)(int, X509_STORE_CTX *);
@@ -76,7 +89,24 @@ struct fly_module {
    void (*SSL_CTX_set_alpn_select_cb)(SSL_CTX *, SSL_alpn_select_cb, void *);
    SSL *(*SSL_new)(SSL_CTX *);
    void (*SSL_free)(SSL *);
+#if defined(__linux__)
+   BIO_METHOD *(*BIO_meth_new)(int, const char *);
+   void (*BIO_meth_free)(BIO_METHOD *);
+   int (*BIO_meth_set_write)(BIO_METHOD *, int (*)(BIO *, const char *, int));
+   int (*BIO_meth_set_ctrl)(BIO_METHOD *, long (*)(BIO *, int, long, void *));
+   BIO *(*BIO_new)(const BIO_METHOD *);
+   BIO *(*BIO_new_socket)(int, int);
+   int (*BIO_free)(BIO *);
+   void (*BIO_set_data)(BIO *, void *);
+   void *(*BIO_get_data)(BIO *);
+   void (*BIO_set_init)(BIO *, int);
+   void (*BIO_clear_flags)(BIO *, int);
+   void (*BIO_set_flags)(BIO *, int);
+   void (*SSL_set0_rbio)(SSL *, BIO *);
+   void (*SSL_set0_wbio)(SSL *, BIO *);
+#else
    int (*SSL_set_fd)(SSL *, int);
+#endif
    void (*SSL_set_connect_state)(SSL *);
    void (*SSL_set_accept_state)(SSL *);
    long (*SSL_ctrl)(SSL *, int, long, void *);
@@ -89,6 +119,9 @@ struct fly_module {
    int (*SSL_write)(SSL *, const void *, int);
    int (*SSL_get_error)(const SSL *, int);
    int (*SSL_shutdown)(SSL *);
+#if defined(__linux__)
+   BIO_METHOD *write_method;
+#endif
 };
 
 struct fly_provider {
@@ -103,11 +136,55 @@ struct fly_provider {
 struct fly_session {
    struct fly_provider *provider;
    SSL *ssl;
+#if defined(__linux__)
+   int fd;
+#endif
    int shutdown_complete;
    char error[1024];
 };
 
 static _Atomic unsigned live_modules;
+
+#if defined(__linux__)
+/* OpenSSL invokes BIO methods synchronously inside a provider step.  The
+ * active module supplies this BIO's dynamically loaded accessors; saving the
+ * previous value also permits nested calls on the same pthread. */
+static _Thread_local struct fly_module *active_bio_module;
+
+static int nosignal_bio_write(BIO *bio, const char *buffer, int count)
+{
+   struct fly_module *module = active_bio_module;
+   const int *fd;
+   int saved_errno;
+   ssize_t result;
+   if (module == NULL) {
+      errno = EINVAL;
+      return -1;
+   }
+   if (buffer == NULL || count <= 0) return 0;
+   fd = module->BIO_get_data(bio);
+   if (fd == NULL) {
+      errno = EBADF;
+      return -1;
+   }
+   module->BIO_clear_flags(bio, BIO_FLAGS_RWS | BIO_FLAGS_SHOULD_RETRY);
+   result = send(*fd, buffer, (size_t)count, MSG_NOSIGNAL);
+   if (result >= 0) return (int)result;
+   saved_errno = errno;
+   if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK || saved_errno == EINTR)
+      module->BIO_set_flags(bio, BIO_FLAGS_WRITE | BIO_FLAGS_SHOULD_RETRY);
+   errno = saved_errno;
+   return -1;
+}
+
+static long nosignal_bio_ctrl(BIO *bio, int command, long number, void *argument)
+{
+   (void)bio;
+   (void)number;
+   (void)argument;
+   return command == BIO_CTRL_FLUSH ? 1 : 0;
+}
+#endif
 
 static void set_error(char *buffer, size_t size, const char *message)
 {
@@ -156,6 +233,9 @@ static void *required_symbol(void *handle, const char *name,
 static void destroy_module(struct fly_module *module)
 {
    if (module == NULL) return;
+#if defined(__linux__)
+   if (module->write_method != NULL) module->BIO_meth_free(module->write_method);
+#endif
    if (module->ssl != NULL) dlclose(module->ssl);
    if (module->crypto != NULL) dlclose(module->crypto);
    free(module);
@@ -266,7 +346,35 @@ matched:
    LOAD(module, SSL_CTX_set_alpn_select_cb, module->ssl);
    LOAD(module, SSL_new, module->ssl);
    LOAD(module, SSL_free, module->ssl);
+#if defined(__linux__)
+   LOAD(module, BIO_meth_new, module->crypto);
+   LOAD(module, BIO_meth_free, module->crypto);
+   LOAD(module, BIO_meth_set_write, module->crypto);
+   LOAD(module, BIO_meth_set_ctrl, module->crypto);
+   LOAD(module, BIO_new, module->crypto);
+   LOAD(module, BIO_new_socket, module->crypto);
+   LOAD(module, BIO_free, module->crypto);
+   LOAD(module, BIO_set_data, module->crypto);
+   LOAD(module, BIO_get_data, module->crypto);
+   LOAD(module, BIO_set_init, module->crypto);
+   LOAD(module, BIO_clear_flags, module->crypto);
+   LOAD(module, BIO_set_flags, module->crypto);
+   LOAD(module, SSL_set0_rbio, module->ssl);
+   LOAD(module, SSL_set0_wbio, module->ssl);
+   /* No unique type index is needed: Flyology never searches a BIO chain by
+    * method type.  OpenSSL limits BIO_get_new_index to 127 lifetime calls. */
+   module->write_method = module->BIO_meth_new
+     (BIO_TYPE_SOURCE_SINK,
+      "flyology socket send(MSG_NOSIGNAL)");
+   if (module->write_method == NULL ||
+       module->BIO_meth_set_write(module->write_method, nosignal_bio_write) != 1 ||
+       module->BIO_meth_set_ctrl(module->write_method, nosignal_bio_ctrl) != 1) {
+      set_error(error, error_size, "cannot create OpenSSL socket write BIO");
+      goto fail;
+   }
+#else
    LOAD(module, SSL_set_fd, module->ssl);
+#endif
    LOAD(module, SSL_set_connect_state, module->ssl);
    LOAD(module, SSL_set_accept_state, module->ssl);
    LOAD(module, SSL_ctrl, module->ssl);
@@ -519,13 +627,42 @@ void *flyology_tls_openssl_session_create(void *provider_handle, int fd,
    }
    module->ERR_clear_error();
    session->ssl = module->SSL_new(provider->ctx);
-   if (session->ssl == NULL || module->SSL_set_fd(session->ssl, fd) != 1) {
-      provider_error(module, error, error_size, "cannot bind TLS descriptor");
-      if (session->ssl != NULL) module->SSL_free(session->ssl);
+   if (session->ssl == NULL) {
+      provider_error(module, error, error_size, "cannot create TLS session");
       free(session);
       provider_release(provider);
       return NULL;
    }
+#if defined(__linux__)
+   {
+      BIO *reader = module->BIO_new_socket(fd, 0);
+      BIO *writer = module->BIO_new(module->write_method);
+      if (reader == NULL || writer == NULL) {
+         provider_error(module, error, error_size, "cannot bind TLS descriptor");
+         if (reader != NULL) module->BIO_free(reader);
+         if (writer != NULL) module->BIO_free(writer);
+         module->SSL_free(session->ssl);
+         free(session);
+         provider_release(provider);
+         return NULL;
+      }
+      /* Both BIOs borrow FD.  SSL_free releases them before session storage;
+       * the enclosing TLS connection closes FD after session cleanup. */
+      session->fd = fd;
+      module->BIO_set_data(writer, &session->fd);
+      module->BIO_set_init(writer, 1);
+      module->SSL_set0_rbio(session->ssl, reader);
+      module->SSL_set0_wbio(session->ssl, writer);
+   }
+#else
+   if (module->SSL_set_fd(session->ssl, fd) != 1) {
+      provider_error(module, error, error_size, "cannot bind TLS descriptor");
+      module->SSL_free(session->ssl);
+      free(session);
+      provider_release(provider);
+      return NULL;
+   }
+#endif
    if (((unsigned long)module->SSL_ctrl
          (session->ssl, SSL_CTRL_MODE,
           (long)SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER, NULL)
@@ -595,18 +732,20 @@ int flyology_tls_openssl_handshake(void *handle)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct flyology_sigpipe_guard guard;
+#if defined(__linux__)
+   struct fly_module *previous = active_bio_module;
+#endif
    int result;
    int classified;
-   if (flyology_sigpipe_begin(&guard) != 0) {
-      set_error(session->error, sizeof session->error,
-                "cannot establish scoped SIGPIPE guard");
-      return FLY_FAILED;
-   }
    module->ERR_clear_error();
+#if defined(__linux__)
+   active_bio_module = module;
+#endif
    result = module->SSL_do_handshake(session->ssl);
    classified = result == 1 ? FLY_COMPLETE : classify(session, result, 0);
-   flyology_sigpipe_end(&guard);
+#if defined(__linux__)
+   active_bio_module = previous;
+#endif
    return classified;
 }
 
@@ -614,18 +753,20 @@ long flyology_tls_openssl_receive(void *handle, void *buffer, int count)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct flyology_sigpipe_guard guard;
+#if defined(__linux__)
+   struct fly_module *previous = active_bio_module;
+#endif
    int result;
    long classified;
-   if (flyology_sigpipe_begin(&guard) != 0) {
-      set_error(session->error, sizeof session->error,
-                "cannot establish scoped SIGPIPE guard");
-      return FLY_FAILED;
-   }
    module->ERR_clear_error();
+#if defined(__linux__)
+   active_bio_module = module;
+#endif
    result = module->SSL_read(session->ssl, buffer, count);
    classified = result > 0 ? result : classify(session, result, 1);
-   flyology_sigpipe_end(&guard);
+#if defined(__linux__)
+   active_bio_module = previous;
+#endif
    return classified;
 }
 
@@ -633,18 +774,20 @@ long flyology_tls_openssl_send(void *handle, const void *buffer, int count)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct flyology_sigpipe_guard guard;
+#if defined(__linux__)
+   struct fly_module *previous = active_bio_module;
+#endif
    int result;
    long classified;
-   if (flyology_sigpipe_begin(&guard) != 0) {
-      set_error(session->error, sizeof session->error,
-                "cannot establish scoped SIGPIPE guard");
-      return FLY_FAILED;
-   }
    module->ERR_clear_error();
+#if defined(__linux__)
+   active_bio_module = module;
+#endif
    result = module->SSL_write(session->ssl, buffer, count);
    classified = result > 0 ? result : classify(session, result, 0);
-   flyology_sigpipe_end(&guard);
+#if defined(__linux__)
+   active_bio_module = previous;
+#endif
    return classified;
 }
 
@@ -652,16 +795,16 @@ int flyology_tls_openssl_shutdown(void *handle)
 {
    struct fly_session *session = handle;
    struct fly_module *module = session->provider->module;
-   struct flyology_sigpipe_guard guard;
+#if defined(__linux__)
+   struct fly_module *previous = active_bio_module;
+#endif
    int result;
    int classified;
    if (session->shutdown_complete) return FLY_COMPLETE;
-   if (flyology_sigpipe_begin(&guard) != 0) {
-      set_error(session->error, sizeof session->error,
-                "cannot establish scoped SIGPIPE guard");
-      return FLY_FAILED;
-   }
    module->ERR_clear_error();
+#if defined(__linux__)
+   active_bio_module = module;
+#endif
    result = module->SSL_shutdown(session->ssl);
    classified = flyology_tls_openssl_policy_classify_shutdown(result);
    if (classified == FLY_COMPLETE) {
@@ -669,7 +812,9 @@ int flyology_tls_openssl_shutdown(void *handle)
    } else if (classified == FLY_FAILED) {
       classified = classify(session, result, 0);
    }
-   flyology_sigpipe_end(&guard);
+#if defined(__linux__)
+   active_bio_module = previous;
+#endif
    return classified;
 }
 

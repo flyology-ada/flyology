@@ -1,3 +1,4 @@
+with Ada.Command_Line;
 with Ada.Exceptions;
 with Ada.Environment_Variables;
 with Ada.Finalization;
@@ -32,6 +33,7 @@ procedure TLS_Smoke is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
    use type ALPN.Protocol_List;
+   use type TLS.Step_Status;
 
    Certificate        : constant String := "tests/fixtures/tls/server-cert.pem";
    Private_Key        : constant String := "tests/fixtures/tls/server-key.pem";
@@ -49,6 +51,9 @@ procedure TLS_Smoke is
 
    function Signal_Wait_Retry_Passes return Interfaces.C.int;
    pragma Import (C, Signal_Wait_Retry_Passes, "flyology_test_sigtimedwait_retry");
+
+   function Linux_SIGPIPE_State return Interfaces.C.int;
+   pragma Import (C, Linux_SIGPIPE_State, "flyology_test_linux_sigpipe_state");
 
    function Live_OpenSSL_Modules return Interfaces.C.unsigned;
    pragma Import (C, Live_OpenSSL_Modules, "flyology_tls_openssl_live_modules");
@@ -488,6 +493,48 @@ procedure TLS_Smoke is
       pragma Assert (Result.Passed);
       TLS.Close (Client);
    end Run_Peer_Failure;
+
+   procedure Run_Linux_SIGPIPE_After_Peer_Close is
+      Client_Socket : Sockets.Socket_Type;
+      Peer_Socket   : Sockets.Socket_Type;
+      Session       : TLS.Session_Access;
+      Before        : Interfaces.C.int;
+      Step          : TLS.Step_Status;
+   begin
+      if Linux_SIGPIPE_State = -2 then
+         return;
+      end if;
+      Sockets.Create_Socket_Pair (Client_Socket, Peer_Socket);
+      Session :=
+        OpenSSL.Create_Session
+          (Client_Backend, Sockets.Native_Descriptor (Client_Socket), TLS.Client, "localhost");
+      Sockets.Close_Socket (Peer_Socket);
+      Before := Linux_SIGPIPE_State;
+      pragma Assert (Before >= 0);
+      Step := TLS.Handshake_Step (Session.all);
+      pragma Assert (Step = TLS.Failed);
+      pragma Assert (Linux_SIGPIPE_State = Before);
+      Free_Session (Session);
+      pragma Assert (Sockets.Is_Open (Client_Socket));
+      Sockets.Close_Socket (Client_Socket);
+   end Run_Linux_SIGPIPE_After_Peer_Close;
+
+   procedure Run_Linux_BIO_Reuse is
+      Baseline : constant Interfaces.C.unsigned := Live_OpenSSL_Modules;
+   begin
+      if Linux_SIGPIPE_State = -2 then
+         return;
+      end if;
+      for Attempt in 1 .. 130 loop
+         declare
+            Backend : OpenSSL.OpenSSL_Provider;
+         begin
+            OpenSSL.Initialize_Client
+              (Backend, CA_File => Certificate, Library_Directory => Library_Directory);
+         end;
+      end loop;
+      pragma Assert (Live_OpenSSL_Modules = Baseline);
+   end Run_Linux_BIO_Reuse;
 
    procedure Run_Hostname_Rejection is
       Client_Socket : Sockets.Socket_Type;
@@ -1729,6 +1776,11 @@ begin
      (Server_Backend, Certificate, Private_Key, Library_Directory => Library_Directory);
    pragma Assert (OpenSSL.Version (Client_Backend)'Length > 0);
 
+   if Ada.Command_Line.Argument_Count = 1 and then Ada.Command_Line.Argument (1) = "linux-sigpipe" then
+      Run_Linux_SIGPIPE_After_Peer_Close;
+      return;
+   end if;
+
    Run_Exchange (Flyology.Lightweight_Task);
    Run_Exchange (Flyology.Native_Task);
    Run_Connection_Upgrade_Exchange (Flyology.Lightweight_Task);
@@ -1741,6 +1793,8 @@ begin
    Run_Cancellation (Flyology.Native_Task);
    Run_Peer_Failure (Flyology.Lightweight_Task);
    Run_Peer_Failure (Flyology.Native_Task);
+   Run_Linux_SIGPIPE_After_Peer_Close;
+   Run_Linux_BIO_Reuse;
    Run_Hostname_Rejection;
    Run_Provider_Selection;
    Run_Provider_Result_Validation;

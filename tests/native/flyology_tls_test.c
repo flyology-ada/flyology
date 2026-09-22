@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <sys/socket.h>
 
 #include "flyology_tls_signal.h"
@@ -33,6 +34,25 @@ int flyology_test_set_abortive_close(int fd)
 {
    struct linger value = { 1, 0 };
    return setsockopt(fd, SOL_SOCKET, SO_LINGER, &value, sizeof value);
+}
+
+int flyology_test_linux_sigpipe_state(void)
+{
+#if defined(__linux__)
+   sigset_t mask;
+   sigset_t pending;
+   int blocked;
+   int queued;
+   if (pthread_sigmask(SIG_SETMASK, NULL, &mask) != 0 ||
+       sigpending(&pending) != 0)
+      return -1;
+   blocked = sigismember(&mask, SIGPIPE);
+   queued = sigismember(&pending, SIGPIPE);
+   if (blocked < 0 || queued < 0) return -1;
+   return blocked | (queued << 1);
+#else
+   return -2;
+#endif
 }
 
 int flyology_test_sigtimedwait_retry(void)
