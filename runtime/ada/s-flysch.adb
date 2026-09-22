@@ -4507,7 +4507,14 @@ package body System.Flyology.Scheduler is
       Unlock_Group (Group);
       Unlock_Registry_Shard (Shard);
 
-      if Need_Wake and then not Pollers.Wake (Group.Scheduler_Poller) then
+      --  This event thread cannot be blocked in its poller while it is
+      --  waking another fiber in the same group. The ready queue or pending
+      --  cancellation is visible on its next scheduler turn without a kernel
+      --  notification. Foreign threads still signal the poller so a wake
+      --  racing the transition into Wait_Batch cannot be lost.
+      if Need_Wake and then Thread_Group /= Group
+        and then not Pollers.Wake (Group.Scheduler_Poller)
+      then
          Fatal (Poller_Failure);
       end if;
       return 0;
