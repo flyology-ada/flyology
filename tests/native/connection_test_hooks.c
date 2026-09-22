@@ -110,8 +110,8 @@ void flyology_test_connection_barrier_release(int point)
 void flyology_test_connection_raw_accept_return_barrier(void)
 {
    pthread_mutex_lock(&raw_accept_mutex);
-   if (atomic_load_explicit(
-         &armed[raw_accept_returned], memory_order_seq_cst) != 0) {
+   if (atomic_exchange_explicit(
+         &armed[raw_accept_returned], 0, memory_order_seq_cst) != 0) {
       atomic_store_explicit(
         &reached[raw_accept_returned], 1, memory_order_seq_cst);
       while (atomic_load_explicit(
