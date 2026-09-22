@@ -87,6 +87,7 @@ private
       entry Wait_Ready (FD : out Interfaces.C.int; Already_Requested : out Boolean);
       procedure Publish_Wake (FD, Signal_FD : Interfaces.C.int);
       procedure Cancel_Initialization;
+      procedure Reset_For_Reuse;
    private
       Is_Requested : Boolean := False;
       Initializing : Boolean := False;

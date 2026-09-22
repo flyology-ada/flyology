@@ -211,43 +211,53 @@ private
    end Completion_Gate;
    type Gate_Array is array (Positive range <>) of Completion_Gate;
 
+   type Preparation_Guard;
+   type Await_Copy_Guard;
    protected type Shared_State (Capacity, Workers : Positive) is
-      procedure Submit
-        (Input            : Input_Type;
-         Token            : Token_Access;
-         Deadline         : Ada.Real_Time.Time;
+      procedure Initialize_Slots;
+      procedure Install_Token (Slot : Positive; Token : Token_Access);
+      procedure Reserve
+        (Deadline         : Ada.Real_Time.Time;
          Slot             : out Positive;
          Generation       : out Generation_Number;
          Prior_Generation : out Generation_Number;
          Prior_Peak       : out Natural;
-         Replaced_Token   : out Token_Access;
+         Token            : out Token_Access;
+         Guard            : not null access Preparation_Guard;
+         Accepted         : out Boolean);
+      procedure Publish
+        (Slot             : Positive;
+         Generation       : Generation_Number;
          Dispatch_Worker  : out Natural;
          Accepted         : out Boolean);
+      procedure Cancel_Preparation (Slot : Positive; Generation : Generation_Number);
+      function Is_Preparing (Slot : Positive; Generation : Generation_Number) return Boolean;
       procedure Rollback_Dispatch
         (Slot             : Positive;
          Generation       : Generation_Number;
          Prior_Generation : Generation_Number;
          Prior_Peak       : Natural;
          Worker           : Positive;
-         Replaced_Token   : Token_Access;
          Rolled_Back      : out Boolean);
       procedure Try_Next (Worker : Positive; Slot : out Positive; Stop, Available : out Boolean);
       procedure Worker_Started (Worker : Positive);
       procedure Dispatch_Accepted (Worker : Positive);
       procedure Operation_Data
         (Slot     : Positive;
-         Input    : out Input_Type;
          Token    : out Token_Access;
          Deadline : out Ada.Real_Time.Time);
-      procedure Complete (Slot : Positive; Result : Result_Type);
+      function Store_Result (Slot : Positive) return Boolean;
+      procedure Complete (Slot : Positive);
       procedure Fail (Slot : Positive; Error : Ada.Exceptions.Exception_Occurrence);
       procedure Try_Await
         (Slot       : Positive;
          Generation : Generation_Number;
-         Result     : out Result_Type;
          Error_Id   : out Ada.Exceptions.Exception_Id;
          Message    : out Ada.Strings.Unbounded.Unbounded_String;
+         Guard      : not null access Await_Copy_Guard;
          Ready      : out Boolean);
+      procedure Finish_Await (Slot : Positive; Generation : Generation_Number);
+      procedure Cancel_Await_Copy (Slot : Positive; Generation : Generation_Number);
       procedure Claim_Abandon
         (Slot : Positive; Generation : Generation_Number; Token : out Token_Access; Claimed : out Boolean);
       procedure Release_Token_Claim (Slot : Positive);
@@ -267,12 +277,16 @@ private
       function Shutdown_Started return Boolean;
       function Statistics return Executor_Statistics;
    private
-      Inputs                  : Input_Array (1 .. Capacity);
-      Results                 : Result_Array (1 .. Capacity);
       Tokens                  : Token_Array (1 .. Capacity) := (others => null);
       Deadlines               : Time_Array (1 .. Capacity) := (others => Ada.Real_Time.Time_Last);
       Generations             : Generation_Array (1 .. Capacity) := (others => 0);
       Status                  : Status_Array (1 .. Capacity) := (others => Free);
+      --  Free slots stay linked here; a cancellation claim keeps a terminal
+      --  slot off the list until its token borrower releases the claim.
+      Next_Free               : Natural_Array (1 .. Capacity) := (others => 0);
+      Free_Head               : Natural := 0;
+      Preparing_Slot          : Natural := 0;
+      Reading                 : Boolean_Array (1 .. Capacity) := (others => False);
       Detached                : Boolean_Array (1 .. Capacity) := (others => False);
       Token_Claimed           : Boolean_Array (1 .. Capacity) := (others => False);
       Error_Ids               : Exception_Id_Array (1 .. Capacity) := (others => Ada.Exceptions.Null_Id);
@@ -296,6 +310,28 @@ private
    end Shared_State;
 
    type Shared_State_Access is access all Shared_State;
+   type Preparation_Guard is new Ada.Finalization.Limited_Controlled with record
+      State      : Shared_State_Access := null;
+      Slot       : Positive := 1;
+      Generation : Generation_Number := 0;
+      Armed      : Boolean := False;
+   end record;
+   --  @exclude
+   --  @param Guard Reservation being cleaned up
+   overriding
+   procedure Finalize (Guard : in out Preparation_Guard);
+
+   type Await_Copy_Guard is new Ada.Finalization.Limited_Controlled with record
+      State      : Shared_State_Access := null;
+      Slot       : Positive := 1;
+      Generation : Generation_Number := 0;
+      Armed      : Boolean := False;
+   end record;
+   --  @exclude
+   --  @param Guard Result-copy claim being cleaned up
+   overriding
+   procedure Finalize (Guard : in out Await_Copy_Guard);
+
    type Handle_Guard is new Ada.Finalization.Limited_Controlled with record
       State      : Shared_State_Access := null;
       Slot       : Positive := 1;
@@ -326,6 +362,8 @@ private
       Capacity : Positive)
    is limited new Ada.Finalization.Limited_Controlled with record
       State             : aliased Shared_State (Capacity, Workers);
+      Inputs            : Input_Array (1 .. Capacity);
+      Results           : Result_Array (1 .. Capacity);
       Gates             : aliased Gate_Array (1 .. Capacity);
       Pool              : Worker_Array_Access;
       Started           : Boolean := False;

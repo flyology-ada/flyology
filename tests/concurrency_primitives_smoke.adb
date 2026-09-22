@@ -628,6 +628,48 @@ procedure Concurrency_Primitives_Smoke is
       Native_Executors.Shutdown (Item);
    end Exercise_Native_Executor_Abandon_Claim;
 
+   procedure Exercise_Native_Executor_Slot_Churn is
+      Item : aliased Native_Executors.Executor (Workers => 1, Capacity => 4);
+      type Handle_Array is array (Positive range <>) of Native_Executors.Operation_Handle (Item'Access);
+      Handles  : Handle_Array (1 .. 4);
+      Accepted : Boolean;
+      Result   : Integer;
+   begin
+      Native_Executors.Start (Item);
+      for Round in 1 .. 24 loop
+         for Index in Handles'Range loop
+            Accepted := False;
+            for Attempt in 1 .. 1_000 loop
+               Native_Executors.Submit
+                 (Item,
+                  (if Index = 1 then 98 else Round * 10 + Index),
+                  null,
+                  Ada.Real_Time.Time_Last,
+                  Handles (Index),
+                  Accepted);
+               exit when Accepted;
+               delay 0.001;
+            end loop;
+            pragma Assert (Accepted);
+         end loop;
+         --  The first operation holds the worker while the second and
+         --  fourth are abandoned in the queue. Every following round must
+         --  reset those slots' requested tokens and recover their free links.
+         Native_Executors.Abandon (Item, Handles (2));
+         Native_Executors.Abandon (Item, Handles (4));
+         Native_Executors.Await (Item, Handles (1), Result);
+         pragma Assert (Result = 196);
+         Native_Executors.Await (Item, Handles (3), Result);
+         pragma Assert (Result = (Round * 10 + 3) * 2);
+         for Attempt in 1 .. 1_000 loop
+            exit when Native_Executors.Statistics (Item).Outstanding_Operations = 0;
+            delay 0.001;
+         end loop;
+         pragma Assert (Native_Executors.Statistics (Item).Outstanding_Operations = 0);
+      end loop;
+      Native_Executors.Shutdown (Item);
+   end Exercise_Native_Executor_Slot_Churn;
+
    procedure Exercise_Native_Executor_Result_Copy_Failure is
       use type Ada.Real_Time.Time;
 
@@ -1499,6 +1541,7 @@ begin
    Exercise_Native_Executor_Abandon_Failure;
    Exercise_Native_Executor_Lightweight_Await;
    Exercise_Native_Executor_Abandon_Claim;
+   Exercise_Native_Executor_Slot_Churn;
    Exercise_Native_Executor_Shutdown_Failure;
    Exercise_Native_Executor_Shutdown_Abort;
    Exercise_Native_Executor_Token_Cleanup_Abort;
