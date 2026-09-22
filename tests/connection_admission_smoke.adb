@@ -4,6 +4,7 @@ with Flyology.IO;
 with Flyology.IO.Connections;
 with Flyology.IO.Connections.Testing;
 with Flyology.IO.Sockets;
+with Flyology.Operations;
 with Interfaces.C;
 
 procedure Connection_Admission_Smoke is
@@ -461,6 +462,158 @@ procedure Connection_Admission_Smoke is
       end if;
    end Run_Raw_Accept_Abort;
 
+   procedure Run_Scoped_Raw_Accept_Abort (Model : Flyology.Execution_Model) is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Point  : constant Testing.Barrier_Point := Testing.Raw_Accept_Returned;
+   begin
+      declare
+         Listener : aliased Sockets.Socket_Type;
+         Client   : Sockets.Socket_Type;
+         Address  : Sockets.Endpoint;
+      begin
+         Open_Listener (Listener, Address);
+         Sockets.Create_Socket (Client);
+         Sockets.Connect_Socket (Client, Address);
+         Testing.Reset_Barriers;
+         Testing.Arm (Point);
+         declare
+            task Worker is
+               pragma Task_Info (Model);
+            end Worker;
+
+            task body Worker is
+               Set        : aliased Flyology.Operations.Completion_Set (1);
+               Acceptance : Sockets.Accept_Operation (Set'Access);
+            begin
+               Sockets.Accept_Connection (Listener'Access, 1.0, Acceptance);
+               Flyology.Operations.Wait_All (Set);
+            end Worker;
+         begin
+            Testing.Wait_Reached (Point);
+            abort Worker;
+            Testing.Release (Point);
+         exception
+            when others =>
+               Testing.Release (Point);
+               abort Worker;
+               raise;
+         end;
+         Close_If_Open (Client);
+         Close_If_Open (Listener);
+         Testing.Reset_Barriers;
+      exception
+         when others =>
+            Testing.Release (Point);
+            Close_If_Open (Client);
+            Close_If_Open (Listener);
+            raise;
+      end;
+      if Open_FD_Count /= Before then
+         raise Program_Error
+           with
+             "scoped raw accept abort leaked a descriptor in " & Model'Image;
+      end if;
+   end Run_Scoped_Raw_Accept_Abort;
+
+   procedure Run_Parallel_Accept is
+      Before : constant Interfaces.C.int := Open_FD_Count;
+      Point  : constant Testing.Barrier_Point := Testing.Raw_Accept_Returned;
+   begin
+      declare
+         First_Listener, Second_Listener : Sockets.Socket_Type;
+         First_Client, Second_Client     : Sockets.Socket_Type;
+         First_Address, Second_Address   : Sockets.Endpoint;
+         First_Result, Second_Result     : Result_Box;
+      begin
+         Open_Listener (First_Listener, First_Address);
+         Open_Listener (Second_Listener, Second_Address);
+         Sockets.Create_Socket (First_Client);
+         Sockets.Create_Socket (Second_Client);
+         Sockets.Connect_Socket (First_Client, First_Address);
+         Sockets.Connect_Socket (Second_Client, Second_Address);
+         Testing.Reset_Barriers;
+         Testing.Arm (Point);
+         declare
+            task First is
+               pragma Task_Info (Flyology.Native_Task);
+            end First;
+
+            task body First is
+               Accepted_Socket : Sockets.Socket_Type;
+               Peer            : Sockets.Endpoint;
+            begin
+               begin
+                  Sockets.Accept_Connection
+                    (First_Listener, Accepted_Socket, Peer, Timeout => 1.0);
+                  Sockets.Close_Socket (Accepted_Socket);
+                  First_Result.Set (Accepted);
+               exception
+                  when others =>
+                     First_Result.Set (Failed);
+               end;
+            end First;
+         begin
+            Testing.Wait_Reached (Point);
+            declare
+               task Second is
+                  pragma Task_Info (Flyology.Native_Task);
+               end Second;
+
+               task body Second is
+                  Accepted_Socket : Sockets.Socket_Type;
+                  Peer            : Sockets.Endpoint;
+               begin
+                  begin
+                     Sockets.Accept_Connection
+                       (Second_Listener,
+                        Accepted_Socket,
+                        Peer,
+                        Timeout => 1.0);
+                     Sockets.Close_Socket (Accepted_Socket);
+                     Second_Result.Set (Accepted);
+                  exception
+                     when others =>
+                        Second_Result.Set (Failed);
+                  end;
+               end Second;
+            begin
+               --  The first descriptor remains unpublished at the hook.
+               --  A package-wide bridge would block this independent listener.
+               Await_Result
+                 (Second_Result, Accepted, "parallel listener accept");
+            exception
+               when others =>
+                  Testing.Release (Point);
+                  abort Second;
+                  raise;
+            end;
+            Testing.Release (Point);
+            Await_Result (First_Result, Accepted, "held listener accept");
+         exception
+            when others =>
+               Testing.Release (Point);
+               abort First;
+               raise;
+         end;
+         Close_If_Open (First_Client);
+         Close_If_Open (Second_Client);
+         Close_If_Open (First_Listener);
+         Close_If_Open (Second_Listener);
+         Testing.Reset_Barriers;
+      exception
+         when others =>
+            Testing.Release (Point);
+            Close_If_Open (First_Client);
+            Close_If_Open (Second_Client);
+            Close_If_Open (First_Listener);
+            Close_If_Open (Second_Listener);
+            raise;
+      end;
+      if Open_FD_Count /= Before then
+         raise Program_Error with "parallel accepts leaked a descriptor";
+      end if;
+   end Run_Parallel_Accept;
+
    procedure Run_Release_Wake_Failure (Model : Flyology.Execution_Model) is
       Before : constant Interfaces.C.int := Open_FD_Count;
       Point  : constant Testing.Barrier_Point := Testing.Accept_Socket_Owned;
@@ -580,6 +733,9 @@ begin
    Run_Abort_Boundaries (Flyology.Native_Task);
    Run_Raw_Accept_Abort (Flyology.Lightweight_Task);
    Run_Raw_Accept_Abort (Flyology.Native_Task);
+   Run_Scoped_Raw_Accept_Abort (Flyology.Lightweight_Task);
+   Run_Scoped_Raw_Accept_Abort (Flyology.Native_Task);
+   Run_Parallel_Accept;
    Run_Release_Wake_Failure (Flyology.Lightweight_Task);
    Run_Release_Wake_Failure (Flyology.Native_Task);
    Run_Drain_Wake_Failure;

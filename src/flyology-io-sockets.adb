@@ -8,6 +8,7 @@ with Flyology.Time_Math;
 with Flyology.Wait_Policy;
 with GNAT.OS_Lib;
 with System.Atomic_Primitives;
+with System.Soft_Links;
 with System.Storage_Elements;
 
 package body Flyology.IO.Sockets is
@@ -331,21 +332,16 @@ package body Flyology.IO.Sockets is
    --  failed, and -2 means C_Accept closed a descriptor that accept(2)
    --  returned but descriptor configuration could not make usable.
 
-   --  A protected call defers abort from the C accept return through
-   --  publication in the caller-owned handle. The listener is nonblocking,
-   --  so the foreign call itself never waits for a connection.
-   protected type Accept_Return_Bridge is
-      procedure Invoke
-        (Listener       : Interfaces.C.int;
-         Decode_Address : Interfaces.C.int;
-         Family         : access Interfaces.C.unsigned_char;
-         Address        : System.Address;
-         Port           : access Interfaces.C.unsigned;
-         Scope          : access Interfaces.C.unsigned;
-         Error          : access Interfaces.C.int;
-         Target         : in out Socket_Type;
-         Result         : out Interfaces.C.int);
-   end Accept_Return_Bridge;
+   procedure Accept_And_Publish
+     (Listener       : Interfaces.C.int;
+      Decode_Address : Interfaces.C.int;
+      Family         : access Interfaces.C.unsigned_char;
+      Address        : System.Address;
+      Port           : access Interfaces.C.unsigned;
+      Scope          : access Interfaces.C.unsigned;
+      Error          : access Interfaces.C.int;
+      Target         : in out Socket_Type;
+      Result         : out Interfaces.C.int);
 
    function C_Connect
      (Socket  : Interfaces.C.int;
@@ -929,28 +925,42 @@ package body Flyology.IO.Sockets is
       return Result;
    end C_Send_To;
 
-   protected body Accept_Return_Bridge is
-      procedure Invoke
-        (Listener       : Interfaces.C.int;
-         Decode_Address : Interfaces.C.int;
-         Family         : access Interfaces.C.unsigned_char;
-         Address        : System.Address;
-         Port           : access Interfaces.C.unsigned;
-         Scope          : access Interfaces.C.unsigned;
-         Error          : access Interfaces.C.int;
-         Target         : in out Socket_Type;
-         Result         : out Interfaces.C.int) is
+   procedure Accept_And_Publish
+     (Listener       : Interfaces.C.int;
+      Decode_Address : Interfaces.C.int;
+      Family         : access Interfaces.C.unsigned_char;
+      Address        : System.Address;
+      Port           : access Interfaces.C.unsigned;
+      Scope          : access Interfaces.C.unsigned;
+      Error          : access Interfaces.C.int;
+      Target         : in out Socket_Type;
+      Result         : out Interfaces.C.int)
+   is
+      Accepted : Interfaces.C.int := -1;
+   begin
+      --  GNARL tracks deferral on the current Ada task, including a fiber.
+      --  No lock is needed across independent nonblocking listeners.
+      System.Soft_Links.Abort_Defer.all;
       begin
-         Result := C_Accept (Listener, Decode_Address, Family, Address, Port, Scope, Error);
-         if Result >= 0 then
+         Accepted := C_Accept (Listener, Decode_Address, Family, Address, Port, Scope, Error);
+         if Accepted >= 0 then
             if Flyology.Connection_Test_Hooks.Enabled then
                Flyology.Connection_Test_Hooks.Raw_Accept_Return_Barrier;
             end if;
-            Target.Value := Result;
+            Target.Value := Accepted;
             Set_Preparation_State (Target.Preparation'Address, Prepared);
          end if;
-      end Invoke;
-   end Accept_Return_Bridge;
+         Result := Accepted;
+      exception
+         when others =>
+            if Accepted >= 0 and then Target.Value /= Accepted then
+               Close_Ignoring_Errors (Accepted);
+            end if;
+            System.Soft_Links.Abort_Undefer.all;
+            raise;
+      end;
+      System.Soft_Links.Abort_Undefer.all;
+   end Accept_And_Publish;
 
    function Address_Data (Value : IP_Address) return System.Address
    is (case Value.Family is
@@ -2634,8 +2644,6 @@ package body Flyology.IO.Sockets is
       State : not null access Accept_State;
       Event : Flyology.Operations.Driver_Event)
    is
-      Bridge : Accept_Return_Bridge;
-
       procedure Fail (Reason : Scoped_Failure; Code : Interfaces.C.int := 0) is
       begin
          Item.Failure := Reason;
@@ -2679,7 +2687,7 @@ package body Flyology.IO.Sockets is
          Error  : aliased Interfaces.C.int := 0;
          Result : Interfaces.C.int;
       begin
-         Bridge.Invoke
+         Accept_And_Publish
            (Item.Socket.Value,
             Boolean'Pos (State.Decode_Address),
             State.Peer_Family'Access,
@@ -3456,7 +3464,6 @@ package body Flyology.IO.Sockets is
       Started          : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
       Socket_Was_Open  : constant Boolean := Is_Open (Socket);
       Pressure_Backoff : Duration := 0.001;
-      Bridge           : Accept_Return_Bridge;
 
       procedure Pause_Before_Retry (Requested : Duration) is
          Requests : Wait_Request_Array (Interrupts'Range);
@@ -3505,7 +3512,7 @@ package body Flyology.IO.Sockets is
             Error  : aliased Interfaces.C.int;
             Result : Interfaces.C.int;
          begin
-            Bridge.Invoke
+            Accept_And_Publish
               (Server.Value,
                Boolean'Pos (Decode_Address),
                Family'Access,
