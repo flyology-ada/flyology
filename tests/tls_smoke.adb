@@ -1,8 +1,10 @@
 with Ada.Exceptions;
 with Ada.Environment_Variables;
+with Ada.Finalization;
 with Ada.Strings.Fixed;
 with Ada.Streams;
 with Ada.Text_IO;
+with Ada.Unchecked_Deallocation;
 with Flyology;
 with Flyology.Cancellation;
 with Flyology.Fairness;
@@ -54,6 +56,9 @@ procedure TLS_Smoke is
    Client_Backend   : OpenSSL.OpenSSL_Provider;
    Server_Backend   : OpenSSL.OpenSSL_Provider;
    H2_Then_HTTP_1_1 : constant ALPN.Protocol_List := ALPN.Offer ("h2") & "http/1.1";
+
+   procedure Free_Session is new Ada.Unchecked_Deallocation
+     (TLS.Session'Class, TLS.Session_Access);
 
    protected type Outcome is
       procedure Report (Passed : Boolean);
@@ -1611,6 +1616,112 @@ procedure TLS_Smoke is
       pragma Assert (Live_OpenSSL_Modules = Baseline);
    end Run_Provider_Lifetime;
 
+   procedure Run_Concurrent_Session_Creation is
+      Baseline      : constant Interfaces.C.unsigned := Live_OpenSSL_Modules;
+      Workers_Count : constant := 8;
+
+      protected Gate is
+         procedure Arrive;
+         entry Start;
+         procedure Report (Passed : Boolean);
+         function Passed return Boolean;
+      private
+         Arrivals : Natural := 0;
+         OK       : Boolean := True;
+      end Gate;
+
+      protected body Gate is
+         procedure Arrive is
+         begin
+            Arrivals := Arrivals + 1;
+         end Arrive;
+
+         entry Start when Arrivals = Workers_Count is
+         begin
+            null;
+         end Start;
+
+         procedure Report (Passed : Boolean) is
+         begin
+            OK := OK and Passed;
+         end Report;
+
+         function Passed return Boolean
+         is (OK);
+      end Gate;
+   begin
+      declare
+         Backend  : OpenSSL.OpenSSL_Provider;
+         Retained : TLS.Provider_Access;
+      begin
+         OpenSSL.Initialize_Client
+           (Backend,
+            CA_File           => Certificate,
+            Library_Directory => Library_Directory);
+         Retained := OpenSSL.Retain (Backend);
+
+         declare
+            task type Worker is
+               pragma Task_Info (Flyology.Native_Task);
+            end Worker;
+
+            task body Worker is
+               Socket : Sockets.Socket_Type;
+               Peer   : Sockets.Socket_Type;
+               Item   : TLS.Connection;
+            begin
+               Gate.Arrive;
+               Gate.Start;
+               for Attempt in 1 .. 32 loop
+                  Sockets.Create_Socket_Pair (Socket, Peer);
+                  if Attempt mod 2 = 0 then
+                     declare
+                        Invalid  : TLS.Session_Access := null;
+                        Rejected : Boolean := False;
+                     begin
+                        begin
+                           Invalid :=
+                             TLS.Create_Session
+                               (Retained.all,
+                                Sockets.Native_Descriptor (Socket),
+                                TLS.Client,
+                                "");
+                        exception
+                           when TLS.TLS_Error =>
+                              Rejected := True;
+                        end;
+                        Free_Session (Invalid);
+                        Gate.Report
+                          (Rejected and then Sockets.Is_Open (Socket));
+                     end;
+                  else
+                     TLS.Take
+                       (Retained.all, Socket, TLS.Client, "localhost", Item);
+                     TLS.Close (Item);
+                  end if;
+                  Sockets.Close_Socket (Socket);
+                  Sockets.Close_Socket (Peer);
+               end loop;
+            exception
+               when Error : others =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Exceptions.Exception_Information (Error));
+                  Gate.Report (False);
+            end Worker;
+
+            Workers : array (1 .. Workers_Count) of Worker;
+         begin
+            Gate.Start;
+            Ada.Finalization.Finalize
+              (Ada.Finalization.Limited_Controlled'Class (Backend));
+         end;
+         pragma Assert (Gate.Passed);
+         pragma Assert (Live_OpenSSL_Modules = Baseline + 1);
+         TLS.Release (Retained);
+      end;
+      pragma Assert (Live_OpenSSL_Modules = Baseline);
+   end Run_Concurrent_Session_Creation;
+
 begin
    pragma Assert (Signal_Wait_Retry_Passes = 1);
    OpenSSL.Initialize_Client (Client_Backend, CA_File => Certificate, Library_Directory => Library_Directory);
@@ -1648,6 +1759,7 @@ begin
    Run_Close_Finalization_Fault;
    Run_Loader_Error;
    Run_Provider_Lifetime;
+   Run_Concurrent_Session_Creation;
    Run_Pre_Cancelled (Flyology.Lightweight_Task);
    Run_Pre_Cancelled (Flyology.Native_Task);
    Run_Queued_Control (Flyology.Lightweight_Task, Cancel_Queued => False);

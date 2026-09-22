@@ -1,5 +1,3 @@
-with Interfaces.C;
-with Interfaces.C.Strings;
 with Flyology.IO.TLS.ALPN;
 with System;
 
@@ -135,27 +133,19 @@ package Flyology.IO.TLS.OpenSSL is
       Protocols   : ALPN.Protocol_List) return Session_Access;
 
 private
-   --  Serializes access to the refcounted C provider across creation, queries,
-   --  and controlled finalization.
+   --  Serializes publication, reference acquisition, queries, and finalization
+   --  detachment of the refcounted C provider.
    protected type Provider_State is
       --  Publish a newly configured provider handle.
       procedure Install (Value : System.Address; Side : Role);
-      --  Remove and release the published provider handle.
-      procedure Release;
+      --  Remove the published provider handle before releasing it outside the monitor.
+      procedure Release (Value : out System.Address);
       --  Copy the loaded provider version while retaining its handle.
       function Version return String;
       --  Report whether a provider handle is published.
       function Is_Available return Boolean;
-      --  Create a C session while finalization is excluded by this monitor.
-      procedure Create_Session
-        (FD              : Interfaces.C.int;
-         Side            : Role;
-         Server_Name     : Interfaces.C.Strings.chars_ptr;
-         Protocols       : System.Address;
-         Protocol_Length : Interfaces.C.unsigned;
-         Error           : System.Address;
-         Error_Size      : Interfaces.C.size_t;
-         Value           : out System.Address);
+      --  Retain the C provider for session construction while finalization is excluded.
+      procedure Retain_For_Session (Side : Role; Value : out System.Address);
       --  Retain the C provider handle while finalization is excluded.
       procedure Retain (Value : out System.Address; Side : out Role);
    private
