@@ -5,6 +5,7 @@ with Flyology.Execution_Groups;
 with Flyology.IO.Connections;
 with Flyology.IO.Sockets;
 with Flyology.IO.Structured_Servers;
+with Flyology.Observability;
 with System.Multiprocessors;
 
 procedure Structured_Server_Smoke is
@@ -16,12 +17,17 @@ procedure Structured_Server_Smoke is
    use type Flyology.IO.Descriptor;
    use type Flyology.Execution_Groups.Group_Id;
    use type Flyology.Execution_Model;
+   use type Flyology.Observability.Counter;
 
-   procedure Open_Listener (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
+   procedure Open_Listener
+     (Listener : in out Sockets.Socket_Type; Address : out Sockets.Endpoint) is
    begin
       Sockets.Create_Socket (Listener);
-      Sockets.Set_Socket_Option (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
-      Sockets.Bind_Socket (Listener, Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
+      Sockets.Set_Socket_Option
+        (Listener, Sockets.Socket_Level, (Sockets.Reuse_Address, True));
+      Sockets.Bind_Socket
+        (Listener,
+         Sockets.Network_Endpoint (Sockets.Loopback_IPv4, Sockets.Any_Port));
       Sockets.Listen_Socket (Listener, Length => 32);
       Address := Sockets.Get_Socket_Name (Listener);
    end Open_Listener;
@@ -89,17 +95,23 @@ procedure Structured_Server_Smoke is
          pragma Unreferenced (Peer);
       begin
          if Model = Flyology.Lightweight_Task then
-            pragma Assert (Flyology.Execution_Groups.Current = Flyology.Execution_Groups.Group_Id (CPU));
+            pragma
+              Assert
+                (Flyology.Execution_Groups.Current
+                   = Flyology.Execution_Groups.Group_Id (CPU));
          end if;
          State.State.Handler_Entered;
          case State.Mode is
             when Gated_Echo    =>
                State.State.Await_Gate;
-               Connection.Receive_Exactly (Data, Timeout => 1.0, Token => Cancellation);
-               Connection.Send_All (Data, Timeout => 1.0, Token => Cancellation);
+               Connection.Receive_Exactly
+                 (Data, Timeout => 1.0, Token => Cancellation);
+               Connection.Send_All
+                 (Data, Timeout => 1.0, Token => Cancellation);
 
             when Draining_Read =>
-               Connection.Receive_Exactly (Data, Timeout => 2.0, Token => Cancellation);
+               Connection.Receive_Exactly
+                 (Data, Timeout => 2.0, Token => Cancellation);
 
             when Failing       =>
                raise Program_Error with "deliberate handler failure";
@@ -115,8 +127,11 @@ procedure Structured_Server_Smoke is
 
       use type Structured.Failure_Origin;
 
-      procedure Wait_Until (Condition : not null access function return Boolean; Message : String) is
-         Deadline : constant Ada.Real_Time.Time := Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
+      procedure Wait_Until
+        (Condition : not null access function return Boolean; Message : String)
+      is
+         Deadline : constant Ada.Real_Time.Time :=
+           Ada.Real_Time.Clock + Ada.Real_Time.Seconds (2);
       begin
          while not Condition.all loop
             if Ada.Real_Time.Clock >= Deadline then
@@ -172,13 +187,15 @@ procedure Structured_Server_Smoke is
 
             task body Client is
                Socket : Sockets.Socket_Type;
-               Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 42);
+               Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
+                 (1 => 42);
                Got    : Ada.Streams.Stream_Element_Array (1 .. 1);
             begin
                Sockets.Create_Socket (Socket);
                Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
                Flyology.IO.Sockets.Send_All (Socket, Sent, Timeout => 1.0);
-               Flyology.IO.Sockets.Receive_Exactly (Socket, Got, Timeout => 2.0);
+               Flyology.IO.Sockets.Receive_Exactly
+                 (Socket, Got, Timeout => 2.0);
                Results.Report (Got = Sent);
                Sockets.Close_Socket (Socket);
             exception
@@ -190,18 +207,22 @@ procedure Structured_Server_Smoke is
             pragma Unreferenced (Clients);
          begin
             begin
-               Wait_Until (Two_Handlers'Access, "capacity did not admit two handlers");
+               Wait_Until
+                 (Two_Handlers'Access, "capacity did not admit two handlers");
                declare
-                  Sample : constant Structured.Snapshot := Structured.Current (Item);
+                  Sample : constant Structured.Snapshot :=
+                    Structured.Current (Item);
                begin
                   pragma Assert (Sample.Active_Handlers = 2);
                   pragma Assert (Sample.Accepted_Connections = 2);
                   pragma Assert (Sample.Accepting);
                end;
                delay 0.020;
-               pragma Assert (Structured.Current (Item).Accepted_Connections = 2);
+               pragma
+                 Assert (Structured.Current (Item).Accepted_Connections = 2);
                State.State.Release_Gate;
-               Wait_Until (All_Clients'Access, "overload clients did not drain");
+               Wait_Until
+                 (All_Clients'Access, "overload clients did not drain");
                Structured.Request_Shutdown (Item);
             exception
                when others =>
@@ -224,6 +245,67 @@ procedure Structured_Server_Smoke is
             pragma Assert (not Sample.Forced_Cancellation);
          end;
       end Run_Overload;
+
+      procedure Run_Idle_Fanout is
+         Capacity : constant Positive := 32;
+         Item     : aliased Structured.Server (Capacity => Capacity);
+         State    : aliased Context := (Mode => Draining_Read, others => <>);
+         Listener : Sockets.Socket_Type;
+         Address  : Sockets.Endpoint;
+
+         function One_Listener_Wait return Boolean is
+            Sample : Flyology.Observability.Group_Snapshot;
+         begin
+            return
+              Flyology.Observability.Snapshot
+                (Flyology.Execution_Groups.Group_Id (CPU), Sample)
+              and then Sample.Members
+                       >= Flyology.Observability.Counter (Capacity)
+              and then Sample.Descriptor_Waits = 1;
+         end One_Listener_Wait;
+
+         function One_Completed return Boolean
+         is (Structured.Current (Item).Completed_Connections = 1);
+      begin
+         Open_Listener (Listener, Address);
+         declare
+            task Runner;
+
+            task body Runner is
+            begin
+               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.5);
+            end Runner;
+         begin
+            begin
+               if Model = Flyology.Lightweight_Task then
+                  --  All 32 fibers have activated, but only one owns a
+                  --  descriptor wait on the shared listener.
+                  Wait_Until
+                    (One_Listener_Wait'Access,
+                     "idle handlers registered multiple listener waits");
+               end if;
+               declare
+                  Client : Sockets.Socket_Type;
+               begin
+                  Sockets.Create_Socket (Client);
+                  Sockets.Connect (Client, Address, Timeout => 1.0);
+                  Sockets.Send_All (Client, [1 => 9], Timeout => 1.0);
+                  Sockets.Close_Socket (Client);
+               end;
+               Wait_Until
+                 (One_Completed'Access,
+                  "single accept did not finish with idle workers");
+               Structured.Request_Shutdown (Item);
+            exception
+               when others =>
+                  Structured.Request_Shutdown (Item);
+                  raise;
+            end;
+         end;
+         pragma Assert (not Sockets.Is_Open (Listener));
+         pragma Assert (Structured.Current (Item).Accepted_Connections = 1);
+         pragma Assert (Structured.Current (Item).Failures = 0);
+      end Run_Idle_Fanout;
 
       procedure Run_Graceful_Drain is
          Item     : aliased Structured.Server (Capacity => 1);
@@ -248,7 +330,8 @@ procedure Structured_Server_Smoke is
 
             task body Client is
                Socket : Sockets.Socket_Type;
-               Data   : constant Ada.Streams.Stream_Element_Array (1 .. 1) := (1 => 7);
+               Data   : constant Ada.Streams.Stream_Element_Array (1 .. 1) :=
+                 (1 => 7);
             begin
                Sockets.Create_Socket (Socket);
                Flyology.IO.Sockets.Connect (Socket, Address, Timeout => 1.0);
@@ -259,7 +342,8 @@ procedure Structured_Server_Smoke is
             end Client;
          begin
             begin
-               Wait_Until (Handler_Active'Access, "draining handler was not admitted");
+               Wait_Until
+                 (Handler_Active'Access, "draining handler was not admitted");
                Structured.Request_Shutdown (Item);
                delay 0.020;
                pragma Assert (Structured.Current (Item).Active_Handlers = 1);
@@ -292,7 +376,8 @@ procedure Structured_Server_Smoke is
          function Forced_Cancellation_Completed return Boolean is
             Sample : constant Structured.Snapshot := Structured.Current (Item);
          begin
-            return Sample.Forced_Cancellation and then Sample.Active_Handlers = 0;
+            return
+              Sample.Forced_Cancellation and then Sample.Active_Handlers = 0;
          end Forced_Cancellation_Completed;
       begin
          Open_Listener (Listener, Address);
@@ -304,7 +389,8 @@ procedure Structured_Server_Smoke is
 
             task body Runner is
             begin
-               Structured.Serve (Item, Listener, State, Drain_Timeout => 0.020);
+               Structured.Serve
+                 (Item, Listener, State, Drain_Timeout => 0.020);
             end Runner;
 
             task body Client is
@@ -316,10 +402,12 @@ procedure Structured_Server_Smoke is
                Sockets.Close_Socket (Socket);
             end Client;
          begin
-            Wait_Until (Handler_Active'Access, "cancellable handler was not admitted");
+            Wait_Until
+              (Handler_Active'Access, "cancellable handler was not admitted");
             Structured.Request_Shutdown (Item);
             Wait_Until
-              (Forced_Cancellation_Completed'Access, "drain deadline did not complete handler cancellation");
+              (Forced_Cancellation_Completed'Access,
+               "drain deadline did not complete handler cancellation");
             State.State.Release_Gate;
          end;
          declare
@@ -349,7 +437,8 @@ procedure Structured_Server_Smoke is
             task body Runner is
             begin
                begin
-                  Structured.Serve (Item, Listener, State, Drain_Timeout => 0.2);
+                  Structured.Serve
+                    (Item, Listener, State, Drain_Timeout => 0.2);
                exception
                   when Structured.Server_Failed =>
                      Propagated := True;
@@ -369,8 +458,12 @@ procedure Structured_Server_Smoke is
          end;
          pragma Assert (Propagated);
          pragma Assert (Structured.Current (Item).Failures = 1);
-         pragma Assert (Structured.Current (Item).First_Failure = Structured.Handler_Callback);
-         pragma Assert (Structured.First_Failure_Information (Item)'Length > 0);
+         pragma
+           Assert
+             (Structured.Current (Item).First_Failure
+                = Structured.Handler_Callback);
+         pragma
+           Assert (Structured.First_Failure_Information (Item)'Length > 0);
       end Run_Failure;
 
       procedure Run_Concurrent_Idle_Shutdown_And_Reuse is
@@ -421,7 +514,8 @@ procedure Structured_Server_Smoke is
             Reused : Sockets.Socket_Type;
          begin
             Sockets.Create_Socket (Reused);
-            pragma Assert (Flyology.IO.Sockets.Native_Descriptor (Reused) = Old_FD);
+            pragma
+              Assert (Flyology.IO.Sockets.Native_Descriptor (Reused) = Old_FD);
             Sockets.Close_Socket (Reused);
          end;
          pragma Assert (Structured.Current (Item).Active_Handlers = 0);
@@ -451,6 +545,7 @@ procedure Structured_Server_Smoke is
       end Run_Pre_Requested_Shutdown;
    begin
       Run_Overload;
+      Run_Idle_Fanout;
       Run_Graceful_Drain;
       Run_Deadline_Cancel;
       Run_Failure;
@@ -458,9 +553,12 @@ procedure Structured_Server_Smoke is
       Run_Pre_Requested_Shutdown;
    end Run_Lane;
 
-   procedure Run_Lightweight is new Run_Lane (Model => Flyology.Lightweight_Task, CPU => 1);
+   procedure Run_Lightweight is new
+     Run_Lane (Model => Flyology.Lightweight_Task, CPU => 1);
    procedure Run_Native is new
-     Run_Lane (Model => Flyology.Native_Task, CPU => System.Multiprocessors.Not_A_Specific_CPU);
+     Run_Lane
+       (Model => Flyology.Native_Task,
+        CPU   => System.Multiprocessors.Not_A_Specific_CPU);
 begin
    Run_Lightweight;
    Run_Native;

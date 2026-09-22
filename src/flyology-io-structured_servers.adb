@@ -222,8 +222,59 @@ package body Flyology.IO.Structured_Servers is
    is
       Manager : aliased Connections.Server (Capacity => Item.Capacity);
 
+      --  Exactly one idle worker may register listener readiness. The other
+      --  workers wait here, leaving accepted work bounded by their task count
+      --  and overload in the kernel backlog.
+      protected type Accept_Lease is
+         entry Acquire (Armed : not null access Boolean; Allowed : out Boolean);
+         procedure Release (Armed : not null access Boolean);
+         procedure Stop;
+      private
+         Busy    : Boolean := False;
+         Stopped : Boolean := False;
+      end Accept_Lease;
+
+      protected body Accept_Lease is
+         entry Acquire (Armed : not null access Boolean; Allowed : out Boolean) when not Busy or else Stopped
+         is
+         begin
+            Allowed := not Stopped;
+            if Allowed then
+               Busy := True;
+               Armed.all := True;
+            end if;
+         end Acquire;
+
+         procedure Release (Armed : not null access Boolean) is
+         begin
+            Busy := False;
+            Armed.all := False;
+         end Release;
+
+         procedure Stop is
+         begin
+            Stopped := True;
+         end Stop;
+      end Accept_Lease;
+
+      Accept_Gate : aliased Accept_Lease;
+
+      type Accept_Lease_Guard (Gate : not null access Accept_Lease) is new Ada.Finalization.Limited_Controlled
+      with record
+         Armed : aliased Boolean := False;
+      end record;
+
+      overriding
+      procedure Finalize (Guard : in out Accept_Lease_Guard) is
+      begin
+         if Guard.Armed then
+            Guard.Gate.Release (Guard.Armed'Access);
+         end if;
+      end Finalize;
+
       procedure Stop_Accepting is
       begin
+         Accept_Gate.Stop;
          Item.Accept_Stop.Request;
       end Stop_Accepting;
 
@@ -431,21 +482,30 @@ package body Flyology.IO.Structured_Servers is
                         Cancelled  : Boolean := False;
                         Failed     : Boolean := False;
                      begin
+                        declare
+                           Lease   : Accept_Lease_Guard (Accept_Gate'Access);
+                           Allowed : Boolean;
                         begin
-                           Connections.Accept_Connection
-                             (Manager  => Manager,
-                              Listener => Item.Owned_Listener,
-                              Item     => Connection,
-                              Address  => Peer,
-                              Token    => Item.Accept_Stop'Access);
-                           Admitted := True;
-                           Item.State.Handler_Started;
-                        exception
-                           when Connections.Operation_Cancelled | Connections.Admission_Closed =>
-                              Stop_Worker := True;
-                           when Event : others =>
-                              Report (Admission_Loop, Event);
-                              Stop_Worker := True;
+                           begin
+                              Accept_Gate.Acquire (Lease.Armed'Access, Allowed);
+                              if not Allowed then
+                                 raise Connections.Operation_Cancelled;
+                              end if;
+                              Connections.Accept_Connection
+                                (Manager  => Manager,
+                                 Listener => Item.Owned_Listener,
+                                 Item     => Connection,
+                                 Address  => Peer,
+                                 Token    => Item.Accept_Stop'Access);
+                              Admitted := True;
+                              Item.State.Handler_Started;
+                           exception
+                              when Connections.Operation_Cancelled | Connections.Admission_Closed =>
+                                 Stop_Worker := True;
+                              when Event : others =>
+                                 Report (Admission_Loop, Event);
+                                 Stop_Worker := True;
+                           end;
                         end;
 
                         if Admitted then
