@@ -2609,11 +2609,14 @@ cleanup transitions, not across the serving loop. `Serve` creates exactly
 `Capacity` dependent Ada handler tasks in a lexical task scope; each task
 accepts at most one connection at a time, so accepted work cannot exceed the
 bound and overload remains in the kernel listen backlog. There is no detached
-task, hidden worker thread, or user-space connection queue. A native
-instantiation creates ordinary GNARL native tasks backed by pthreads; a
-lightweight instantiation creates fibers on the configured loop pool. The
-designation belongs to the instantiated task type and never changes during a
-connection. `Handler_CPU` is also a task-type property: an explicit
+task, hidden worker thread, or user-space connection queue. One idle handler
+at a time waits for listener readiness; the others wait for an abort-safe
+accept lease. The lease passes to another idle handler before the admitted
+handler invokes its callback, so a readiness event does not wake every idle
+handler. A native instantiation creates ordinary GNARL native tasks backed by
+pthreads; a lightweight instantiation creates fibers on the configured loop
+pool. The designation belongs to the instantiated task type and never changes
+during a connection. `Handler_CPU` is also a task-type property: an explicit
 value chooses an event group for lightweight handlers (or keeps normal Ada CPU
 semantics for native handlers), while `Not_A_Specific_CPU` uses the configured
 automatic event-loop pool or stock native placement.
