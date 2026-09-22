@@ -607,6 +607,7 @@ create_finalize_race_smoke
 library_finalize_exception_runtime_smoke
 library_finalize_runtime_smoke
 lane_identity_lookup_smoke
+same_group_wake_smoke
 pool_reduction_claim_smoke
 pool_reduction_cross_to_shard_smoke
 structured_server_reuse_smoke
@@ -1146,6 +1147,8 @@ unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
   "$test_bin/library_finalize_runtime_smoke"
 "$project_root/scripts/run-with-timeout.sh" 30 \
   "$test_bin/lane_identity_lookup_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/same_group_wake_smoke"
 #  A saved exception from a controlled library finalizer must propagate after
 #  scheduler teardown. The atexit marker proves the exceptional path retained
 #  the same exactly-once ordering instead of merely producing a nonzero exit.

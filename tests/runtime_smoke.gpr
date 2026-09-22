@@ -118,6 +118,7 @@ project Runtime_Smoke is
       "library_finalize_exception_runtime_smoke.adb",
       "library_finalize_runtime_smoke.adb",
       "lane_identity_lookup_smoke.adb",
+      "same_group_wake_smoke.adb",
       "lifecycle_smoke.adb",
       "lifecycle_churn_smoke.adb",
       "lightweight_affinity_smoke.adb",
