@@ -21,6 +21,14 @@ is
    --  Bounded descriptor set armed as one operation source.
    type Readiness_Source_Array is array (Positive range <>) of Readiness_Source;
 
+   --  Readiness from the current completion-set wake. A shared notification
+   --  may have been consumed by another operation in the same batch.
+   type Source_Readiness is (Not_Ready, Ready, Shared_Ready);
+
+   --  Inspect one source from the most recent Arm_Readiness call, by its
+   --  one-based position. Valid only during a Source_Ready drive.
+   function Readiness (Item : Operation'Class; Position : Positive) return Source_Readiness;
+
    --  Reserve the operation's stable slot and mark it pending. Call this once
    --  before the provider's first Drive event.
    --  @param Item Fresh or previously consumed operation object

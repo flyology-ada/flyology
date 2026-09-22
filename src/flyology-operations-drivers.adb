@@ -22,6 +22,20 @@ package body Flyology.Operations.Drivers is
       end;
    end Pending_Slot;
 
+   function Readiness (Item : Operation'Class; Position : Positive) return Source_Readiness is
+      Id : constant Operation_Id := Pending_Slot (Item);
+   begin
+      if not Item.Set.Slots (Id).Delivering_Ready or else Position > Max_Readiness_Sources_Per_Operation then
+         raise Operation_Error with "no readiness notification at this source";
+      elsif not Item.Set.Slots (Id).Ready_Sources (Readiness_Source_Index (Position)) then
+         return Not_Ready;
+      elsif Item.Set.Slots (Id).Shared_Sources (Readiness_Source_Index (Position)) then
+         return Shared_Ready;
+      else
+         return Ready;
+      end if;
+   end Readiness;
+
    procedure Start (Item : in out Operation'Class) is
    begin
       Register (Item);

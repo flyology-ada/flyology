@@ -286,6 +286,7 @@ private
    subtype Readiness_Source_Index is Positive range 1 .. Max_Readiness_Sources_Per_Operation;
    type Descriptor_Source_Array is array (Readiness_Source_Index) of Interfaces.C.int;
    type Write_Interest_Array is array (Readiness_Source_Index) of Boolean;
+   type Ready_Source_Array is array (Readiness_Source_Index) of Boolean;
 
    type Slot_Record is record
       State            : Slot_State := Vacant;
@@ -294,6 +295,9 @@ private
       Source_Count     : Natural range 0 .. Max_Readiness_Sources_Per_Operation := 0;
       Descriptors      : Descriptor_Source_Array := (others => Interfaces.C.int (-1));
       For_Write        : Write_Interest_Array := (others => False);
+      Ready_Sources    : Ready_Source_Array := (others => False);
+      Shared_Sources   : Ready_Source_Array := (others => False);
+      Delivering_Ready : Boolean := False;
       Deadline         : Duration := Duration'Last;
       Result           : Terminal_Outcome := Succeeded;
       Reported         : Boolean := False;

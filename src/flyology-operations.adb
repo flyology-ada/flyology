@@ -748,11 +748,51 @@ package body Flyology.Operations is
                                    and then Has_Readiness (Set.Slots (Candidate), Descriptor, For_Write)
                                  then
                                     Processed (Candidate) := True;
+                                    --  Retain every source notified in this
+                                    --  batch before clearing the armed set.
+                                    --  Another operation may consume a shared
+                                    --  descriptor before this driver examines it.
+                                    Set.Slots (Candidate).Ready_Sources := (others => False);
+                                    Set.Slots (Candidate).Shared_Sources := (others => False);
+                                    for Source in 1 .. Set.Slots (Candidate).Source_Count loop
+                                       for Other in 1 .. Ready.Count loop
+                                          declare
+                                             Index       : constant Positive := Ready.Indexes (Other);
+                                             Same_Source : constant Boolean :=
+                                               Set.Slots (Candidate).Descriptors
+                                                 (Readiness_Source_Index (Source))
+                                               = Requests (Index).FD
+                                               and then Set.Slots (Candidate).For_Write
+                                                          (Readiness_Source_Index (Source))
+                                                        = (Requests (Index).Condition
+                                                           = Flyology.IO.For_Write);
+                                          begin
+                                             if Same_Source then
+                                                Set.Slots (Candidate).Ready_Sources
+                                                  (Readiness_Source_Index (Source)) :=
+                                                  True;
+                                                if Slot_Map (Index) /= Candidate then
+                                                   Set.Slots (Candidate).Shared_Sources
+                                                     (Readiness_Source_Index (Source)) :=
+                                                     True;
+                                                end if;
+                                             end if;
+                                          end;
+                                       end loop;
+                                    end loop;
                                     Clear_Source (Set.Slots (Candidate));
                                     if Set.Slots (Candidate).Owner = null then
                                        raise Operation_Error with "pending operation has no driver";
                                     end if;
-                                    Drive (Set.Slots (Candidate).Owner.all, Source_Ready);
+                                    Set.Slots (Candidate).Delivering_Ready := True;
+                                    begin
+                                       Drive (Set.Slots (Candidate).Owner.all, Source_Ready);
+                                    exception
+                                       when others =>
+                                          Set.Slots (Candidate).Delivering_Ready := False;
+                                          raise;
+                                    end;
+                                    Set.Slots (Candidate).Delivering_Ready := False;
                                  end if;
                               end loop;
                            end if;
