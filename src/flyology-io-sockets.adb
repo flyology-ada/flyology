@@ -2336,22 +2336,19 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
-         Shared   : Boolean := False;
+         Notified : Boolean := False;
       begin
          if Event = Flyology.Operations.Source_Ready then
             for Index in 1 .. Item.Interrupt_Count loop
                case Flyology.Operations.Drivers.Readiness (Item, Index + 1) is
-                  when Flyology.Operations.Drivers.Ready        =>
-                     return True;
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
 
-                  when Flyology.Operations.Drivers.Shared_Ready =>
-                     Shared := True;
-
-                  when Flyology.Operations.Drivers.Not_Ready    =>
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
                      null;
                end case;
             end loop;
-            if not Shared then
+            if not Notified then
                return False;
             end if;
          end if;
@@ -2505,23 +2502,20 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
-         Shared   : Boolean := False;
+         Notified : Boolean := False;
          Offset   : constant Natural := (if Item.Retry_Due then 0 else 1);
       begin
          if Event = Flyology.Operations.Source_Ready then
             for Index in 1 .. Item.Interrupt_Count loop
                case Flyology.Operations.Drivers.Readiness (Item, Index + Offset) is
-                  when Flyology.Operations.Drivers.Ready        =>
-                     return True;
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
 
-                  when Flyology.Operations.Drivers.Shared_Ready =>
-                     Shared := True;
-
-                  when Flyology.Operations.Drivers.Not_Ready    =>
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
                      null;
                end case;
             end loop;
-            if not Shared then
+            if not Notified then
                return False;
             end if;
          end if;
@@ -2812,22 +2806,19 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Source_Count);
-         Shared   : Boolean := False;
+         Notified : Boolean := False;
       begin
          if Event = Flyology.Operations.Source_Ready then
             for Index in 1 .. Source_Count loop
                case Flyology.Operations.Drivers.Readiness (Item, Index + 1) is
-                  when Flyology.Operations.Drivers.Ready        =>
-                     return True;
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
 
-                  when Flyology.Operations.Drivers.Shared_Ready =>
-                     Shared := True;
-
-                  when Flyology.Operations.Drivers.Not_Ready    =>
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
                      null;
                end case;
             end loop;
-            if not Shared then
+            if not Notified then
                return False;
             end if;
          end if;

@@ -23,10 +23,16 @@ is
 
    --  Readiness from the current completion-set wake. A shared notification
    --  may have been consumed by another operation in the same batch.
+   --  @enum Not_Ready This source was not reported ready in the batch
+   --  @enum Ready This source was reported ready only for this operation
+   --  @enum Shared_Ready This source was also armed by another operation
    type Source_Readiness is (Not_Ready, Ready, Shared_Ready);
 
    --  Inspect one source from the most recent Arm_Readiness call, by its
    --  one-based position. Valid only during a Source_Ready drive.
+   --  @param Item Operation receiving the Source_Ready drive
+   --  @param Position One-based position in the most recent armed source set
+   --  @return Readiness reported for that source in the current batch
    function Readiness (Item : Operation'Class; Position : Positive) return Source_Readiness;
 
    --  Reserve the operation's stable slot and mark it pending. Call this once
