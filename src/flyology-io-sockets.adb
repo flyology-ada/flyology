@@ -22,6 +22,7 @@ package body Flyology.IO.Sockets is
    use type Flyology.Socket_Policy.Error_Kind;
    use type Flyology.Socket_Policy.IO_Error_Action;
    use type Flyology.Operations.Driver_Event;
+   use type Flyology.Operations.Drivers.Source_Readiness;
    use type Flyology.Operations.Terminal_Outcome;
    use type System.Address;
    use System.Storage_Elements;
@@ -2335,7 +2336,22 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+         Notified : Boolean := False;
       begin
+         if Event = Flyology.Operations.Source_Ready then
+            for Index in 1 .. Item.Interrupt_Count loop
+               case Flyology.Operations.Drivers.Readiness (Item, Index + 1) is
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
+
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
+                     null;
+               end case;
+            end loop;
+            if not Notified then
+               return False;
+            end if;
+         end if;
          for Index in Requests'Range loop
             Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
          end loop;
@@ -2486,7 +2502,23 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Item.Interrupt_Count);
+         Notified : Boolean := False;
+         Offset   : constant Natural := (if Item.Retry_Due then 0 else 1);
       begin
+         if Event = Flyology.Operations.Source_Ready then
+            for Index in 1 .. Item.Interrupt_Count loop
+               case Flyology.Operations.Drivers.Readiness (Item, Index + Offset) is
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
+
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
+                     null;
+               end case;
+            end loop;
+            if not Notified then
+               return False;
+            end if;
+         end if;
          for Index in Requests'Range loop
             Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
          end loop;
@@ -2614,20 +2646,27 @@ package body Flyology.IO.Sockets is
          return;
       end if;
 
-      declare
-         Requests : constant Wait_Request_Array := (1 => (FD => Item.Socket.Value, Condition => For_Write));
-      begin
-         --  A shared interrupt may have been consumed by an earlier
-         --  operation. SO_ERROR alone is zero while a connect is pending.
-         if Wait_Any (Requests, Timeout => 0.0) = 0 then
-            Arm_Connection_Sources;
-            return;
-         end if;
-      exception
-         when Device_Error =>
-            Fail (Device_Failure);
-            return;
-      end;
+      --  SO_ERROR alone is zero while a connect is pending. The completion
+      --  set's socket notification proves readiness unless another operation
+      --  shared that source and could have consumed it first.
+      if Flyology.Operations.Drivers.Readiness (Item, 1) = Flyology.Operations.Drivers.Not_Ready then
+         Arm_Connection_Sources;
+         return;
+      elsif Flyology.Operations.Drivers.Readiness (Item, 1) = Flyology.Operations.Drivers.Shared_Ready then
+         declare
+            Requests : constant Wait_Request_Array :=
+              (1 => (FD => Item.Socket.Value, Condition => For_Write));
+         begin
+            if Wait_Any (Requests, Timeout => 0.0) = 0 then
+               Arm_Connection_Sources;
+               return;
+            end if;
+         exception
+            when Device_Error =>
+               Fail (Device_Failure);
+               return;
+         end;
+      end if;
 
       Result := C_Pending_Error (Item.Socket.Value, Pending'Access, Error'Access);
       if Result /= 0 then
@@ -2767,7 +2806,22 @@ package body Flyology.IO.Sockets is
 
       function Interrupted return Boolean is
          Requests : Wait_Request_Array (1 .. Source_Count);
+         Notified : Boolean := False;
       begin
+         if Event = Flyology.Operations.Source_Ready then
+            for Index in 1 .. Source_Count loop
+               case Flyology.Operations.Drivers.Readiness (Item, Index + 1) is
+                  when Flyology.Operations.Drivers.Ready | Flyology.Operations.Drivers.Shared_Ready =>
+                     Notified := True;
+
+                  when Flyology.Operations.Drivers.Not_Ready                                        =>
+                     null;
+               end case;
+            end loop;
+            if not Notified then
+               return False;
+            end if;
+         end if;
          for Index in 1 .. Item.Interrupt_Count loop
             Requests (Index) := (FD => Item.Interrupts (Index), Condition => For_Read);
          end loop;

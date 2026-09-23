@@ -14,10 +14,16 @@ procedure Operation_Gates_Smoke is
    use type Flyology.Execution_Model;
    use type Flyology.Operations.Driver_Event;
    use type Flyology.Operations.Terminal_Outcome;
+   use type Flyology.Operations.Drivers.Source_Readiness;
 
    type Multi_Source_Operation (Set : not null access Flyology.Operations.Completion_Set'Class) is
      new Flyology.Operations.Operation (Set)
-   with null record;
+   with record
+      First_Expected  : Flyology.Operations.Drivers.Source_Readiness :=
+        Flyology.Operations.Drivers.Not_Ready;
+      Second_Expected : Flyology.Operations.Drivers.Source_Readiness :=
+        Flyology.Operations.Drivers.Not_Ready;
+   end record;
 
    overriding
    procedure Drive (Item : in out Multi_Source_Operation; Event : Flyology.Operations.Driver_Event);
@@ -50,6 +56,11 @@ procedure Operation_Gates_Smoke is
    begin
       if Event /= Flyology.Operations.Source_Ready then
          raise Program_Error with "unexpected multi-source driver event";
+      end if;
+      if Flyology.Operations.Drivers.Readiness (Item, 1) /= Item.First_Expected
+        or else Flyology.Operations.Drivers.Readiness (Item, 2) /= Item.Second_Expected
+      then
+         raise Program_Error with "completion set delivered incorrect source readiness";
       end if;
       Flyology.Operations.Drivers.Complete (Item, Flyology.Operations.Succeeded);
    end Drive;
@@ -163,12 +174,46 @@ procedure Operation_Gates_Smoke is
          Sockets.Prepare (Left_1);
          Sockets.Prepare (Left_2);
          Flyology.Operations.Drivers.Start (Item);
+         Item.Second_Expected := Flyology.Operations.Drivers.Ready;
          Flyology.Operations.Drivers.Arm_Readiness
            (Item, [(Sockets.Native_Descriptor (Left_1), False), (Sockets.Native_Descriptor (Left_2), False)]);
          Sockets.Send_Socket (Right_2, Data, Last);
          Flyology.Operations.Wait_All (Set);
          Passed := Passed and then Flyology.Operations.Outcome (Item) = Flyology.Operations.Succeeded;
          Flyology.Operations.Consume (Item);
+      end;
+
+      --  Another operation can consume a shared notification before its
+      --  peer's driver runs. Both must see that the source was shared.
+      declare
+         package Sockets renames Flyology.IO.Sockets;
+         Left, Right, Idle_Left, Idle_Right : Sockets.Socket_Type;
+         Set                               : aliased Flyology.Operations.Completion_Set (2);
+         First, Second                     : Multi_Source_Operation (Set'Access);
+         Data                              : constant Ada.Streams.Stream_Element_Array := [1 => 43];
+         Last                              : Ada.Streams.Stream_Element_Offset;
+         Sources                           : Flyology.Operations.Drivers.Readiness_Source_Array (1 .. 2);
+      begin
+         Sockets.Create_Socket_Pair (Left, Right);
+         Sockets.Create_Socket_Pair (Idle_Left, Idle_Right);
+         Sockets.Prepare (Left);
+         Sockets.Prepare (Idle_Left);
+         Sources :=
+           [(Sockets.Native_Descriptor (Left), False), (Sockets.Native_Descriptor (Idle_Left), False)];
+         First.First_Expected := Flyology.Operations.Drivers.Shared_Ready;
+         Second.First_Expected := Flyology.Operations.Drivers.Shared_Ready;
+         Flyology.Operations.Drivers.Start (First);
+         Flyology.Operations.Drivers.Arm_Readiness (First, Sources);
+         Flyology.Operations.Drivers.Start (Second);
+         Flyology.Operations.Drivers.Arm_Readiness (Second, Sources);
+         Sockets.Send_Socket (Right, Data, Last);
+         Flyology.Operations.Wait_All (Set);
+         Passed :=
+           Passed
+           and then Flyology.Operations.Outcome (First) = Flyology.Operations.Succeeded
+           and then Flyology.Operations.Outcome (Second) = Flyology.Operations.Succeeded;
+         Flyology.Operations.Consume (First);
+         Flyology.Operations.Consume (Second);
       end;
 
       --  The documented maximum is a real one-operation capability: six

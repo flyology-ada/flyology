@@ -1901,7 +1901,13 @@ slot. A terminal result otherwise continues occupying capacity.
 
 Cancellation terminalizes the current readiness and timer providers
 immediately. Socket providers run one nonblocking step on the owner task after
-each readiness notification. A submitted file operation uses a caller-owned
+each readiness notification. The completion set gives a driver the readiness
+of each armed source in that wake. Socket drivers skip the interrupt probe when
+only their primary socket source woke. They recheck every reported interrupt
+because its owner may consume the borrowed source through another completion
+set before the driver runs. A connect socket shared inside one completion set
+is likewise rechecked because another operation may consume its readiness.
+A submitted file operation uses a caller-owned
 runtime request node and does not become terminal until the kernel has
 relinquished its borrowed array. File operations currently require a
 lightweight owner; the existing synchronous file procedures remain lane-neutral.
