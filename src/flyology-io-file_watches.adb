@@ -100,6 +100,19 @@ package body Flyology.IO.File_Watches is
          Operation.Outcome := Ready;
          Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
       elsif Timeout = 0.0 then
+         begin
+            if Wait (Item.Native_Source, For_Read, 0.0) then
+               Pump (Item.all);
+               if Take_Pending (Item.all, Operation.Result) then
+                  Operation.Outcome := Ready;
+               end if;
+            end if;
+         exception
+            when others =>
+               Operation.Failure := Drain_Failure;
+               Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Failed);
+               return;
+         end;
          Flyology.Operations.Drivers.Complete (Operation, Flyology.Operations.Succeeded);
       else
          if Timeout > 0.0 then

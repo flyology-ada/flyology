@@ -480,6 +480,7 @@ file_transfers_smoke
 file_watches_recursive_smoke
 file_watches_recovery_smoke
 file_watches_smoke
+flyology-io-file_watches-recursive-zero_timeout_smoke
 files_smoke
 flyology-counter_policy_smoke
 flyology-atomic_store_publication_smoke
