@@ -15,6 +15,12 @@ package System.Flyology.Scheduler is
       Group      : Interfaces.C.int) return Interfaces.C.int;
 
    function Is_Lightweight_Task (T : System.Address) return Interfaces.C.int;
+
+   --  Temporary issue #146 diagnostic surface. The implementation counts
+   --  only registry lock/Find operations performed by Is_Lightweight_Task.
+   procedure Reset_Lane_Predicate_Lookups;
+   function Lane_Predicate_Lookups return Interfaces.C.unsigned_long_long;
+
    function Current_Task return System.Address;
    function Task_Thread (T : System.Address) return System.OS_Interface.Thread_Id;
 

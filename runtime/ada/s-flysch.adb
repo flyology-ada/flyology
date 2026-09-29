@@ -443,6 +443,7 @@ package body System.Flyology.Scheduler is
    Topology_Lock              : Scheduler_Mutex;
    Registry_Shard_Locks       : Registry_Shard_Lock_Array;
    Registry_Instances         : Registry_Instance_Array := (others => 0);
+   Lane_Predicate_Counts      : Registry_Instance_Array := (others => 0);
    --  Creates that passed the lifecycle guard and may still name, read, or
    --  lock an execution group. Guarded by the matching shard lock, so
    --  Finalize observes every claim while it holds all shards.
@@ -2824,10 +2825,48 @@ package body System.Flyology.Scheduler is
       end if;
       Shard := Registry_Shard_For (T);
       Lock_Registry_Shard (Shard);
+      if Lane_Predicate_Counts (Shard) < C.unsigned_long_long'Last then
+         Lane_Predicate_Counts (Shard) := Lane_Predicate_Counts (Shard) + 1;
+      end if;
       Result := (if Find (T) = null then 0 else 1);
       Unlock_Registry_Shard (Shard);
       return Result;
    end Is_Lightweight_Task;
+
+   procedure Reset_Lane_Predicate_Lookups is
+   begin
+      --  Holding every shard gives reset one global cut relative to every
+      --  counted lock/Find operation; the test never infers asynchronous
+      --  state from independently sampled counters.
+      for Shard in Registry_Shard_Index loop
+         Lock_Registry_Shard (Shard);
+      end loop;
+      Lane_Predicate_Counts := (others => 0);
+      for Shard in reverse Registry_Shard_Index loop
+         Unlock_Registry_Shard (Shard);
+      end loop;
+   end Reset_Lane_Predicate_Lookups;
+
+   function Lane_Predicate_Lookups return C.unsigned_long_long is
+      Total : C.unsigned_long_long := 0;
+   begin
+      --  Match reset's global cut. Counts saturate instead of wrapping, so a
+      --  snapshot cannot manufacture a decrease.
+      for Shard in Registry_Shard_Index loop
+         Lock_Registry_Shard (Shard);
+      end loop;
+      for Shard in Registry_Shard_Index loop
+         if Total > C.unsigned_long_long'Last - Lane_Predicate_Counts (Shard) then
+            Total := C.unsigned_long_long'Last;
+         else
+            Total := Total + Lane_Predicate_Counts (Shard);
+         end if;
+      end loop;
+      for Shard in reverse Registry_Shard_Index loop
+         Unlock_Registry_Shard (Shard);
+      end loop;
+      return Total;
+   end Lane_Predicate_Lookups;
 
    function Is_Event_Thread return Boolean
    is (Initialized and then Thread_Group /= null and then OSI.pthread_self = Thread_Group.Event_Thread);
