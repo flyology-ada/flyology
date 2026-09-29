@@ -14,7 +14,9 @@ project Flyology_Runtime_Bench is
    for Main use
      ("runtime_callback_bench.adb",
       "fiber_trampoline_memory.adb",
-      "idle_wait_rate.adb");
+      "idle_wait_rate.adb",
+      "native_rendezvous_lane_control.adb",
+      "native_rendezvous_lane_treatment.adb");
    for Create_Missing_Dirs use "True";
 
    package Compiler is
