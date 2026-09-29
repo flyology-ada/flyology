@@ -1,0 +1,57 @@
+FROM ubuntu:24.04
+
+ARG ALIRE_VERSION=2.1.0
+ARG TARGETARCH
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       build-essential \
+       ca-certificates \
+       curl \
+       git \
+       jq \
+       libssl-dev \
+       pkg-config \
+       python3 \
+       unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN case "${TARGETARCH}" in \
+      arm64) alire_arch=aarch64 ;; \
+      amd64) alire_arch=x86_64 ;; \
+      *) echo "unsupported Docker target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+      "https://github.com/alire-project/alire/releases/download/v${ALIRE_VERSION}/alr-${ALIRE_VERSION}-bin-${alire_arch}-linux.zip" \
+      -o /tmp/alire.zip \
+    && unzip -q /tmp/alire.zip -d /opt/alire \
+    && ln -s "/opt/alire/bin/alr" /usr/local/bin/alr \
+    && rm /tmp/alire.zip
+
+ENV ALR=/usr/local/bin/alr
+
+# Keep the compiler download independent of source changes.
+ARG GNAT_PROVIDER=gnat_flyology_native
+ARG GNAT_VERSION=16.2.0-patchset.1.1.0
+ARG GPRBUILD_VERSION=26.0.1
+WORKDIR /toolchain
+RUN alr index --reset-community \
+    && alr index \
+      --add=git+https://github.com/flyology-ada/alire-index.git \
+      --name=flyology \
+      --before=community
+RUN alr --non-interactive toolchain \
+      --select ${GNAT_PROVIDER}=${GNAT_VERSION} gprbuild=${GPRBUILD_VERSION}
+
+WORKDIR /workspace
+COPY . .
+RUN python3 ./scripts/test-tlc-release-policy.py
+
+# Resolve the development workspace so the root build uses the in-tree
+# allocator while the publishable Flyology manifest retains its indexed
+# dependency constraint.
+RUN ./scripts/alr-development.sh build
+RUN cd flyology_debug && alr --non-interactive build
+RUN cd flyology_bench && alr --non-interactive build
+
+CMD ["sh", "-c", "cd flyology_debug && alr --non-interactive test && cd ../flyology_bench && alr --non-interactive test && cd .. && ./scripts/test.sh"]

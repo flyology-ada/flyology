@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Flyology is an experimental project for contemporary Ada systems programming, focused on performance, interoperability, observability, and explicit control.">
+    <meta name="theme-color" content="#17213d">
+    <title>Flyology · Systems software for Ada</title>
+    <link rel="canonical" href="https://flyology.org/">
+    <link rel="icon" href="assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/styles/site.css">
+    <link rel="stylesheet" href="assets/styles/ecosystem.css">
+    <script src="assets/scripts/ada-highlight.js"></script>
+    <script src="assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="./" aria-label="Flyology home">
+          <img src="assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="runtime/">Overview</a></li>
+                <li><a href="guide/">Guide</a></li>
+                <li><a href="architecture/">Architecture</a></li>
+                <li><a href="api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="libraries/">Libraries</a></li>
+          <li><a href="journal/">Journal</a></li>
+          <li><a href="ci/">CI</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/>
+              <circle cx="12" cy="12" r="4"/>
+            </svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="project-hero page-shell" aria-labelledby="hero-title">
+        <div class="project-hero-copy">
+          <p class="eyebrow">Systems foundations for Ada</p>
+          <h1 id="hero-title">Flyology</h1>
+          <p class="hero-lede">Flyology is an experimental project for contemporary systems programming in Ada. Its runtime, libraries, and tools focus on performance, interoperability, observability, and explicit control from task execution to application interfaces.</p>
+          <div class="actions">
+            <a class="button button-primary" href="libraries/">Explore the libraries <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></a>
+            <a class="button button-secondary" href="runtime/">Evaluate the runtime</a>
+          </div>
+        </div>
+
+        <figure class="project-map" aria-label="Flyology project map">
+          <div class="project-map-origin">
+            <img src="assets/brand/flyology-mark-transparent.svg" alt="">
+            <span>Flyology</span>
+          </div>
+          <div class="project-map-paths">
+            <section class="project-map-path project-map-runtime">
+              <p>Prepare the runtime</p>
+              <strong>Runtime</strong>
+              <span>Native and lightweight Ada tasks, task-aware I/O, and bounded systems building blocks.</span>
+              <ul aria-label="Libraries that require Flyology Runtime; each link opens in a new tab"><li><a href="https://http.flyology.org/" target="_blank" rel="noopener">HTTP</a></li><li><a href="https://postgres.flyology.org/" target="_blank" rel="noopener">Postgres</a></li><li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic" target="_blank" rel="noopener">QUIC</a></li></ul>
+            </section>
+            <section class="project-map-path project-map-standalone">
+              <p>Add a crate</p>
+              <strong>Standalone libraries</strong>
+              <span>Focused packages that work in ordinary Ada projects.</span>
+              <ul aria-label="Standalone Flyology libraries; each link opens in a new tab"><li><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_allocators" target="_blank" rel="noopener">Allocators</a></li><li><a href="guide/benchmarking/" target="_blank">Bench</a></li><li><a href="guide/cachelines/" target="_blank">Cachelines</a></li><li><a href="api/flyology_debug/" target="_blank">Debug</a></li><li><a href="https://http.flyology.org/guide/iri/" target="_blank" rel="noopener">IRI</a></li><li><a href="https://json.flyology.org/" target="_blank" rel="noopener">JSON</a></li><li><a href="guide/numa/" target="_blank">NUMA</a></li><li><a href="https://rdf.flyology.org/" target="_blank" rel="noopener">RDF</a></li><li><a href="https://simd.flyology.org/" target="_blank" rel="noopener">SIMD</a></li><li><a href="https://tui.flyology.org/" target="_blank" rel="noopener">TUI</a></li></ul>
+            </section>
+          </div>
+        </figure>
+      </section>
+
+      <section class="project-catalogue page-shell" aria-labelledby="catalogue-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">Project map</p><h2 id="catalogue-title">Choose only the layer you need.</h2></div>
+          <p>The directory identifies each component's runtime dependency and links to its operational boundaries. Independent libraries remain useful outside Flyology applications.</p>
+        </div>
+
+        <div class="project-chapter project-chapter-core">
+          <div class="project-chapter-heading">
+            <span>01</span>
+            <div><h3>Runtime core</h3><p>The execution and I/O foundation. With the native project default, undesignated Ada tasks remain native. Explicitly designated lightweight tasks run cooperatively on shared event loops.</p></div>
+          </div>
+          <a class="project-feature-row" href="runtime/">
+            <span class="project-row-name">Flyology Runtime</span>
+            <span class="project-row-description">GNAT tasking integration, task-aware I/O, execution groups, bounded buffers, supervision, shared memory, and relocatable data structures.</span>
+            <span class="project-row-action">Runtime overview <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span>
+          </a>
+        </div>
+
+        <div class="project-chapter">
+          <div class="project-chapter-heading">
+            <span>02</span>
+            <div><h3>Built on the runtime</h3><p>These libraries require Flyology Runtime and use its task-aware I/O from native and lightweight tasks.</p></div>
+          </div>
+          <ul class="ecosystem-index">
+            <li><a href="https://http.flyology.org/"><strong class="ecosystem-index-name">HTTP</strong><span class="ecosystem-index-description">HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://postgres.flyology.org/"><strong class="ecosystem-index-name">Postgres</strong><span class="ecosystem-index-description">Client and server primitives for the Postgres frontend/backend protocol.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic"><strong class="ecosystem-index-name">QUIC</strong><span class="ecosystem-index-description">An experimental bounded QUIC transport with protocol state and recovery in Ada.</span><span class="ecosystem-index-action">Source <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+          </ul>
+        </div>
+
+        <div class="project-chapter">
+          <div class="project-chapter-heading">
+            <span>03</span>
+            <div><h3>Standalone libraries</h3><p>These libraries belong to Flyology but do not require Flyology Runtime.</p></div>
+          </div>
+          <ul class="ecosystem-index project-compact-index">
+            <li><a href="https://github.com/flyology-ada/flyology/tree/main/flyology_allocators"><strong class="ecosystem-index-name">Allocators</strong><span class="ecosystem-index-description">Caller-owned buddy, best-fit, TLSF, and slab/span allocation algorithms.</span><span class="ecosystem-index-action">Source <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="guide/benchmarking/"><strong class="ecosystem-index-name">Bench</strong><span class="ecosystem-index-description">Adaptive microbenchmarking and balanced comparisons for Ada workloads.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="guide/cachelines/"><strong class="ecosystem-index-name">Cachelines</strong><span class="ecosystem-index-description">Cache-line-aware storage, ownership-aware groups, and host cache queries.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="api/flyology_debug/"><strong class="ecosystem-index-name">Debug</strong><span class="ecosystem-index-description">Bounded in-memory tracing and persistent gauges for Ada.</span><span class="ecosystem-index-action">API <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://http.flyology.org/guide/iri/"><strong class="ecosystem-index-name">IRI</strong><span class="ecosystem-index-description">Allocation-conscious URI, IRI, and WHATWG URL parsing.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://json.flyology.org/"><strong class="ecosystem-index-name">JSON</strong><span class="ecosystem-index-description">An incremental JSON parser and transactional streaming writer with a bounded core.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="guide/numa/"><strong class="ecosystem-index-name">NUMA</strong><span class="ecosystem-index-description">Memory-node reporting, placement on a chosen node, and node-bound storage pools.</span><span class="ecosystem-index-action">Guide <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://rdf.flyology.org/"><strong class="ecosystem-index-name">RDF</strong><span class="ecosystem-index-description">Streaming RDF 1.2 parsers, dataset canonicalization, and Notation3 and SPARQL 1.1 syntax.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://simd.flyology.org/"><strong class="ecosystem-index-name">SIMD</strong><span class="ecosystem-index-description">Portable, strongly typed SIMD foundations for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+            <li><a href="https://tui.flyology.org/"><strong class="ecosystem-index-name">TUI</strong><span class="ecosystem-index-description">A typed, declarative terminal user-interface toolkit for Ada.</span><span class="ecosystem-index-action">Site <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10h11M11 6l4 4-4 4"/></svg></span></a></li>
+          </ul>
+          <a class="project-text-link" href="libraries/">Compare every library and dependency</a>
+        </div>
+      </section>
+
+      <section class="runtime-spotlight" aria-labelledby="runtime-title">
+        <div class="runtime-spotlight-inner">
+          <div>
+            <p class="eyebrow">Core component</p>
+            <h2 id="runtime-title">Ordinary Ada tasks, two execution lanes.</h2>
+            <p>Native tasks keep their OS threads. Lightweight tasks run cooperatively on shared event loops. Both lanes retain Ada rendezvous, protected objects, exceptions, activation, masters, and synchronous control flow.</p>
+            <a href="runtime/">Understand Flyology Runtime</a>
+          </div>
+          <div class="runtime-lanes" aria-label="Flyology Runtime execution lanes">
+            <div><span>Lightweight task</span><strong>Fiber on a shared event loop</strong><small>Explicit designation</small></div>
+            <div><span>Native task</span><strong>Dedicated operating-system thread</strong><small>Default behavior</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section page-shell constraint-layout" aria-labelledby="boundaries-title">
+        <div class="constraint-lede">
+          <p class="eyebrow">Boundaries</p>
+          <h2 id="boundaries-title">Each component documents its limits.</h2>
+          <p>Flyology components differ in runtime dependency, platform support, maturity, and verification scope. Follow each component's linked documentation and source for its stated boundaries.</p>
+          <a href="libraries/">Compare library dependencies</a>
+        </div>
+        <table class="constraint-table">
+          <thead><tr><th>Concern</th><th>Project contract</th></tr></thead>
+          <tbody>
+            <tr><td>Adoption</td><td>Standalone libraries do not prepare or link Flyology Runtime.</td></tr>
+            <tr><td>Runtime compatibility</td><td>Only exact, versioned GNAT patch families are accepted.</td></tr>
+            <tr><td>Scheduling</td><td>Lightweight scheduling within one execution group is cooperative.</td></tr>
+            <tr><td>Portability</td><td>Operating-system and toolchain support differs by component.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section page-shell" aria-labelledby="name-title">
+        <div class="history">
+          <div class="history-visual"><img src="assets/brand/flyology-one-color.svg" alt="The Flyology flight mark"></div>
+          <div class="history-copy">
+            <p class="eyebrow">The name</p>
+            <h2 id="name-title">A study of flight, revisited.</h2>
+            <p>In 1828, Ada Lovelace studied bird anatomy, experimented with materials for wings, and planned a book she called <em>Flyology</em>. This project borrows that name for systems software that examines how familiar Ada forms can move differently.</p>
+            <a href="https://doi.org/10.1080/17498430.2017.1325297">Read the historical source</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="journal-teaser page-shell" aria-labelledby="journal-title">
+        <div class="journal-teaser-heading">
+          <p class="eyebrow">Journal</p>
+          <h2 id="journal-title">Notes from across Flyology.</h2>
+          <p>Runtime findings will appear here. HTTP and Postgres retain their own records, with evidence and limits attached to each result.</p>
+        </div>
+        <div class="report-method">
+          <strong>Project records</strong>
+          <p><a href="journal/">Open the Flyology journal</a>, or browse the <a href="https://http.flyology.org/journal/">HTTP</a> and <a href="https://postgres.flyology.org/journal/">Postgres</a> journals.</p>
+        </div>
+      </section>
+
+      <section class="final-cta page-shell" aria-labelledby="cta-title">
+        <h2 id="cta-title">Start with the component you need.</h2>
+        <div class="actions">
+          <a class="button button-primary" href="libraries/">Explore the libraries</a>
+          <a class="button button-secondary" href="runtime/">Evaluate the runtime</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Support, maturity, and licensing are documented for each component.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="https://github.com/flyology-ada">Source</a><a href="libraries/">Libraries</a><a href="journal/">Journal</a><a href="api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "pageTitle": "flyology_numa API reference",
+  "indexDescription": "Generated public API reference for flyology_numa.",
+  "indexTitle": "flyology_numa API reference · Flyology",
+  "canonicalUrl": "https://flyology.org/api/flyology_numa/",
+  "brandLabel": "flyology_numa API",
+  "navigationHtml": "<a href='../../'>Overview</a>\n        <a href='../../guide/numa/'>NUMA guide</a>\n        <a href='../'>Runtime API</a>\n        <a href='https://github.com/flyology-ada/flyology/tree/main/flyology_numa'>GitHub</a>",
+  "indexIntroduction": "Generated public contracts for memory-node reporting, memory placement, and node-bound storage pools.",
+  "footerNote": "Generated with GNATdoc. Public API only."
+}

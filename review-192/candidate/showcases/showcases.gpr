@@ -1,0 +1,74 @@
+with "../flyology.gpr";
+with "flyology_tui";
+with "config/flyology_showcases_config.gpr";
+
+project Showcases is
+   type Build_Profile_Type is ("development", "validation", "release");
+   Default_Build_Profile : Build_Profile_Type := "development";
+   case Flyology_Showcases_Config.Build_Profile is
+      when "development" =>
+         Default_Build_Profile := "development";
+      when "validation" =>
+         Default_Build_Profile := "validation";
+      when "release" =>
+         Default_Build_Profile := "release";
+   end case;
+   Build_Profile : Build_Profile_Type :=
+     external ("FLYOLOGY_SHOWCASE_PROFILE", Default_Build_Profile);
+
+   for Languages use ("Ada", "C");
+   for Runtime ("Ada") use
+     external ("FLYOLOGY_RTS_DIR", "../build/rts");
+   for Source_Dirs use (".", "native");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use
+     ("cancellation_density.adb",
+      "buffer_handoff.adb",
+      "buffer_pool_contention.adb",
+      "connection_density.adb",
+      "connection_lifecycle.adb",
+      "cooperative_fairness.adb",
+      "dormant_stack_pressure.adb",
+      "dns_resolution.adb",
+      "execution_groups.adb",
+      "file_transfer_benchmark.adb",
+      "lightweight_file_io.adb",
+      "lightweight_io.adb",
+      "event_loop_pool.adb",
+      "lightweight_pipeline.adb",
+      "lightweight_vs_native.adb",
+      "hybrid_blocking_bridge.adb",
+      "loop_thread_placement.adb",
+      "many_lightweight_tasks.adb",
+      "priority_scheduling.adb",
+      "runtime_observability.adb",
+      "shared_image_index.adb",
+      "shared_image_index_worker.adb",
+      "stall_watchdog.adb",
+      "synchronization_benchmark.adb",
+      "task_snapshot_contention.adb",
+      "task_lifecycle.adb",
+      "thread_per_core.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      case Build_Profile is
+         when "development" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
+            for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
+         when "validation" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-gnata", "-gnatVa", "-gnatwa", "-gnatwJ");
+            for Default_Switches ("C") use ("-O2", "-Wall", "-Wextra");
+         when "release" =>
+            for Default_Switches ("Ada") use
+              Flyology_Showcases_Config.Ada_Compiler_Switches
+              & ("-gnat2022", "-O3", "-gnatwa", "-gnatwJ");
+            for Default_Switches ("C") use ("-O3", "-Wall", "-Wextra");
+      end case;
+   end Compiler;
+end Showcases;

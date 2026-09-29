@@ -1,0 +1,104 @@
+/*
+ * termcast.css - presentation for replayed terminal recordings.
+ *
+ * The palette matches the static terminal cards used in the guide, so a
+ * recorded session and a quoted result card read as one component family.
+ */
+
+.termcast {
+  margin-block: 1.75rem;
+  margin-inline: 0;
+  overflow: hidden;
+  border: 1px solid oklch(84% 0.025 270);
+  border-radius: var(--radius-md);
+  background: oklch(99.2% 0.004 270);
+  box-shadow: 0 1.2rem 3rem oklch(23% 0.045 270 / 0.08);
+}
+
+.termcast figcaption {
+  display: flex;
+  min-height: 2.6rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-inline: 1rem;
+  border-bottom: 1px solid oklch(88% 0.02 270);
+  color: oklch(42% 0.035 270);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.termcast-status {
+  color: oklch(56% 0.11 185);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.termcast-viewport {
+  overflow-x: auto;
+}
+
+.termcast pre {
+  margin: 0;
+  padding: 1.15rem 1.3rem 1.35rem;
+  min-height: calc(30 * 1.7 * 0.72rem);
+  color: oklch(27% 0.052 270);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+.termcast-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem 0.7rem;
+  border-top: 1px solid oklch(88% 0.02 270);
+}
+
+.termcast-button {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid oklch(84% 0.025 270);
+  border-radius: calc(var(--radius-md) / 2);
+  background: oklch(97% 0.006 270);
+  color: oklch(35% 0.04 270);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.termcast-button:hover:not(:disabled) {
+  border-color: oklch(70% 0.06 270);
+  color: oklch(25% 0.05 270);
+}
+
+.termcast-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.termcast-scrubber {
+  flex: 1;
+  min-width: 4rem;
+  accent-color: oklch(56% 0.11 185);
+  cursor: pointer;
+}
+
+.tc-bold { font-weight: 700; }
+.tc-dim { color: oklch(53% 0.025 270); }
+.tc-red { color: oklch(52% 0.15 28); }
+.tc-green { color: oklch(49% 0.12 152); }
+.tc-yellow { color: oklch(55% 0.12 85); }
+.tc-blue { color: oklch(61% 0.16 250); }
+.tc-magenta { color: oklch(58% 0.19 300); }
+.tc-cyan { color: oklch(56% 0.11 185); }
+
+@media (max-width: 640px) {
+  .termcast pre { font-size: 0.64rem; }
+}
+
+@media print {
+  .termcast { box-shadow: none; }
+  .termcast-controls { display: none; }
+}

@@ -1,0 +1,296 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    flyology-ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+# Every job, and every step that reaches the network, carries a timeout. The
+# bounds are generous multiples of observed healthy runs: they exist so a
+# stalled mirror or download fails in minutes instead of hanging until GitHub's
+# six-hour job default, not to police how long healthy work may take.
+jobs:
+  test:
+    name: Test / ${{ matrix.os }} / GNAT ${{ matrix.toolchain.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        toolchain: # Add one entry here to extend the supported launch matrix.
+          - provider: gnat_flyology_native
+            gnat: 16.2.0-patchset.1.1.0
+            label: 16.2.0
+            gprbuild: 26.0.1
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Alire
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: --disable-assistant
+          cache: true
+      - name: Configure Flyology index
+        timeout-minutes: 10
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            ${{ matrix.toolchain.provider }}=${{ matrix.toolchain.gnat }} \
+            gprbuild=${{ matrix.toolchain.gprbuild }}
+          printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
+      - name: Install OpenSSL 3 on macOS
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          brew install openssl@3 pkg-config
+          printf 'FLYOLOGY_TEST_OPENSSL_DIR=%s/lib\n' \
+            "$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      # apt-get update is the command that stalls: an unresponsive mirror leaves
+      # it waiting rather than failing, so it needs its own bound before the
+      # step bound can mean anything. Each attempt is capped, a stall or a
+      # transient failure is retried twice, and the worst case still lands
+      # inside timeout-minutes so the message below is what the log ends on.
+      - name: Install OpenSSL 3 on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            if sudo timeout --kill-after=10s 120s apt-get update; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error title=apt-get update did not complete::Three bounded attempts to refresh the apt indexes stalled or failed. This is usually a transient mirror problem; re-run the job."
+              exit 1
+            fi
+            printf 'apt-get update attempt %s did not complete; retrying.\n' \
+              "$attempt" >&2
+            sleep "$((attempt * 15))"
+          done
+          sudo timeout --kill-after=10s 180s apt-get install -y libssl-dev pkg-config
+      - name: Require the Linux io_uring file backend
+        if: runner.os == 'Linux'
+        run: printf '%s\n' 'FLYOLOGY_EXPECT_FILE_BACKEND=io-uring' >> "$GITHUB_ENV"
+      - name: Test flyology_debug
+        working-directory: flyology_debug
+        run: alr test
+      - name: Test flyology_bench
+        working-directory: flyology_bench
+        run: |
+          alr test || {
+            status=$?
+            if [ -f alire/alr_test_local.log ]; then
+              printf '%s\n' '--- flyology_bench local test log (last 300 lines) ---' >&2
+              tail -n 300 alire/alr_test_local.log >&2
+            fi
+            exit "$status"
+          }
+      - name: Test flyology_cli
+        working-directory: flyology_cli
+        run: alr test
+      - name: Run runtime tests
+        run: ./scripts/test.sh
+      - name: Build connection-density showcase
+        working-directory: showcases
+        run: |
+          ./prepare-alire.sh
+          alr exec -- env -u GPR_CONFIG gprbuild \
+            --RTS="$GITHUB_WORKSPACE/build/rts" \
+            -f \
+            -P showcases.gpr \
+            connection_density.adb
+      - name: Run connection-density smoke
+        run: ./showcases/run_connection_density.sh 200 1000
+
+  hook-elision:
+    name: Test-hook elision / ${{ matrix.os }} / GNAT 16.1.0
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Alire
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=16.1.0 \
+            gprbuild=26.0.1
+      - name: Configure Flyology index
+        timeout-minutes: 10
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Check every test-hook selection and optimization mode
+        timeout-minutes: 50
+        run: ./scripts/check-test-hook-elision.sh
+
+  proof:
+    name: SPARK proof / ubuntu-latest / GNAT 16.1.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install Alire
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - name: Select toolchain
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=16.1.0 \
+            gprbuild=26.0.1
+          printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
+      - name: Configure Flyology index
+        timeout-minutes: 10
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Prove SPARK units
+        shell: bash
+        run: |
+          proof_log=$(mktemp)
+          ./scripts/prove.sh 2>&1 | tee "$proof_log"
+          grep -Fqx 'Flyology SPARK proof suite passed' "$proof_log"
+
+  tlc_release:
+    name: TLC release policy / v1.8.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      checksum_policy: ${{ steps.release.outputs.checksum_policy }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      published_asset_digest: ${{ steps.release.outputs.published_asset_digest }}
+      release_immutable: ${{ steps.release.outputs.release_immutable }}
+      release_phase: ${{ steps.release.outputs.release_phase }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      run_tla: ${{ steps.release.outputs.run_tla }}
+    steps:
+      - name: Check out sources
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Classify the official TLC release
+        id: release
+        timeout-minutes: 5
+        env:
+          FLYOLOGY_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ./scripts/check-tlc-release.py
+
+  tla:
+    name: TLA+ models and Ada replay / ubuntu-latest / TLC 1.8.0
+    needs: tlc_release
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require TLC release classification
+        if: needs.tlc_release.result != 'success'
+        run: |
+          message='The established TLA gate cannot proceed or defer'
+          message="$message without validated official release metadata."
+          printf '%s\n' "::error title=TLC release classification failed::$message"
+          exit 1
+      - name: Report authorized prerelease deferral
+        if: >-
+          needs.tlc_release.result == 'success' &&
+          needs.tlc_release.outputs.run_tla == 'false'
+        env:
+          TLC_ASSET_DIGEST: ${{ needs.tlc_release.outputs.published_asset_digest }}
+          TLC_RELEASE_IMMUTABLE: ${{ needs.tlc_release.outputs.release_immutable }}
+        run: |
+          message="Official v1.8.0 is still a prerelease"
+          message="$message (immutable=$TLC_RELEASE_IMMUTABLE;"
+          message="$message published digest=$TLC_ASSET_DIGEST)."
+          message="$message Its mutable artifact is not admitted;"
+          message="$message ordinary CI defers the TLA+ gate until it is final."
+          printf '%s\n' "::notice title=TLC prerelease gate deferred::$message"
+          printf '### TLA+ gate\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check out sources
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check out the reviewed TLA+ harness
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 10
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: flyology-ada/tla
+          ref: dea289018a3eef2ac2aeab7a5ee8bc4e287fe231
+          path: build/flyology-tla
+      - name: Install Alire
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 15
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
+        with:
+          version: 2.1.1
+          toolchain: gnat_native=16.1.0 gprbuild=26.0.1
+          cache: true
+      - name: Select toolchain
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 10
+        run: |
+          alr --non-interactive toolchain --select \
+            gnat_native=16.1.0 \
+            gprbuild=26.0.1
+          printf 'ALR=%s\n' "$(command -v alr)" >> "$GITHUB_ENV"
+      - name: Configure Flyology index
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        timeout-minutes: 10
+        run: |
+          alr index --reset-community
+          alr index --add=git+https://github.com/flyology-ada/alire-index.git --name=flyology --before=community
+      - name: Build the TLA+ harness and provision its toolchain
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        shell: bash
+        timeout-minutes: 15
+        working-directory: build/flyology-tla
+        run: |
+          alr -n build
+          toolchain_root="$GITHUB_WORKSPACE/build/flyology-tla-toolchain"
+          ./bin/flyology-tla toolchain install "$toolchain_root"
+          ./bin/flyology-tla toolchain verify "$toolchain_root"
+          eval "$(./bin/flyology-tla toolchain env "$toolchain_root")"
+          {
+            printf 'FLYOLOGY_TLA_HARNESS_ROOT=%s\n' "$GITHUB_WORKSPACE/build/flyology-tla"
+            printf 'FLYOLOGY_TLA_TOOLCHAIN=%s\n' "$FLYOLOGY_TLA_TOOLCHAIN"
+            printf 'FLYOLOGY_TLA_JAVA=%s\n' "$FLYOLOGY_TLA_JAVA"
+            printf 'FLYOLOGY_TLA_TLC_JAR=%s\n' "$FLYOLOGY_TLA_TLC_JAR"
+            printf 'FLYOLOGY_TLAPM=%s\n' "$FLYOLOGY_TLAPM"
+          } >> "$GITHUB_ENV"
+      - name: Check TLA+ models and replay implementation traces
+        if: needs.tlc_release.outputs.run_tla == 'true'
+        run: ./scripts/check-tla.sh

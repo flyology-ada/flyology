@@ -1,0 +1,11 @@
+Compile
+   [Ada]          flyology-execution_groups-topology.adb
+Build Libraries
+   [gprlib]       Flyology.lexch
+   [archive]      libFlyology.a
+   [index]        libFlyology.a
+Bind
+   [gprbind]      pool_reduction_cross_to_shard_smoke.bexch
+   [Ada]          pool_reduction_cross_to_shard_smoke.ali
+Link
+   [link]         pool_reduction_cross_to_shard_smoke.adb

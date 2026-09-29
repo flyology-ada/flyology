@@ -1,0 +1,1719 @@
+with Ada.Exceptions;
+with Ada.Task_Identification;
+with Flyology.Cancellation;
+with Flyology.Supervision_Policy;
+with Flyology.Task_Lifecycle_Test_Hooks;
+with Interfaces;
+
+package body Flyology.Supervision.Static is
+   use type Ada.Real_Time.Time;
+   use type Ada.Real_Time.Time_Span;
+   use type Ada.Exceptions.Exception_Id;
+   use type Flyology.Execution_Model;
+   use type Interfaces.Unsigned_64;
+
+   package Policy renames Flyology.Supervision_Policy;
+
+   function Generation_Is_Current
+     (Handle : Child_Handle; Owner : Controller_Id; Id : Child_Id; Value : Generation) return Boolean
+   is (Policy.Authority_Matches
+         (Expected_Owner      => Interfaces.Unsigned_64 (Owner),
+          Expected_Id         => Id,
+          Expected_Generation => Value,
+          Supplied_Owner      => Interfaces.Unsigned_64 (Controller (Handle)),
+          Supplied_Id         => Child (Handle),
+          Supplied_Generation => Current_Generation (Handle)));
+
+   function Empty_Summary (Kind : Termination_Kind) return Termination_Summary
+   is ((Kind => Kind, Task_Id => Ada.Task_Identification.Null_Task_Id, others => <>));
+
+   function Completed_Observation
+     (Status : Generation_Observation_Status; Snapshot : Child_Snapshot) return Generation_Observation;
+
+   function Completed_Observation
+     (Status : Generation_Observation_Status; Snapshot : Child_Snapshot) return Generation_Observation is
+   begin
+      case Status is
+         when Generation_Terminated =>
+            return (Status => Generation_Terminated, Snapshot => Snapshot);
+
+         when Generation_Replaced   =>
+            return (Status => Generation_Replaced, Snapshot => Snapshot);
+
+         when Observation_Timed_Out =>
+            raise Program_Error with "incomplete generation observation";
+      end case;
+   end Completed_Observation;
+
+   function Failure_Summary
+     (Occurrence : Ada.Exceptions.Exception_Occurrence; Kind : Termination_Kind := Unhandled_Exception)
+      return Termination_Summary
+   is
+      Name        : constant String :=
+        Ada.Exceptions.Exception_Name (Ada.Exceptions.Exception_Identity (Occurrence));
+      Message     : constant String := Ada.Exceptions.Exception_Message (Occurrence);
+      Name_Length : constant Exception_Name_Length :=
+        Exception_Name_Length'Min (Exception_Name_Length'Last, Name'Length);
+      Length      : constant Diagnostic_Length :=
+        Diagnostic_Length'Min (Diagnostic_Length'Last, Message'Length);
+      Result      : Termination_Summary := Empty_Summary (Kind);
+   begin
+      Result.Exception_Id := Ada.Exceptions.Exception_Identity (Occurrence);
+      Result.Exception_Name_Length := Name_Length;
+      Result.Exception_Name_Truncated := Name'Length > Name_Length;
+      if Name_Length > 0 then
+         Result.Exception_Name (1 .. Name_Length) := Name (Name'First .. Name'First + Name_Length - 1);
+      end if;
+      Result.Message_Length := Length;
+      Result.Message_Truncated := Message'Length > Length;
+      if Length > 0 then
+         Result.Message (1 .. Length) := Message (Message'First .. Message'First + Length - 1);
+      end if;
+      return Result;
+   end Failure_Summary;
+
+   protected body Lifecycle is
+      procedure Complete_Monitors (Child : Child_Kind; Status : Generation_Observation_Status) is
+      begin
+         pragma Assert (Status /= Observation_Timed_Out);
+         for Ticket in Monitor_Index loop
+            if Monitor_States (Ticket) = Monitor_Pending
+              and then Is_Current (Monitor_Handles (Ticket), Child_Ids (Child), Snapshots (Child).Generation)
+            then
+               Monitor_States (Ticket) :=
+                 (if Status = Generation_Terminated then Monitor_Terminated else Monitor_Replaced);
+               Monitor_Snapshots (Ticket) := Snapshots (Child);
+            end if;
+         end loop;
+      end Complete_Monitors;
+
+      procedure Configure
+        (Identity     : Controller_Id;
+         Specs        : Specification_Array;
+         Ids          : Logical_Id_Array;
+         Dependencies : Dependency_Matrix;
+         Cohorts      : Cohort_Matrix;
+         Start_Order  : Child_Order;
+         Stop_Order   : Child_Order;
+         Inherited    : Incident_Context) is
+      begin
+         if Run_Used then
+            raise Program_Error with "supervisor is one-shot";
+         end if;
+         Run_Used := True;
+         Configured := True;
+         Lifecycle.Identity := Identity;
+         Child_Specs := Specs;
+         Child_Ids := Ids;
+         Child_Dependencies := Dependencies;
+         Child_Cohorts := Cohorts;
+         Starts := Start_Order;
+         Stops := Stop_Order;
+         Inherited_Incident := Inherited;
+         Phase := (if Shutdown_Pending then Finished else Starting_Children);
+         Start_Position := 0;
+         Stop_Position := 0;
+         Managers_Done := 0;
+         Terminal :=
+           (Outcome     => Shutdown_Completed,
+            Child       => Child_Ids (Child_Kind'First),
+            Generation  => Generation'First,
+            Termination => Empty_Summary (No_Termination),
+            Incident    => Inherited);
+
+         for Child in Child_Kind loop
+            Intervention_Pending (Child) := False;
+            Intervention (Child) := Empty_Summary (No_Termination);
+            Snapshots (Child) :=
+              (Id          => Child_Ids (Child),
+               Generation  => Generation'First,
+               State       => Flyology.Supervision.Configured,
+               Task_Model  => Child_Specs (Child).Task_Model,
+               Has_Group   => Child_Specs (Child).Has_Group,
+               Group       => Child_Specs (Child).Group,
+               Termination => Empty_Summary (No_Termination),
+               Attempts    => 0,
+               Backoff     => Ada.Real_Time.Time_Span_Zero,
+               Ready       => False,
+               Live        => False,
+               Escalated   => False);
+            if Shutdown_Pending then
+               Snapshots (Child).State := Joined;
+            end if;
+         end loop;
+         if Shutdown_Pending then
+            Terminal :=
+              (Outcome     => Shutdown_Completed,
+               Child       => Child_Ids (Child_Kind'First),
+               Generation  => Generation'First,
+               Termination => Empty_Summary (Supervisor_Shutdown),
+               Incident    => No_Incident);
+            Record_Event
+              (Child_Kind'First,
+               Supervisor_Stopped,
+               Flyology.Supervision.Configured,
+               Joined,
+               Ada.Real_Time.Clock,
+               Supervisor_Shutdown,
+               No_Incident);
+         end if;
+      end Configure;
+
+      procedure Record_Event
+        (Child       : Child_Kind;
+         Kind        : Event_Kind;
+         Before      : Child_State;
+         After       : Child_State;
+         Now         : Ada.Real_Time.Time;
+         Termination : Termination_Kind := No_Termination;
+         Incident    : Incident_Context := No_Incident;
+         Backoff     : Ada.Real_Time.Time_Span := Ada.Real_Time.Time_Span_Zero)
+      is
+         Slot : Positive;
+      begin
+         if not Policy.Recorded_Transition_Allowed (Kind, Before, After) then
+            raise Program_Error with "illegal static supervision lifecycle transition";
+         end if;
+         if Event_Sequence_Exhausted then
+            return;
+         elsif Event_Last_Sequence = Event_Sequence'Last then
+            Event_Sequence_Exhausted := True;
+            return;
+         end if;
+
+         Event_Last_Sequence := Event_Last_Sequence + 1;
+         if Event_Length < Event_Capacity then
+            Slot :=
+              Positive
+                (((Event_First - Event_Buffer'First + Event_Length) mod Event_Capacity) + Event_Buffer'First);
+            Event_Length := Event_Length + 1;
+         else
+            Slot := Event_First;
+            Event_First := (if Event_First = Event_Buffer'Last then Event_Buffer'First else Event_First + 1);
+         end if;
+         Events (Slot) :=
+           (Sequence    => Event_Last_Sequence,
+            Timestamp   => Now,
+            Kind        => Kind,
+            Child       => Child_Ids (Child),
+            Generation  => Snapshots (Child).Generation,
+            Before      => Before,
+            After       => After,
+            Task_Model  => Child_Specs (Child).Task_Model,
+            Has_Group   => Child_Specs (Child).Has_Group,
+            Group       => Child_Specs (Child).Group,
+            Termination => Termination,
+            Incident    => Incident,
+            Backoff     => Backoff);
+      end Record_Event;
+
+      procedure Begin_Terminal_Stop
+        (Outcome : Supervisor_Outcome; Child : Child_Kind; Termination : Termination_Summary) is
+      begin
+         if Phase not in Stopping_Children | Finished then
+            Terminal :=
+              (Outcome     => Outcome,
+               Child       => Child_Ids (Child),
+               Generation  => Snapshots (Child).Generation,
+               Termination => Termination,
+               Incident    => (if Active (Active_Incident) then Active_Incident else Inherited_Incident));
+            Phase := Stopping_Children;
+            Stop_Position := 1;
+            Snapshots (Child).Escalated := Outcome in Recovery_Exhausted | Failure_Escalated | Child_Stuck;
+            Record_Event
+              (Child,
+               (if Outcome = Child_Stuck then Child_Became_Stuck else Recovery_Escalated),
+               Snapshots (Child).State,
+               Snapshots (Child).State,
+               Ada.Real_Time.Clock,
+               Termination.Kind,
+               Terminal.Incident);
+            Advance_Stop_Order;
+         end if;
+      end Begin_Terminal_Stop;
+
+      procedure Advance_Stop_Order is
+         Child : Child_Kind;
+      begin
+         while Phase = Stopping_Children and then Stop_Position in Order_Position loop
+            Child := Stops (Order_Position (Stop_Position));
+            exit when Snapshots (Child).Live;
+            Snapshots (Child).Ready := False;
+            Snapshots (Child).Backoff := Ada.Real_Time.Time_Span_Zero;
+            Snapshots (Child).State := Joined;
+            Stop_Position := Stop_Position + 1;
+         end loop;
+         if Phase = Stopping_Children and then Stop_Position > Child_Total then
+            Phase := Finished;
+         end if;
+      end Advance_Stop_Order;
+
+      procedure Advance_Recovery_Stop_Order is
+         Child : Child_Kind;
+      begin
+         while Phase = Recovery_Stopping and then Recovery_Stop_Position < Child_Total loop
+            Recovery_Stop_Position := Recovery_Stop_Position + 1;
+            Child := Stops (Order_Position (Recovery_Stop_Position));
+            if Recovery_Affected (Child) then
+               if Snapshots (Child).Live then
+                  return;
+               end if;
+               Snapshots (Child).Ready := False;
+            end if;
+         end loop;
+         if Phase = Recovery_Stopping and then Recovery_Stop_Position = Child_Total then
+            Phase := Recovery_Backing_Off;
+            Recovery_Start_Position := 0;
+         end if;
+      end Advance_Recovery_Stop_Order;
+
+      procedure Advance_Recovery_Start_Order is
+         Child : Child_Kind;
+      begin
+         while Phase = Recovery_Starting and then Recovery_Start_Position < Child_Total loop
+            Child := Starts (Order_Position (Recovery_Start_Position + 1));
+            exit when Recovery_Affected (Child);
+            Recovery_Start_Position := Recovery_Start_Position + 1;
+         end loop;
+         if Phase = Recovery_Starting and then Recovery_Start_Position = Child_Total then
+            Phase := Running_Children;
+            Subtree_Ready_Since := Ada.Real_Time.Clock;
+            Record_Event
+              (Recovery_Trigger,
+               Restart_Completed,
+               Running,
+               Running,
+               Subtree_Ready_Since,
+               No_Termination,
+               Active_Incident);
+            Recovery_Affected := (others => False);
+         end if;
+      end Advance_Recovery_Start_Order;
+
+      procedure Compute_Affected (Trigger : Child_Kind; Impact : Restart_Impact; Result : out Boolean_Array)
+      is
+      begin
+         Result := (others => False);
+         if Impact = Escalate then
+            return;
+         end if;
+         Result (Trigger) := True;
+         if Impact = Restart_Cohort then
+            for Child in Child_Kind loop
+               Result (Child) := Result (Child) or else Child_Cohorts (Trigger, Child);
+            end loop;
+         elsif Impact = Restart_Dependents then
+            for Pass in Child_Kind loop
+               pragma Unreferenced (Pass);
+               for Child in Child_Kind loop
+                  if not Result (Child) then
+                     for Prerequisite in Child_Kind loop
+                        if Child_Dependencies (Child, Prerequisite) and then Result (Prerequisite) then
+                           Result (Child) := True;
+                        end if;
+                     end loop;
+                  end if;
+               end loop;
+            end loop;
+         end if;
+      end Compute_Affected;
+
+      procedure Try_Start
+        (Child    : Child_Kind;
+         Now      : Ada.Real_Time.Time;
+         Started  : out Boolean;
+         Value    : out Child_Handle;
+         Spec     : out Child_Specification;
+         Incident : out Incident_Context)
+      is
+         Initial_Start  : constant Boolean :=
+           Phase = Starting_Children
+           and then Start_Position < Child_Total
+           and then Starts (Order_Position (Start_Position + 1)) = Child;
+         Recovery_Start : Boolean := False;
+         Before         : Child_State;
+      begin
+         if Phase = Recovery_Backing_Off and then Now >= Recovery_Due then
+            Phase := Recovery_Starting;
+            Recovery_Start_Position := 0;
+            Advance_Recovery_Start_Order;
+         end if;
+         Recovery_Start :=
+           Phase = Recovery_Starting
+           and then Recovery_Start_Position < Child_Total
+           and then Starts (Order_Position (Recovery_Start_Position + 1)) = Child;
+         Started := False;
+         Spec := Child_Specs (Child);
+         Incident := (if Initial_Start then Inherited_Incident else Active_Incident);
+         Value :=
+           (Controller => Identity, Id => Child_Ids (Child), Generation => Snapshots (Child).Generation);
+         if not Initial_Start and then not Recovery_Start then
+            return;
+         end if;
+
+         if Has_Generation (Child) then
+            if not Policy.Generation_Can_Advance (Snapshots (Child).Generation) then
+               Snapshots (Child).Termination := Empty_Summary (Policy_Exhaustion);
+               Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               return;
+            end if;
+            Snapshots (Child).Generation := Policy.Next_Generation (Snapshots (Child).Generation);
+            Before := Snapshots (Child).State;
+            Snapshots (Child).State := Restarting;
+            Record_Event (Child, Lifecycle_Changed, Before, Restarting, Now, No_Termination, Incident);
+         else
+            Has_Generation (Child) := True;
+         end if;
+
+         Before := Snapshots (Child).State;
+         Snapshots (Child).State := Starting;
+         Snapshots (Child).Ready := False;
+         Ready_Since (Child) := Ada.Real_Time.Time_First;
+         Snapshots (Child).Live := True;
+         Snapshots (Child).Backoff := Ada.Real_Time.Time_Span_Zero;
+         Snapshots (Child).Termination := Empty_Summary (No_Termination);
+         Value :=
+           (Controller => Identity, Id => Child_Ids (Child), Generation => Snapshots (Child).Generation);
+         Started := True;
+         Record_Event (Child, Lifecycle_Changed, Before, Starting, Now, No_Termination, Incident);
+      end Try_Start;
+
+      procedure Publish_Ready (Child : Child_Kind; Value : Child_Handle; Now : Ada.Real_Time.Time) is
+      begin
+         if not Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+           or else not Snapshots (Child).Live
+           or else Snapshots (Child).State /= Starting
+         then
+            return;
+         end if;
+
+         Snapshots (Child).State := Ready;
+         Snapshots (Child).Ready := True;
+         Ready_Since (Child) := Now;
+         Snapshots (Child).State := Running;
+         Record_Event
+           (Child,
+            Readiness_Published,
+            Starting,
+            Running,
+            Now,
+            No_Termination,
+            (if Phase = Recovery_Starting then Active_Incident else Inherited_Incident));
+         if Phase = Starting_Children
+           and then Start_Position < Child_Total
+           and then Starts (Order_Position (Start_Position + 1)) = Child
+         then
+            Start_Position := Start_Position + 1;
+            if Start_Position = Child_Total then
+               Phase := Running_Children;
+            end if;
+         elsif Phase = Recovery_Starting
+           and then Recovery_Start_Position < Child_Total
+           and then Starts (Order_Position (Recovery_Start_Position + 1)) = Child
+         then
+            Recovery_Start_Position := Recovery_Start_Position + 1;
+            Advance_Recovery_Start_Order;
+         end if;
+      end Publish_Ready;
+
+      procedure Stop_Decision
+        (Child    : Child_Kind;
+         Value    : Child_Handle;
+         Stop     : out Boolean;
+         Shutdown : out Boolean;
+         Spec     : out Stop_Policy;
+         Override : out Termination_Summary) is
+      begin
+         Spec := Child_Specs (Child).Stopping;
+         Stop := False;
+         Shutdown := False;
+         Override := Empty_Summary (No_Termination);
+         if not Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+           or else not Snapshots (Child).Live
+         then
+            return;
+         end if;
+         if Phase = Running_Children and then Intervention_Pending (Child) then
+            Stop := True;
+            Override := Intervention (Child);
+            if Snapshots (Child).State /= Stopping then
+               Record_Event
+                 (Child,
+                  Stop_Published,
+                  Snapshots (Child).State,
+                  Stopping,
+                  Ada.Real_Time.Clock,
+                  Override.Kind,
+                  Active_Incident);
+               Snapshots (Child).State := Stopping;
+               Snapshots (Child).Ready := False;
+            end if;
+         elsif Phase = Stopping_Children
+           and then Stop_Position in Order_Position
+           and then Stops (Order_Position (Stop_Position)) = Child
+         then
+            Stop := True;
+            Shutdown := Terminal.Outcome = Shutdown_Completed;
+            if Snapshots (Child).State not in Stopping | Failed_Escalated then
+               Record_Event
+                 (Child,
+                  Stop_Published,
+                  Snapshots (Child).State,
+                  Stopping,
+                  Ada.Real_Time.Clock,
+                  No_Termination,
+                  Active_Incident);
+               Snapshots (Child).State := Stopping;
+            end if;
+         elsif Phase = Recovery_Stopping
+           and then Recovery_Stop_Position in Order_Position
+           and then Stops (Order_Position (Recovery_Stop_Position)) = Child
+           and then Recovery_Affected (Child)
+         then
+            Stop := True;
+            Shutdown := False;
+            if Snapshots (Child).State /= Stopping then
+               Record_Event
+                 (Child,
+                  Stop_Published,
+                  Snapshots (Child).State,
+                  Stopping,
+                  Ada.Real_Time.Clock,
+                  No_Termination,
+                  Active_Incident);
+               Snapshots (Child).State := Stopping;
+            end if;
+         end if;
+      end Stop_Decision;
+
+      procedure Request_Intervention
+        (Child       : Child_Kind;
+         Handle      : Child_Handle;
+         Termination : Termination_Summary;
+         Result      : out Intervention_Result) is
+      begin
+         Result := Intervention_Stale;
+         if Phase /= Running_Children
+           or else not Generation_Is_Current
+                         (Handle, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+           or else not Snapshots (Child).Live
+           or else not Snapshots (Child).Ready
+           or else Intervention_Pending (Child)
+         then
+            return;
+         elsif Termination.Kind = Restart_Requested
+           and then (Child_Specs (Child).Restart = Never
+                     or else Child_Specs (Child).Impact = Escalate
+                     or else not Child_Specs (Child).Restart_Safe)
+         then
+            Result := Intervention_Unsupported;
+            return;
+         end if;
+         Intervention (Child) := Termination;
+         Intervention_Pending (Child) := True;
+         Result := Intervention_Accepted;
+      end Request_Intervention;
+
+      procedure Classify_Restart
+        (Child           : Child_Kind;
+         Incident        : Incident_Context;
+         Now             : Ada.Real_Time.Time;
+         Minimum_Backoff : Ada.Real_Time.Time_Span;
+         Admitted        : out Boolean;
+         Backoff         : out Ada.Real_Time.Time_Span)
+      is
+         Limits          : constant Recovery_Limits := Child_Specs (Child).Recovery;
+         Next_Attempt    : Natural;
+         Subtree_Next    : Natural;
+         Elapsed         : Ada.Real_Time.Time_Span;
+         Subtree_Elapsed : Ada.Real_Time.Time_Span;
+         Subtree_Backoff : Ada.Real_Time.Time_Span;
+
+         procedure Double_To_Attempt
+           (Target : Natural; Limit : Ada.Real_Time.Time_Span; Value : in out Ada.Real_Time.Time_Span) is
+         begin
+            if Value > Ada.Real_Time.Time_Span_Zero then
+               for Index in 2 .. Target loop
+                  exit when Value = Limit;
+                  if Value > Limit / 2 then
+                     Value := Limit;
+                  else
+                     Value := Value * 2;
+                  end if;
+               end loop;
+            end if;
+         end Double_To_Attempt;
+      begin
+         if not Active (Incident) then
+            Admitted := False;
+            Backoff := Ada.Real_Time.Time_Span_Zero;
+            return;
+         end if;
+
+         if Ready_Since (Child) /= Ada.Real_Time.Time_First
+           and then Now - Ready_Since (Child) >= Limits.Stability_Reset
+         then
+            Total_Used (Child) := 0;
+            Window_Used (Child) := 0;
+            Consecutive (Child) := 0;
+            Incident_Since (Child) := Now;
+            Window_Since (Child) := Now;
+         end if;
+
+         if Total_Used (Child) = 0 then
+            Incident_Since (Child) := Now;
+         end if;
+         if Window_Used (Child) = 0 or else Now - Window_Since (Child) >= Limits.Window then
+            Window_Since (Child) := Now;
+            Window_Used (Child) := 0;
+         end if;
+
+         if Subtree_Ready_Since /= Ada.Real_Time.Time_First
+           and then Now - Subtree_Ready_Since >= Subtree_Recovery.Stability_Reset
+         then
+            Subtree_Total_Used := 0;
+            Subtree_Window_Used := 0;
+            Subtree_Consecutive := 0;
+            Subtree_Incident_Since := Now;
+            Subtree_Window_Since := Now;
+         end if;
+         if Subtree_Total_Used = 0 then
+            Subtree_Incident_Since := Now;
+         end if;
+         if Subtree_Window_Used = 0 or else Now - Subtree_Window_Since >= Subtree_Recovery.Window then
+            Subtree_Window_Since := Now;
+            Subtree_Window_Used := 0;
+         end if;
+
+         if Total_Used (Child) >= Limits.Total_Attempts
+           or else Window_Used (Child) >= Limits.Burst_Attempts
+           or else Subtree_Total_Used >= Subtree_Recovery.Total_Attempts
+           or else Subtree_Window_Used >= Subtree_Recovery.Burst_Attempts
+           or else Now > Recovery_Deadline (Incident)
+         then
+            Admitted := False;
+            Backoff := Limits.Maximum_Backoff;
+            return;
+         end if;
+
+         Next_Attempt := Consecutive (Child) + 1;
+         Backoff := Limits.Initial_Backoff;
+         Double_To_Attempt (Next_Attempt, Limits.Maximum_Backoff, Backoff);
+         Subtree_Next := Subtree_Consecutive + 1;
+         Subtree_Backoff := Subtree_Recovery.Initial_Backoff;
+         Double_To_Attempt (Subtree_Next, Subtree_Recovery.Maximum_Backoff, Subtree_Backoff);
+         if Subtree_Backoff > Backoff then
+            Backoff := Subtree_Backoff;
+         end if;
+         if Minimum_Backoff > Backoff then
+            Backoff := Minimum_Backoff;
+         end if;
+
+         Elapsed := Now - Incident_Since (Child);
+         Subtree_Elapsed := Now - Subtree_Incident_Since;
+         Admitted :=
+           Total_Used (Child) < Limits.Total_Attempts
+           and then Window_Used (Child) < Limits.Burst_Attempts
+           and then Subtree_Total_Used < Subtree_Recovery.Total_Attempts
+           and then Subtree_Window_Used < Subtree_Recovery.Burst_Attempts
+           and then Elapsed <= Limits.Recovery_Deadline
+           and then Backoff <= Limits.Recovery_Deadline - Elapsed
+           and then Subtree_Elapsed <= Subtree_Recovery.Recovery_Deadline
+           and then Backoff <= Subtree_Recovery.Recovery_Deadline - Subtree_Elapsed
+           and then Now <= Recovery_Deadline (Incident)
+           and then Backoff <= Recovery_Deadline (Incident) - Now;
+      end Classify_Restart;
+
+      procedure Record_Restart
+        (Child    : Child_Kind;
+         Incident : Incident_Context;
+         Now      : Ada.Real_Time.Time;
+         Backoff  : Ada.Real_Time.Time_Span) is
+      begin
+         Total_Used (Child) := Total_Used (Child) + 1;
+         Window_Used (Child) := Window_Used (Child) + 1;
+         Consecutive (Child) := Consecutive (Child) + 1;
+         if not Policy.Same_Incident_Attempt
+                  (Has_Observed_Attempt,
+                   Observed_Incident,
+                   Observed_Attempt,
+                   Flyology.Supervision.Incident (Incident),
+                   Attempt (Incident))
+         then
+            Subtree_Total_Used := Subtree_Total_Used + 1;
+            Subtree_Window_Used := Subtree_Window_Used + 1;
+            Subtree_Consecutive := Subtree_Consecutive + 1;
+            Observed_Incident := Flyology.Supervision.Incident (Incident);
+            Observed_Attempt := Attempt (Incident);
+            Has_Observed_Attempt := True;
+         end if;
+         Snapshots (Child).Attempts := Interfaces.Unsigned_64 (Total_Used (Child));
+         Snapshots (Child).Backoff := Backoff;
+         if Backoff > Ada.Real_Time.Time_Last - Now then
+            Restart_Due (Child) := Ada.Real_Time.Time_Last;
+         else
+            Restart_Due (Child) := Now + Backoff;
+         end if;
+         Snapshots (Child).State := Backing_Off;
+      end Record_Restart;
+
+      procedure Begin_Recovery
+        (Trigger     : Child_Kind;
+         Termination : Termination_Summary;
+         Incident    : Incident_Context;
+         Now         : Ada.Real_Time.Time)
+      is
+         Admitted        : Boolean;
+         Backoff         : Ada.Real_Time.Time_Span;
+         Previous        : constant Boolean_Array := Recovery_Affected;
+         Retrying        : constant Boolean := Phase in Recovery_Backing_Off | Recovery_Starting;
+         Previous_Due    : constant Ada.Real_Time.Time := Recovery_Due;
+         Merging_Backoff : constant Boolean := Phase = Recovery_Backing_Off;
+         Minimum_Backoff : constant Ada.Real_Time.Time_Span :=
+           (if Merging_Backoff and then Previous_Due > Now
+            then Previous_Due - Now
+            else Ada.Real_Time.Time_Span_Zero);
+      begin
+         Active_Incident := Incident;
+         Classify_Restart (Trigger, Incident, Now, Minimum_Backoff, Admitted, Backoff);
+         if not Admitted then
+            Snapshots (Trigger).Termination.Kind := Policy_Exhaustion;
+            Begin_Terminal_Stop (Recovery_Exhausted, Trigger, Snapshots (Trigger).Termination);
+            return;
+         end if;
+
+         Subtree_Ready_Since := Ada.Real_Time.Time_First;
+         Compute_Affected (Trigger, Child_Specs (Trigger).Impact, Recovery_Affected);
+         if Retrying then
+            for Child in Child_Kind loop
+               Recovery_Affected (Child) := Recovery_Affected (Child) or else Previous (Child);
+            end loop;
+         end if;
+         Recovery_Trigger := Trigger;
+         Record_Restart (Trigger, Incident, Now, Backoff);
+         --  One start gate serves the merged set.  Classify_Restart includes
+         --  the retained delay in every deadline check before charging the
+         --  new attempt.
+         Recovery_Due := Restart_Due (Trigger);
+         Recovery_Stop_Position := 0;
+         Recovery_Start_Position := 0;
+         Phase := Recovery_Stopping;
+         Record_Event
+           (Trigger, Restart_Admitted, Terminated, Backing_Off, Now, Termination.Kind, Incident, Backoff);
+         Advance_Recovery_Stop_Order;
+      end Begin_Recovery;
+
+      procedure Publish_Termination
+        (Child       : Child_Kind;
+         Value       : Child_Handle;
+         Termination : Termination_Summary;
+         Incident    : Incident_Context;
+         Now         : Ada.Real_Time.Time)
+      is
+         Existing_Stuck : constant Boolean := Snapshots (Child).Termination.Kind = Stuck;
+         Before         : Child_State;
+         Retry_Incident : Incident_Context := Incident;
+
+         procedure Advance_Repeated_Attempt (Context : in out Incident_Context; Exhausted : out Boolean) is
+         begin
+            Exhausted := False;
+            if Policy.Same_Incident_Attempt
+                 (Has_Observed_Attempt,
+                  Observed_Incident,
+                  Observed_Attempt,
+                  Flyology.Supervision.Incident (Context),
+                  Attempt (Context))
+            then
+               begin
+                  Context := Next_Attempt (Context);
+               exception
+                  when Program_Error =>
+                     Exhausted := True;
+               end;
+            end if;
+         end Advance_Repeated_Attempt;
+
+         procedure Advance_Merged_Attempt (Context : in out Incident_Context; Exhausted : out Boolean) is
+            Current_Id      : Incident_Id;
+            Current_Attempt : Incident_Attempt;
+         begin
+            Exhausted := False;
+            if Active (Active_Incident) and then Active (Context) then
+               Current_Id := Flyology.Supervision.Incident (Active_Incident);
+               Current_Attempt := Attempt (Active_Incident);
+               if Flyology.Supervision.Incident (Context) < Current_Id
+                 or else (Flyology.Supervision.Incident (Context) = Current_Id
+                          and then Attempt (Context) <= Current_Attempt)
+               then
+                  begin
+                     Context := Next_Attempt (Active_Incident);
+                  exception
+                     when Program_Error =>
+                        Context := Active_Incident;
+                        Exhausted := True;
+                  end;
+                  return;
+               end if;
+            end if;
+            Advance_Repeated_Attempt (Context, Exhausted);
+         end Advance_Merged_Attempt;
+
+         Attempts_Exhausted : Boolean;
+      begin
+         if not Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+           or else not Snapshots (Child).Live
+         then
+            return;
+         end if;
+
+         Before := Snapshots (Child).State;
+         Intervention_Pending (Child) := False;
+         Snapshots (Child).Live := False;
+         Snapshots (Child).Ready := False;
+         Snapshots (Child).State := Terminated;
+         if not Existing_Stuck then
+            Snapshots (Child).Termination := Termination;
+         end if;
+         Complete_Monitors (Child, Generation_Terminated);
+         Record_Event
+           (Child, Lifecycle_Changed, Before, Terminated, Now, Snapshots (Child).Termination.Kind, Incident);
+
+         if Phase = Stopping_Children then
+            Advance_Stop_Order;
+         elsif Phase = Recovery_Stopping then
+            if Recovery_Affected (Child) then
+               Advance_Recovery_Stop_Order;
+            else
+               Active_Incident := Incident;
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            end if;
+         elsif Phase = Recovery_Backing_Off then
+            if Child_Specs (Child).Impact /= Isolate_Child
+              or else not Policy.Should_Restart (Child_Specs (Child).Restart, Termination.Kind)
+            then
+               Active_Incident := Incident;
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            else
+               Advance_Merged_Attempt (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Retry_Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               else
+                  Begin_Recovery (Child, Snapshots (Child).Termination, Retry_Incident, Now);
+               end if;
+            end if;
+         elsif Phase = Starting_Children then
+            Active_Incident := Incident;
+            Begin_Terminal_Stop (Startup_Failed, Child, Snapshots (Child).Termination);
+         elsif Phase = Running_Children then
+            Active_Incident := Incident;
+            if Child_Specs (Child).Impact = Escalate
+              or else not Policy.Should_Restart (Child_Specs (Child).Restart, Termination.Kind)
+            then
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            else
+               Advance_Repeated_Attempt (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               else
+                  Active_Incident := Retry_Incident;
+                  Begin_Recovery (Child, Snapshots (Child).Termination, Retry_Incident, Now);
+               end if;
+            end if;
+         elsif Phase = Recovery_Starting then
+            if not Recovery_Affected (Child)
+              or else Child_Specs (Child).Impact = Escalate
+              or else not Policy.Should_Restart (Child_Specs (Child).Restart, Termination.Kind)
+            then
+               Active_Incident := Incident;
+               Begin_Terminal_Stop (Failure_Escalated, Child, Snapshots (Child).Termination);
+            else
+               Advance_Repeated_Attempt (Retry_Incident, Attempts_Exhausted);
+               if Attempts_Exhausted then
+                  Active_Incident := Incident;
+                  Snapshots (Child).Termination.Kind := Policy_Exhaustion;
+                  Begin_Terminal_Stop (Recovery_Exhausted, Child, Snapshots (Child).Termination);
+               else
+                  Begin_Recovery (Child, Snapshots (Child).Termination, Retry_Incident, Now);
+               end if;
+            end if;
+         end if;
+      end Publish_Termination;
+
+      function Incident_Can_Close
+        (Child : Child_Kind; Value : Child_Handle; Now : Ada.Real_Time.Time) return Boolean
+      is (Phase = Running_Children
+          and then Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+          and then Snapshots (Child).Live
+          and then Snapshots (Child).Ready
+          and then Ready_Since (Child) /= Ada.Real_Time.Time_First
+          and then Subtree_Ready_Since /= Ada.Real_Time.Time_First
+          and then Now - Ready_Since (Child) >= Child_Specs (Child).Recovery.Stability_Reset
+          and then Now - Subtree_Ready_Since >= Subtree_Recovery.Stability_Reset);
+
+      procedure Publish_Stuck (Child : Child_Kind; Value : Child_Handle) is
+      begin
+         if Generation_Is_Current (Value, Identity, Child_Ids (Child), Snapshots (Child).Generation)
+           and then Snapshots (Child).Live
+           and then Snapshots (Child).Termination.Kind /= Stuck
+         then
+            Snapshots (Child).Ready := False;
+            Snapshots (Child).Termination := Empty_Summary (Stuck);
+            if Phase = Stopping_Children then
+               Terminal :=
+                 (Outcome     => Child_Stuck,
+                  Child       => Child_Ids (Child),
+                  Generation  => Snapshots (Child).Generation,
+                  Termination => Snapshots (Child).Termination,
+                  Incident    => Active_Incident);
+               Snapshots (Child).Escalated := True;
+            else
+               Begin_Terminal_Stop (Child_Stuck, Child, Snapshots (Child).Termination);
+            end if;
+         end if;
+      end Publish_Stuck;
+
+      procedure Request_Stop is
+      begin
+         if Phase = Unconfigured then
+            Shutdown_Pending := True;
+            Terminal :=
+              (Outcome     => Shutdown_Completed,
+               Child       => Child_Id'First,
+               Generation  => Generation'First,
+               Termination => Empty_Summary (Supervisor_Shutdown),
+               Incident    => No_Incident);
+         elsif Phase not in Stopping_Children | Finished then
+            Terminal :=
+              (Outcome     => Shutdown_Completed,
+               Child       => Child_Ids (Child_Kind'First),
+               Generation  => Snapshots (Child_Kind'First).Generation,
+               Termination => Empty_Summary (Supervisor_Shutdown),
+               Incident    => Active_Incident);
+            Phase := Stopping_Children;
+            Stop_Position := 1;
+            Record_Event
+              (Child_Kind'First,
+               Supervisor_Stopped,
+               Snapshots (Child_Kind'First).State,
+               Snapshots (Child_Kind'First).State,
+               Ada.Real_Time.Clock,
+               Supervisor_Shutdown,
+               Active_Incident);
+            Advance_Stop_Order;
+         end if;
+      end Request_Stop;
+
+      function Manager_Should_Exit return Boolean
+      is (Phase = Finished);
+
+      procedure Manager_Failed (Child : Child_Kind; Termination : Termination_Summary) is
+      begin
+         if Phase /= Finished then
+            Snapshots (Child).Live := False;
+            Snapshots (Child).Ready := False;
+            Snapshots (Child).Termination := Termination;
+            Complete_Monitors (Child, Generation_Terminated);
+            if Phase = Stopping_Children then
+               Advance_Stop_Order;
+            else
+               Begin_Terminal_Stop (Failure_Escalated, Child, Termination);
+            end if;
+         end if;
+      end Manager_Failed;
+
+      procedure Manager_Finished is
+      begin
+         if Managers_Done < Child_Total then
+            Managers_Done := Managers_Done + 1;
+         end if;
+      end Manager_Finished;
+
+      entry Await_Finished when Phase = Finished is
+      begin
+         null;
+      end Await_Finished;
+
+      entry Await_Managers when Managers_Done = Child_Total is
+      begin
+         null;
+      end Await_Managers;
+
+      function Has_Configuration return Boolean
+      is (Configured);
+
+      function Read_Result return Supervisor_Result
+      is (Terminal);
+
+      function Read_Snapshot (Child : Child_Kind) return Child_Snapshot
+      is (Snapshots (Child));
+
+      function Read_Latest (Child : Child_Kind) return Child_Handle is
+      begin
+         if not Configured or else not Has_Generation (Child) then
+            raise Program_Error with "static child has no current generation";
+         end if;
+         return (Controller => Identity, Id => Child_Ids (Child), Generation => Snapshots (Child).Generation);
+      end Read_Latest;
+
+      procedure Register_Monitor
+        (Child     : Child_Kind;
+         Handle    : Child_Handle;
+         Immediate : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot;
+         Ticket    : not null access Monitor_Index;
+         Token     : not null access Monitor_Token;
+         Active    : not null access Boolean)
+      is
+         Selected : Monitor_Index := Monitor_Index'First;
+         Found    : Boolean := False;
+         Reusable : Boolean := False;
+      begin
+         Immediate := True;
+         Status := Observation_Timed_Out;
+         Ticket.all := Monitor_Index'First;
+         Token.all := 0;
+         Active.all := False;
+         Snapshot := Snapshots (Child);
+         if not Configured
+           or else not Has_Generation (Child)
+           or else Controller (Handle) /= Identity
+           or else Flyology.Supervision.Child (Handle) /= Child_Ids (Child)
+         then
+            raise Program_Error with "invalid static generation monitor";
+         elsif Current_Generation (Handle) /= Snapshots (Child).Generation then
+            Status := Generation_Replaced;
+            return;
+         elsif not Snapshots (Child).Live then
+            Status := Generation_Terminated;
+            return;
+         end if;
+
+         for Candidate in Monitor_Index loop
+            if Monitor_Tokens (Candidate) /= Monitor_Token'Last then
+               Reusable := True;
+            end if;
+            if Monitor_States (Candidate) = Monitor_Free
+              and then Monitor_Tokens (Candidate) /= Monitor_Token'Last
+            then
+               Selected := Candidate;
+               Found := True;
+               exit;
+            end if;
+         end loop;
+         if not Found then
+            if Reusable then
+               raise Constraint_Error with "static supervisor monitor capacity exhausted";
+            else
+               raise Program_Error with "static supervisor monitor identity exhausted";
+            end if;
+         end if;
+
+         Monitor_Tokens (Selected) := Monitor_Tokens (Selected) + 1;
+         Monitor_Handles (Selected) := Handle;
+         Monitor_Snapshots (Selected) := Snapshots (Child);
+         Monitor_States (Selected) := Monitor_Pending;
+         Ticket.all := Selected;
+         Token.all := Monitor_Tokens (Selected);
+         Active.all := True;
+         Immediate := False;
+      end Register_Monitor;
+
+      entry Await_Monitor (for Ticket in Monitor_Index)
+        (Token : Monitor_Token; Status : out Generation_Observation_Status; Snapshot : out Child_Snapshot)
+        when Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced
+      is
+      begin
+         pragma Assert (Token = Monitor_Tokens (Ticket));
+         Status :=
+           (if Monitor_States (Ticket) = Monitor_Terminated
+            then Generation_Terminated
+            else Generation_Replaced);
+         Snapshot := Monitor_Snapshots (Ticket);
+         Monitor_States (Ticket) := Monitor_Free;
+      end Await_Monitor;
+
+      procedure Cancel_Monitor
+        (Ticket    : Monitor_Index;
+         Token     : Monitor_Token;
+         Completed : out Boolean;
+         Status    : out Generation_Observation_Status;
+         Snapshot  : out Child_Snapshot) is
+      begin
+         if Token /= Monitor_Tokens (Ticket) then
+            Completed := False;
+            Status := Observation_Timed_Out;
+            Snapshot := Monitor_Snapshots (Ticket);
+            return;
+         end if;
+         Completed := Monitor_States (Ticket) in Monitor_Terminated | Monitor_Replaced;
+         Status :=
+           (if Monitor_States (Ticket) = Monitor_Terminated
+            then Generation_Terminated
+            elsif Monitor_States (Ticket) = Monitor_Replaced
+            then Generation_Replaced
+            else Observation_Timed_Out);
+         Snapshot := Monitor_Snapshots (Ticket);
+         Monitor_States (Ticket) := Monitor_Free;
+      end Cancel_Monitor;
+
+      procedure Copy_Events
+        (Cursor  : in out Event_Sequence;
+         Target  : out Supervisor_Event_Array;
+         Count   : out Natural;
+         Dropped : out Event_Sequence)
+      is
+         Oldest  : Event_Sequence;
+         Desired : Event_Sequence;
+         Slot    : Positive;
+      begin
+         Target := (others => <>);
+         Count := 0;
+         Dropped := 0;
+         if Event_Length = 0 or else Cursor >= Event_Last_Sequence then
+            return;
+         end if;
+
+         Oldest := Event_Last_Sequence - Event_Sequence (Event_Length) + 1;
+         if Cursor < Oldest - 1 then
+            Dropped := Oldest - Cursor - 1;
+            Desired := Oldest;
+         elsif Cursor = Event_Sequence'Last then
+            return;
+         else
+            Desired := Cursor + 1;
+         end if;
+
+         for Offset in 0 .. Event_Length - 1 loop
+            exit when Count = Target'Length;
+            Slot :=
+              Positive
+                (((Event_First - Event_Buffer'First + Offset) mod Event_Capacity) + Event_Buffer'First);
+            if Events (Slot).Sequence >= Desired then
+               Count := Count + 1;
+               Target (Target'First + Count - 1) := Events (Slot);
+               Cursor := Events (Slot).Sequence;
+            end if;
+         end loop;
+      end Copy_Events;
+   end Lifecycle;
+
+   overriding
+   procedure Finalize (Item : in out Monitor_Guard) is
+      Completed : Boolean;
+      Status    : Generation_Observation_Status;
+      Snapshot  : Child_Snapshot;
+   begin
+      if Item.Active and then Item.State /= null then
+         Item.State.Cancel_Monitor (Item.Ticket, Item.Token, Completed, Status, Snapshot);
+         Item.Active := False;
+      end if;
+   exception
+      when others =>
+         null;
+   end Finalize;
+
+   procedure Validate_Configuration
+     (Specs        : out Specification_Array;
+      Ids          : out Logical_Id_Array;
+      Dependencies : out Dependency_Matrix;
+      Cohorts      : out Cohort_Matrix;
+      Start_Order  : out Child_Order;
+      Stop_Order   : out Child_Order)
+   is
+      Emitted  : Boolean_Array := (others => False);
+      Found    : Boolean;
+      Ready    : Boolean;
+      Selected : Child_Kind := Child_Kind'First;
+      Position : Natural := 0;
+      Affected : Boolean_Array;
+   begin
+      if Subtree_Recovery.Window <= Ada.Real_Time.Time_Span_Zero
+        or else Subtree_Recovery.Initial_Backoff < Ada.Real_Time.Time_Span_Zero
+        or else Subtree_Recovery.Maximum_Backoff < Subtree_Recovery.Initial_Backoff
+        or else Subtree_Recovery.Stability_Reset <= Ada.Real_Time.Time_Span_Zero
+        or else Subtree_Recovery.Recovery_Deadline < Ada.Real_Time.Time_Span_Zero
+      then
+         raise Configuration_Error with "invalid subtree recovery policy";
+      end if;
+
+      for Child in Child_Kind loop
+         Specs (Child) := Specification (Child);
+         Ids (Child) := Logical_Id (Child);
+         if Specs (Child).Readiness_Timeout < Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Recovery.Window <= Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Recovery.Initial_Backoff < Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Recovery.Maximum_Backoff < Specs (Child).Recovery.Initial_Backoff
+           or else Specs (Child).Recovery.Stability_Reset <= Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Recovery.Recovery_Deadline < Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Stopping.Grace < Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Stopping.Abort_Observation < Ada.Real_Time.Time_Span_Zero
+           or else Specs (Child).Stopping.Grace
+                   > Ada.Real_Time.Time_Span_Last - Specs (Child).Stopping.Abort_Observation
+           or else (Specs (Child).Task_Model /= Flyology.Lightweight_Task
+                    and then Specs (Child).Task_Model /= Flyology.Native_Task)
+           or else (Specs (Child).Task_Model = Flyology.Native_Task and then Specs (Child).Has_Group)
+           or else (Specs (Child).Task_Model = Flyology.Lightweight_Task
+                    and then Specs (Child).Has_Group
+                    and then Integer (Specs (Child).Group) = Integer (Control_Group))
+           or else (Specs (Child).Restart /= Never and then not Specs (Child).Restart_Safe)
+           or else (Specs (Child).Restart = Never and then Specs (Child).Impact /= Escalate)
+         then
+            raise Configuration_Error with "invalid child specification";
+         end if;
+
+         for Other in Child_Kind loop
+            if Other < Child and then Ids (Other) = Ids (Child) then
+               raise Configuration_Error with "duplicate logical child id";
+            end if;
+            Dependencies (Child, Other) := Depends_On (Child, Other);
+            Cohorts (Child, Other) := Cohort_Member (Child, Other);
+            if Child = Other and then Dependencies (Child, Other) then
+               raise Configuration_Error with "self dependency";
+            end if;
+         end loop;
+      end loop;
+
+      for Slot in Order_Position loop
+         Found := False;
+         for Child in Child_Kind loop
+            if not Found and then not Emitted (Child) then
+               Ready := True;
+               for Prerequisite in Child_Kind loop
+                  if Dependencies (Child, Prerequisite) and then not Emitted (Prerequisite) then
+                     Ready := False;
+                  end if;
+               end loop;
+               if Ready then
+                  Selected := Child;
+                  Found := True;
+               end if;
+            end if;
+         end loop;
+         if not Found then
+            raise Configuration_Error with "dependency cycle";
+         end if;
+         Position := Position + 1;
+         Start_Order (Order_Position (Position)) := Selected;
+         Emitted (Selected) := True;
+      end loop;
+
+      for Slot in Order_Position loop
+         Stop_Order (Slot) := Start_Order (Order_Position (Child_Total - Slot + 1));
+      end loop;
+
+      for Trigger in Child_Kind loop
+         if Specs (Trigger).Restart /= Never and then Specs (Trigger).Impact /= Escalate then
+            Affected := (others => False);
+            Affected (Trigger) := True;
+            if Specs (Trigger).Impact = Restart_Cohort then
+               if not Cohorts (Trigger, Trigger) then
+                  raise Configuration_Error with "recovery cohort must contain its trigger";
+               end if;
+               for Child in Child_Kind loop
+                  Affected (Child) := Affected (Child) or else Cohorts (Trigger, Child);
+               end loop;
+            elsif Specs (Trigger).Impact = Restart_Dependents then
+               for Pass in Child_Kind loop
+                  pragma Unreferenced (Pass);
+                  for Child in Child_Kind loop
+                     if not Affected (Child) then
+                        for Prerequisite in Child_Kind loop
+                           if Dependencies (Child, Prerequisite) and then Affected (Prerequisite) then
+                              Affected (Child) := True;
+                           end if;
+                        end loop;
+                     end if;
+                  end loop;
+               end loop;
+            end if;
+
+            for Child in Child_Kind loop
+               if Affected (Child) and then not Specs (Child).Restart_Safe then
+                  raise Configuration_Error with "affected child is not restart safe";
+               end if;
+               for Prerequisite in Child_Kind loop
+                  if Affected (Prerequisite)
+                    and then Dependencies (Child, Prerequisite)
+                    and then not Affected (Child)
+                  then
+                     raise Configuration_Error with "recovery set is not closed over dependents";
+                  end if;
+               end loop;
+            end loop;
+         end if;
+      end loop;
+   end Validate_Configuration;
+
+   procedure Request_Shutdown (Item : in out Supervisor) is
+   begin
+      Item.State.Request_Stop;
+   end Request_Shutdown;
+
+   procedure Restart (Item : in out Supervisor; Child : Child_Kind; Handle : Child_Handle) is
+      Status : Intervention_Result;
+   begin
+      Item.State.Request_Intervention
+        (Child, Handle, Diagnostic_Summary (Restart_Requested, "manual restart requested"), Status);
+      case Status is
+         when Intervention_Accepted    =>
+            null;
+
+         when Intervention_Stale       =>
+            raise Stale_Handle with "manual restart requires the current running generation";
+
+         when Intervention_Unsupported =>
+            raise Program_Error with "manual restart requires a restart-safe replacement policy";
+      end case;
+   end Restart;
+
+   procedure Report_Unhealthy
+     (Item : in out Supervisor; Child : Child_Kind; Handle : Child_Handle; Diagnostic : String)
+   is
+      Summary : constant Termination_Summary := Diagnostic_Summary (Unhealthy, Diagnostic);
+      Status  : Intervention_Result;
+   begin
+      Item.State.Request_Intervention (Child, Handle, Summary, Status);
+      if Status /= Intervention_Accepted then
+         raise Stale_Handle with "health report requires the current running generation";
+      end if;
+   end Report_Unhealthy;
+
+   function Current (Item : Supervisor; Child : Child_Kind) return Child_Snapshot is
+      Spec : Child_Specification;
+   begin
+      if Item.State.Has_Configuration then
+         return Item.State.Read_Snapshot (Child);
+      end if;
+      Spec := Specification (Child);
+      return
+        (Id          => Logical_Id (Child),
+         Generation  => Generation'First,
+         State       => Flyology.Supervision.Configured,
+         Task_Model  => Spec.Task_Model,
+         Has_Group   => Spec.Has_Group,
+         Group       => Spec.Group,
+         Termination => Empty_Summary (No_Termination),
+         Attempts    => 0,
+         Backoff     => Ada.Real_Time.Time_Span_Zero,
+         Ready       => False,
+         Live        => False,
+         Escalated   => False);
+   end Current;
+
+   function Latest (Item : Supervisor; Child : Child_Kind) return Child_Handle is
+   begin
+      return Item.State.Read_Latest (Child);
+   end Latest;
+
+   function Wait_Termination
+     (Item : in out Supervisor; Child : Child_Kind; Handle : Child_Handle; Timeout : Duration := -1.0)
+      return Generation_Observation
+   is
+      Immediate : Boolean;
+      Completed : Boolean := False;
+      Status    : Generation_Observation_Status;
+      Snapshot  : Child_Snapshot;
+      Guard     : Monitor_Guard;
+   begin
+      Guard.State := Item.State'Unchecked_Access;
+      Item.State.Register_Monitor
+        (Child,
+         Handle,
+         Immediate,
+         Status,
+         Snapshot,
+         Guard.Ticket'Access,
+         Guard.Token'Access,
+         Guard.Active'Access);
+      if Flyology.Task_Lifecycle_Test_Hooks.Enabled and then Guard.Active then
+         Flyology.Task_Lifecycle_Test_Hooks.Barrier
+           (Flyology.Task_Lifecycle_Test_Hooks.Static_Monitor_Registered);
+      end if;
+      if Immediate then
+         return Completed_Observation (Status, Snapshot);
+      end if;
+
+      if Timeout < 0.0 then
+         Item.State.Await_Monitor (Guard.Ticket) (Guard.Token, Status, Snapshot);
+         Guard.Active := False;
+         return Completed_Observation (Status, Snapshot);
+      elsif Timeout = 0.0 then
+         Item.State.Cancel_Monitor (Guard.Ticket, Guard.Token, Completed, Status, Snapshot);
+         Guard.Active := False;
+      else
+         select
+            Item.State.Await_Monitor (Guard.Ticket) (Guard.Token, Status, Snapshot);
+            Completed := True;
+         or
+            delay Timeout;
+         end select;
+         if not Completed then
+            Item.State.Cancel_Monitor (Guard.Ticket, Guard.Token, Completed, Status, Snapshot);
+         end if;
+         Guard.Active := False;
+      end if;
+
+      if Completed then
+         return Completed_Observation (Status, Snapshot);
+      else
+         return (Status => Observation_Timed_Out);
+      end if;
+   end Wait_Termination;
+
+   procedure Read_Events
+     (Item    : in out Supervisor;
+      Cursor  : in out Event_Sequence;
+      Events  : out Supervisor_Event_Array;
+      Count   : out Natural;
+      Dropped : out Event_Sequence) is
+   begin
+      Item.State.Copy_Events (Cursor, Events, Count, Dropped);
+   end Read_Events;
+
+   procedure Run_Internal
+     (Item        : aliased in out Supervisor;
+      Context     : aliased in out Application_Context;
+      Inherited   : Incident_Context;
+      Parent_Stop : access Flyology.Cancellation.Token;
+      Result      : out Supervisor_Result)
+   is
+      Specs        : Specification_Array;
+      Ids          : Logical_Id_Array;
+      Dependencies : Dependency_Matrix;
+      Cohorts      : Cohort_Matrix;
+      Start_Order  : Child_Order;
+      Stop_Order   : Child_Order;
+      Identity     : Controller_Id;
+   begin
+      Validate_Configuration (Specs, Ids, Dependencies, Cohorts, Start_Order, Stop_Order);
+      Identity := New_Controller;
+      Item.State.Configure (Identity, Specs, Ids, Dependencies, Cohorts, Start_Order, Stop_Order, Inherited);
+
+      if Item.State.Manager_Should_Exit then
+         Result := Item.State.Read_Result;
+         return;
+      end if;
+
+      declare
+         protected type Runner_Completion is
+            procedure Store (Value : Generation_Result);
+            procedure Read (Done : out Boolean; Value : out Generation_Result);
+         private
+            Finished : Boolean := False;
+            Stored   : Generation_Result;
+         end Runner_Completion;
+
+         protected body Runner_Completion is
+            procedure Store (Value : Generation_Result) is
+            begin
+               if not Finished then
+                  Stored := Value;
+                  Finished := True;
+               end if;
+            end Store;
+
+            procedure Read (Done : out Boolean; Value : out Generation_Result) is
+            begin
+               Done := Finished;
+               Value := Stored;
+            end Read;
+         end Runner_Completion;
+
+         task type Manager with CPU => Control_Group is
+            pragma Task_Info (Flyology.Lightweight_Task);
+            entry Start (Child : Child_Kind);
+         end Manager;
+
+         task body Manager is
+            Managed_Child : Child_Kind := Child_Kind'First;
+            Activated     : Boolean := False;
+
+            procedure Run_Generation
+              (Value : Child_Handle; Spec : Child_Specification; Incident : Incident_Context)
+            is
+               Control      : aliased Generation_Control;
+               Result_Value : Generation_Result;
+            begin
+               Open (Control, Value, Incident);
+               declare
+                  Completion : aliased Runner_Completion;
+
+                  task Runner
+                    with CPU => Control_Group is
+                     pragma Task_Info (Flyology.Lightweight_Task);
+                  end Runner;
+
+                  task body Runner is
+                     Generation : Generation_Result;
+                  begin
+                     begin
+                        Run_One_Generation (Context, Managed_Child, Control, Generation);
+                     exception
+                        when Occurrence : Tasking_Error =>
+                           Generation :=
+                             (Termination    => Failure_Summary (Occurrence, Activation_Failure),
+                              Reported_Ready => Is_Ready (Control),
+                              Incident       => Recovery_Incident (Control));
+                        when Occurrence : others =>
+                           Generation :=
+                             (Termination    => Failure_Summary (Occurrence),
+                              Reported_Ready => Is_Ready (Control),
+                              Incident       => Recovery_Incident (Control));
+                     end;
+                     Completion.Store (Generation);
+                  end Runner;
+
+                  Started_At        : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+                  Stop_At           : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+                  Done              : Boolean;
+                  Ready_Published   : Boolean := False;
+                  Stop_Published    : Boolean := False;
+                  Abort_Published   : Boolean := False;
+                  Stuck_Published   : Boolean := False;
+                  Incident_Closed   : Boolean := not Active (Incident);
+                  Stop_Now          : Boolean;
+                  Shutdown_Stop     : Boolean;
+                  Stop_Config       : Stop_Policy;
+                  Override          : Termination_Summary := Empty_Summary (No_Termination);
+                  Decision_Override : Termination_Summary;
+                  Now               : Ada.Real_Time.Time;
+               begin
+                  loop
+                     Completion.Read (Done, Result_Value);
+                     Now := Ada.Real_Time.Clock;
+
+                     if not Ready_Published and then Is_Ready (Control) then
+                        Item.State.Publish_Ready (Managed_Child, Value, Now);
+                        Ready_Published := True;
+                     end if;
+                     if not Incident_Closed and then Item.State.Incident_Can_Close (Managed_Child, Value, Now)
+                     then
+                        Close_Recovery_Incident (Control);
+                        Incident_Closed := True;
+                     end if;
+                     exit when Done;
+
+                     Item.State.Stop_Decision
+                       (Managed_Child, Value, Stop_Now, Shutdown_Stop, Stop_Config, Decision_Override);
+                     if Decision_Override.Kind /= No_Termination then
+                        Override := Decision_Override;
+                     end if;
+                     if not Ready_Published and then Now - Started_At >= Spec.Readiness_Timeout then
+                        Stop_Now := True;
+                        Shutdown_Stop := False;
+                        Override := Empty_Summary (Readiness_Timeout);
+                        Stop_Config := Spec.Stopping;
+                     end if;
+
+                     if Stop_Now and then not Stop_Published then
+                        Stop_Published := True;
+                        Stop_At := Now;
+                        begin
+                           Request_Stop (Control, Shutdown_Stop);
+                        exception
+                           when others =>
+                              null;
+                        end;
+                     end if;
+
+                     if Stop_Published and then Now - Stop_At >= Stop_Config.Grace then
+                        if not Shutdown_Stop and then Override.Kind = No_Termination then
+                           Override := Empty_Summary (Stop_Timeout);
+                        end if;
+                        if Stop_Config.Request_Abort and then not Abort_Published then
+                           Abort_Published := True;
+                           begin
+                              Request_Abort (Control);
+                           exception
+                              when others =>
+                                 null;
+                           end;
+                        end if;
+                        if not Stuck_Published
+                          and then Now - Stop_At >= Stop_Config.Grace + Stop_Config.Abort_Observation
+                        then
+                           Stuck_Published := True;
+                           Item.State.Publish_Stuck (Managed_Child, Value);
+                        end if;
+                     end if;
+                     delay 0.001;
+                  end loop;
+
+                  Result_Value.Incident := Recovery_Incident (Control);
+                  if Result_Value.Termination.Kind = No_Termination then
+                     Result_Value.Termination := Empty_Summary (Abnormal_Completion);
+                  elsif Override.Kind /= No_Termination
+                    and then Result_Value.Termination.Kind
+                             in Normal_Return | Cancelled | Supervisor_Shutdown | Abnormal_Completion
+                  then
+                     declare
+                        Task_Id : constant Ada.Task_Identification.Task_Id :=
+                          Result_Value.Termination.Task_Id;
+                     begin
+                        Result_Value.Termination := Override;
+                        Result_Value.Termination.Task_Id := Task_Id;
+                     end;
+                  elsif Stop_Published
+                    and then Shutdown_Stop
+                    and then Result_Value.Termination.Kind in Normal_Return | Cancelled
+                  then
+                     Result_Value.Termination.Kind := Supervisor_Shutdown;
+                  end if;
+               exception
+                  when Occurrence : others =>
+                     Result_Value :=
+                       (Termination    => Failure_Summary (Occurrence),
+                        Reported_Ready => Is_Ready (Control),
+                        Incident       => Recovery_Incident (Control));
+               end;
+               --  Leaving the nested block joins Runner. The application
+               --  factory has already joined its generation before returning.
+               declare
+                  Finished_At : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+                  Cascade     : Incident_Context := Result_Value.Incident;
+                  Span        : constant Ada.Real_Time.Time_Span :=
+                    (if Spec.Recovery.Recovery_Deadline < Subtree_Recovery.Recovery_Deadline
+                     then Spec.Recovery.Recovery_Deadline
+                     else Subtree_Recovery.Recovery_Deadline);
+                  Deadline    : Ada.Real_Time.Time;
+               begin
+                  if not Active (Cascade) then
+                     if Span > Ada.Real_Time.Time_Last - Finished_At then
+                        Deadline := Ada.Real_Time.Time_Last;
+                     else
+                        Deadline := Finished_At + Span;
+                     end if;
+                     Cascade := New_Incident (Finished_At, Deadline);
+                  end if;
+                  Item.State.Publish_Termination
+                    (Managed_Child, Value, Result_Value.Termination, Cascade, Finished_At);
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
+                  end if;
+               end;
+            exception
+               when Occurrence : others =>
+                  declare
+                     Failed_At : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+                     Cascade   : Incident_Context := Recovery_Incident (Control);
+                     Span      : constant Ada.Real_Time.Time_Span :=
+                       (if Spec.Recovery.Recovery_Deadline < Subtree_Recovery.Recovery_Deadline
+                        then Spec.Recovery.Recovery_Deadline
+                        else Subtree_Recovery.Recovery_Deadline);
+                     Deadline  : Ada.Real_Time.Time;
+                  begin
+                     if not Active (Cascade) then
+                        if Span > Ada.Real_Time.Time_Last - Failed_At then
+                           Deadline := Ada.Real_Time.Time_Last;
+                        else
+                           Deadline := Failed_At + Span;
+                        end if;
+                        Cascade := New_Incident (Failed_At, Deadline);
+                     end if;
+                     Item.State.Publish_Termination
+                       (Managed_Child,
+                        Value,
+                        Failure_Summary
+                          (Occurrence,
+                           (if Ada.Exceptions.Exception_Identity (Occurrence) = Tasking_Error'Identity
+                            then Activation_Failure
+                            else Unhandled_Exception)),
+                        Cascade,
+                        Failed_At);
+                     if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                        Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                          (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Terminated);
+                     end if;
+                  end;
+            end Run_Generation;
+
+            Started  : Boolean;
+            Value    : Child_Handle;
+            Spec     : Child_Specification;
+            Incident : Incident_Context;
+         begin
+            select
+               accept Start (Child : Child_Kind) do
+                  Managed_Child := Child;
+                  Activated := True;
+               end Start;
+            or
+               terminate;
+            end select;
+
+            while Activated and then not Item.State.Manager_Should_Exit loop
+               Item.State.Try_Start (Managed_Child, Ada.Real_Time.Clock, Started, Value, Spec, Incident);
+               if Started then
+                  if Flyology.Task_Lifecycle_Test_Hooks.Enabled then
+                     Flyology.Task_Lifecycle_Test_Hooks.Barrier
+                       (Flyology.Task_Lifecycle_Test_Hooks.Static_Generation_Starting);
+                  end if;
+                  Run_Generation (Value, Spec, Incident);
+               else
+                  delay 0.001;
+               end if;
+            end loop;
+            Item.State.Manager_Finished;
+         exception
+            when Occurrence : others =>
+               Item.State.Manager_Failed (Managed_Child, Failure_Summary (Occurrence));
+               Item.State.Manager_Finished;
+         end Manager;
+
+         type Manager_Array is array (Child_Kind) of Manager;
+         Managers : Manager_Array;
+      begin
+         for Child in Child_Kind loop
+            Managers (Child).Start (Child);
+         end loop;
+         if Parent_Stop = null then
+            Item.State.Await_Finished;
+         else
+            while not Item.State.Manager_Should_Exit loop
+               if Parent_Stop.Requested then
+                  Item.State.Request_Stop;
+               end if;
+               delay 0.001;
+            end loop;
+         end if;
+         Item.State.Await_Managers;
+         Result := Item.State.Read_Result;
+      exception
+         when others =>
+            Item.State.Request_Stop;
+            raise;
+      end;
+   end Run_Internal;
+
+   procedure Run
+     (Item    : aliased in out Supervisor;
+      Context : aliased in out Application_Context;
+      Result  : out Supervisor_Result) is
+   begin
+      Run_Internal (Item, Context, No_Incident, null, Result);
+   end Run;
+
+   procedure Run_Nested
+     (Item    : aliased in out Supervisor;
+      Context : aliased in out Application_Context;
+      Parent  : aliased in out Generation_Control;
+      Result  : out Supervisor_Result)
+   is
+      Parent_Handle : constant Child_Handle := Handle (Parent);
+      Inherited     : constant Incident_Context := Recovery_Incident (Parent);
+      Parent_Stop   : constant not null access Flyology.Cancellation.Token := Stopping (Parent);
+      pragma Unreferenced (Parent_Handle);
+   begin
+      Run_Internal (Item, Context, Inherited, Parent_Stop, Result);
+      if Active (Result.Incident) and then Result.Outcome /= Shutdown_Completed then
+         Report_Escalation (Parent, Result.Incident);
+      end if;
+   end Run_Nested;
+
+end Flyology.Supervision.Static;

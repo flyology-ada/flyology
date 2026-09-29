@@ -1,0 +1,19 @@
+GNAT runtime patch licensing and provenance
+
+The files in this directory contain patch context derived from the GNAT
+runtime sources distributed as part of GCC, principally GNARL units from
+gcc/ada/libgnarl. They are licensed under:
+
+    GPL-3.0-or-later WITH GCC-exception-3.1
+
+The complete license terms are published by the GNU Project:
+
+    GNU General Public License version 3
+    https://www.gnu.org/licenses/gpl-3.0.html
+
+    GCC Runtime Library Exception version 3.1
+    https://www.gnu.org/licenses/gcc-exception-3.1.html
+
+Flyology does not redistribute complete GNAT runtime source files. The build
+script applies these patches to sources copied from the user's installed GNAT
+toolchain.

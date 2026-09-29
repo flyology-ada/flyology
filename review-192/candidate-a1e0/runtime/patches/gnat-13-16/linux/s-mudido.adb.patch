@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-mudido.adb
++++ b/s-mudido.adb
+@@ -38 +38,3 @@
+ with Ada.Unchecked_Conversion;
++with Interfaces.C;
++with System.Flyology.Scheduler;
+@@ -40 +42,2 @@
+ package body System.Multiprocessors.Dispatching_Domains is
++   use type Interfaces.C.int;
+@@ -358 +361,11 @@
+    begin
++      --  A lightweight task's domain and CPU fields describe its Flyology
++      --  execution group, not native processor affinity. Leave that
++      --  bookkeeping untouched, including before dispatching domains freeze,
++      --  when GNARL also updates its per-CPU task counters.
++
++      if System.Flyology.Scheduler.Is_Lightweight_Task (T.all'Address) /= 0
++      then
++         return;
++      end if;
++

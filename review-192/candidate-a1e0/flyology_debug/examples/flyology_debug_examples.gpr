@@ -1,0 +1,14 @@
+with "../flyology_debug.gpr";
+
+project Flyology_Debug_Examples is
+   for Source_Dirs use (".");
+   for Main use ("basic.adb");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-O2", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa");
+   end Compiler;
+end Flyology_Debug_Examples;

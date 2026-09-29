@@ -1,0 +1,6 @@
+
+Execution of tests/bin/review192a1e0/pool_reduction_cross_to_shard_smoke terminated by unhandled exception
+raised PROGRAM_ERROR : stale shard crossing survived reduction: rejected=FALSE group= 2 explicit= 1
+Load address: 0x102818000
+Call stack traceback locations:
+0x10283acec 0x10283ad4c 0x102819c4c 0x10281b8f4

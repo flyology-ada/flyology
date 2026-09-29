@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Create, map, hand off, persist, and safely populate Flyology shared-memory segments with race-safe named extents and relocatable data structures.">
+    <meta name="theme-color" content="#17213d">
+    <title>Shared-memory segments · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/shared-memory/">
+    <link rel="icon" href="../../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../../assets/styles/site.css">
+    <link rel="stylesheet" href="../../assets/styles/ecosystem.css">
+    <link rel="stylesheet" href="shared-memory.css">
+    <script src="../../assets/scripts/ada-highlight.js"></script>
+    <script src="../../assets/scripts/guide-navigation.js"></script>
+    <script src="../../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../../" aria-label="Flyology home">
+          <img src="../../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../../runtime/">Overview</a></li>
+                <li><a href="../../guide/" aria-current="page">Guide</a></li>
+                <li><a href="../../architecture/">Architecture</a></li>
+                <li><a href="../../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../../libraries/">Libraries</a></li>
+          <li><a href="../../journal/">Journal</a></li>
+          <li><a href="../../ci/">CI</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../../">Flyology</a></li><li><a href="../../runtime/">Runtime</a></li><li><a href="../">Guide</a></li><li aria-current="page">Shared-memory segments</li></ol>
+          <h1>Create and use shared-memory segments.</h1>
+        </div>
+        <p class="doc-hero-copy">Use <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html"><code>Flyology.Shared_Memory</code></a> to create or open an exact-size backing object, map it, initialize or attach a persisted segment registry, and publish named extents for relocatable data structures.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#model">Layer the ownership model</a></li>
+            <li><a href="#backing">Choose a backing mode</a></li>
+            <li><a href="#mapping">Map and attach</a></li>
+            <li><a href="#registry">Initialize the registry</a></li>
+            <li><a href="#objects">Publish a relocatable object</a></li>
+            <li><a href="#migration">Grow by replacement</a></li>
+            <li><a href="#worker-status">Share worker status</a></li>
+            <li><a href="#image-index-showcase">Run the image index</a></li>
+            <li><a href="#peers">Hand off one capability safely</a></li>
+            <li><a href="#lifecycle">Detach and persist</a></li>
+            <li><a href="#import-checkpoint">Reopen an import checkpoint</a></li>
+            <li><a href="#limits">Trust and recovery limits</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p>This guide covers backing and mapping ownership, plus named extents inside a segment. The companion <a href="../data-structures/">relocatable data-structures guide</a> covers the arenas, rings, maps, vectors, slabs, and strings placed in those extents.</p>
+          </aside>
+
+          <section id="model">
+            <span class="step-label">SEGMENT 01</span>
+            <h2>Keep five lifetimes distinct.</h2>
+            <p>The packages divide the problem by responsibility. <code>Flyology.Shared_Memory</code> answers where the bytes come from and who releases them. <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html"><code>Shared_Memory.Segments</code></a> answers how peers agree on what occupies those bytes. The <a href="../data-structures/"><code>Data_Structures</code> packages</a> answer how stored values remain valid when each process maps the bytes at a different address.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Namespace</dt><dd>A POSIX shm name or file path locates a backing object. Unlinking that name is explicit and does not remove a mapping or a registry entry.</dd></div>
+                <div class="decision-row"><dt>Backing object</dt><dd>A limited owner closes exactly one descriptor. Closing it does not invalidate mappings already derived from it.</dd></div>
+                <div class="decision-row"><dt>Mapping</dt><dd>A limited owner unmaps one process-local virtual range. The operating system chooses its base; public operations never request execute permission or a fixed address.</dd></div>
+                <div class="decision-row"><dt>Segment registry</dt><dd>A process-local view validates the persisted header and coordinates exact-name allocation, publication, lookup, removal, and reuse.</dd></div>
+                <div class="decision-row"><dt>Relocatable leaf</dt><dd>An arena, string, vector, map, slab, or ring stores offsets, indices, generations, counters, and bytes rather than native addresses.</dd></div>
+              </dl>
+            </div>
+            <p>The normal direction is backing object, mapping, segment, region, leaf. Teardown reverses the borrowed portion: detach the leaf, region, and segment before unmapping. Descriptor close may happen while the mapping is still live.</p>
+          </section>
+
+          <section id="backing">
+            <span class="step-label">SEGMENT 02</span>
+            <h2>Choose the backing mode by discovery and persistence.</h2>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Anonymous capability</dt><dd>Use <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#0997330fe9df4e6db30ee9ac32f2b360d5c00b2d0f0ebdd0c10fcb0a416fa265"><code>Create_Anonymous</code></a> when peers receive a descriptor rather than discover a name. Linux uses a size-sealed <code>memfd</code>; Darwin immediately unlinks an exclusive mode-0600 POSIX shm object.</dd></div>
+                <div class="decision-row"><dt>Named POSIX object</dt><dd>Use <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#d4b8ab7ed01c67935ba2e6da982bd9e6ff4a9d1f6f67b2ff55fd46b1a7782913"><code>Create_Named</code></a>, <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#cb936afc0014e66f55e80af020fd420d0a81614763dd7d902d9b78343886feb3"><code>Open_Named</code></a>, or <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#de1f88fadf09287d40f41c0d5d92953cf4ce7efb7026c9438d6231febc9fda9e"><code>Create_Or_Open_Named</code></a> when an application already owns a POSIX name protocol. Size and type must match exactly.</dd></div>
+                <div class="decision-row"><dt>Regular file</dt><dd>Use <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#d9b4646ef54a5a68e4ec91021329184b9320112bef7391cd53b8b2424ae72ffc"><code>Create_File</code></a> and <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#70eed184ae48fd9714069b2d9cbdab51ac42e12da8dcfb38cbb5241fb61494cf"><code>Open_File</code></a> for explicit filesystem persistence. Opens reject a final symlink where the host supports <code>O_NOFOLLOW</code> and require a regular file of the exact expected size.</dd></div>
+              </dl>
+            </div>
+            <p>Creation permissions default to 0600. Every acquired descriptor must report <code>FD_CLOEXEC</code>. Linux anonymous storage also reports whether immutable size seals and the runtime-supported no-execute seal were applied. Set <code>Require_No_Execute_Seal</code> when absence of that Linux property must fail closed.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>A namespace is not an initialization protocol.</strong> A named opener that races the creator before sizing receives <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#b94b793c72dbff60c358fcd9da623ed7ec6b812f97561cb6f18d14c654bb70c3"><code>Initialization_In_Progress</code></a> with no owned descriptor. It does not resize, repair, or overwrite the object.</p>
+            </aside>
+          </section>
+
+          <section id="mapping">
+            <span class="step-label">SEGMENT 03</span>
+            <h2>Map once, then attach local views.</h2>
+            <figure class="code-panel">
+              <figcaption>anonymous backing and one shared mapping</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology.Data_Structures.Regions;
+with Flyology.Shared_Memory;
+
+procedure Map_Shared_Bytes is
+   package Regions renames Flyology.Data_Structures.Regions;
+   package Shared  renames Flyology.Shared_Memory;
+
+   Backing : Shared.Backing_Object;
+   Map     : Shared.Mapping;
+   Region  : Regions.View;
+begin
+   Shared.Create_Anonymous (Backing, Length =&gt; 1_048_576);
+   Shared.Map (Map, Backing);
+   Shared.Attach_Region (Map, Region);
+
+   --  Attach relocatable structures through Region here.
+
+   Regions.Detach (Region);
+   Shared.Unmap (Map);
+   Shared.Close (Backing);
+end Map_Shared_Bytes;</code></pre>
+            </figure>
+            <p>A <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#49601dcce72d769f1c4b9dbafceff3b1ba93f85d846a78aaf4a320e46daca067"><code>Backing_Object</code></a> owns the descriptor, while a <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#61fe7d241ee8e7e0175567321f2e50510034dc031097ff9c00b6032726a27b8c"><code>Mapping</code></a> owns the process-local mapped extent. <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#55c03e0fe0a56d17a67ed7968fbc67cda119401e5384350aed979e8441615d78"><code>Attach_Region</code></a> initializes the relocatable region view. <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#8af0c9d296b64b49b1ba3bf1664e68d972e9289bb36b57f6c9cf66d3e444ed3b"><code>Unmap</code></a> and <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#79043d940a20215b253a2630d0aa60ea2ae5f345dfa33af1275df53bcb9736ca"><code>Close</code></a> release those owners independently.</p>
+            <p><a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#c134ddccd4e892a104ec9da045dadefb5eacb57c801eafa87ad57e936d84e2e0"><code>Map</code></a> borrows the descriptor only for the mapping call. The descriptor can close immediately afterward if the application no longer needs handoff, flush, or explicit unlink. Named objects and files must keep it open through <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#06c09a9e99dde7172b494e48991217517726a3e374b35ab485a03b3203560199"><code>Unlink</code></a>, because the descriptor supplies the identity used to reject a detectable namespace replacement.</p>
+            <p>Each mapping has its own native base. Attach a distinct region, segment, and leaf view in each process or mapping. Stored offsets remain the same even when the virtual addresses differ.</p>
+          </section>
+
+          <section id="registry">
+            <span class="step-label">SEGMENT 04</span>
+            <h2>Initialize one fixed-capacity registry.</h2>
+            <p>An OS name identifies the complete backing object, not the values inside it. The segment registry is the shared directory that lets every mapping resolve an exact application name to the same offset, reserved length, and generation. The payload at that offset remains a relocatable data structure with its own header and validation rules.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One segment, three stored layers</strong><span>all locations are relative to the mapping</span></figcaption>
+              <svg role="img" aria-labelledby="segment-anatomy-title segment-anatomy-desc" viewBox="0 0 760 500">
+                <title id="segment-anatomy-title">Stored layout of a shared-memory segment</title>
+                <desc id="segment-anatomy-desc">A validated segment header is followed by exact-name registry entries. Each registry entry points by offset to a relocatable byte string, MPMC ring, or hash map in the payload area.</desc>
+                <defs>
+                  <marker id="segment-anatomy-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="18" y="18" width="724" height="464" rx="18"/>
+                <text x="42" y="49" font-size="15" font-weight="620">Shared segment</text>
+                <text class="diagram-label" x="718" y="49" text-anchor="end">exact mapped extent</text>
+
+                <rect class="diagram-header" x="36" y="68" width="688" height="74" rx="10"/>
+                <text x="56" y="94" font-size="14" font-weight="620">Validated header</text>
+                <text class="diagram-code diagram-muted" x="56" y="121">magic · version · schema · total size · capacity · alignment</text>
+
+                <text class="diagram-label" x="46" y="178">FIXED-CAPACITY REGISTRY</text>
+                <rect class="diagram-box" x="36" y="192" width="688" height="145" rx="10"/>
+                <line x1="36" y1="240" x2="724" y2="240" stroke="var(--line)"/>
+                <line x1="36" y1="288" x2="724" y2="288" stroke="var(--line)"/>
+                <text class="diagram-code" x="56" y="222" font-size="12">jobs/image-index/status</text>
+                <text class="diagram-code diagram-muted" x="704" y="222" text-anchor="end">offset 16384 · 128 B · gen 1</text>
+                <text class="diagram-code" x="56" y="270" font-size="12">jobs/image-index/queue</text>
+                <text class="diagram-code diagram-muted" x="704" y="270" text-anchor="end">offset 16512 · 8192 B · gen 1</text>
+                <text class="diagram-code" x="56" y="318" font-size="12">metrics/by-worker</text>
+                <text class="diagram-code diagram-muted" x="704" y="318" text-anchor="end">offset 24704 · 4096 B · gen 3</text>
+
+                <path class="diagram-dashed" d="M170 228v126h-5v22" marker-end="url(#segment-anatomy-arrow)"/>
+                <path class="diagram-dashed" d="M341 276v78h15v22" marker-end="url(#segment-anatomy-arrow)"/>
+                <path class="diagram-dashed" d="M543 324v30h27v22" marker-end="url(#segment-anatomy-arrow)"/>
+
+                <text class="diagram-label" x="46" y="378">RELOCATABLE PAYLOAD EXTENTS</text>
+                <rect class="diagram-payload" x="36" y="394" width="218" height="60" rx="10"/>
+                <text x="145" y="419" text-anchor="middle" font-size="13" font-weight="620">Byte string</text>
+                <text class="diagram-muted" x="145" y="438" text-anchor="middle">status bytes</text>
+                <rect class="diagram-payload" x="272" y="394" width="218" height="60" rx="10"/>
+                <text x="381" y="419" text-anchor="middle" font-size="13" font-weight="620">MPMC ring</text>
+                <text class="diagram-muted" x="381" y="438" text-anchor="middle">queue slots + sequences</text>
+                <rect class="diagram-payload" x="508" y="394" width="216" height="60" rx="10"/>
+                <text x="616" y="419" text-anchor="middle" font-size="13" font-weight="620">Hash map</text>
+                <text class="diagram-muted" x="616" y="438" text-anchor="middle">entries + generations</text>
+              </svg>
+            </figure>
+            <p>The header persists its magic, layout version, application schema, complete mapping extent, slot capacity, maximum name length, slot geometry, and allocation alignment. <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#e316c4770be66ad966734c8acf966fb2abbe10c4ce88625edcfc8def85c0e925"><code>Create_Or_Attach</code></a> checks all of them exactly. Only a mapping derived from exclusive backing creation may claim an all-zero lifecycle.</p>
+            <figure class="code-panel">
+              <figcaption>segment configuration and attachment</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Config : constant Segments.Configuration :=
+  (Schema                 =&gt; 16#4D59_4150_5000_0001#,
+   Registry_Capacity      =&gt; 64,
+   Maximum_Name_Length    =&gt; 96,
+   Allocation_Alignment   =&gt; 64);
+
+Segments.Create_Or_Attach (Segment, Map, Config, Segment_Open);
+
+case Segment_Open is
+   when Segments.Initialized_New |
+        Segments.Attached_Existing =&gt;
+      Segments.Attach_Region (Segment, Region);
+
+   when Segments.Initialization_In_Progress =&gt;
+      --  Retry only at an application-selected scheduling point.
+      null;
+end case;</code></pre>
+            </figure>
+            <p>Opened and received mappings that see zero report initialization in progress. They never reinterpret an abandoned object as virgin. A nonzero incompatible or corrupt header raises <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#29399da8cdb37509e9c7ffb4061d9ea02dba4f564c6103d8f30eb111cd427668"><code>Segment_Error</code></a>; attachment is validation, not migration or recovery.</p>
+          </section>
+
+          <section id="objects">
+            <span class="step-label">SEGMENT 05</span>
+            <h2>Publish the leaf only after initialization completes.</h2>
+            <p><a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#b00e882feac08ec8f229348665e9bccf96599624a58c086c6497f28d267cf890"><code>Try_Find_Or_Create</code></a> compares the hash, exact length, and every name byte. Hash collisions cannot alias different names. When several participants race one name, the registry designates exactly one creator. That creator receives a limited claim to reserved but unpublished storage; everyone else receives an explicit outcome rather than a partially initialized leaf.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One creator, no partial readers</strong><span>every attempt is nonblocking</span></figcaption>
+              <svg role="img" aria-labelledby="publication-title publication-desc" viewBox="0 0 760 430">
+                <title id="publication-title">Race-safe named extent publication</title>
+                <desc id="publication-desc">Four participants race to find or create one exact name. One receives the creation claim and initializes the leaf. Peers see initialization in progress until success is published. The creator can instead publish a visible failure.</desc>
+                <defs>
+                  <marker id="publication-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="publication-violet-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker>
+                  <marker id="publication-teal-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <text class="diagram-label" x="32" y="35">RACING PARTICIPANTS</text>
+                <rect class="diagram-box" x="32" y="52" width="112" height="42" rx="9"/><text x="88" y="78" text-anchor="middle" font-size="12">Worker A</text>
+                <rect class="diagram-box" x="32" y="106" width="112" height="42" rx="9"/><text x="88" y="132" text-anchor="middle" font-size="12">Worker B</text>
+                <rect class="diagram-box" x="32" y="160" width="112" height="42" rx="9"/><text x="88" y="186" text-anchor="middle" font-size="12">Worker C</text>
+                <rect class="diagram-box" x="32" y="214" width="112" height="42" rx="9"/><text x="88" y="240" text-anchor="middle" font-size="12">Worker D</text>
+                <path class="diagram-line" d="M144 73h40M144 127h40M144 181h40M144 235h40M184 73v162M184 154h44" marker-end="url(#publication-arrow)"/>
+
+                <rect class="diagram-violet" x="234" y="113" width="220" height="82" rx="13"/>
+                <text class="diagram-code" x="344" y="143" text-anchor="middle" font-size="13" font-weight="620">Try_Find_Or_Create</text>
+                <text class="diagram-code diagram-muted" x="344" y="169" text-anchor="middle">metrics/by-worker</text>
+                <path class="diagram-line-violet" d="M454 154h54" marker-end="url(#publication-violet-arrow)"/>
+
+                <rect class="diagram-violet" x="514" y="106" width="214" height="96" rx="13"/>
+                <text x="621" y="136" text-anchor="middle" font-size="14" font-weight="620">Initializing</text>
+                <text class="diagram-muted" x="621" y="160" text-anchor="middle">one creator owns the claim</text>
+                <text class="diagram-muted" x="621" y="181" text-anchor="middle">reserved bytes are not resolvable</text>
+
+                <path class="diagram-line-teal" d="M580 202v41" marker-end="url(#publication-teal-arrow)"/>
+                <rect class="diagram-teal" x="476" y="250" width="208" height="72" rx="13"/>
+                <text x="580" y="279" text-anchor="middle" font-size="14" font-weight="620">Ready</text>
+                <text class="diagram-muted" x="580" y="302" text-anchor="middle">Publish makes it resolvable</text>
+
+                <path class="diagram-line" d="M514 184c-72 20-88 100-54 148" marker-end="url(#publication-arrow)"/>
+                <rect class="diagram-box" x="234" y="300" width="220" height="76" rx="13"/>
+                <text x="344" y="329" text-anchor="middle" font-size="14" font-weight="620">Explicit peer outcome</text>
+                <text class="diagram-code diagram-muted" x="344" y="350" text-anchor="middle">Initialization_In_Progress</text>
+                <text class="diagram-code diagram-muted" x="344" y="368" text-anchor="middle">or Registry_Busy</text>
+
+                <path class="diagram-dashed" d="M710 202v142" marker-end="url(#publication-arrow)"/>
+                <rect class="diagram-box" x="514" y="350" width="214" height="58" rx="13"/>
+                <text x="621" y="374" text-anchor="middle" font-size="14" font-weight="620">Failed</text>
+                <text class="diagram-code diagram-muted" x="621" y="394" text-anchor="middle">Publish_Failure (code)</text>
+              </svg>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>named relocatable byte string</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Segments.Try_Find_Or_Create
+  (Segment, "status", Byte_Strings.Required_Storage (256),
+   Handle, Claim, Named_Open, Failure);
+
+case Named_Open is
+   when Segments.Created =&gt;
+      Segments.Claimed_Extent (Segment, Claim, Location, Extent);
+      Byte_Strings.Initialize
+        (Value, Region, Location, Maximum_Length =&gt; 256);
+      Byte_Strings.Assign
+        (Value, Ada.Streams.Stream_Element_Array'
+          (1 =&gt; 16#72#, 2 =&gt; 16#65#, 3 =&gt; 16#61#, 4 =&gt; 16#64#,
+           5 =&gt; 16#79#));
+      Segments.Publish (Segment, Claim);
+
+   when Segments.Attached_Existing =&gt;
+      Segments.Resolve (Segment, Handle, Location, Extent);
+      Byte_Strings.Attach
+        (Value, Region, Location, Maximum_Length =&gt; 256);
+
+   when Segments.Registry_Busy |
+        Segments.Initialization_In_Progress =&gt;
+      --  Yield or retry according to application policy.
+      null;
+
+   when others =&gt;
+      --  Handle failure, mismatch, or bounded exhaustion explicitly.
+      null;
+end case;</code></pre>
+            </figure>
+            <p>The creator calls <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#71db320cf0379276dfb93f021fb17244b83b22d8560fd1c06ac21a59cf820837"><code>Claimed_Extent</code></a> before initializing and assigning the leaf. The untimed <a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html#1a96127ab24acda73cf4df6a78767135d7c6ce94f66e7d5b7ea480b3afa84f59"><code>Byte_Strings.Assign</code></a> overload replaces its bytes. An opener calls <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#e8c00b984817b02984166b81a5d8772b1fcffcb96a0f77ccb5cd99d3e629bf5b"><code>Segments.Resolve</code></a> to recover the published location and extent.</p>
+            <p>Call <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#6d416a7626884303eff395e38f3523d2158c963ff4f6131be52bcc0577763d70"><code>Publish</code></a> only after the nested leaf is ready. If initialization fails while the creator is still alive, call <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#5d9c4b71b2f95d78ce0c76ad0014d235f4637ca7162c7a9c0c8b623dd1b952da"><code>Publish_Failure</code></a> with a nonzero application code. The failed name remains visible until explicit removal; no later participant silently overwrites it.</p>
+            <p>Removal invalidates the registry handle but does not destroy application bytes or unlink the OS object. A later fitting reuse advances a nonwrapping generation, so stale handles fail. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains how to select and initialize the leaf placed in each extent.</p>
+          </section>
+
+          <section id="migration">
+            <span class="step-label">SEGMENT GROWTH</span>
+            <h2>Replace a quiescent segment instead of resizing it.</h2>
+            <p>A live mapping cannot safely follow an in-place backing resize. Linux anonymous segments also have immutable grow and shrink seals. Flyology therefore prepares a larger replacement segment. The old mapping stays ready while the library copies its validated registry and allocated bytes into a distinct, exclusively created mapping.</p>
+
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>Preserve the stored coordinate system</strong><span>publish the new lifecycle last</span></figcaption>
+              <svg role="img" aria-labelledby="migration-title migration-desc" viewBox="0 0 760 340">
+                <title id="migration-title">Safe segment growth by replacement</title>
+                <desc id="migration-desc">Applications quiesce every participant. Flyology locks and validates the old registry, copies every allocated byte to the same offsets in a larger virgin mapping, updates only the total extent, and publishes the replacement ready. The application hands it to peers, waits for attachment acknowledgments, cuts over, then retires the old mapping.</desc>
+                <defs>
+                  <marker id="migration-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="migration-teal-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="68" width="206" height="166" rx="15"/>
+                <text x="127" y="97" text-anchor="middle" font-size="14" font-weight="620">Old segment · ready</text>
+                <rect class="diagram-violet" x="48" y="116" width="158" height="36" rx="8"/>
+                <text class="diagram-code" x="127" y="139" text-anchor="middle">registry + generations</text>
+                <rect class="diagram-payload" x="48" y="164" width="118" height="42" rx="8"/>
+                <text class="diagram-code" x="107" y="190" text-anchor="middle">allocated bytes</text>
+                <rect class="diagram-box" x="166" y="164" width="40" height="42" rx="8"/>
+                <text class="diagram-muted" x="186" y="190" text-anchor="middle">free</text>
+
+                <rect class="diagram-violet" x="274" y="32" width="212" height="50" rx="11"/>
+                <text x="380" y="54" text-anchor="middle" font-size="13" font-weight="620">Caller-established quiescence</text>
+                <text class="diagram-muted" x="380" y="72" text-anchor="middle">registry + every nested object</text>
+                <path class="diagram-line-violet" d="M230 112c28-36 45-48 72-48" marker-end="url(#migration-arrow)"/>
+                <path class="diagram-line" d="M230 166h66" marker-end="url(#migration-arrow)"/>
+                <text class="diagram-label" x="330" y="144" text-anchor="middle">VALIDATE · COPY</text>
+                <text class="diagram-code diagram-muted" x="330" y="188" text-anchor="middle">same offsets</text>
+                <text class="diagram-code diagram-muted" x="330" y="208" text-anchor="middle">same handles</text>
+
+                <rect class="diagram-header" x="400" y="100" width="336" height="166" rx="15"/>
+                <text x="568" y="129" text-anchor="middle" font-size="14" font-weight="620">Larger replacement · ready last</text>
+                <rect class="diagram-violet" x="424" y="148" width="158" height="36" rx="8"/>
+                <text class="diagram-code" x="503" y="171" text-anchor="middle">preserved registry</text>
+                <rect class="diagram-payload" x="424" y="196" width="118" height="42" rx="8"/>
+                <text class="diagram-code" x="483" y="222" text-anchor="middle">copied bytes</text>
+                <rect class="diagram-teal" x="542" y="196" width="170" height="42" rx="8"/>
+                <text class="diagram-code" x="627" y="222" text-anchor="middle">new zero-filled tail</text>
+                <path class="diagram-line-teal" d="M568 266v42" marker-end="url(#migration-teal-arrow)"/>
+                <text class="diagram-label" x="568" y="329" text-anchor="middle">HAND OFF · ACKNOWLEDGE · CUT OVER · RETIRE OLD</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>prepare a larger anonymous replacement</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Shared.Create_Anonymous (New_Backing, 2_097_152);
+Shared.Map (New_Map, New_Backing);
+
+Segments.Try_Prepare_Replacement
+  (Source      =&gt; Segment,
+   Target      =&gt; New_Map,
+   Config      =&gt; Segment_Config,
+   Quiescence  =&gt; Segments.Caller_Established_Quiescence,
+   Result      =&gt; Migration);
+
+case Migration is
+   when Segments.Replacement_Ready =&gt;
+      --  Preparation publishes stored bytes. Attachment separately creates
+      --  this process's local view and cannot alias the source parameter.
+      Segments.Create_Or_Attach
+        (New_Segment, New_Map, Segment_Config, Open);
+      if Open /= Segments.Attached_Existing then
+         raise Program_Error with "published replacement did not attach";
+      end if;
+
+      --  Send New_Backing, wait for every peer to attach and acknowledge,
+      --  then direct participants to the new capability and retire the old.
+   when Segments.Registry_Busy |
+        Segments.Initialization_In_Progress =&gt;
+      --  Quiescence is incomplete. Do not copy or cut over.
+      null;
+end case;</code></pre>
+            </figure>
+
+            <p><a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#1e231d44c72f6161b834a03eac38f41acbc6abf5ae81578713b155caa32c408f"><code>Caller_Established_Quiescence</code></a> is deliberately explicit. Flyology acquires the persisted registry guard and rejects every unpublished creation claim. However, the segment layer cannot discover application-owned leaf views or detect another process that is mutating a stored object. The caller must stop and acknowledge every participant before making this declaration. Do not migrate if the caller cannot establish quiescence.</p>
+            <p>The target must be a distinct mapping with a virgin lifecycle from exclusive backing creation. An opened or received mapping is rejected, even when its bytes are zero. The operation release-publishes the initializing lifecycle first, then zeroes the bytes after that field. It retains the configuration, validates each slot, copies through the aligned allocation frontier, changes the persisted extent, and resets the target guard. The ready lifecycle is release-published last.</p>
+            <p>If a later step raises, the target becomes poisoned and must be discarded. If the creator dies during a page fault or copy, observers see initialization in progress instead of virgin storage.</p>
+            <p><a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#a249f6c83393f0f882f380d0cfa70acb24f3513403a9f5689791cc772cb0c29c"><code>Try_Prepare_Replacement</code></a> does not wait when the registry guard is busy, but successful preparation performs synchronous bulk work. It clears the target and copies through the frontier while holding the guard. Cost is linear in those byte ranges, and file-backed pages can fault or be written. Run migration from a native task unless event-loop occupation is explicitly acceptable.</p>
+            <p>Preparation and process-local attachment are separate on purpose. After <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#92024724aa5d6e6d12b4b2b141e457872e1c32926b32e0396c1c24019772e34c"><code>Replacement_Ready</code></a>, call <code>Create_Or_Attach</code> for the target mapping and require <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#e5df034333a58a8b7550d8e1c6a34a90980a379e8af10b1db745e974d05da6f8"><code>Attached_Existing</code></a>. This prevents a source view from also serving as an output view and makes the cutover point visible.</p>
+            <p>Offsets and generation-stamped handles retain their values, so existing application metadata can resolve immediately in the replacement. Registry capacity and object geometry do not grow. Reserve enough registry slots initially, and use the new tail for later extents or arena allocations. After cloning, the old and new segments are independent snapshots. Writers must not resume against both segments.</p>
+            <p>The application still owns peer handoff and cutover. Send the replacement capability and wait for receiver validation and attachment acknowledgments. Then switch all participants and detach the old leaf and segment views. Finally, unmap and close or unlink the old backing. For a file-backed target, flush according to the persistence policy after migration. This operation is not a durable transaction, schema conversion, owner-death recovery, or namespace-atomic replacement.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">✓</span>
+              <p>The scalar admission kernel is SPARK-proved. Acceptance implies an unchanged configuration, a virgin exclusive distinct target, a strictly larger extent, and an aligned copy frontier bounded by both mappings. Address-based atomics and byte copying remain in the narrow reviewed Ada boundary.</p>
+            </aside>
+          </section>
+
+          <section id="worker-status">
+            <span class="step-label">EXAMPLE 01</span>
+            <h2>Report progress from an exec'd worker.</h2>
+            <p>Consider a coordinator that starts a helper process to index a collection of images. The coordinator needs a small status value that survives different virtual addresses and remains valid after it closes the descriptor used for handoff. A named byte string inside an anonymous segment is enough for the stored state.</p>
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One stored value, two process-local mappings</strong><span>descriptor handoff does not transfer an address</span></figcaption>
+              <svg role="img" aria-labelledby="worker-handoff-title worker-handoff-desc" viewBox="0 0 760 390">
+                <title id="worker-handoff-title">Coordinator and exec'd worker sharing one status value</title>
+                <desc id="worker-handoff-desc">The coordinator creates and maps an anonymous segment, publishes a queued status, and sends its descriptor over a Unix-domain socket. The exec'd worker validates and maps the descriptor at another address, then updates the same named byte string to working and complete. The coordinator observes those bytes through its original mapping.</desc>
+                <defs>
+                  <marker id="handoff-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="handoff-violet-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--violet)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="28" width="278" height="310" rx="16"/>
+                <text x="48" y="60" font-size="15" font-weight="620">Coordinator</text>
+                <text class="diagram-label" x="278" y="60" text-anchor="end">PROCESS A</text>
+                <rect class="diagram-violet" x="48" y="84" width="230" height="58" rx="10"/>
+                <text x="163" y="108" text-anchor="middle" font-size="13" font-weight="620">Backing descriptor</text>
+                <text class="diagram-muted" x="163" y="128" text-anchor="middle">anonymous capability</text>
+                <path class="diagram-line" d="M163 142v31" marker-end="url(#handoff-arrow)"/>
+                <rect class="diagram-box" x="48" y="180" width="230" height="70" rx="10"/>
+                <text x="163" y="207" text-anchor="middle" font-size="13" font-weight="620">Mapping A</text>
+                <text class="diagram-code diagram-muted" x="163" y="230" text-anchor="middle">base 0x0000_104…</text>
+                <rect class="diagram-payload" x="70" y="274" width="186" height="42" rx="9"/>
+                <text class="diagram-code" x="163" y="300" text-anchor="middle" font-size="12">observes "complete"</text>
+
+                <rect class="diagram-box" x="458" y="28" width="278" height="310" rx="16"/>
+                <text x="482" y="60" font-size="15" font-weight="620">Exec'd worker</text>
+                <text class="diagram-label" x="712" y="60" text-anchor="end">PROCESS B</text>
+                <rect class="diagram-violet" x="482" y="84" width="230" height="58" rx="10"/>
+                <text x="597" y="108" text-anchor="middle" font-size="13" font-weight="620">Received descriptor</text>
+                <text class="diagram-muted" x="597" y="128" text-anchor="middle">CLOEXEC + exact-size validation</text>
+                <path class="diagram-line" d="M597 142v31" marker-end="url(#handoff-arrow)"/>
+                <rect class="diagram-box" x="482" y="180" width="230" height="70" rx="10"/>
+                <text x="597" y="207" text-anchor="middle" font-size="13" font-weight="620">Mapping B</text>
+                <text class="diagram-code diagram-muted" x="597" y="230" text-anchor="middle">base 0x0000_7f2…</text>
+                <rect class="diagram-payload" x="504" y="274" width="186" height="42" rx="9"/>
+                <text class="diagram-code" x="597" y="300" text-anchor="middle" font-size="12">writes "complete"</text>
+
+                <path class="diagram-line-violet" d="M278 113h204" marker-end="url(#handoff-violet-arrow)"/>
+                <text class="diagram-code diagram-muted" x="380" y="100" text-anchor="middle">SCM_RIGHTS</text>
+                <path class="diagram-dashed" d="M256 295c70 76 178 76 248 0"/>
+                <text class="diagram-label" x="380" y="374" text-anchor="middle">SAME OFFSET AND BYTES · DIFFERENT NATIVE BASES</text>
+              </svg>
+            </figure>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Coordinator</dt><dd>Creates the anonymous backing, publishes <code>jobs/image-index/status</code> with the value <code>queued</code>, and sends the descriptor over a connected Unix-domain socket.</dd></div>
+                <div class="decision-row"><dt>Worker</dt><dd>Receives and maps the descriptor after <code>exec</code>, attaches the ready named extent, then replaces the value with <code>working</code> and finally <code>complete</code>.</dd></div>
+                <div class="decision-row"><dt>Observer</dt><dd>Reads the same byte string through its own mapping. Its native base may differ from both the coordinator and worker bases.</dd></div>
+              </dl>
+            </div>
+            <figure class="code-panel">
+              <figcaption>coordinator: publish queued before handing off</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Queued : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#71#, 2 =&gt; 16#75#, 3 =&gt; 16#65#,
+   4 =&gt; 16#75#, 5 =&gt; 16#65#);
+
+Shared.Create_Anonymous (Backing, Segment_Length);
+Shared.Map (Coordinator_Map, Backing);
+Segments.Create_Or_Attach
+  (Coordinator_Segment, Coordinator_Map, Config, Segment_Open);
+if Segment_Open /= Segments.Initialized_New then
+   raise Program_Error with "coordinator did not initialize the segment";
+end if;
+Segments.Attach_Region (Coordinator_Segment, Coordinator_Region);
+
+Segments.Try_Find_Or_Create
+  (Coordinator_Segment, "jobs/image-index/status",
+   Byte_Strings.Required_Storage (32),
+   Status_Handle, Status_Claim, Named_Open, Failure);
+
+if Named_Open = Segments.Created then
+   Segments.Claimed_Extent
+     (Coordinator_Segment, Status_Claim, Location, Extent);
+   Byte_Strings.Initialize
+     (Status, Coordinator_Region, Location, Maximum_Length =&gt; 32);
+   Byte_Strings.Assign (Status, Queued);
+   Segments.Publish (Coordinator_Segment, Status_Claim);
+else
+   raise Program_Error with "new status extent was not created";
+end if;
+
+Unix_Sockets.Adopt
+  (Worker_Channel, Worker_Socket, Unix_Sockets.Trusted_Peer);
+Unix_Sockets.Send
+  (Worker_Channel, Backing, Ownership =&gt; Unix_Sockets.Transfer);
+--  Coordinator_Map and Status remain live after Transfer closes Backing.</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>worker: attach at its own address and publish progress</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Working : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#77#, 2 =&gt; 16#6F#, 3 =&gt; 16#72#, 4 =&gt; 16#6B#,
+   5 =&gt; 16#69#, 6 =&gt; 16#6E#, 7 =&gt; 16#67#);
+Complete : constant Ada.Streams.Stream_Element_Array :=
+  (1 =&gt; 16#63#, 2 =&gt; 16#6F#, 3 =&gt; 16#6D#, 4 =&gt; 16#70#,
+   5 =&gt; 16#6C#, 6 =&gt; 16#65#, 7 =&gt; 16#74#, 8 =&gt; 16#65#);
+
+Unix_Sockets.Adopt
+  (Coordinator_Channel, Coordinator_Socket, Unix_Sockets.Trusted_Peer);
+Unix_Sockets.Receive
+  (Coordinator_Channel, Segment_Length, Received,
+   Require_Immutable_Size =&gt; False);
+Shared.Map (Worker_Map, Received);
+Shared.Close (Received);
+
+Segments.Create_Or_Attach
+  (Worker_Segment, Worker_Map, Config, Segment_Open);
+if Segment_Open /= Segments.Attached_Existing then
+   raise Program_Error with "worker did not receive a ready segment";
+end if;
+Segments.Attach_Region (Worker_Segment, Worker_Region);
+
+loop
+   Segments.Try_Find
+     (Worker_Segment, "jobs/image-index/status",
+      Status_Handle, Lookup, Failure);
+   exit when Lookup /= Segments.Registry_Busy;
+   delay 0.0;
+end loop;
+
+if Lookup = Segments.Found then
+   Segments.Resolve
+     (Worker_Segment, Status_Handle, Location, Extent);
+   Byte_Strings.Attach
+     (Status, Worker_Region, Location, Maximum_Length =&gt; 32);
+   Byte_Strings.Assign (Status, Working);
+   Index_Images;
+   Byte_Strings.Assign (Status, Complete);
+else
+   raise Program_Error with "worker status is not ready";
+end if;</code></pre>
+            </figure>
+            <p>The owned channel examples call <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#8835f5dfb6e753977fbdd36b8f43b925015b76c49f8fc9761fe9de0b947f66b2"><code>Unix_Sockets.Adopt</code></a>, then use the owned <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#c73761d4240c5d502dbe6e4e47229771fbdf689506ab85bcad6ceb6cc4b71ccc"><code>Unix_Sockets.Send</code></a> and <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#3b05ba39c36a1ebb7357d8c35c96c8ba1274b9926c950240216e072f13557592"><code>Unix_Sockets.Receive</code></a> overloads. The worker calls <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#245b1d94743a1c7bcb4058ff1e6df7e744b49343b6a78a5481a0c92a29d8f98c"><code>Segments.Try_Find</code></a> until the result is <a href="../../api/c1a8bee4b52e6609ee69a7f735000b5b369b8c426835cd0a57717504a43cccb5.html#9ff16f682dff61da7071bce9bc8a1898a131683082ac11ff97baaf6a6a405b60"><code>Found</code></a>.</p>
+            <p>The coordinator can read the updated value through its retained <code>Status</code> view. Shared memory supplies no notification, so the application must choose how the coordinator learns that the value changed. It can poll at an application scheduling point or use a separate readiness channel. This example selects <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#887ce7175590b1126aae64381208683a80e9982febda2d13da509e5d3b11ef8f"><code>Trusted_Peer</code></a> because the coordinator created and exec'd the worker; that declaration is application policy, not authentication performed by Flyology. A Linux deployment that receives from an untrusted peer selects <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#887ce7175590b1126aae64381208683a80e9982febda2d13da509e5d3b11ef8f"><code>Untrusted_Peer</code></a>, which automatically requires memfd size seals. Process creation must also respect Flyology's post-tasking rule: after Ada tasking starts, a fork child performs only async-signal-safe work before <code>exec</code> or <code>_exit</code>.</p>
+          </section>
+
+          <section id="image-index-showcase">
+            <span class="step-label">RUNNABLE SHOWCASE</span>
+            <h2>Index real image files through one shared segment.</h2>
+            <p>The maintained image-index showcase turns the ownership model into a loaded process workload. A producer continuously writes and queues a bounded set of 2,000 deterministic random P6 PPM files while eight native worker processes analyze earlier files. At the pipeline high-water mark, generation pauses and admits four more workers. After they help restore low pressure and the producer sustains a recovery interval, those workers drain and leave. The original segment remains mapped throughout.</p>
+
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>Files outside, coordination inside</strong><span>bounded queues create visible backpressure</span></figcaption>
+              <svg role="img" aria-labelledby="index-showcase-title index-showcase-desc" viewBox="0 0 760 420">
+                <title id="index-showcase-title">Shared image-index showcase data flow</title>
+                <desc id="index-showcase-desc">A coordinator continuously generates PPM files through a high-water and low-water pipeline and initializes a shared segment containing pending and result MPMC rings, a relocatable image hash map, and a safety gate. Independently executed workers receive the segment capability, consume image jobs, and publish results. The population grows from eight to twelve workers and drains back to eight during each epoch.</desc>
+                <defs>
+                  <marker id="index-flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="index-flow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <rect class="diagram-box" x="24" y="38" width="178" height="122" rx="14"/>
+                <text x="113" y="68" text-anchor="middle" font-size="14" font-weight="620">Coordinator</text>
+                <text class="diagram-code diagram-muted" x="113" y="94" text-anchor="middle">2,000 P6 images</text>
+                <text class="diagram-muted" x="113" y="118" text-anchor="middle">create · map · publish</text>
+                <text class="diagram-muted" x="113" y="141" text-anchor="middle">enqueue · verify</text>
+
+                <rect class="diagram-header" x="256" y="26" width="248" height="348" rx="16"/>
+                <text x="380" y="57" text-anchor="middle" font-size="14" font-weight="620">Anonymous shared segment</text>
+                <text class="diagram-label" x="380" y="78" text-anchor="middle">EXACT-SIZE · RELOCATABLE</text>
+                <rect class="diagram-box" x="280" y="98" width="200" height="48" rx="9"/>
+                <text class="diagram-code" x="380" y="127" text-anchor="middle">jobs/pending · MPMC</text>
+                <rect class="diagram-box" x="280" y="158" width="200" height="48" rx="9"/>
+                <text class="diagram-code" x="380" y="187" text-anchor="middle">jobs/results · MPMC</text>
+                <rect class="diagram-payload" x="280" y="218" width="200" height="62" rx="9"/>
+                <text class="diagram-code" x="380" y="244" text-anchor="middle">index/by-image · map</text>
+                <text class="diagram-muted" x="380" y="264" text-anchor="middle">shared hot-key contention</text>
+                <rect class="diagram-violet" x="280" y="292" width="200" height="24" rx="7"/>
+                <text class="diagram-code" x="380" y="309" text-anchor="middle">workers/gate · epoch + limit</text>
+                <rect class="diagram-violet" x="280" y="322" width="200" height="26" rx="7"/>
+                <text class="diagram-code" x="380" y="340" text-anchor="middle">shared-startup · creator=1</text>
+
+                <rect class="diagram-box" x="558" y="38" width="178" height="296" rx="14"/>
+                <text x="647" y="68" text-anchor="middle" font-size="14" font-weight="620">Exec'd workers</text>
+                <text class="diagram-label" x="647" y="90" text-anchor="middle">8 ↔ 12 NATIVE PROCESSES</text>
+                <rect class="diagram-violet" x="582" y="108" width="130" height="40" rx="8"/>
+                <text class="diagram-code" x="647" y="133" text-anchor="middle">SCM_RIGHTS</text>
+                <text class="diagram-muted" x="647" y="180" text-anchor="middle">map elsewhere</text>
+                <text class="diagram-muted" x="647" y="205" text-anchor="middle">attach local views</text>
+                <text class="diagram-muted" x="647" y="230" text-anchor="middle">read full pixels × 128</text>
+                <text class="diagram-muted" x="647" y="255" text-anchor="middle">publish hash + totals</text>
+                <text class="diagram-muted" x="647" y="281" text-anchor="middle">join / drain mid-epoch</text>
+                <text class="diagram-muted" x="647" y="306" text-anchor="middle">no stored addresses</text>
+
+                <path class="diagram-line" d="M202 112h54" marker-end="url(#index-flow-arrow)"/>
+                <path class="diagram-line-violet" d="M504 128h54" marker-end="url(#index-flow-arrow)"/>
+                <path class="diagram-line-teal" d="M558 250h-54" marker-end="url(#index-flow-teal)"/>
+                <path class="diagram-dashed" d="M202 324c26 54 53 70 86 70h266c37 0 65-18 83-60" marker-end="url(#index-flow-arrow)"/>
+                <text class="diagram-label" x="380" y="411" text-anchor="middle">ATTACH ACKNOWLEDGMENT BEFORE SENDER SOCKET CLOSE</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>generate, contend, verify, and clean up</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-shell"># A terminal keeps the rolling pipeline live until q or Esc stops admission.
+./showcases/run_shared_image_index.sh
+
+# Fast regression shape: workers images width height passes index-rounds
+NO_COLOR=1 ./showcases/run_shared_image_index.sh 4 64 64 64 2 8
+
+# Optional seventh argument: run exactly three safety epochs.
+NO_COLOR=1 ./showcases/run_shared_image_index.sh 8 2000 256 256 128 32 3</code></pre>
+            </figure>
+
+            <p>The two 64-slot MPMC rings are intentionally smaller than the corpus, so producers and consumers encounter full, empty, and CAS-contention outcomes. Generation and indexing share one pipeline fed by irregular bursts. At the 32-image high-water mark, the producer enters <code>BACKOFF</code> and admits four extra workers to drain work to the 16-image low-water mark. Generation then returns to <code>FLOW</code>, but the extra workers remain through a stable recovery interval before leaving.</p>
+            <p>Before storing each final image entry, workers also publish through one frequently used hash-map key. A joining worker attaches a distinct local map view, which requires one stable table snapshot under the persisted map guard. If publishers own that guard, the native worker retries <a href="../../api/8853b9f9f97ab3c932c26afa5a6bbf25f048d4ef87d24fea806275b126bcafe1.html#c06bd7eb4c03723a3a0659bc08ba0665ec2f556e5b75c775fb0f6912309e56a4"><code>Busy_Error</code></a> after a bounded delay. The coordinator keeps the mapping, registry entries, rings, and hash map live in one segment for the complete session.</p>
+            <p>The shared gate stores the current safety epoch and the permitted worker-ID limit. While existing workers continue to transfer jobs and results, a joiner maps and validates the segment, resolves the registry, and attaches fresh local ring views. Ring attachment checks the published identity, geometry, and complete extent without scanning mutable claim positions, because producers and consumers advance positions before publishing slot sequences. Deep sequence validation occurs during destruction after quiescence.</p>
+            <p>The joiner publishes both acknowledgments while the old limit still excludes it. Only then does the coordinator raise the limit and permit that worker to enter the job ring. To remove workers, the coordinator lowers the limit, which each worker samples immediately before dequeue. A worker already analyzing an image finishes and publishes the result before acknowledging departure and detaching. Because a limit update can race with one dequeue, each departing worker can claim one additional image. Removal is not immediate cancellation, and it does not abandon claimed work.</p>
+            <p>Pressing <code>q</code> or Esc stops further image admission at the coordinator's next check. A generated image that has not entered the job ring is discarded. Temporary workers retire after publishing any image they already claimed, and the coordinator appends one epoch-end marker per remaining worker behind the admitted jobs. Shutdown therefore waits only for admitted work and worker quiescence, not for the rest of the configured batch. Mid-epoch membership changes do not advance the safety identity and do not abandon claimed work.</p>
+            <p>The interactive display uses the <a href="https://tui.flyology.org/"><code>flyology_tui</code></a> POSIX backend. The backend owns raw mode, the alternate screen, color fallback, typed key input, resize events, and terminal restoration. The coordinator remains the sole owner of pipeline state and renders a declarative view at most once every 75 ms. One input task publishes only resize and stop requests through protected control.</p>
+            <p>Wide terminals show separate pipeline, shared-segment, and worker panels. A medium layout combines the pipeline and segment data. Smaller terminals retain state, progress, and the stop-admission action while omitting secondary detail. Detached worker slots remain visible when they fit, and the worker panel reports any hidden slots.</p>
+            <p>When the run ends, the TUI backend restores the terminal. The runner then prints ordinary text with session totals, backoffs, join and leave counts, worker populations, contention, timing, and the unchanged stored segment layout.</p>
+            <p>The display reports producer backoffs and contention outcomes instead of hiding them behind blocking calls. Its segment panel uses the TUI table component. The table gives each registry entry a name, offset, reserved length, structure kind, and current activity column. Non-terminal and <code>NO_COLOR=1</code> runs execute one deterministic epoch and produce stable line output. A seventh argument requests a specific finite epoch count. The <a href="../data-structures/#choose">relocatable data-structures guide</a> explains the ring and map contracts used here.</p>
+            <p>The coordinator retains each handoff socket until its worker publishes an attached event through the result ring. A successful <code>sendmsg</code> means only that the local kernel queued the descriptor. It does not prove that the worker validated or mapped it. The coordinator closes the socket after the acknowledgment but retains the backing descriptor for later joiners.</p>
+            <p>At final shutdown, the coordinator closes the descriptor and then sets the worker limit to zero. Each process uses its existing mapping until it detaches. The runner removes the temporary corpus when it exits.</p>
+            <p>Because mapping, metadata calls, file reads, and pixel analysis are synchronous in this example, the runner prepares Flyology with the native project default. Running that work in a lightweight task could occupy its event-loop pthread. The runner fingerprints runtime inputs and compiler identity, so unchanged preparation and compilation report cache hits. Corpus generation still repeats because it is part of the demonstrated workload.</p>
+          </section>
+
+          <section id="peers">
+            <span class="step-label">SEGMENT 06</span>
+            <h2>Use an owned channel for descriptor handoff.</h2>
+            <p>A named-object peer calls <code>Open_Named</code> with the exact expected length, maps the returned descriptor, then calls segment <code>Create_Or_Attach</code>. Because that mapping is not an exclusive creator, it can attach a ready registry but cannot claim zero storage.</p>
+            <p>For capability handoff, <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html"><code>Shared_Memory.Unix_Sockets</code></a> uses a narrow protocol over a connected Unix-domain stream. Each record contains one nonzero carrier byte and one <code>SCM_RIGHTS</code> descriptor. Use the owned <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#2b0b8893fcff1877a5a64c4db289132834b7b7659ed39592d71681850e31fb70"><code>Handoff_Channel</code></a> overloads by default. They enforce exclusive socket use and reject concurrent calls without waiting. Any operation failure, including transport, framing, ancillary, security, or backing validation failure, permanently poisons and closes the endpoint.</p>
+
+            <figure class="architecture-figure shared-memory-figure">
+              <figcaption><strong>One carrier byte, one capability, one local validation chain</strong><span>the stream is dedicated to handoff records</span></figcaption>
+              <svg role="img" aria-labelledby="handoff-frame-title handoff-frame-desc" viewBox="0 0 760 430">
+                <title id="handoff-frame-title">Flyology descriptor handoff framing and validation</title>
+                <desc id="handoff-frame-desc">The sender passes one writable shared-memory descriptor with a one-byte stream record. The owned receiver reads exactly that carrier with a large ancillary buffer, scans every control header, closes extras, requires one descriptor, establishes close-on-exec, validates writable regular backing and exact size, optionally validates immutable Linux size seals, and only then creates a backing owner. Any failure closes descriptors and poisons the channel.</desc>
+                <defs>
+                  <marker id="handoff-frame-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--path)"/></marker>
+                  <marker id="handoff-frame-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--teal-deep)"/></marker>
+                </defs>
+
+                <text class="diagram-label" x="28" y="32">SENDMSG</text>
+                <rect class="diagram-violet" x="28" y="48" width="180" height="90" rx="12"/>
+                <text x="118" y="78" text-anchor="middle" font-size="13" font-weight="620">Handoff record</text>
+                <text class="diagram-code" x="118" y="103" text-anchor="middle">byte 0x46</text>
+                <text class="diagram-code diagram-muted" x="118" y="124" text-anchor="middle">SCM_RIGHTS × 1</text>
+
+                <path class="diagram-line-violet" d="M208 93h66" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="282" y="48" width="194" height="90" rx="12"/>
+                <text x="379" y="78" text-anchor="middle" font-size="13" font-weight="620">Dedicated stream</text>
+                <text class="diagram-code diagram-muted" x="379" y="103" text-anchor="middle">AF_UNIX · SOCK_STREAM</text>
+                <text class="diagram-muted" x="379" y="124" text-anchor="middle">no ordinary reads or writes</text>
+
+                <path class="diagram-line-violet" d="M476 93h66" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-violet" x="550" y="48" width="182" height="90" rx="12"/>
+                <text x="641" y="78" text-anchor="middle" font-size="13" font-weight="620">One recvmsg</text>
+                <text class="diagram-code diagram-muted" x="641" y="103" text-anchor="middle">1-byte data buffer</text>
+                <text class="diagram-code diagram-muted" x="641" y="124" text-anchor="middle">control room for 512 FDs</text>
+
+                <path class="diagram-line" d="M641 138v37" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="492" y="183" width="240" height="78" rx="12"/>
+                <text x="612" y="210" text-anchor="middle" font-size="13" font-weight="620">Parse bounded control data</text>
+                <text class="diagram-muted" x="612" y="233" text-anchor="middle">scan every header · close every extra</text>
+                <text class="diagram-muted" x="612" y="251" text-anchor="middle">require exact carrier and descriptor count</text>
+
+                <path class="diagram-line" d="M492 222h-52" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-box" x="214" y="183" width="218" height="78" rx="12"/>
+                <text x="323" y="210" text-anchor="middle" font-size="13" font-weight="620">Validate the capability</text>
+                <text class="diagram-muted" x="323" y="233" text-anchor="middle">CLOEXEC · writable · regular</text>
+                <text class="diagram-muted" x="323" y="251" text-anchor="middle">exact length · required Linux seals</text>
+
+                <path class="diagram-line-teal" d="M323 261v50" marker-end="url(#handoff-frame-teal)"/>
+                <rect class="diagram-teal" x="214" y="319" width="218" height="78" rx="12"/>
+                <text x="323" y="348" text-anchor="middle" font-size="13" font-weight="620">Owned Backing_Object</text>
+                <text class="diagram-muted" x="323" y="371" text-anchor="middle">safe to map, then attach segment</text>
+
+                <path class="diagram-dashed" d="M650 261v50" marker-end="url(#handoff-frame-arrow)"/>
+                <rect class="diagram-header" x="500" y="319" width="232" height="78" rx="12"/>
+                <text x="616" y="348" text-anchor="middle" font-size="13" font-weight="620">Any failed check</text>
+                <text class="diagram-muted" x="616" y="371" text-anchor="middle">close visible FDs · poison endpoint</text>
+              </svg>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>coordinator process: send the capability</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Sender_Socket is this process's end of one connected AF_UNIX
+--  SOCK_STREAM pair. The application created the pair and authenticated
+--  or launched the process at the other end. No other protocol, read,
+--  write, or duplicate descriptor may use this endpoint.
+Unix_Sockets.Adopt
+  (Sender, Sender_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+--  Sender now owns the endpoint; Sender_Socket is invalid after success.
+
+--  Send emits one carrier byte with exactly one SCM_RIGHTS descriptor.
+--  Borrow keeps the coordinator's Backing descriptor open. The existing
+--  Coordinator_Map is independent and would survive either ownership mode.
+Unix_Sockets.Send
+  (Sender, Backing, Ownership =&gt; Unix_Sockets.Borrow);
+
+--  Success means the local kernel accepted the record. It does not prove
+--  that the worker received, validated, mapped, or attached the segment.
+--  Keep the endpoint connected until an application acknowledgment proves
+--  the worker has at least received and validated the record. The image-index
+--  showcase keeps it through mapping and segment attachment. Closing earlier
+--  can race receiver peer validation, particularly on Darwin.
+Wait_For_Worker_Attached;
+Unix_Sockets.Close (Sender);</code></pre>
+            </figure>
+
+            <figure class="code-panel">
+              <figcaption>worker process: validate, map, then attach</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Receiver_Socket is the worker's end of the dedicated stream. This
+--  example trusts it because the coordinator created and exec'd this worker.
+Unix_Sockets.Adopt
+  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Trusted_Peer);
+--  Receiver now owns the endpoint and rejects concurrent channel use.
+
+--  Receive consumes one complete handoff record. Before returning, it checks
+--  the carrier and ancillary layout, closes visible extra descriptors, sets
+--  CLOEXEC, and requires writable regular backing of this exact local size.
+Unix_Sockets.Receive
+  (Receiver,
+   Expected_Length        =&gt; 1_048_576,
+   Item                   =&gt; Received,
+   Require_Immutable_Size =&gt; False);
+
+--  Map creates a process-local mapping at any address. Closing the received
+--  descriptor afterward is safe because Peer_Map owns an independent mapping
+--  lifetime. The one-shot channel is independent too, so close it now.
+Shared.Map (Peer_Map, Received);
+Shared.Close (Received);
+Unix_Sockets.Close (Receiver);
+
+--  First attach the segment registry, then derive a relocatable region view
+--  from it. Leaf structures borrow Peer_Region, never a native address.
+Segments.Create_Or_Attach
+  (Peer_Segment, Peer_Map, Config, Segment_Open);
+
+if Segment_Open /= Segments.Attached_Existing then
+   raise Program_Error with "peer did not receive a ready segment";
+end if;
+Segments.Attach_Region (Peer_Segment, Peer_Region);
+
+--  Resolve the exact persisted name and attach the byte string at its offset.
+loop
+   Segments.Try_Find
+     (Peer_Segment, "jobs/image-index/status",
+      Status_Handle, Lookup, Failure);
+   exit when Lookup /= Segments.Registry_Busy;
+   delay 0.0;
+end loop;
+
+if Lookup /= Segments.Found then
+   raise Program_Error with "worker status is not ready";
+end if;
+Segments.Resolve
+  (Peer_Segment, Status_Handle, Location, Extent);
+Byte_Strings.Attach
+  (Status, Peer_Region, Location, Maximum_Length =&gt; 32);
+
+Observe_Status (Byte_Strings.Length (Status));
+
+--  Release borrows from the inside out. The mapping is the last live owner.
+Byte_Strings.Detach (Status);
+Regions.Detach (Peer_Region);
+Segments.Detach (Peer_Segment);
+Shared.Unmap (Peer_Map);</code></pre>
+            </figure>
+
+            <p><code>Trusted_Peer</code> is an application declaration, not authentication. It permits Darwin and mutable regular files. The application promises that the peer will not exploit ancillary truncation, resize a retained duplicate, or mutate shared open-file-description state. <code>Untrusted_Peer</code> is available only on Linux and requires immutable grow, shrink, and seal seals. In practice, an untrusted handoff requires an exact-size writable sealed object such as Flyology's anonymous <code>memfd</code>. Darwin rejects this policy because XNU can hide installed excess descriptors after a truncated receive.</p>
+
+            <h3>Choose the handoff pattern from the deployment.</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>Coordinator launches a worker</dt><dd>Create the socket pair before spawning or exec'ing the worker, pass one endpoint through the launch contract, and adopt both ends as <code>Trusted_Peer</code>. Successful send is only local kernel acceptance. Retain the connected sender until an application acknowledgment proves the worker received and validated the record; the <a href="#image-index-showcase">image-index showcase</a> retains it through mapping and segment attachment. <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html#c00bc2b8464c895a12947061b58eb7ca0e012b6cbd8b40af3c76307fd403704f"><code>Transfer</code></a> may still close the backing descriptor because existing mappings have independent lifetimes.</dd></div>
+                <div class="decision-row"><dt>Linux service accepts a less-trusted peer</dt><dd>Authenticate and authorize the connection outside Flyology, then adopt the receiving endpoint as <code>Untrusted_Peer</code>. Receive automatically requires immutable Linux size seals, so use an exact-size sealed anonymous <code>memfd</code>. Do not downgrade to <code>Trusted_Peer</code> merely to accept a regular file. Darwin deliberately has no equivalent untrusted mode.</dd></div>
+                <div class="decision-row"><dt>Peers reopen persistent state</dt><dd>Use <code>Open_Named</code> for a POSIX shared-memory name or <code>Open_File</code> for a stable file path when namespace discovery and persistence are intentional. Validate the exact size, map, and attach the segment registry. <code>SCM_RIGHTS</code> is useful when possession of an already-open descriptor is the capability; it is not required merely because two processes share the same persisted segment.</dd></div>
+              </dl>
+            </div>
+
+            <figure class="code-panel">
+              <figcaption>Linux receiver: require a sealed capability from a less-trusted peer</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">--  Authentication and authorization still happen before this call.
+--  Untrusted_Peer is a receive policy, not an identity check.
+Unix_Sockets.Adopt
+  (Receiver, Receiver_Socket, Trust =&gt; Unix_Sockets.Untrusted_Peer);
+
+--  The trust policy automatically requires immutable grow, shrink, and seal
+--  seals. The explicit flag may remain False; it cannot weaken the policy.
+Unix_Sockets.Receive
+  (Receiver,
+   Expected_Length        =&gt; Segment_Length,
+   Item                   =&gt; Received,
+   Require_Immutable_Size =&gt; False);
+
+Shared.Map (Peer_Map, Received);
+Shared.Close (Received);</code></pre>
+            </figure>
+
+            <h3>The stream protocol requires an owned channel.</h3>
+            <p><code>SCM_RIGHTS</code> is attached to stream bytes, not to an abstract message object. A stateless <code>Receive (Socket, ...)</code> call cannot exclude another reader or writer. It also cannot prove that a failed stream is safe to reuse. The owned channel enforces those requirements. Raw socket overloads remain available for integrations that provide equivalent ownership and serialization. Retire the socket after any raw-operation exception.</p>
+
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>1 · Byte association</dt><dd>Ancillary rights must accompany at least one byte. Flyology sends one fixed nonzero byte and receives exactly one byte. The descriptor belongs to the byte range passed by that <code>sendmsg</code>, not to the lifetime of the socket.</dd></div>
+                <div class="decision-row"><dt>2 · Stream boundaries</dt><dd>One <code>sendmsg</code> need not correspond to one arbitrary <code>recvmsg</code>. Linux and BSD also differ around ancillary boundaries. A one-byte record and a one-byte receive remove partial-record ambiguity for a compliant peer.</dd></div>
+                <div class="decision-row"><dt>3 · First-byte delivery</dt><dd>The receive that consumes the range's first byte receives its control data. No <code>read</code>, <code>recv</code>, or second <code>recvmsg</code> may race the channel, and an endpoint duplicate is subject to the same ban.</dd></div>
+                <div class="decision-row"><dt>4 · Short reads</dt><dd>Linux may stop a read at an ancillary boundary; ordinary stream conditions can also produce short reads. A short result is never treated as “the socket is drained,” and Flyology does not mix this channel with edge-triggered application draining.</dd></div>
+                <div class="decision-row"><dt>5 · Crossing a range</dt><dd>If a receiver only partly consumes a larger associated byte range, a later receive can pass its remainder and encounter later ancillary data. Flyology makes every valid range exactly one byte, so a successful receive consumes the complete record.</dd></div>
+                <div class="decision-row"><dt>6 · Descriptor count</dt><dd>Linux permits up to <code>SCM_MAX_FD</code> (253) descriptors in one rights message. The native receiver reserves aligned control space for 512 descriptors, scans the count actually returned, accepts exactly one, and closes every visible extra.</dd></div>
+                <div class="decision-row"><dt>7 · Alignment</dt><dd><code>CMSG_SPACE</code> includes alignment padding, so a buffer sized “for one” can sometimes expose more than one descriptor. Flyology calculates payload size from <code>CMSG_LEN(0)</code>, counts complete descriptor integers, and never assumes the requested capacity is the returned count.</dd></div>
+                <div class="decision-row"><dt>8 · Every header</dt><dd>One receive may contain several control headers. Flyology walks all bounded headers, accumulates every <code>SCM_RIGHTS</code> descriptor, closes extras, and rejects unrelated ancillary types instead of ignoring a hidden descriptor later in the buffer.</dd></div>
+                <div class="decision-row"><dt>9 · Truncation</dt><dd><code>MSG_CTRUNC</code>, <code>MSG_TRUNC</code>, an overlong returned control length, a malformed header length, or an incomplete descriptor payload is a protocol error. Linux closes rights discarded by control truncation; Flyology also closes every descriptor it can observe.</dd></div>
+                <div class="decision-row"><dt>10 · Darwin kernel limits</dt><dd>Darwin has no documented rights-count maximum and has had a truncation path that can leak installed descriptors. It can also report a control-header length beyond the returned control extent. Flyology limits parsing to the actual buffer and reserves space for 512 descriptors as an additional defense. These measures do not make receipt from an untrusted Darwin peer safe.</dd></div>
+                <div class="decision-row"><dt>11 · Close on exec</dt><dd>Linux requests <code>MSG_CMSG_CLOEXEC</code>. Darwin sets <code>FD_CLOEXEC</code> immediately after receipt. This change cannot be atomic with a concurrent <code>fork</code> and <code>exec</code>. Do not perform work in a post-tasking fork child.</dd></div>
+                <div class="decision-row"><dt>12 · Hostile descriptors</dt><dd>The receiver accepts only an <code>O_RDWR</code>, exact-size regular or POSIX-shm backing descriptor. Sockets, pipes, devices, directories, and read-only files are rejected. Untrusted Linux receipt additionally requires immutable size seals so a retained peer duplicate cannot shrink the mapping and induce <code>SIGBUS</code>.</dd></div>
+                <div class="decision-row"><dt>13 · Shared open description</dt><dd><code>SCM_RIGHTS</code> duplicates a reference to the same open file description; it does not create an independent underlying object. Trusted peers must not mutate shared status flags or backing state in ways outside the segment protocol. Shared payload mutation itself remains the intended capability.</dd></div>
+                <div class="decision-row"><dt>14 · Broken peers</dt><dd>Linux sends with <code>MSG_NOSIGNAL</code>; Darwin applies <code>SO_NOSIGPIPE</code> when the channel is adopted. A closed peer therefore raises an Ada exception and poisons the channel instead of terminating the process with <code>SIGPIPE</code>.</dd></div>
+                <div class="decision-row"><dt>15 · Authentication</dt><dd>The package does not use <code>SCM_CREDENTIALS</code> as an identity oracle and does not create or authenticate the socket. Establish peer provenance through an application-owned Unix-socket namespace or inherited endpoint before selecting <code>Trusted_Peer</code>.</dd></div>
+                <div class="decision-row"><dt>16 · Acceptance is local</dt><dd>A successful <a href="../../api/5b36e22df2d7ec142917960d430e791ce080101d463a0b0081ecb51939322997.html"><code>Send</code></a> means the local kernel accepted the byte and capability. It does not mean the peer received, validated, mapped, attached, or published anything. Add a separate application acknowledgment when that distinction matters.</dd></div>
+                <div class="decision-row"><dt>17 · Portability choices</dt><dd>Flyology uses <code>SOCK_STREAM</code>, the mode documented for rights passing on both supported hosts. It does not substitute <code>SOCK_SEQPACKET</code>, and it does not use Linux-only <code>recvmmsg</code>; neither removes the need for the portable framing and cleanup rules.</dd></div>
+              </dl>
+            </div>
+
+            <p>These constraints follow the failure cases collected in Kenton Varda's <a href="https://gist.github.com/kentonv/bc7592af98c68ba2738f4436920868dc">SCM_RIGHTS notes</a>. The narrow C boundary performs one send or receive and exposes the host's control-message layout facts. Ada owns retries, exact-one framing, closure of every rejected descriptor, endpoint lifetime, nonblocking guard state, poisoning, backing validation, and the resulting limited owners. Stable platform constants and ordinary fixed-signature system calls stay in the platform Ada bodies.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Unix-socket handoff is synchronous.</strong> <code>sendmsg</code> and <code>recvmsg</code> may block, and an owned channel poisons itself after a would-block transport failure rather than hiding a retry loop. Use a native-task boundary unless the application has independently established readiness and deliberately owns the retry policy.</p>
+            </aside>
+          </section>
+
+          <section id="lifecycle">
+            <span class="step-label">SEGMENT 07</span>
+            <h2>Detach borrowed views before releasing owners.</h2>
+            <ol>
+              <li>Detach every relocatable leaf view borrowing a named extent.</li>
+              <li>Detach the region view.</li>
+              <li>Detach the segment view.</li>
+              <li>Unmap the process-local mapping.</li>
+              <li>For a named object or file, call <code>Unlink</code> while its descriptor remains open if this owner is responsible for namespace removal.</li>
+              <li>Close the backing descriptor. Explicit <code>Close</code> and <code>Unmap</code> are idempotent; finalization is a non-raising fallback and never implicitly unlinks.</li>
+            </ol>
+            <p>File-backed mappings expose two writeback operations. <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#fc6ff0815617d84795343010e685a9d780dc7072a5b8e699b883cb6562e94191"><code>Flush (Map)</code></a> requests mapping-page writeback through <code>msync</code>; <a href="../../api/ef7afcca45c5f80b90a6eff8d8c855528c87f30afb81cee20d457d766c473d47.html#58f21854a5337eae7004e1815e0d462be3c5c0ade992099473bd97106ca2bf2b"><code>Flush (Backing)</code></a> requests descriptor-level persistence through <code>fsync</code>. Use both when the application requires those respective effects.</p>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><strong>Writeback is not a transaction.</strong> These calls do not make several registry and leaf updates atomically crash-consistent. Supply an application journal or another explicit transaction protocol when several writes must commit together.</p>
+            </aside>
+          </section>
+
+          <section id="import-checkpoint">
+            <span class="step-label">EXAMPLE 02</span>
+            <h2>Resume an import from a file-backed checkpoint.</h2>
+            <p>A single-owner importer can keep its last completed record in a regular-file segment. The first run creates the file and publishes a named byte string. Later runs open the same exact-size file, attach the registry, resolve the checkpoint, and continue from the stored value. The application creates the containing <code>state</code> directory before this startup sequence.</p>
+            <figure class="code-panel">
+              <figcaption>open or create the checkpoint segment at application startup</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Checkpoint_Path : constant String := "state/orders-import.segment";
+
+if Ada.Directories.Exists (Checkpoint_Path) then
+   Shared.Open_File (Backing, Checkpoint_Path, Segment_Length);
+else
+   Shared.Create_File
+     (Backing, Checkpoint_Path, Segment_Length, Permissions =&gt; 8#600#);
+end if;
+
+Shared.Map (Map, Backing);
+Segments.Create_Or_Attach (Segment, Map, Config, Segment_Open);
+
+case Segment_Open is
+   when Segments.Initialized_New |
+        Segments.Attached_Existing =&gt;
+      Segments.Attach_Region (Segment, Region);
+
+   when Segments.Initialization_In_Progress =&gt;
+      raise Program_Error with "checkpoint initialization is incomplete";
+end case;</code></pre>
+            </figure>
+            <figure class="code-panel">
+              <figcaption>publish or attach the last completed record</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">Segments.Try_Find_Or_Create
+  (Segment, "imports/orders/last-record",
+   Byte_Strings.Required_Storage (32),
+   Checkpoint_Handle, Checkpoint_Claim, Named_Open, Failure);
+
+case Named_Open is
+   when Segments.Created =&gt;
+      Segments.Claimed_Extent
+        (Segment, Checkpoint_Claim, Location, Extent);
+      Byte_Strings.Initialize
+        (Checkpoint, Region, Location, Maximum_Length =&gt; 32);
+      Byte_Strings.Assign
+        (Checkpoint, Ada.Streams.Stream_Element_Array'(1 =&gt; 16#30#));
+      Segments.Publish (Segment, Checkpoint_Claim);
+
+   when Segments.Attached_Existing =&gt;
+      Segments.Resolve
+        (Segment, Checkpoint_Handle, Location, Extent);
+      Byte_Strings.Attach
+        (Checkpoint, Region, Location, Maximum_Length =&gt; 32);
+
+   when others =&gt;
+      raise Program_Error with "checkpoint is not available";
+end case;
+
+--  After importing record 25000, encode "25000" as bytes and assign it.
+Byte_Strings.Assign (Checkpoint, Encoded_Record_Number);
+Shared.Flush (Map, Synchronous =&gt; True);
+Shared.Flush (Backing);</code></pre>
+            </figure>
+            <p>On restart, <a href="../../api/0b90ad413c110e47da1cadc709395073efec0f926c19708018e87e47ca344846.html"><code>Byte_Strings.Read</code></a> returns the last stored record number and the importer resumes after it. The file path is owned by one externally serialized startup authority in this example. <code>Ada.Directories.Exists</code> is not a multi-process create-or-open protocol.</p>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>Define the checkpoint transaction.</strong> Flushing the string does not prove that the external database or output file committed the corresponding record. A resumable importer must define which side commits first and how it detects or tolerates replay.</p>
+            </aside>
+          </section>
+
+          <section id="limits">
+            <span class="step-label">SEGMENT 08</span>
+            <h2>Apply trust, blocking, and recovery limits.</h2>
+            <ul>
+              <li>Namespace creation, open, unlink, mapping, unmapping, and flush are synchronous metadata or virtual-memory syscalls. They may occupy a lightweight task's event-loop pthread.</li>
+              <li><code>Unlink</code> requires external exclusion of concurrent namespace replacement because identity comparison and unlink are separate operations. Darwin POSIX shm exposes no stable per-object identity for that comparison.</li>
+              <li>A dead creator can leave the registry guard or a named extent initializing. Flyology does not detect process death, steal ownership, or infer participant quiescence.</li>
+              <li>Recovery requires independently authorized owner-death detection and quiescence. Replacing the complete backing object is often the simplest valid policy.</li>
+              <li>The fixed registry does not grow. Capacity, name length, alignment, and schema remain fixed during replacement migration; only a newly created segment's total extent and zero-filled allocation tail may increase.</li>
+              <li>Names are exact Ada <code>String</code> bytes. The registry performs no Unicode normalization and treats different byte sequences as different names.</li>
+              <li>Shared memory does not provide peer discovery, authentication, higher-level permissions, wake channels, schema migration, or durable application transactions.</li>
+              <li>The implementation is experimental and currently tested on Flyology's supported 64-bit Darwin and Linux targets.</li>
+            </ul>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">→</span>
+              <p>Continue with <a href="../data-structures/">relocatable data structures</a> to choose the stored object, or consult the <a href="../../api/">generated API reference</a> for exact outcomes, exceptions, and ownership contracts.</p>
+            </aside>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology Runtime is experimental. Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Guide</a><a href="../data-structures/">Relocatable data structures</a><a href="../../architecture/">Architecture</a><a href="../../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

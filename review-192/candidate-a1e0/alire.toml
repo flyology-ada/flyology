@@ -1,0 +1,33 @@
+name = "flyology"
+description = "Experimental GNAT runtime extension for native and lightweight Ada tasks"
+version = "0.2.0"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "(MIT OR Apache-2.0) AND GPL-3.0-or-later WITH GCC-exception-3.1"
+website = "https://flyology.org/"
+tags = ["ada", "runtime", "event-loop", "concurrency", "lightweight", "spark"]
+project-files = ["flyology.gpr"]
+
+[[depends-on]]
+gnat = ">=13 & <17"
+
+[[depends-on]]
+flyology_allocators = "~0.1.0"
+
+[available.'case(os)']
+'linux|macos' = true
+'...' = false
+
+[environment]
+FLYOLOGY_ROOT.set = "${CRATE_ROOT}"
+GPR_CONFIG.set = "${CRATE_ROOT}/build/flyology.cgpr"
+
+[[actions]]
+type = "pre-build"
+command = ["./scripts/prepare-alire-rts.sh"]
+
+[[actions]]
+type = "test"
+command = ["./scripts/test.sh"]

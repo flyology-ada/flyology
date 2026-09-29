@@ -1,0 +1,13 @@
+with "../../../flyology.gpr";
+
+--  Compile-only project for prepared-admission operation lifetime fixtures.
+project Prepared_Admission_Lifetime_Rejection is
+   for Source_Dirs use (".");
+   for Object_Dir use "../../obj/prepared_admission_lifetime_rejection";
+   for Main use ("operation_outlives_family.adb", "operation_outlives_set.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Compiler is
+      for Default_Switches ("Ada") use ("-gnat2022", "-gnatwa", "-gnatwJ");
+   end Compiler;
+end Prepared_Admission_Lifetime_Rejection;

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+: "${FLYOLOGY_ROOT:?Alire did not export FLYOLOGY_ROOT for the dependency}"
+: "${FLYOLOGY_CONSUMER_RTS:?FLYOLOGY_CONSUMER_RTS is required}"
+: "${FLYOLOGY_CONSUMER_DEFAULT:?FLYOLOGY_CONSUMER_DEFAULT is required}"
+
+FLYOLOGY_RTS_DIR="$FLYOLOGY_CONSUMER_RTS" \
+FLYOLOGY_DEFAULT="$FLYOLOGY_CONSUMER_DEFAULT" \
+  "$FLYOLOGY_ROOT/scripts/prepare-rts.sh" >/dev/null

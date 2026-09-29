@@ -1,0 +1,7 @@
+with "../../flyology.gpr";
+
+project Flyology_Development_Workspace is
+   for Source_Dirs use ();
+   for Object_Dir use "obj";
+   for Create_Missing_Dirs use "True";
+end Flyology_Development_Workspace;

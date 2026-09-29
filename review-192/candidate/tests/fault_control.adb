@@ -1,0 +1,113 @@
+package body Fault_Control is
+
+   use type Interfaces.C.int;
+
+   function Id (At_Point : Point) return Interfaces.C.int
+   is (Interfaces.C.int (Point'Enum_Rep (At_Point)));
+
+   function Enabled return Boolean
+   is (C_Enabled /= 0);
+
+   procedure Reset is
+   begin
+      C_Reset;
+   end Reset;
+
+   procedure Arm (At_Point : Point; First : Natural := 0; Count : Positive := 1) is
+   begin
+      if C_Arm (Id (At_Point), Interfaces.C.unsigned (First), Interfaces.C.unsigned (Count)) /= 0 then
+         raise Program_Error with "runtime fault injection is disabled";
+      end if;
+   end Arm;
+
+   procedure Disarm (At_Point : Point) is
+   begin
+      if C_Disarm (Id (At_Point)) /= 0 then
+         raise Program_Error with "runtime fault injection is disabled";
+      end if;
+   end Disarm;
+
+   function Calls (At_Point : Point) return Natural
+   is (Natural (C_Calls (Id (At_Point))));
+
+   function Create_Registration_Parked return Boolean
+   is (C_Create_Registration_Parked /= 0);
+
+   function Automatic_Placement_Parked return Boolean
+   is (C_Automatic_Placement_Parked /= 0);
+
+   function Automatic_Placement_Claim_Group return Integer
+   is (Integer (C_Automatic_Placement_Claim_Group));
+
+   procedure Release_Create_Registration is
+   begin
+      C_Release_Create_Registration;
+   end Release_Create_Registration;
+
+   procedure Release_Automatic_Placement is
+   begin
+      C_Release_Automatic_Placement;
+   end Release_Automatic_Placement;
+
+   function Poller_Translation_Parked return Boolean
+   is (C_Poller_Translation_Parked /= 0);
+
+   procedure Release_Poller_Translation is
+   begin
+      C_Release_Poller_Translation;
+   end Release_Poller_Translation;
+
+   function Poller_Batch_Delivery_Parked return Boolean
+   is (C_Poller_Batch_Delivery_Parked /= 0);
+
+   procedure Release_Poller_Batch_Delivery is
+   begin
+      C_Release_Poller_Batch_Delivery;
+   end Release_Poller_Batch_Delivery;
+
+   function Descriptor_Cancel_Budget_Parked return Boolean
+   is (C_Descriptor_Cancel_Budget_Parked /= 0);
+
+   procedure Release_Descriptor_Cancel_Budget is
+   begin
+      C_Release_Descriptor_Cancel_Budget;
+   end Release_Descriptor_Cancel_Budget;
+
+   function Descriptor_Cancel_Timer_Parked return Boolean
+   is (C_Descriptor_Cancel_Timer_Parked /= 0);
+
+   procedure Release_Descriptor_Cancel_Timer is
+   begin
+      C_Release_Descriptor_Cancel_Timer;
+   end Release_Descriptor_Cancel_Timer;
+
+   function Poller_Cancel_During_Translation_Count return Natural
+   is (Natural (C_Poller_Cancel_During_Translation_Count));
+
+   function Descriptor_Cancel_Queued_Count return Natural
+   is (Natural (C_Descriptor_Cancel_Queued_Count));
+
+   function Descriptor_Cancel_Processed_Count return Natural
+   is (Natural (C_Descriptor_Cancel_Processed_Count));
+
+   function File_Cancel_Count
+     (Backend : File_Cancel_Backend; Disposition : File_Cancel_Disposition; Terminal : Boolean) return Natural
+   is (Natural
+         (C_File_Cancel_Count
+            (Interfaces.C.int (File_Cancel_Backend'Enum_Rep (Backend)),
+             Interfaces.C.int (File_Cancel_Disposition'Enum_Rep (Disposition)),
+             Boolean'Pos (Terminal))));
+
+   function Atomic_Store_Model_Count (Model : Memory_Model) return Natural
+   is (Natural (C_Atomic_Store_Model_Count (Interfaces.C.int (Memory_Model'Enum_Rep (Model)))));
+
+   function Uring_Identity_Count (Reused : Boolean) return Natural
+   is (Natural (C_Uring_Identity_Count (Interfaces.C.int (Boolean'Pos (Reused)))));
+
+   function Uring_Admin_Complete_Count return Natural
+   is (Natural (C_Uring_Admin_Complete_Count));
+
+   function Uring_CQ_Capacity return Natural
+   is (Natural (C_Uring_CQ_Capacity));
+
+end Fault_Control;

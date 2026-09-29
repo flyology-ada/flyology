@@ -1,0 +1,486 @@
+#!/bin/sh
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+generated_config_temp=
+policy_temp=
+stamp_temp=
+validation_root=
+
+#  The external-consumer race regression holds each critical section long
+#  enough to make an omitted or ineffective preparation lock deterministic.
+lock_probe=${FLYOLOGY_TEST_RTS_LOCK_PROBE_DIR:-}
+cleanup_transaction () {
+  if [ -n "$generated_config_temp" ]; then
+    rm -f -- "$generated_config_temp"
+  fi
+  if [ -n "$policy_temp" ]; then
+    rm -f -- "$policy_temp"
+  fi
+  if [ -n "$stamp_temp" ]; then
+    rm -f -- "$stamp_temp"
+  fi
+  if [ -n "$validation_root" ]; then
+    rm -rf -- "$validation_root"
+  fi
+  if [ -n "$lock_probe" ]; then
+    rmdir "$lock_probe" 2>/dev/null || true
+  fi
+}
+trap cleanup_transaction EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ -n "$lock_probe" ]; then
+  if ! mkdir "$lock_probe"; then
+    printf '%s\n' \
+      "concurrent Flyology RTS preparation entered its critical section" \
+      >&2
+    exit 1
+  fi
+  sleep 2
+fi
+
+rts_root="$project_root/build/alire-rts"
+generated_config_file="$project_root/build/flyology.cgpr"
+policy_file="$project_root/build/flyology-rts.conf"
+stamp_file="$rts_root/.flyology-input-stamp"
+patched_core_manifest="$rts_root/.flyology-patched-core-manifest"
+
+mode=prepare
+case "$#:$*" in
+  0:) ;;
+  1:--configure) mode=configure ;;
+  1:--reset) mode=reset ;;
+  *)
+    printf '%s\n' \
+      "usage: prepare-alire-rts.sh [--configure|--reset]" >&2
+    exit 2
+    ;;
+esac
+
+set_default_policy () {
+  execution_default=native
+  loop_pool_size=1
+  placement_policy=round_robin
+  loop_placement=none
+  loop_placement_map=
+  sanitizer=none
+  test_faults=0
+  deny_io_uring=0
+}
+
+load_policy () {
+  if ! awk '
+    function known(key) {
+      return key == "version" || key == "default" ||
+        key == "loop_pool_size" || key == "placement" ||
+        key == "loop_placement" || key == "loop_placement_map" ||
+        key == "sanitizer" || key == "test_faults" ||
+        key == "deny_io_uring"
+    }
+    {
+      separator = index($0, "=")
+      if (separator == 0) { invalid = 1; next }
+      key = substr($0, 1, separator - 1)
+      if (!known(key) || seen[key]++) invalid = 1
+    }
+    END {
+      required[1] = "version"
+      required[2] = "default"
+      required[3] = "loop_pool_size"
+      required[4] = "placement"
+      required[5] = "loop_placement"
+      required[6] = "loop_placement_map"
+      required[7] = "sanitizer"
+      required[8] = "test_faults"
+      required[9] = "deny_io_uring"
+      for (i = 1; i <= 9; i++) {
+        if (seen[required[i]] != 1) invalid = 1
+      }
+      exit invalid ? 1 : 0
+    }
+  ' "$policy_file"; then
+    printf '%s\n' \
+      "invalid persisted Flyology RTS configuration: $policy_file" \
+      "run prepare-alire-rts.sh --reset to restore defaults" >&2
+    exit 1
+  fi
+
+  policy_version=$(sed -n 's/^version=//p' "$policy_file")
+  if [ "$policy_version" != 1 ]; then
+    printf '%s\n' \
+      "unsupported Flyology RTS configuration version: $policy_version" \
+      "run prepare-alire-rts.sh --reset to restore defaults" >&2
+    exit 1
+  fi
+  execution_default=$(sed -n 's/^default=//p' "$policy_file")
+  loop_pool_size=$(sed -n 's/^loop_pool_size=//p' "$policy_file")
+  placement_policy=$(sed -n 's/^placement=//p' "$policy_file")
+  loop_placement=$(sed -n 's/^loop_placement=//p' "$policy_file")
+  loop_placement_map=$(sed -n 's/^loop_placement_map=//p' "$policy_file")
+  sanitizer=$(sed -n 's/^sanitizer=//p' "$policy_file")
+  test_faults=$(sed -n 's/^test_faults=//p' "$policy_file")
+  deny_io_uring=$(sed -n 's/^deny_io_uring=//p' "$policy_file")
+}
+
+set_default_policy
+policy_publication=none
+case "$mode" in
+  prepare)
+    if [ -f "$policy_file" ]; then
+      load_policy
+    fi
+    ;;
+  configure)
+    execution_default=${FLYOLOGY_DEFAULT:-native}
+    loop_pool_size=${FLYOLOGY_LOOP_POOL_SIZE:-1}
+    placement_policy=${FLYOLOGY_PLACEMENT:-round_robin}
+    loop_placement=${FLYOLOGY_LOOP_PLACEMENT:-none}
+    loop_placement_map=${FLYOLOGY_LOOP_PLACEMENT_MAP:-}
+    sanitizer=${FLYOLOGY_SANITIZER:-none}
+    test_faults=${FLYOLOGY_TEST_FAULTS:-0}
+    deny_io_uring=${FLYOLOGY_TEST_DENY_IO_URING:-0}
+    policy_publication=write
+    ;;
+  reset)
+    policy_publication=remove
+    ;;
+esac
+
+alr=${ALR:-$("$project_root/scripts/find-alr.sh")}
+compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$alr")
+compiler="$compiler_prefix/bin/gcc"
+compiler_release=$("$project_root/scripts/prepare-atomic-store-config.sh" "$alr")
+gprbuild_prefix=$("$project_root/scripts/gprbuild-prefix.sh" "$alr")
+gprconfig="$gprbuild_prefix/bin/gprconfig"
+
+hash_stream () {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum
+  else
+    printf '%s\n' "SHA-256 tool not found" >&2
+    return 1
+  fi
+}
+
+hash_file () {
+  hash_stream <"$1" | awk '{ print $1 }'
+}
+
+archive_member_has_symbol () {
+  checked_member=$1
+  checked_symbol=$2
+
+  nm -g "$validation_root/$checked_member" 2>/dev/null |
+    awk '{ print $NF }' |
+    sed 's/^_//' |
+    grep -Fx "$checked_symbol" >/dev/null
+}
+
+record_patched_core () {
+  entry_kind=$1
+  entry_name=$2
+  entry_file=$3
+
+  printf '%s %s %s\n' \
+    "$entry_kind" "$entry_name" "$(hash_file "$entry_file")" \
+    >>"$expected_manifest"
+}
+
+input_stamp=$(
+  {
+    printf '%s\n' \
+      "compiler_prefix=$compiler_prefix" \
+      "compiler_release=$compiler_release" \
+      "compiler_target=$("$compiler" -dumpmachine)" \
+      "gprbuild_prefix=$gprbuild_prefix" \
+      "gprconfig_version=$("$gprconfig" --version | sed -n '1p')" \
+      "host=$(uname -s):$(uname -m)" \
+      "default=$execution_default" \
+      "loop_pool_size=$loop_pool_size" \
+      "placement=$placement_policy" \
+      "loop_placement=$loop_placement" \
+      "loop_placement_map=$loop_placement_map" \
+      "sanitizer=$sanitizer" \
+      "test_faults=$test_faults" \
+      "deny_io_uring=$deny_io_uring"
+    find "$project_root/runtime" -type f -print | LC_ALL=C sort
+    printf '%s\n' \
+      "$project_root/scripts/prepare-rts.sh" \
+      "$project_root/scripts/prepare-alire-rts.sh" \
+      "$project_root/scripts/prepare-alire-rts-internal.sh" \
+      "$project_root/scripts/gnat-native-prefix.sh" \
+      "$project_root/scripts/gnat-native-release.sh" \
+      "$project_root/scripts/gprbuild-prefix.sh"
+  } |
+    while IFS= read -r item; do
+      if [ -f "$item" ]; then
+        relative=${item#"$project_root/"}
+        printf 'file=%s:%s\n' "$relative" "$(hash_file "$item")"
+      else
+        printf '%s\n' "$item"
+      fi
+    done |
+    hash_stream | awk '{ print $1 }'
+)
+
+runtime_artifacts_valid () {
+  object="$rts_root/obj/context_switch.o"
+  archive="$rts_root/adalib/libgnarl.a"
+  include="$rts_root/adainclude"
+  [ -f "$object" ] && [ -f "$archive" ] \
+    && [ -f "$patched_core_manifest" ] \
+    && [ ! -L "$patched_core_manifest" ] || return 1
+  [ -f "$include/s-taprop.adb" ] \
+    && [ -f "$include/s-tassta.adb" ] \
+    && [ -f "$include/s-taskin.adb" ] \
+    && [ -f "$include/s-interr.adb" ] || return 1
+  if [ "$(uname -s)" = Linux ]; then
+    [ -f "$include/s-mudido.adb" ] || return 1
+  fi
+  ar -t "$archive" | grep '^context_switch[.]o$' >/dev/null || return 1
+  object_hash=$(hash_file "$object")
+  archived_hash=$(ar -p "$archive" context_switch.o | hash_stream |
+    awk '{ print $1 }')
+  [ "$object_hash" = "$archived_hash" ] || return 1
+
+  if [ -n "$validation_root" ]; then
+    rm -rf -- "$validation_root"
+    validation_root=
+  fi
+  validation_root=$(mktemp -d \
+    "$project_root/build/.flyology-rts-validation.XXXXXX")
+  set -- s-taprop.o s-interr.o s-taskin.o s-tassta.o
+  if [ "$(uname -s)" = Linux ]; then
+    set -- "$@" s-mudido.o
+  fi
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      set -- "$@" a-sytaco.o
+      ;;
+  esac
+  (
+    cd "$validation_root"
+    ar -x "$archive" "$@"
+  ) || return 1
+
+  expected_manifest="$validation_root/expected-manifest"
+  printf '%s\n' "Flyology patched core manifest version 1" \
+    >"$expected_manifest"
+  record_patched_core source adainclude/s-taprop.adb \
+    "$include/s-taprop.adb"
+  record_patched_core source adainclude/s-tassta.adb \
+    "$include/s-tassta.adb"
+  record_patched_core source adainclude/s-taskin.adb \
+    "$include/s-taskin.adb"
+  record_patched_core source adainclude/s-interr.adb \
+    "$include/s-interr.adb"
+  if [ "$(uname -s)" = Linux ]; then
+    record_patched_core source adainclude/s-mudido.adb \
+      "$include/s-mudido.adb"
+  fi
+  if [ "$(uname -s)" = Darwin ]; then
+    record_patched_core source adainclude/s-tpopmo.adb \
+      "$include/s-tpopmo.adb"
+  fi
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      record_patched_core source adainclude/a-sytaco.ads \
+        "$include/a-sytaco.ads"
+      record_patched_core source adainclude/a-sytaco.adb \
+        "$include/a-sytaco.adb"
+      ;;
+  esac
+  record_patched_core archive adalib/libgnarl.a:s-taprop.o \
+    "$validation_root/s-taprop.o"
+  record_patched_core archive adalib/libgnarl.a:s-tassta.o \
+    "$validation_root/s-tassta.o"
+  record_patched_core archive adalib/libgnarl.a:s-taskin.o \
+    "$validation_root/s-taskin.o"
+  record_patched_core archive adalib/libgnarl.a:s-interr.o \
+    "$validation_root/s-interr.o"
+  if [ "$(uname -s)" = Linux ]; then
+    record_patched_core archive adalib/libgnarl.a:s-mudido.o \
+      "$validation_root/s-mudido.o"
+  fi
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      record_patched_core archive adalib/libgnarl.a:a-sytaco.o \
+        "$validation_root/a-sytaco.o"
+      ;;
+  esac
+  cmp -s "$expected_manifest" "$patched_core_manifest" || return 1
+
+  grep -F "renames System.Flyology.Scheduler.Create;" \
+    "$include/s-taprop.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Scheduler.Finalize;" \
+    "$include/s-tassta.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Task_Results.Publish" \
+    "$include/s-tassta.adb" >/dev/null || return 1
+  grep -F "System.Flyology.Scheduler.Current_Task" \
+    "$include/s-taskin.adb" >/dev/null || return 1
+  grep -F "pragma Task_Info (System.Flyology.Native_Designation);" \
+    "$include/s-interr.adb" >/dev/null || return 1
+  archive_member_has_symbol \
+    s-taprop.o system__flyology__scheduler__create || return 1
+  archive_member_has_symbol \
+    s-taprop.o flyology_runtime_file_io || return 1
+  archive_member_has_symbol \
+    s-tassta.o system__flyology__scheduler__finalize || return 1
+  archive_member_has_symbol \
+    s-tassta.o system__flyology__task_results__publish || return 1
+  archive_member_has_symbol \
+    s-taskin.o system__flyology__scheduler__current_task || return 1
+  archive_member_has_symbol \
+    s-interr.o system__flyology__native_designation || return 1
+
+  case "$(uname -s)" in
+    Darwin)
+      [ -f "$include/s-tpopmo.adb" ] || return 1
+      grep -F '"flyology_monotonic_clock"' \
+        "$include/s-tpopmo.adb" >/dev/null || return 1
+      grep -F '"flyology_darwin_cond_timedwait_relative"' \
+        "$include/s-tpopmo.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_monotonic_clock || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_darwin_cond_timedwait_relative || return 1
+      ;;
+    Linux)
+      grep -F "System.Flyology.Scheduler.Is_Lightweight_Task" \
+        "$include/s-mudido.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-mudido.o system__flyology__scheduler__is_lightweight_task || return 1
+      grep -F '"flyology_linux_pthread_stack_min"' \
+        "$include/s-taprop.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        s-taprop.o flyology_linux_pthread_stack_min || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  case "$compiler_release" in
+    13.2.2|14.1.3|14.2.1|15.1.2|15.3.1)
+      [ -f "$include/a-sytaco.ads" ] \
+        && [ -f "$include/a-sytaco.adb" ] || return 1
+      grep -F "Suspended_Task : System.Tasking.Task_Id;" \
+        "$include/a-sytaco.ads" >/dev/null || return 1
+      grep -F "S.Suspended_Task := Self_ID;" \
+        "$include/a-sytaco.adb" >/dev/null || return 1
+      archive_member_has_symbol \
+        a-sytaco.o system__soft_links__abort_defer || return 1
+      ;;
+  esac
+
+  case "$(uname -m)" in
+    arm64|aarch64)
+      case "$(uname -s)" in
+        Darwin)
+          frame_dump=$(xcrun dwarfdump --eh-frame "$object")
+          ;;
+        Linux)
+          frame_dump=$(readelf --debug-dump=frames "$object")
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+      case "$frame_dump" in
+        *"DW_CFA_undefined: W30"*|*"DW_CFA_undefined: r30"*) ;;
+        *) return 1 ;;
+      esac
+      ;;
+  esac
+}
+
+runtime_is_current () {
+  [ -f "$stamp_file" ] || return 1
+  [ "$(sed -n '1p' "$stamp_file")" = "$input_stamp" ] || return 1
+  [ -f "$patched_core_manifest" ] || return 1
+  manifest_hash=$(hash_file "$patched_core_manifest")
+  [ "$(sed -n '2p' "$stamp_file")" = \
+    "patched_core_manifest=$manifest_hash" ] || return 1
+  [ -z "$(sed -n '3p' "$stamp_file")" ] || return 1
+  runtime_artifacts_valid
+}
+
+rebuilt=0
+if ! runtime_is_current; then
+  #  The stamp is the transaction commit marker. Invalidate it before the
+  #  clean replacement is assembled; prepare-rts publishes only a completed
+  #  directory, and interruption always forces the next lock owner to retry.
+  rm -f -- "$stamp_file"
+  FLYOLOGY_RTS_DIR="$rts_root" \
+  FLYOLOGY_DEFAULT="$execution_default" \
+  FLYOLOGY_LOOP_POOL_SIZE="$loop_pool_size" \
+  FLYOLOGY_PLACEMENT="$placement_policy" \
+  FLYOLOGY_LOOP_PLACEMENT="$loop_placement" \
+  FLYOLOGY_LOOP_PLACEMENT_MAP="$loop_placement_map" \
+  FLYOLOGY_SANITIZER="$sanitizer" \
+  FLYOLOGY_TEST_FAULTS="$test_faults" \
+  FLYOLOGY_TEST_DENY_IO_URING="$deny_io_uring" \
+    "$project_root/scripts/prepare-rts.sh" >/dev/null
+  rebuilt=1
+fi
+
+if ! runtime_artifacts_valid; then
+  printf '%s\n' \
+    "prepared Flyology RTS lacks required patched core artifacts" \
+    >&2
+  exit 1
+fi
+
+if [ "$rebuilt" -eq 1 ] || [ ! -f "$generated_config_file" ]; then
+  generated_config_temp=$(mktemp "$project_root/build/.flyology.cgpr.XXXXXX")
+  "$gprconfig" \
+    --batch \
+    --config="ada,,$rts_root,$compiler_prefix/bin" \
+    --config="c,,,$compiler_prefix/bin" \
+    -o "$generated_config_temp"
+  mv "$generated_config_temp" "$generated_config_file"
+  generated_config_temp=
+fi
+
+if [ "$rebuilt" -eq 1 ] \
+  && [ "${FLYOLOGY_TEST_RTS_FAIL_BEFORE_PUBLICATION:-0}" = 1 ]; then
+  printf '%s\n' \
+    "injected failure before Flyology RTS stamp publication" >&2
+  exit 97
+fi
+
+case "$policy_publication" in
+  write)
+    policy_temp=$(mktemp "$project_root/build/.flyology-rts.conf.XXXXXX")
+    printf '%s\n' \
+      "version=1" \
+      "default=$execution_default" \
+      "loop_pool_size=$loop_pool_size" \
+      "placement=$placement_policy" \
+      "loop_placement=$loop_placement" \
+      "loop_placement_map=$loop_placement_map" \
+      "sanitizer=$sanitizer" \
+      "test_faults=$test_faults" \
+      "deny_io_uring=$deny_io_uring" >"$policy_temp"
+    mv "$policy_temp" "$policy_file"
+    policy_temp=
+    ;;
+  remove)
+    rm -f -- "$policy_file"
+    ;;
+esac
+
+if [ "$rebuilt" -eq 1 ]; then
+  stamp_temp=$(mktemp "$rts_root/.flyology-input-stamp.XXXXXX")
+  manifest_hash=$(hash_file "$patched_core_manifest")
+  printf '%s\n' \
+    "$input_stamp" \
+    "patched_core_manifest=$manifest_hash" >"$stamp_temp"
+  mv "$stamp_temp" "$stamp_file"
+  stamp_temp=
+fi

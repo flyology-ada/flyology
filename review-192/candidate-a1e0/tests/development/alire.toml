@@ -1,0 +1,26 @@
+name = "flyology_development_workspace"
+description = "Development-only workspace for Flyology and its allocator"
+version = "0.1.0-dev"
+
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "development", "test"]
+project-files = ["flyology_development_workspace.gpr"]
+
+[[depends-on]]
+flyology = "*"
+
+[[depends-on]]
+flyology_allocators = "~0.1.0"
+
+[[pins]]
+flyology = { path = "../.." }
+
+[[pins]]
+flyology_allocators = { path = "../../flyology_allocators" }
+
+[build-profiles]
+flyology = "development"
+flyology_allocators = "development"

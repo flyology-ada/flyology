@@ -1,0 +1,4 @@
+2026-09-15 09:26:54.033 xcodebuild[92584:172067019]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-15 09:26:54.510 xcodebuild[92584:172066974] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+fatal: unable to access 'https://github.com/alire-project/alire-index/': Could not resolve host: github.com
+ERROR: Could not add community index: Command ["git", "clone", "--recursive", "-q", "https://github.com/alire-project/alire-index", "/tmp/.config/alire/indexes/community/repo"] exited with code 128

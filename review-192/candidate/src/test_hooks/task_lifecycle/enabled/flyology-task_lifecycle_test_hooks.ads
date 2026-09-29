@@ -1,0 +1,56 @@
+--  Enabled task-lifecycle test control selected by the owning project.
+
+private package Flyology.Task_Lifecycle_Test_Hooks is
+   pragma Preelaborate;
+
+   --  Keep this a literal compile-time constant. GNAT removes code guarded by
+   --  a literal False even at -O0; a function returning False can retain both
+   --  its call and references inside the guarded branch.
+   Enabled : constant Boolean := True;
+
+   type Barrier_Point is
+     (Static_Monitor_Registered,
+      Static_Generation_Starting,
+      Static_Generation_Terminated,
+      Family_Monitor_Registered,
+      Family_Generation_Starting,
+      Family_Generation_Terminated,
+      Family_Before_Take_Start,
+      Prepared_Admission_Reserved,
+      Prepared_Admission_Published,
+      Prepared_Admission_Committed,
+      Prepared_Observation_Before_Reserve,
+      Prepared_Observation_Reserved,
+      Prepared_Admission_Released,
+      Prepared_Admission_Cancellation_Requested,
+      Admission_Monitor_Registered,
+      Admission_Immediate_Claimed,
+      Admission_Before_Replacement,
+      Admission_Before_Manager_Done,
+      Admission_Signal_Claimed,
+      Admission_Signal_Interrupted,
+      Admission_Signal_Finalizing,
+      Task_Result_Attached,
+      Task_Result_Retained);
+
+   --  Reset barriers and reference accounting while no test operation is active.
+   procedure Reset;
+   procedure Arm (Point : Barrier_Point);
+   procedure Barrier (Point : Barrier_Point);
+   function Reached (Point : Barrier_Point) return Boolean;
+   procedure Release (Point : Barrier_Point);
+
+   procedure Note_Reference_Acquired;
+   procedure Note_Reference_Released;
+   function Outstanding_References return Natural;
+
+   procedure Force_Next_Prepared_Generation_Final;
+   function Consume_Prepared_Generation_Final return Boolean;
+   procedure Force_Next_Prepared_Monitor_Identity_Exhausted;
+   function Consume_Prepared_Monitor_Identity_Exhausted return Boolean;
+   procedure Interrupt_Next_Admission_Signal;
+   function Consume_Admission_Signal_Interrupted return Boolean;
+   procedure Force_Next_Family_Manager_Failure;
+   function Consume_Family_Manager_Failure return Boolean;
+
+end Flyology.Task_Lifecycle_Test_Hooks;

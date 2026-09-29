@@ -1,0 +1,19 @@
+with "config/tests_config.gpr";
+project Macos_Detection_Tests is
+
+   for Source_Dirs use ("src_macos/", "config/");
+   for Object_Dir use "obj/macos_detection/" & Tests_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Exec_Dir use "bin";
+   for Main use ("flyology_cachelines-macos_testing-main.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Tests_Config.Ada_Compiler_Switches;
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+end Macos_Detection_Tests;

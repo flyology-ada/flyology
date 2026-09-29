@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Prepare a version-matched Flyology runtime, designate a lightweight task, and choose the next focused guide chapter.">
+    <meta name="theme-color" content="#17213d">
+    <title>Guide · Flyology Runtime</title>
+    <link rel="canonical" href="https://flyology.org/guide/">
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <link rel="stylesheet" href="../assets/styles/ecosystem.css">
+    <script src="../assets/scripts/ada-highlight.js"></script>
+    <script src="../assets/scripts/guide-navigation.js"></script>
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home">
+          <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary class="nav-section-current">Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/">Overview</a></li>
+                <li><a href="../guide/" aria-current="page">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../libraries/">Libraries</a></li>
+          <li><a href="../journal/">Journal</a></li>
+          <li><a href="../ci/">CI</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="doc-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li><a href="../runtime/">Runtime</a></li><li aria-current="page">Guide</li></ol>
+          <h1>Build and configure Flyology Runtime.</h1>
+        </div>
+        <p class="doc-hero-copy">Prepare a version-matched runtime and designate one ordinary Ada task as lightweight. Then continue through focused chapters for configuration, I/O, operation, and verification.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="On this page" tabindex="0">
+          <p class="toc-title">On this page</p>
+          <ol>
+            <li><a href="#requirements">Requirements</a></li>
+            <li><a href="#build">Add the crate</a></li>
+            <li><a href="#prepare">Build with the runtime</a></li>
+            <li><a href="#designate">Designate a task</a></li>
+            <li><a href="#chapters">Runtime chapters</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <aside class="callout callout-teal">
+            <span class="callout-symbol" aria-hidden="true">→</span>
+            <p>This page keeps the four setup steps together. After you complete them, use the Runtime guide menu to continue with one focused subject. The <a href="#chapters">runtime chapter directory</a> remains below for an at-a-glance overview and links to earlier guide sections.</p>
+          </aside>
+          <section id="requirements">
+            <span class="step-label">STEP 01</span>
+            <h2>Use a supported toolchain.</h2>
+            <p>Flyology is an Alire crate and requires Alire 2.1 or newer. The dependency range accepts GNAT 13 through 16. Runtime preparation supports only the host and release pairs listed below.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt>macOS / AArch64</dt><dd>13.2.2, 14.1.3, 14.2.1, and 16.1.0</dd></div>
+                <div class="decision-row"><dt>Linux / AArch64</dt><dd>13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0</dd></div>
+                <div class="decision-row"><dt>Linux / x86-64</dt><dd>13.2.2, 14.1.3, 14.2.1, 15.1.2, 15.3.1, and 16.1.0</dd></div>
+              </dl>
+            </div>
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">!</span>
+              <p><strong>The dependency range is not the support matrix.</strong> Runtime preparation checks the exact active compiler and fails rather than guessing a nearby patch family.</p>
+            </aside>
+          </section>
+
+          <section id="build">
+            <span class="step-label">STEP 02</span>
+            <h2>Add Flyology to an Alire application.</h2>
+            <p>Flyology is published through a separate organization index. Keep the community index enabled for compiler and third-party dependencies. Add the Flyology index before the community index, then add the crate. Flyology might move to the community index later, but no decision has been made.</p>
+            <figure class="code-panel">
+              <figcaption>shell</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr init --bin flyology_app
+cd flyology_app
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>The Flyology index is a development channel, not a community-index release. Remove it with <code>alr index --del flyology</code> when Flyology is available from the community index.</p>
+            </aside>
+          </section>
+
+          <section id="prepare">
+            <span class="step-label">STEP 03</span>
+            <h2>Build with a version-matched runtime.</h2>
+            <p>The first build runs Flyology's Alire post-fetch action. The action copies the active compiler's installed runtime sources into the dependency build output. It then applies the exact patch family, builds the RTS, and exports a GPR configuration. The application links to this prepared RTS instead of the stock tasking runtime.</p>
+            <figure class="code-panel">
+              <figcaption>build the application</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr build</code></pre>
+            </figure>
+            <p>The default is <code>native</code>. In this compatibility configuration, undesignated tasks use stock OS-thread execution. No event machinery starts until a lightweight task activates.</p>
+            <figure class="code-panel">
+              <figcaption>launch with four shared groups</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>FLYOLOGY_LOOP_POOL_SIZE=4 alr run</code></pre>
+            </figure>
+            <aside class="callout callout-teal">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p><code>FLYOLOGY_LOOP_POOL_SIZE</code> sets the initial size before library-level tasks activate. Its default is <code>1</code>. An empty, malformed, or out-of-range value causes application initialization to fail. The automatic-placement ceiling can change later.</p>
+            </aside>
+            <p>Continue with <a href="execution-groups/#grow-pool">Execution groups</a> to change the automatic pool after startup.</p>
+          </section>
+
+          <section id="designate">
+            <span class="step-label">STEP 04</span>
+            <h2>Designate one ordinary Ada task.</h2>
+            <p>Use GNAT <code>Task_Info</code> to select the execution model at task creation. Current GNAT emits an obsolete-feature warning for this mechanism. The warning is an artifact of the current design and GNAT's handling of it, not intended Flyology behavior. Flyology projects use <code>-gnatwJ</code> to suppress that warning class while retaining other warnings.</p>
+            <p>A future design might use another designation mechanism, including an Ada aspect, if GNAT makes one available. Flyology has not selected a replacement.</p>
+            <figure class="code-panel">
+              <figcaption>worker.ads</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code class="language-ada">with Flyology;
+
+package Worker is
+   task Connection is
+      pragma Task_Info (Flyology.Lightweight_Task);
+   end Connection;
+end Worker;</code></pre>
+            </figure>
+            <p>Use <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#726aaaac29c58a02cdeb708e96b9a137809dbc3a0f21c93a5a0c6bc74c796d56"><code>Flyology.Native_Task</code></a> and <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#875ae342f1f8100c941ea7f728e5becae505856cfcf5f1325715baca3a04e2fd"><code>Flyology.Lightweight_Task</code></a> for explicit task designations. Both are values of <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#5550ffdd655377a446bc400485f835addf3e208ba07a230e98d2fa1143821e30"><code>Flyology.Execution_Model</code></a>. <a href="../api/71391bc9f3493c520c57632f71e0ae903371187f2fbbd5d228913e7b022653df.html#ffae341f663f8611276214be8783dda019d7a713ef674a79f23f437163208f99"><code>Flyology.Project_Default</code></a> requests the project default explicitly, which is useful on discriminated task types.</p>
+            <figure class="code-panel">
+              <figcaption>rebuild after changing the application</figcaption>
+              <button class="copy-button" type="button" data-copy>Copy</button>
+              <pre><code>alr build</code></pre>
+            </figure>
+          </section>
+
+          <section id="chapters">
+            <span class="step-label">CHAPTER INDEX</span>
+            <h2>Continue with one focused chapter.</h2>
+            <p>The core path follows the setup above. Each later step has a stable page that you can open or link directly.</p>
+
+            <h3>Core chapters</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt aria-current="page">Steps 01–04 · Start here (current page)</dt><dd>Check the toolchain, add the crate, prepare the runtime, and designate one lightweight task.</dd></div>
+                <div class="decision-row" id="stacks"><dt><a href="stacks/">Step 05 · Task stack sizing</a></dt><dd>Choose usable stack size and account for guard pages, pool classes, and native-task behavior.</dd></div>
+                <div class="decision-row" id="memory"><dt><a href="task-memory/">Step 06 · Task memory</a></dt><dd>Control dormant stack reclamation and task-private region lifetimes.</dd></div>
+                <div class="decision-row" id="groups"><dt><a href="execution-groups/">Step 07 · Execution groups</a></dt><dd>Choose automatic placement or a shared or dedicated group. Continue directly to <a id="grow-pool" href="execution-groups/#grow-pool">pool growth</a> or <a id="reduce-pool" href="execution-groups/#reduce-pool">pool reduction</a>.</dd></div>
+                <div class="decision-row" id="io"><dt><a href="task-aware-io/">Step 08 · Task-aware I/O</a></dt><dd>Use synchronous calls and choose <a id="client-connections" href="task-aware-io/#client-connections">client ownership</a> or <a id="unix-sockets" href="task-aware-io/#unix-sockets">pathname Unix sockets</a>.</dd></div>
+                <div class="decision-row"><dt><a id="scoped-operations" href="scoped-operations/">Step 08 continued · Scoped operations</a></dt><dd>Start several bounded operations, wait for batches or gates, and finish each retained result.</dd></div>
+                <div class="decision-row" id="budgets"><dt><a href="resource-budgets/">Step 09 · Resource budgets</a></dt><dd>Bound concurrency, memory, parallelism, and latency. Continue directly to <a id="checkpoints" href="resource-budgets/#checkpoints">cooperative checkpoints</a>.</dd></div>
+                <div class="decision-row" id="observe"><dt><a href="observability/">Step 10 · Runtime observability</a></dt><dd>Compare snapshots, queue pressure, and memory measurements. Continue directly to <a id="utilization" href="observability/#utilization">event-loop utilization</a>.</dd></div>
+                <div class="decision-row" id="verify"><dt><a href="verification/">Step 11 · Verification</a></dt><dd>Run behavioral tests, proofs, documentation checks, stress campaigns, and showcases.</dd></div>
+                <div class="decision-row" id="constraints"><dt><a href="constraints/">Step 12 · Execution constraints</a></dt><dd>Choose lightweight, native, or dedicated execution within the current experimental limits.</dd></div>
+              </dl>
+            </div>
+
+            <h3>Topic guides</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="shared-memory/">Shared-memory segments</a></dt><dd>Manage backing, mapping, named extents, descriptor handoff, and teardown.</dd></div>
+                <div class="decision-row"><dt><a href="data-structures/">Relocatable data structures</a></dt><dd>Place bounded arenas, rings, maps, vectors, slabs, and strings in caller-owned storage.</dd></div>
+                <div class="decision-row"><dt><a href="file-watching/">File watching</a></dt><dd>Observe bounded file, directory, and recursive-tree registrations.</dd></div>
+                <div class="decision-row"><dt><a href="file-transfers/">File-to-socket transfers</a></dt><dd>Move positional regular-file regions with native and completion-driven paths.</dd></div>
+                <div class="decision-row"><dt><a href="subprocesses/">Native subprocesses</a></dt><dd>Create processes from native tasks with bounded capture, deadlines, and cleanup.</dd></div>
+                <div class="decision-row"><dt><a href="supervision/">Structured task supervision</a></dt><dd>Build typed static trees and bounded dynamic families with explicit recovery policy.</dd></div>
+                <div class="decision-row"><dt><a href="process-upgrades/">Process upgrades</a></dt><dd>Coordinate listener escrow, canaries, promotion, drain, and reversal across fresh processes.</dd></div>
+                <div class="decision-row"><dt><a href="timers/">Timers and clock changes</a></dt><dd>Use relative, monotonic, multi-deadline, and wall-clock waits.</dd></div>
+              </dl>
+            </div>
+
+            <h3>Project tooling</h3>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row"><dt><a href="cli/">Flyology CLI</a></dt><dd>Install the aggregate command, scaffold binary or library crates, provision agent guidance and website files, and add extension commands.</dd></div>
+              </dl>
+            </div>
+
+            <aside class="callout">
+              <span class="callout-symbol" aria-hidden="true">i</span>
+              <p>Guides for standalone components, including Bench, Cachelines, and NUMA, remain indexed by dependency in <a href="../libraries/">Libraries</a>.</p>
+            </aside>
+          </section>
+
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Validate the exact host, compiler release, and operating constraints for your application.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Overview</a><a href="../architecture/">Architecture</a><a href="../journal/">Journal</a><a href="../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

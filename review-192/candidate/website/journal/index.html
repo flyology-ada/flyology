@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Dated notes about Flyology component decisions, measurements, proofs, and corrections.">
+    <meta name="theme-color" content="#17213d">
+    <title>Journal · Flyology</title>
+    <link rel="canonical" href="https://flyology.org/journal/">
+    <link rel="icon" href="../assets/brand/flyology-primary-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../assets/styles/site.css">
+    <link rel="stylesheet" href="../assets/styles/ecosystem.css">
+    <script src="../assets/scripts/ada-highlight.js"></script>
+    <script src="../assets/scripts/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="brand" href="../" aria-label="Flyology home">
+          <img src="../assets/brand/flyology-mark-transparent.svg" alt="">
+          <span>Flyology</span>
+        </a>
+        <ul class="nav-links" data-nav-links>
+          <li>
+            <details class="nav-dropdown" data-nav-dropdown>
+              <summary>Runtime <svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m2.5 4.5 3.5 3 3.5-3"/></svg></summary>
+              <ul class="nav-dropdown-menu">
+                <li><a href="../runtime/">Overview</a></li>
+                <li><a href="../guide/">Guide</a></li>
+                <li><a href="../architecture/">Architecture</a></li>
+                <li><a href="../api/">API reference</a></li>
+              </ul>
+            </details>
+          </li>
+          <li><a href="../libraries/">Libraries</a></li>
+          <li><a href="../journal/" aria-current="page">Journal</a></li>
+          <li><a href="../ci/">CI</a></li>
+          <li><a href="https://github.com/flyology-ada/flyology">GitHub</a></li>
+        </ul>
+        <div class="nav-tools">
+          <button class="icon-button" type="button" data-theme-toggle>
+            <span class="visually-hidden" data-theme-label>Change theme</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.64 5.64 7.2 7.2M16.8 16.8l1.56 1.56M18.36 5.64 16.8 7.2M7.2 16.8l-1.56 1.56"/><circle cx="12" cy="12" r="4"/></svg>
+          </button>
+          <button class="menu-button" type="button" data-menu-toggle aria-expanded="false" aria-label="Toggle navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="page-shell">
+      <header class="journal-hero">
+        <div>
+          <ol class="breadcrumb" aria-label="Breadcrumb"><li><a href="../">Flyology</a></li><li aria-current="page">Journal</li></ol>
+          <h1>Notes from across Flyology.</h1>
+        </div>
+        <p>We will use this journal to record what changed, what the evidence showed, and the limits of each result. The HTTP and Postgres libraries keep their own journals.</p>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="toc" aria-label="Component journals">
+          <p class="toc-title">Component journals</p>
+          <ol>
+            <li><a href="https://http.flyology.org/journal/">Flyology HTTP</a></li>
+            <li><a href="https://postgres.flyology.org/journal/">Flyology Postgres</a></li>
+          </ol>
+        </nav>
+
+        <article class="prose">
+          <section>
+            <h2>Records stay with their component.</h2>
+            <p>Expect implementation decisions, measurements, proof results, and corrections. Each entry names its source revision and environment, then states the evidence and its limits.</p>
+            <p>Library records remain in the <a href="https://http.flyology.org/journal/">HTTP journal</a> and <a href="https://postgres.flyology.org/journal/">Postgres journal</a>. Runtime and standalone-crate entries appear below.</p>
+            <div class="decision-list">
+              <dl>
+                <div class="decision-row">
+                  <dt><a href="2026-08-benchmark-harness-comparison/">Most benchmarks compare by subtraction. That is the bug.</a><br><time datetime="2026-08-19">2026-08-19</time></dt>
+                  <dd>Almost every harness answers "is B faster than A" by timing them separately and dividing, which folds the machine's mood into the speedup. <code>flyology_bench</code> makes the paired comparison the measurement itself, and carries resource axes, hardware counters, mid-run host observation, and live-service recording on that same schedule.</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span>Flyology is experimental. Journal entries are dated observations, not portable performance guarantees.</span>
+        <div class="footer-links"><a href="https://crates.flyology.org/">Crate index</a><a href="../">Overview</a><a href="../runtime/">Runtime</a><a href="../libraries/">Libraries</a><a href="../api/">API reference</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

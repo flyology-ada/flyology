@@ -1,0 +1,252 @@
+with Flyology.Operations;
+with System;
+
+--  A bounded FIFO channel with terminal close and drain semantics.
+--
+--  The channel owns no task and allocates no storage after elaboration.
+--  Multiple producers and consumers may call it concurrently. Blocking uses
+--  protected entries, preserving the same synchronous API for lightweight and
+--  native tasks.
+--
+--  Element assignment and finalization execute as part of channel protected
+--  operations. Element_Type operations must therefore not block, reenter the
+--  same Channel, or propagate exceptions. If a prohibited finalization raises
+--  after delivery, the dequeue remains committed and the value cannot be
+--  delivered again.
+--  @formal Element_Type Definite value transferred by copy through the channel
+--  @formal Empty_Value Resource-empty value copied into unoccupied slots
+
+generic
+   --  Definite value transferred by copy through the channel.
+   type Element_Type is private;
+
+   --  Resource-empty value used to initialize storage and clear each slot
+   --  immediately after delivery. Copying and finalizing this value must obey
+   --  the Element_Type protected-operation requirements above.
+   Empty_Value : Element_Type;
+package Flyology.Channels.Bounded is
+
+   --  Raised when Send observes a closed channel, or Receive observes a closed
+   --  and empty channel.
+   Channel_Closed : exception;
+
+   --  Raised by a timed Send or Receive whose deadline expires first.
+   Timeout_Error       : exception;
+   --  Raised by Finish after a scoped channel operation is cancelled.
+   Operation_Cancelled : exception renames Flyology.Operations.Operation_Cancelled;
+
+   --  Result of a nonblocking send attempt.
+   --  @enum Item_Sent The value was appended
+   --  @enum Channel_Full No capacity was available
+   --  @enum Send_Closed The channel had been closed
+   type Try_Send_Result is (Item_Sent, Channel_Full, Send_Closed);
+
+   --  Result of a nonblocking receive attempt.
+   --  @enum Item_Received The oldest value was returned
+   --  @enum Channel_Empty No value was available from an open channel
+   --  @enum Receive_Closed The closed channel was fully drained
+   type Try_Receive_Result is (Item_Received, Channel_Empty, Receive_Closed);
+
+   --  One coherent channel-state snapshot.
+   --  @field Closed Whether Close has been called
+   --  @field Pending Number of values currently buffered
+   --  @field Waiting_Senders Number of callers queued for capacity
+   --  @field Waiting_Receivers Number of callers queued for a value
+   type Snapshot is record
+      Closed            : Boolean;
+      Pending           : Natural;
+      Waiting_Senders   : Natural;
+      Waiting_Receivers : Natural;
+   end record;
+
+   --  @exclude Internal fixed storage for Channel.
+   type Element_Array is array (Positive range <>) of Element_Type;
+
+   --  Fixed-capacity MPMC FIFO. Close is terminal. Values accepted before
+   --  Close remain available in FIFO order; blocked and later senders are
+   --  rejected, while receivers finish draining the buffer.
+   protected type Channel
+     (Capacity : Positive)  --  Maximum buffered value count
+   is
+      --  Idempotently reject new sends and let accepted values drain.
+      procedure Close;
+
+      --  Append Value, waiting while the open channel is full.
+      --  @param Value Value copied into the channel
+      --  @exception Channel_Closed Close occurs before the value is accepted
+      entry Send (Value : Element_Type);
+
+      --  Remove the oldest value, waiting while the open channel is empty.
+      --  @param Value Receives the oldest buffered value
+      --  @exception Channel_Closed The closed channel has been fully drained
+      entry Receive (Value : out Element_Type);
+
+      --  Attempt to append without waiting.
+      --  @param Value Value to copy if capacity is available
+      --  @param Result Item_Sent, Channel_Full, or Send_Closed
+      procedure Try_Send (Value : Element_Type; Result : out Try_Send_Result);
+
+      --  @exclude Internal half of the abort-stable package-level Try_Send.
+      --  Accepted must already be False. On success it becomes True only after
+      --  the complete item and queue state have been installed.
+      --  @param Value Value to copy if capacity is available
+      --  @param Accepted Caller-owned evidence that the channel accepted Value
+      --  @param Result Item_Sent, Channel_Full, or Send_Closed
+      procedure Try_Send_After_Clear
+        (Value : Element_Type; Accepted : not null access Boolean; Result : out Try_Send_Result)
+      with Pre => not Accepted.all;
+
+      --  Attempt to remove the oldest value without waiting. Value is assigned
+      --  only when Result is Item_Received.
+      --  @param Value Receives the oldest buffered value on success
+      --  @param Result Item_Received, Channel_Empty, or Receive_Closed
+      procedure Try_Receive (Value : in out Element_Type; Result : out Try_Receive_Result);
+
+      --  Wait until Close has occurred and the buffer is empty.
+      entry Await_Drained;
+
+      --  Read channel state under its protected lock.
+      --  @return Current close, buffer, and waiter counts
+      function Current return Snapshot;
+   private
+      procedure Signal_Scoped;
+      Buffer  : Element_Array (1 .. Capacity) := (others => Empty_Value);  --  Circular FIFO storage
+      Head    : Positive := 1;  --  Next element to receive
+      Tail    : Positive := 1;  --  Next slot to send into
+      Count   : Natural := 0;  --  Occupied slots
+      Stopped : Boolean := False;  --  Terminal close state
+   end Channel;
+
+   --  Attempt to append without waiting and publish abort-stable ownership
+   --  evidence. Accepted is cleared before attempting to enter the protected
+   --  channel, then becomes True only after the complete item and queue state
+   --  have been installed. Unlike Result, the caller-aliased evidence remains
+   --  authoritative if the calling task is aborted at either boundary. True
+   --  means the channel owns exactly one copy of Value; False means it owns
+   --  none. Once True is published, a later propagated internal notification
+   --  failure does not revoke acceptance; ordinary Result copy-out may then be
+   --  unavailable.
+   --  @param Object Channel on which to attempt the send
+   --  @param Value Value to copy if capacity is available
+   --  @param Accepted Caller-owned evidence that the channel accepted Value
+   --  @param Result Item_Sent, Channel_Full, or Send_Closed
+   procedure Try_Send
+     (Object   : in out Channel;
+      Value    : Element_Type;
+      Accepted : not null access Boolean;
+      Result   : out Try_Send_Result);
+
+   --  Append Value within one relative deadline. Negative Timeout waits
+   --  indefinitely; zero is an immediate attempt. Once the protected Send is
+   --  accepted, success wins over a simultaneous deadline.
+   --  @param Item Channel to update
+   --  @param Value Value copied into the channel
+   --  @param Timeout Deadline interval in seconds
+   --  @exception Channel_Closed Close occurs before acceptance
+   --  @exception Timeout_Error No capacity is available before the deadline
+   procedure Timed_Send (Item : in out Channel; Value : Element_Type; Timeout : Duration);
+
+   --  Remove the oldest value within one relative deadline. Negative Timeout
+   --  waits indefinitely; zero is an immediate attempt. Values accepted before
+   --  Close remain receivable until the channel drains.
+   --  @param Item Channel to update
+   --  @param Value Receives the oldest buffered value
+   --  @param Timeout Deadline interval in seconds
+   --  @exception Channel_Closed The closed channel is fully drained
+   --  @exception Timeout_Error No value is available before the deadline
+   procedure Timed_Receive (Item : in out Channel; Value : out Element_Type; Timeout : Duration);
+
+   --  First-class send operation using the synchronous channel barrier. A
+   --  pending operation owns its copied value until Finish or finalization.
+   type Send_Operation is new Flyology.Operations.Operation with private;
+   --  First-class receive operation using the synchronous channel barrier. A
+   --  completed operation owns its received value until Finish or
+   --  finalization.
+   type Receive_Operation is new Flyology.Operations.Operation with private;
+
+   --  Start a send without suspending the owner task. Value is copied into the
+   --  operation before this call returns, so the source actual need not remain
+   --  alive. Negative Timeout is unlimited and zero is an immediate attempt.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Value Value copied into the pending operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited send operation
+   function Send
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Channel;
+      Value   : Element_Type;
+      Timeout : Duration := -1.0) return Send_Operation;
+
+   --  Start or restart a send in an established operation object.
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Value Value copied into the pending operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh or consumed send operation
+   procedure Send
+     (Item      : not null access Channel;
+      Value     : Element_Type;
+      Timeout   : Duration := -1.0;
+      Operation : in out Send_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Start a receive without suspending the owner task. The received value is
+   --  retained by the operation and copied out only by Finish.
+   --  @param Set Completion set that owns the operation slot
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @return Started limited receive operation
+   function Receive
+     (Set     : not null access Flyology.Operations.Completion_Set'Class;
+      Item    : not null access Channel;
+      Timeout : Duration := -1.0) return Receive_Operation;
+
+   --  Start or restart a receive in an established operation object.
+   --  @param Item Aliased channel that outlives the operation
+   --  @param Timeout Relative operation deadline in seconds
+   --  @param Operation Fresh or consumed receive operation
+   procedure Receive
+     (Item : not null access Channel; Timeout : Duration := -1.0; Operation : in out Receive_Operation)
+   with
+     Pre =>
+       not Flyology.Operations.Is_Active (Operation) and then not Flyology.Operations.Is_Terminal (Operation);
+
+   --  Consume a terminal send. Channel close and timeout reproduce the
+   --  synchronous exceptions; cancellation raises Operation_Cancelled.
+   --  @param Operation Terminal send operation
+   procedure Finish (Operation : in out Send_Operation);
+
+   --  Consume a terminal receive and copy out its value.
+   --  @param Operation Terminal receive operation
+   --  @param Value Received value on success
+   procedure Finish (Operation : in out Receive_Operation; Value : out Element_Type);
+
+private
+   type Scoped_Kind is (Scoped_Send, Scoped_Receive);
+   type Scoped_Failure is (No_Failure, Channel_Closed_Failure, Timeout_Failure, Driver_Failure);
+
+   type Channel_Operation is abstract new Flyology.Operations.Operation with record
+      Item       : access Channel := null;
+      Kind       : Scoped_Kind := Scoped_Receive;
+      Value      : Element_Type := Empty_Value;
+      Next       : System.Address := System.Null_Address;
+      Subscribed : Boolean := False;
+      Failure    : Scoped_Failure := No_Failure;
+   end record;
+
+   --  @exclude
+   --  @param Item Channel operation to advance
+   --  @param Event Driver event to process
+   overriding
+   procedure Drive (Item : in out Channel_Operation; Event : Flyology.Operations.Driver_Event);
+
+   --  @exclude
+   --  @param Item Channel operation to cancel
+   overriding
+   procedure Request_Cancellation (Item : in out Channel_Operation);
+
+   type Send_Operation is new Channel_Operation with null record;
+   type Receive_Operation is new Channel_Operation with null record;
+end Flyology.Channels.Bounded;

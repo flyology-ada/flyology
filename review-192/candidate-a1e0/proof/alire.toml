@@ -1,0 +1,21 @@
+name = "flyology_proof"
+description = "Development-only SPARK proof harness for Flyology"
+version = "0.1.1-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "spark", "proof"]
+project-files = ["runtime_policy.gpr"]
+
+[[depends-on]]
+flyology = "*"
+flyology_debug = "*"
+gnatprove = "^16.1.0"
+
+[[pins]]
+flyology = { path = ".." }
+
+[[pins]]
+flyology_debug = { path = "../flyology_debug" }

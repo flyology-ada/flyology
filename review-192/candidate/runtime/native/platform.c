@@ -1,0 +1,1288 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <pthread.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+#if defined(__linux__)
+#include <sched.h>
+#include <sys/epoll.h>
+#include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#endif
+
+/* GNAT's supported targets represent Duration as signed nanoseconds. Keep
+   clock conversion in C so the Darwin tick conversion is checked before Ada
+   receives a timespec. Mach absolute time deliberately matches Darwin's
+   relative pthread and kqueue waits: all three pause during system sleep. */
+int flyology_monotonic_clock(struct timespec *value) {
+#if defined(__APPLE__)
+    mach_timebase_info_data_t timebase;
+    __uint128_t nanoseconds;
+
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+        timebase.denom == 0) {
+        errno = EIO;
+        return -1;
+    }
+    nanoseconds = (__uint128_t)mach_absolute_time() * timebase.numer;
+    nanoseconds /= timebase.denom;
+    if (nanoseconds > INT64_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    value->tv_sec = (time_t)(nanoseconds / UINT64_C(1000000000));
+    value->tv_nsec = (long)(nanoseconds % UINT64_C(1000000000));
+    return 0;
+#else
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    return clock_gettime(CLOCK_MONOTONIC, value);
+#endif
+}
+
+int flyology_monotonic_resolution(struct timespec *value) {
+    if (value == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(__APPLE__)
+    mach_timebase_info_data_t timebase;
+    __uint128_t nanoseconds;
+
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+        timebase.denom == 0) {
+        errno = EIO;
+        return -1;
+    }
+    nanoseconds = ((__uint128_t)timebase.numer + timebase.denom - 1) /
+        timebase.denom;
+    if (nanoseconds == 0) {
+        nanoseconds = 1;
+    }
+    if (nanoseconds > INT64_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    value->tv_sec = (time_t)(nanoseconds / UINT64_C(1000000000));
+    value->tv_nsec = (long)(nanoseconds % UINT64_C(1000000000));
+    return 0;
+#else
+    return clock_getres(CLOCK_MONOTONIC, value);
+#endif
+}
+
+#if defined(__APPLE__)
+int flyology_darwin_cond_timedwait_relative(
+    pthread_cond_t *condition,
+    pthread_mutex_t *mutex,
+    const struct timespec *timeout)
+{
+    return pthread_cond_timedwait_relative_np(condition, mutex, timeout);
+}
+#endif
+
+#if defined(__linux__)
+static int flyology_linux_selected_file_backend;
+
+/* GNAT 13 and 14 assume a 16 KiB pthread minimum on every Linux target.
+   glibc requires 128 KiB on AArch64, so reject-free native task creation
+   needs the target value supplied by the active C library. */
+size_t flyology_linux_pthread_stack_min(void) {
+#if defined(_SC_THREAD_STACK_MIN)
+    long value = sysconf(_SC_THREAD_STACK_MIN);
+
+    if (value > 0) {
+        return (size_t)value;
+    }
+#endif
+    return (size_t)PTHREAD_STACK_MIN;
+}
+
+void flyology_linux_note_file_backend(int backend) {
+    __atomic_store_n(&flyology_linux_selected_file_backend, backend,
+                     __ATOMIC_RELAXED);
+}
+
+int flyology_linux_file_backend(void) {
+    return __atomic_load_n(&flyology_linux_selected_file_backend,
+                           __ATOMIC_RELAXED);
+}
+
+struct flyology_epoll_event {
+    uint32_t events;
+    int descriptor;
+};
+_Static_assert(sizeof(struct flyology_epoll_event) == 8,
+               "Ada epoll translation record must remain eight bytes");
+
+/* Translate through libc's native struct epoll_event so ABI-dependent
+   padding never leaks into Ada.  x86-64 uses a packed 12-byte kernel record;
+   AArch64 uses a naturally aligned 16-byte record. */
+int flyology_linux_epoll_ctl(int epoll_fd, int operation, int descriptor,
+                            uint32_t events) {
+    struct epoll_event item = { .events = events };
+
+    item.data.fd = descriptor;
+    return epoll_ctl(epoll_fd, operation, descriptor,
+                     operation == EPOLL_CTL_DEL ? NULL : &item);
+}
+
+int flyology_linux_epoll_wait(int epoll_fd,
+                             struct flyology_epoll_event *events,
+                             int max_events, int timeout_ms) {
+    struct epoll_event native_events[64];
+    int count;
+    int index;
+
+    if (events == NULL || max_events < 1 || max_events > 64) {
+        errno = EINVAL;
+        return -1;
+    }
+    count = epoll_wait(epoll_fd, native_events, max_events, timeout_ms);
+    if (count < 0) {
+        return -1;
+    }
+    for (index = 0; index < count; ++index) {
+        events[index].events = native_events[index].events;
+        events[index].descriptor = native_events[index].data.fd;
+    }
+    return count;
+}
+
+/*
+ * Keep Linux syscall-number selection in C, where the target system headers
+ * describe the active ABI.  The scheduler and file-engine policy stay in Ada;
+ * these wrappers are only a typed bridge for interfaces that glibc does not
+ * expose as ordinary functions.  syscall(2) preserves its normal convention:
+ * -1 on failure with errno set, and a nonnegative kernel result on success.
+ */
+long flyology_linux_io_setup(unsigned entries, unsigned long *context) {
+    return syscall(SYS_io_setup, entries, context);
+}
+
+long flyology_linux_io_destroy(unsigned long context) {
+    return syscall(SYS_io_destroy, context);
+}
+
+long flyology_linux_io_submit(unsigned long context, long count,
+                             void *controls) {
+    return syscall(SYS_io_submit, context, count, controls);
+}
+
+long flyology_linux_io_cancel(unsigned long context, void *control,
+                             void *result) {
+    return syscall(SYS_io_cancel, context, control, result);
+}
+
+long flyology_linux_io_getevents(unsigned long context, long minimum,
+                                long count, void *events, void *timeout) {
+    return syscall(SYS_io_getevents, context, minimum, count, events, timeout);
+}
+
+long flyology_linux_io_uring_setup(unsigned entries, void *parameters) {
+#if defined(FLYOLOGY_TEST_DENY_IO_URING)
+    (void)entries;
+    (void)parameters;
+    errno = EPERM;
+    return -1;
+#else
+    return syscall(SYS_io_uring_setup, entries, parameters);
+#endif
+}
+
+long flyology_linux_io_uring_enter(int descriptor, unsigned to_submit,
+                                  unsigned minimum, unsigned flags,
+                                  void *signal_mask, size_t signal_size) {
+    return syscall(SYS_io_uring_enter, descriptor, to_submit, minimum, flags,
+                   signal_mask, signal_size);
+}
+
+long flyology_linux_io_uring_register(int descriptor, unsigned opcode,
+                                     void *argument, unsigned count) {
+    return syscall(SYS_io_uring_register, descriptor, opcode, argument, count);
+}
+#endif
+
+#if !defined(__linux__)
+int flyology_linux_file_backend(void) {
+    return 0;
+}
+
+#endif
+
+#define FLYOLOGY_PLACEMENT_STRICT 1
+#define FLYOLOGY_PLACEMENT_ADVISORY 2
+#define FLYOLOGY_PLACEMENT_UNSUPPORTED (-1)
+#define FLYOLOGY_PLACEMENT_INVALID (-2)
+
+#if defined(__linux__)
+static cpu_set_t flyology_initial_cpu_mask;
+static int flyology_initial_cpu_mask_valid;
+#endif
+static pthread_once_t flyology_placement_once = PTHREAD_ONCE_INIT;
+static int flyology_placement_initialization_result;
+
+/*
+ * Capture the Linux process leader's CPU allowance. Unlike pthread_self(),
+ * getpid() continues to name the leader when a placement request originates
+ * on an already-narrowed native or event-loop thread. The scheduler owns
+ * placement policy; these helpers only bridge macro-only OS interfaces and
+ * verify kernel state.
+ */
+static void flyology_thread_placement_initialize_once(void) {
+#if defined(__linux__)
+    int result = sched_getaffinity(getpid(), sizeof(flyology_initial_cpu_mask),
+                                   &flyology_initial_cpu_mask);
+    flyology_initial_cpu_mask_valid = result == 0;
+    flyology_placement_initialization_result = result == 0 ? 0 : errno;
+#endif
+}
+
+int flyology_thread_placement_initialize(void) {
+    int result = pthread_once(&flyology_placement_once,
+                              flyology_thread_placement_initialize_once);
+    return result == 0 ? flyology_placement_initialization_result : result;
+}
+
+static int flyology_thread_placement_platform_ready(void) {
+    return flyology_thread_placement_initialize() == 0;
+}
+
+int flyology_thread_placement_supported(int mode) {
+    if (!flyology_thread_placement_platform_ready()) {
+        return 0;
+    }
+#if defined(__linux__)
+    return mode == FLYOLOGY_PLACEMENT_STRICT &&
+           flyology_initial_cpu_mask_valid;
+#elif defined(__APPLE__)
+#if defined(__aarch64__) || defined(__arm64__)
+    (void)mode;
+    return 0;
+#else
+    return mode == FLYOLOGY_PLACEMENT_ADVISORY;
+#endif
+#else
+    (void)mode;
+    return 0;
+#endif
+}
+
+int flyology_thread_placement_validate(int mode, int value) {
+    if (!flyology_thread_placement_supported(mode)) {
+        return FLYOLOGY_PLACEMENT_UNSUPPORTED;
+    }
+#if defined(__linux__)
+    if (!flyology_initial_cpu_mask_valid || value < 0 || value >= CPU_SETSIZE ||
+        !CPU_ISSET(value, &flyology_initial_cpu_mask)) {
+        return FLYOLOGY_PLACEMENT_INVALID;
+    }
+    return 0;
+#elif defined(__APPLE__)
+    return value > 0 ? 0 : FLYOLOGY_PLACEMENT_INVALID;
+#endif
+}
+
+int flyology_thread_placement_apply(int mode, int value) {
+    int valid = flyology_thread_placement_validate(mode, value);
+
+    if (valid != 0) {
+        return valid;
+    }
+#if defined(__linux__)
+    cpu_set_t requested;
+    cpu_set_t effective;
+    int result;
+
+    CPU_ZERO(&requested);
+    CPU_SET(value, &requested);
+    result = pthread_setaffinity_np(pthread_self(), sizeof(requested),
+                                    &requested);
+    if (result != 0) {
+        return result;
+    }
+    result = pthread_getaffinity_np(pthread_self(), sizeof(effective),
+                                    &effective);
+    if (result != 0) {
+        return result;
+    }
+    if (CPU_COUNT(&effective) != 1 || !CPU_ISSET(value, &effective)) {
+        return EIO;
+    }
+    return 0;
+#elif defined(__APPLE__)
+    thread_affinity_policy_data_t requested = { value };
+    thread_port_t thread = pthread_mach_thread_np(pthread_self());
+    kern_return_t result;
+
+    result = thread_policy_set(thread, THREAD_AFFINITY_POLICY,
+                               (thread_policy_t)&requested,
+                               THREAD_AFFINITY_POLICY_COUNT);
+    /* Darwin offers no supported read-back or physical-CPU guarantee for
+       this hint. Applied means the kernel accepted thread_policy_set. */
+    return result == KERN_SUCCESS ? 0 : (int)result;
+#endif
+}
+
+int flyology_thread_current_processor(void) {
+#if defined(__linux__)
+    return sched_getcpu();
+#else
+    /* Darwin exposes no stable public physical-CPU identity contract. */
+    return -1;
+#endif
+}
+
+static uint32_t *flyology_fork_child_flag;
+
+static void flyology_mark_fork_child(void) {
+    __atomic_store_n(flyology_fork_child_flag, 1, __ATOMIC_RELAXED);
+}
+
+int flyology_install_fork_guard(void *flag) {
+    if (flag == NULL || flyology_fork_child_flag != NULL) {
+        return -1;
+    }
+    flyology_fork_child_flag = (uint32_t *)flag;
+    return pthread_atfork(NULL, NULL, flyology_mark_fork_child);
+}
+
+int flyology_in_fork_child(void) {
+    return flyology_fork_child_flag != NULL &&
+           __atomic_load_n(flyology_fork_child_flag, __ATOMIC_RELAXED) != 0;
+}
+
+#define FLYOLOGY_FAULT_ACCEPT_CONNECTION_ABORTED 20
+#define FLYOLOGY_FAULT_ACCEPT_PROTOCOL_ERROR 21
+#define FLYOLOGY_FAULT_ACCEPT_PROCESS_LIMIT 22
+#define FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT 23
+#define FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR 24
+#define FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE 25
+#define FLYOLOGY_FAULT_CONNECT_INTERRUPTED 35
+
+#ifdef FLYOLOGY_TEST_FAULTS
+#include <stdatomic.h>
+
+#define FLYOLOGY_FAULT_POINT_COUNT 46
+#define FLYOLOGY_FILE_CANCEL_BACKENDS 3
+#define FLYOLOGY_FILE_CANCEL_DISPOSITIONS 4
+
+struct flyology_fault_plan {
+    atomic_uint calls;
+    atomic_uint first;
+    atomic_uint count;
+};
+
+static struct flyology_fault_plan
+    flyology_faults[FLYOLOGY_FAULT_POINT_COUNT + 1];
+static atomic_uint flyology_final_reap_state;
+/* 0 idle, 1 creator parked, 2 creator released, 3 creator holds its shard. */
+static atomic_uint flyology_create_race_state;
+static atomic_uint flyology_automatic_placement_state;
+static atomic_int flyology_automatic_claim_group;
+/* 0 idle, 1 event-loop translation parked, 2 translation released. */
+static atomic_uint flyology_poller_translation_state;
+/* 0 idle, 1 delivered batch parked, 2 delivery released. */
+static atomic_uint flyology_poller_batch_delivery_state;
+/* 0 idle, 1 bounded drain parked, 2 drain released. */
+static atomic_uint flyology_descriptor_cancel_budget_state;
+/* 0 idle, 1 expired cancellation-owned timer parked, 2 timer released. */
+static atomic_uint flyology_descriptor_cancel_timer_state;
+static atomic_uint flyology_poller_cancel_during_translation;
+static atomic_uint flyology_descriptor_cancel_queued;
+static atomic_uint flyology_descriptor_cancel_processed;
+static atomic_uint flyology_file_cancel_counts
+    [FLYOLOGY_FILE_CANCEL_BACKENDS + 1]
+    [FLYOLOGY_FILE_CANCEL_DISPOSITIONS + 1][2];
+static atomic_uint flyology_uring_identity_counts[2];
+static atomic_uint flyology_uring_admin_completions;
+static atomic_uint flyology_uring_cq_capacity;
+static atomic_uint flyology_finalization_order_armed;
+static atomic_uint flyology_finalization_sequence;
+static atomic_uint flyology_library_finalize_count;
+static atomic_uint flyology_library_finalize_order;
+static atomic_uint flyology_scheduler_finalize_count;
+static atomic_uint flyology_scheduler_finalize_order;
+static atomic_uint flyology_exceptional_finalization_expected;
+
+/* The binder runs Ada finalization before returning from main. This test-only
+   atexit callback is therefore the first observation point after both the
+   library-object and scheduler finalizers have returned. */
+static void flyology_test_verify_finalization_order(void) {
+    static const char message[] =
+        "Flyology finalization-order test failed\n";
+    static const char exceptional_success[] =
+        "Flyology exceptional finalization-order test passed\n";
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    if (atomic_load_explicit(&flyology_library_finalize_count,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_scheduler_finalize_count,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_library_finalize_order,
+                             memory_order_relaxed) != 1 ||
+        atomic_load_explicit(&flyology_scheduler_finalize_order,
+                             memory_order_relaxed) != 2) {
+        (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+        _Exit(EXIT_FAILURE);
+    }
+    if (atomic_load_explicit(&flyology_exceptional_finalization_expected,
+                             memory_order_relaxed) != 0) {
+        (void)write(STDERR_FILENO, exceptional_success,
+                    sizeof(exceptional_success) - 1);
+    }
+}
+
+static int flyology_test_arm_finalization_order_common(
+    unsigned exceptional_expected) {
+    if (atomic_exchange_explicit(&flyology_finalization_order_armed, 1,
+                                 memory_order_acq_rel) != 0) {
+        return -1;
+    }
+    atomic_store_explicit(&flyology_finalization_sequence, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_library_finalize_count, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_library_finalize_order, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_scheduler_finalize_count, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_scheduler_finalize_order, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_exceptional_finalization_expected,
+                          exceptional_expected, memory_order_relaxed);
+    if (atexit(flyology_test_verify_finalization_order) != 0) {
+        atomic_store_explicit(&flyology_finalization_order_armed, 0,
+                              memory_order_release);
+        return -1;
+    }
+    return 0;
+}
+
+int flyology_test_arm_finalization_order(void) {
+    return flyology_test_arm_finalization_order_common(0);
+}
+
+int flyology_test_arm_exceptional_finalization_order(void) {
+    return flyology_test_arm_finalization_order_common(1);
+}
+
+void flyology_test_note_library_finalize(void) {
+    unsigned order;
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    order = atomic_fetch_add_explicit(&flyology_finalization_sequence, 1,
+                                      memory_order_relaxed) + 1;
+    atomic_store_explicit(&flyology_library_finalize_order, order,
+                          memory_order_relaxed);
+    atomic_fetch_add_explicit(&flyology_library_finalize_count, 1,
+                              memory_order_relaxed);
+}
+
+void flyology_test_note_scheduler_finalize(void) {
+    unsigned order;
+
+    if (atomic_load_explicit(&flyology_finalization_order_armed,
+                             memory_order_acquire) == 0) {
+        return;
+    }
+    order = atomic_fetch_add_explicit(&flyology_finalization_sequence, 1,
+                                      memory_order_relaxed) + 1;
+    atomic_store_explicit(&flyology_scheduler_finalize_order, order,
+                          memory_order_relaxed);
+    atomic_fetch_add_explicit(&flyology_scheduler_finalize_count, 1,
+                              memory_order_relaxed);
+}
+
+/* Memory orders an Ada caller actually handed to the atomic-store bridge.
+   Slot FLYOLOGY_MEMORY_MODEL_SLOTS - 1 collects every value outside the
+   __ATOMIC_* range, which is what an import that omits the model argument
+   leaves in the third argument register. */
+#define FLYOLOGY_MEMORY_MODEL_SLOTS 7
+
+static atomic_uint
+    flyology_atomic_store_models[FLYOLOGY_MEMORY_MODEL_SLOTS];
+
+static unsigned flyology_memory_model_slot(int model) {
+    if (model < 0 || model > 5) {
+        return FLYOLOGY_MEMORY_MODEL_SLOTS - 1;
+    }
+    return (unsigned)model;
+}
+
+unsigned flyology_test_atomic_store_model_count(int model) {
+    return atomic_load_explicit(
+        &flyology_atomic_store_models[flyology_memory_model_slot(model)],
+        memory_order_relaxed);
+}
+
+void flyology_test_note_uring_cq_capacity(unsigned capacity) {
+    atomic_store_explicit(&flyology_uring_cq_capacity, capacity,
+                          memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_cq_capacity(void) {
+    return atomic_load_explicit(&flyology_uring_cq_capacity,
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_uring_identity(int reused) {
+    atomic_fetch_add_explicit(&flyology_uring_identity_counts[reused != 0], 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_identity_count(int reused) {
+    return atomic_load_explicit(&flyology_uring_identity_counts[reused != 0],
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_uring_admin_complete(void) {
+    atomic_fetch_add_explicit(&flyology_uring_admin_completions, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_uring_admin_complete_count(void) {
+    return atomic_load_explicit(&flyology_uring_admin_completions,
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_file_cancel(int backend, int disposition,
+                                    int terminal) {
+    if (backend < 1 || backend > FLYOLOGY_FILE_CANCEL_BACKENDS ||
+        disposition < 1 ||
+        disposition > FLYOLOGY_FILE_CANCEL_DISPOSITIONS) {
+        return;
+    }
+    atomic_fetch_add_explicit(
+        &flyology_file_cancel_counts[backend][disposition][terminal != 0], 1,
+        memory_order_relaxed);
+}
+
+unsigned flyology_test_file_cancel_count(int backend, int disposition,
+                                         int terminal) {
+    if (backend < 1 || backend > FLYOLOGY_FILE_CANCEL_BACKENDS ||
+        disposition < 1 ||
+        disposition > FLYOLOGY_FILE_CANCEL_DISPOSITIONS) {
+        return 0;
+    }
+    return atomic_load_explicit(
+        &flyology_file_cancel_counts[backend][disposition][terminal != 0],
+        memory_order_relaxed);
+}
+
+int flyology_test_faults_enabled(void) {
+    return 1;
+}
+
+void flyology_test_fault_reset(void) {
+    unsigned point;
+    unsigned backend;
+    unsigned disposition;
+
+    for (point = 1; point <= FLYOLOGY_FAULT_POINT_COUNT; ++point) {
+        atomic_store_explicit(&flyology_faults[point].calls, 0,
+                              memory_order_relaxed);
+        atomic_store_explicit(&flyology_faults[point].first, 0,
+                              memory_order_relaxed);
+        atomic_store_explicit(&flyology_faults[point].count, 0,
+                              memory_order_release);
+    }
+    atomic_store_explicit(&flyology_final_reap_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_create_race_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_automatic_placement_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_automatic_claim_group, -1,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_poller_translation_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_poller_batch_delivery_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_descriptor_cancel_timer_state, 0,
+                          memory_order_release);
+    atomic_store_explicit(&flyology_poller_cancel_during_translation, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_descriptor_cancel_queued, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_descriptor_cancel_processed, 0,
+                          memory_order_relaxed);
+    for (backend = 1; backend <= FLYOLOGY_FILE_CANCEL_BACKENDS; ++backend) {
+        for (disposition = 1;
+             disposition <= FLYOLOGY_FILE_CANCEL_DISPOSITIONS;
+             ++disposition) {
+            atomic_store_explicit(
+                &flyology_file_cancel_counts[backend][disposition][0], 0,
+                memory_order_relaxed);
+            atomic_store_explicit(
+                &flyology_file_cancel_counts[backend][disposition][1], 0,
+                memory_order_relaxed);
+        }
+    }
+    atomic_store_explicit(&flyology_uring_identity_counts[0], 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_uring_identity_counts[1], 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_uring_admin_completions, 0,
+                          memory_order_relaxed);
+    for (unsigned slot = 0; slot < FLYOLOGY_MEMORY_MODEL_SLOTS; ++slot) {
+        atomic_store_explicit(&flyology_atomic_store_models[slot], 0,
+                              memory_order_relaxed);
+    }
+}
+
+int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
+        return -1;
+    }
+    atomic_store_explicit(&flyology_faults[point].calls, 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_faults[point].first, first,
+                          memory_order_relaxed);
+    atomic_store_explicit(&flyology_faults[point].count, count,
+                          memory_order_release);
+    return 0;
+}
+
+int flyology_test_fault_disarm(int point) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
+        return -1;
+    }
+    atomic_store_explicit(&flyology_faults[point].count, 0,
+                          memory_order_release);
+    return 0;
+}
+
+unsigned flyology_test_fault_calls(int point) {
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
+        return 0;
+    }
+    return atomic_load_explicit(&flyology_faults[point].calls,
+                                memory_order_relaxed);
+}
+
+int flyology_test_fault_hit(int point) {
+    struct flyology_fault_plan *plan;
+    unsigned call;
+    unsigned first;
+    unsigned count;
+
+    if (point < 1 || point > FLYOLOGY_FAULT_POINT_COUNT) {
+        return 0;
+    }
+    plan = &flyology_faults[point];
+    call = atomic_fetch_add_explicit(&plan->calls, 1,
+                                     memory_order_relaxed);
+    count = atomic_load_explicit(&plan->count, memory_order_acquire);
+    if (count == 0) {
+        return 0;
+    }
+    first = atomic_load_explicit(&plan->first, memory_order_relaxed);
+    return call >= first && call - first < count;
+}
+
+int flyology_test_pause_final_reaper(void) {
+    atomic_store_explicit(&flyology_final_reap_state, 1,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 1000; ++attempt) {
+        if (atomic_load_explicit(&flyology_final_reap_state,
+                                 memory_order_acquire) == 2) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+void flyology_test_release_final_reaper(void) {
+    if (atomic_load_explicit(&flyology_final_reap_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_final_reap_state, 2,
+                              memory_order_release);
+    }
+}
+
+/* Park a creating thread that already passed the unlocked lifecycle guard so
+   a concurrent finalization reaches its quiescence decision first.  The bound
+   keeps a test that never finalizes from hanging its creator forever. */
+int flyology_test_pause_create_registration(void) {
+    atomic_store_explicit(&flyology_create_race_state, 1,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 5000; ++attempt) {
+        if (atomic_load_explicit(&flyology_create_race_state,
+                                 memory_order_acquire) >= 2) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+void flyology_test_note_create_registering(void) {
+    if (atomic_load_explicit(&flyology_create_race_state,
+                             memory_order_acquire) == 2) {
+        atomic_store_explicit(&flyology_create_race_state, 3,
+                              memory_order_release);
+    }
+}
+
+int flyology_test_create_race_parked(void) {
+    return atomic_load_explicit(&flyology_create_race_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_note_automatic_placement_claim(int group) {
+    atomic_store_explicit(&flyology_automatic_claim_group, group,
+                          memory_order_release);
+}
+
+int flyology_test_automatic_placement_claim_group(void) {
+    return atomic_load_explicit(&flyology_automatic_claim_group,
+                                memory_order_acquire);
+}
+
+int flyology_test_pause_automatic_placement(void) {
+    atomic_store_explicit(&flyology_automatic_placement_state, 1,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 5000; ++attempt) {
+        if (atomic_load_explicit(&flyology_automatic_placement_state,
+                                 memory_order_acquire) == 2) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+int flyology_test_automatic_placement_parked(void) {
+    return atomic_load_explicit(&flyology_automatic_placement_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_automatic_placement(void) {
+    if (atomic_load_explicit(&flyology_automatic_placement_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_automatic_placement_state, 2,
+                              memory_order_release);
+    }
+}
+
+/* Test rendezvous policy, including waiting and timeouts, remains in Ada.
+   These leaf functions expose only atomic publication and observation. */
+void flyology_test_begin_poller_translation(void) {
+    atomic_store_explicit(&flyology_poller_translation_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_poller_translation_released(void) {
+    return atomic_load_explicit(&flyology_poller_translation_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_poller_translation_parked(void) {
+    return atomic_load_explicit(&flyology_poller_translation_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_poller_translation(void) {
+    if (atomic_load_explicit(&flyology_poller_translation_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_poller_translation_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_begin_poller_batch_delivery(void) {
+    atomic_store_explicit(&flyology_poller_batch_delivery_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_poller_batch_delivery_released(void) {
+    return atomic_load_explicit(&flyology_poller_batch_delivery_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_poller_batch_delivery_parked(void) {
+    return atomic_load_explicit(&flyology_poller_batch_delivery_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_poller_batch_delivery(void) {
+    if (atomic_load_explicit(&flyology_poller_batch_delivery_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_poller_batch_delivery_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_begin_descriptor_cancel_budget(void) {
+    atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_descriptor_cancel_budget_released(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_descriptor_cancel_budget_parked(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_descriptor_cancel_budget(void) {
+    if (atomic_load_explicit(&flyology_descriptor_cancel_budget_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_descriptor_cancel_budget_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_begin_descriptor_cancel_timer(void) {
+    atomic_store_explicit(&flyology_descriptor_cancel_timer_state, 1,
+                          memory_order_release);
+}
+
+int flyology_test_descriptor_cancel_timer_released(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_timer_state,
+                                memory_order_acquire) == 2;
+}
+
+int flyology_test_descriptor_cancel_timer_parked(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_timer_state,
+                                memory_order_acquire) == 1;
+}
+
+void flyology_test_release_descriptor_cancel_timer(void) {
+    if (atomic_load_explicit(&flyology_descriptor_cancel_timer_state,
+                             memory_order_acquire) == 1) {
+        atomic_store_explicit(&flyology_descriptor_cancel_timer_state, 2,
+                              memory_order_release);
+    }
+}
+
+void flyology_test_note_poller_cancel(void) {
+    if (atomic_load_explicit(&flyology_poller_translation_state,
+                             memory_order_acquire) == 1) {
+        atomic_fetch_add_explicit(
+            &flyology_poller_cancel_during_translation, 1,
+            memory_order_relaxed);
+    }
+}
+
+unsigned flyology_test_poller_cancel_during_translation_count(void) {
+    return atomic_load_explicit(
+        &flyology_poller_cancel_during_translation, memory_order_relaxed);
+}
+
+void flyology_test_note_descriptor_cancel_queued(void) {
+    atomic_fetch_add_explicit(&flyology_descriptor_cancel_queued, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_descriptor_cancel_queued_count(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_queued,
+                                memory_order_relaxed);
+}
+
+void flyology_test_note_descriptor_cancel_processed(void) {
+    atomic_fetch_add_explicit(&flyology_descriptor_cancel_processed, 1,
+                              memory_order_relaxed);
+}
+
+unsigned flyology_test_descriptor_cancel_processed_count(void) {
+    return atomic_load_explicit(&flyology_descriptor_cancel_processed,
+                                memory_order_relaxed);
+}
+
+/* Release the parked creator and wait until it owns its registry shard, so
+   the finalizing thread resumes with the creator inside the window rather
+   than before it. */
+void flyology_test_release_create_registration(void) {
+    if (atomic_load_explicit(&flyology_create_race_state,
+                             memory_order_acquire) != 1) {
+        return;
+    }
+    atomic_store_explicit(&flyology_create_race_state, 2,
+                          memory_order_release);
+    for (unsigned attempt = 0; attempt < 5000; ++attempt) {
+        if (atomic_load_explicit(&flyology_create_race_state,
+                                 memory_order_acquire) == 3) {
+            return;
+        }
+        usleep(1000);
+    }
+}
+#else
+void flyology_test_note_automatic_placement_claim(int group) {
+    (void)group;
+}
+
+int flyology_test_automatic_placement_claim_group(void) {
+    return -1;
+}
+
+int flyology_test_pause_automatic_placement(void) {
+    return -1;
+}
+
+int flyology_test_automatic_placement_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_automatic_placement(void) {
+}
+
+void flyology_test_begin_poller_translation(void) {
+}
+
+int flyology_test_poller_translation_released(void) {
+    return 1;
+}
+
+int flyology_test_poller_translation_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_poller_translation(void) {
+}
+
+void flyology_test_begin_poller_batch_delivery(void) {
+}
+
+int flyology_test_poller_batch_delivery_released(void) {
+    return 1;
+}
+
+int flyology_test_poller_batch_delivery_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_poller_batch_delivery(void) {
+}
+
+void flyology_test_begin_descriptor_cancel_budget(void) {
+}
+
+int flyology_test_descriptor_cancel_budget_released(void) {
+    return 1;
+}
+
+int flyology_test_descriptor_cancel_budget_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_descriptor_cancel_budget(void) {
+}
+
+void flyology_test_begin_descriptor_cancel_timer(void) {
+}
+
+int flyology_test_descriptor_cancel_timer_released(void) {
+    return 1;
+}
+
+int flyology_test_descriptor_cancel_timer_parked(void) {
+    return 0;
+}
+
+void flyology_test_release_descriptor_cancel_timer(void) {
+}
+
+void flyology_test_note_poller_cancel(void) {
+}
+
+unsigned flyology_test_poller_cancel_during_translation_count(void) {
+    return 0;
+}
+
+void flyology_test_note_descriptor_cancel_queued(void) {
+}
+
+unsigned flyology_test_descriptor_cancel_queued_count(void) {
+    return 0;
+}
+
+void flyology_test_note_descriptor_cancel_processed(void) {
+}
+
+unsigned flyology_test_descriptor_cancel_processed_count(void) {
+    return 0;
+}
+
+unsigned flyology_test_atomic_store_model_count(int model) {
+    (void)model;
+    return 0;
+}
+
+void flyology_test_note_uring_identity(int reused) {
+    (void)reused;
+}
+
+unsigned flyology_test_uring_identity_count(int reused) {
+    (void)reused;
+    return 0;
+}
+
+void flyology_test_note_uring_admin_complete(void) {
+}
+
+unsigned flyology_test_uring_admin_complete_count(void) {
+    return 0;
+}
+
+void flyology_test_note_file_cancel(int backend, int disposition,
+                                    int terminal) {
+    (void)backend;
+    (void)disposition;
+    (void)terminal;
+}
+
+unsigned flyology_test_file_cancel_count(int backend, int disposition,
+                                         int terminal) {
+    (void)backend;
+    (void)disposition;
+    (void)terminal;
+    return 0;
+}
+
+int flyology_test_faults_enabled(void) {
+    return 0;
+}
+
+void flyology_test_fault_reset(void) {
+}
+
+int flyology_test_fault_arm(int point, unsigned first, unsigned count) {
+    (void)point;
+    (void)first;
+    (void)count;
+    return -1;
+}
+
+int flyology_test_fault_disarm(int point) {
+    (void)point;
+    return -1;
+}
+
+unsigned flyology_test_fault_calls(int point) {
+    (void)point;
+    return 0;
+}
+
+int flyology_test_fault_hit(int point) {
+    (void)point;
+    return 0;
+}
+#endif
+
+/* Keep errno values that GNAT's generated OS constants do not expose in the
+   host-header bridge.  -1 denotes an unavailable condition and cannot collide
+   with errno captured after a failed accept. */
+int flyology_errno_connection_aborted(void) {
+#ifdef ECONNABORTED
+    return ECONNABORTED;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_protocol_error(void) {
+#ifdef EPROTO
+    return EPROTO;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_process_file_limit(void) {
+#ifdef EMFILE
+    return EMFILE;
+#else
+    return -1;
+#endif
+}
+
+int flyology_errno_system_file_limit(void) {
+#ifdef ENFILE
+    return ENFILE;
+#else
+    return -1;
+#endif
+}
+
+/* Keep listener close injection at the syscall boundary. Production builds
+   contain one direct close(2). Fault-enabled tests report an error after a
+   successful close so cleanup must not retry a consumed descriptor number. */
+int flyology_structured_listener_close(int descriptor) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    int inject_failure = flyology_test_fault_hit(
+        FLYOLOGY_FAULT_STRUCTURED_LISTENER_CLOSE);
+    int result = close(descriptor);
+    if (inject_failure && result == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return result;
+#else
+    return close(descriptor);
+#endif
+}
+
+/* The production path remains one direct accept call.  Deterministic errno
+   injection exists only in explicitly fault-enabled test runtimes. */
+int flyology_accept(int socket, void *address, void *length) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    if (flyology_test_fault_hit(
+            FLYOLOGY_FAULT_ACCEPT_CONNECTION_ABORTED)) {
+        errno = ECONNABORTED;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_PROTOCOL_ERROR)) {
+        errno = EPROTO;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_PROCESS_LIMIT)) {
+        errno = EMFILE;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_SYSTEM_LIMIT)) {
+        errno = ENFILE;
+        return -1;
+    }
+    if (flyology_test_fault_hit(FLYOLOGY_FAULT_ACCEPT_BAD_DESCRIPTOR)) {
+        errno = EBADF;
+        return -1;
+    }
+#endif
+    return accept(socket, (struct sockaddr *)address, (socklen_t *)length);
+}
+
+/* POSIX keeps an interrupted connect(2) alive: "the connection request shall
+   not be aborted, and the connection shall be established asynchronously".
+   Producing that errno for real needs a signal handler installed without
+   SA_RESTART racing an in-flight handshake, so fault-enabled test runtimes
+   report EINTR after issuing the genuine attempt.  A real failure keeps its
+   own errno, and the production path remains one direct connect call. */
+int flyology_connect(int socket, const void *address, unsigned length) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    int inject_interrupt =
+        flyology_test_fault_hit(FLYOLOGY_FAULT_CONNECT_INTERRUPTED);
+    int result = connect(socket, (const struct sockaddr *)address,
+                         (socklen_t)length);
+    if (inject_interrupt && (result == 0 || errno == EINPROGRESS)) {
+        errno = EINTR;
+        return -1;
+    }
+    return result;
+#else
+    return connect(socket, (const struct sockaddr *)address,
+                   (socklen_t)length);
+#endif
+}
+
+int flyology_map_anonymous(void) {
+    return MAP_ANONYMOUS;
+}
+
+int flyology_linux_msg_nosignal(void) {
+#if defined(__linux__)
+    return MSG_NOSIGNAL;
+#else
+    return 0;
+#endif
+}
+
+/*
+ * Stack-arena policy lives in Ada. These wrappers provide only the two
+ * process primitives which are awkward to represent portably in the runtime
+ * sources: a statically initialized pthread mutex and the host's page-discard
+ * advice value. A native-only program never calls either function.
+ */
+static pthread_mutex_t flyology_stack_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int flyology_stack_pool_lock(void) {
+    return pthread_mutex_lock(&flyology_stack_pool_mutex);
+}
+
+int flyology_stack_pool_unlock(void) {
+    return pthread_mutex_unlock(&flyology_stack_pool_mutex);
+}
+
+int flyology_discard_pages(void *address, size_t length) {
+    return madvise(address, length, MADV_DONTNEED);
+}
+
+int flyology_cold_pages_supported(void) {
+#if defined(__linux__) && defined(MADV_COLD)
+    return madvise(NULL, 0, MADV_COLD) == 0;
+#else
+    return 0;
+#endif
+}
+
+int flyology_pageout_pages_supported(void) {
+#if defined(__linux__) && defined(MADV_PAGEOUT)
+    return madvise(NULL, 0, MADV_PAGEOUT) == 0;
+#else
+    return 0;
+#endif
+}
+
+int flyology_pageout_pages(void *address, size_t length) {
+#if defined(__linux__) && defined(MADV_PAGEOUT)
+    return madvise(address, length, MADV_PAGEOUT) == 0 ? 1 : -1;
+#else
+    (void)address;
+    (void)length;
+    return 0;
+#endif
+}
+
+int flyology_cold_pages(void *address, size_t length) {
+#if defined(__linux__) && defined(MADV_COLD)
+    return madvise(address, length, MADV_COLD) == 0 ? 1 : -1;
+#else
+    (void)address;
+    (void)length;
+    return 0;
+#endif
+}
+
+/* Production builds contain only the store. Fault-enabled test runtimes also
+   record the memory order the Ada caller supplied, so an import that does not
+   pass one is caught instead of silently degrading publication ordering. */
+void flyology_atomic_store_u32(void *address, uint32_t value, int model) {
+#ifdef FLYOLOGY_TEST_FAULTS
+    atomic_fetch_add_explicit(
+        &flyology_atomic_store_models[flyology_memory_model_slot(model)], 1,
+        memory_order_relaxed);
+#endif
+    __atomic_store_n((uint32_t *)address, value, model);
+}

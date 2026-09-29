@@ -1,0 +1,25 @@
+project Flyology_CLI is
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use ("flyology_cli_main.adb");
+   for Create_Missing_Dirs use "True";
+
+   package Builder is
+      for Executable ("flyology_cli_main.adb") use "flyology";
+   end Builder;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-O2", "-gnat2022", "-gnatwa", "-gnatwJ", "-gnatVa", "-gnatyM110");
+   end Compiler;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+end Flyology_CLI;

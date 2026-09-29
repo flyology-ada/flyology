@@ -1,0 +1,23 @@
+name = "flyology_allocator_benchmarks"
+description = "Hosted allocator comparisons for flyology_allocators"
+version = "0.1.0-dev"
+
+authors = ["Yurii Rashkovskii"]
+maintainers = ["Yurii Rashkovskii <yrashk@gmail.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0"
+tags = ["ada", "allocators", "benchmark", "performance"]
+project-files = ["flyology_allocator_benchmarks.gpr"]
+
+[[depends-on]]
+flyology_allocators = "*"
+
+[[depends-on]]
+flyology_bench = "*"
+
+[[pins]]
+flyology_allocators = { path = ".." }
+
+[[pins]]
+flyology_bench = { path = "../../flyology_bench" }
+

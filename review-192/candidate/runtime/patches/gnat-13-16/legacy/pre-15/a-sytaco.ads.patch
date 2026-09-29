@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../../LICENSE.
+--- a/a-sytaco.ads
++++ b/a-sytaco.ads
+@@ -36,1 +36,2 @@
+ with System.Task_Primitives;
++with System.Tasking;
+@@ -78,8 +79,7 @@
+    type Suspension_Object is
+      new Ada.Finalization.Limited_Controlled with
+    record
+-      SO : System.Task_Primitives.Suspension_Object;
+-      --  Use low-level suspension objects so that the synchronization
+-      --  functionality provided by this object can be achieved using
+-      --  efficient operating system primitives.
++      L              : aliased System.Task_Primitives.RTS_Lock;
++      State          : Boolean;
++      pragma Atomic (State);
++      Suspended_Task : System.Tasking.Task_Id;
+    end record;

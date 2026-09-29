@@ -1,0 +1,383 @@
+with "config/flyology_config.gpr";
+with "config/flyology_atomic_store_config.gpr";
+with "flyology_allocators.gpr";
+project Flyology is
+
+   for Languages use ("Ada", "C");
+
+   Atomic_Store_Source_Dir := Flyology_Atomic_Store_Config.Source_Dir;
+
+   type Adaptive_Pool_Test_Hooks_Type is ("false", "true");
+   Adaptive_Pool_Test_Hooks : Adaptive_Pool_Test_Hooks_Type :=
+     external ("FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS", "false");
+   Adaptive_Pool_Test_Hook_Source_Dir :=
+     "src/test_hooks/adaptive_pool/disabled/";
+   Dynamic_Destroy_Test_Hook_Source_Dir :=
+     "src/test_hooks/dynamic_destroy/disabled/";
+   case Adaptive_Pool_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Adaptive_Pool_Test_Hook_Source_Dir :=
+           "src/test_hooks/adaptive_pool/enabled/";
+         Dynamic_Destroy_Test_Hook_Source_Dir :=
+           "src/test_hooks/dynamic_destroy/enabled/";
+   end case;
+
+   type Buffer_Test_Hooks_Type is ("false", "true");
+   Buffer_Test_Hooks : Buffer_Test_Hooks_Type :=
+     external ("FLYOLOGY_BUFFER_TEST_HOOKS", "false");
+   Buffer_Test_Hook_Source_Dir := "src/test_hooks/buffer/disabled/";
+   case Buffer_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Buffer_Test_Hook_Source_Dir := "src/test_hooks/buffer/enabled/";
+   end case;
+
+   type DNS_Test_Hooks_Type is ("false", "true");
+   DNS_Test_Hooks : DNS_Test_Hooks_Type :=
+     external ("FLYOLOGY_DNS_TEST_HOOKS", "false");
+   DNS_Test_Hook_Source_Dir := "src/test_hooks/dns/disabled/";
+   case DNS_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         DNS_Test_Hook_Source_Dir := "src/test_hooks/dns/enabled/";
+   end case;
+
+   type TLS_Test_Hooks_Type is ("false", "true");
+   TLS_Test_Hooks : TLS_Test_Hooks_Type :=
+     external ("FLYOLOGY_TLS_TEST_HOOKS", "false");
+   TLS_Test_Hook_Source_Dir := "src/test_hooks/tls/disabled/";
+   TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=0";
+   case TLS_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         TLS_Test_Hook_Source_Dir := "src/test_hooks/tls/enabled/";
+         TLS_Test_Hook_Switch := "-DFLYOLOGY_TLS_TEST_HOOKS=1";
+   end case;
+
+   type Connection_Test_Hooks_Type is ("false", "true");
+   Connection_Test_Hooks : Connection_Test_Hooks_Type :=
+     external ("FLYOLOGY_CONNECTION_TEST_HOOKS", "false");
+   Connection_Test_Hook_Source_Dir :=
+     "src/test_hooks/connection/disabled/";
+   case Connection_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Connection_Test_Hook_Source_Dir :=
+           "src/test_hooks/connection/enabled/";
+   end case;
+
+   type Worker_Pool_Test_Hooks_Type is ("false", "true");
+   Worker_Pool_Test_Hooks : Worker_Pool_Test_Hooks_Type :=
+     external ("FLYOLOGY_WORKER_POOL_TEST_HOOKS", "false");
+   Worker_Pool_Test_Hook_Source_Dir :=
+     "src/test_hooks/worker_pool/disabled/";
+   case Worker_Pool_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Worker_Pool_Test_Hook_Source_Dir :=
+           "src/test_hooks/worker_pool/enabled/";
+   end case;
+
+   type Task_Lifecycle_Test_Hooks_Type is ("false", "true");
+   Task_Lifecycle_Test_Hooks : Task_Lifecycle_Test_Hooks_Type :=
+     external ("FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS", "false");
+   Task_Lifecycle_Test_Hook_Source_Dir :=
+     "src/test_hooks/task_lifecycle/disabled/";
+   case Task_Lifecycle_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Task_Lifecycle_Test_Hook_Source_Dir :=
+           "src/test_hooks/task_lifecycle/enabled/";
+   end case;
+
+   type Channel_Test_Hooks_Type is ("false", "true");
+   Channel_Test_Hooks : Channel_Test_Hooks_Type :=
+     external ("FLYOLOGY_CHANNEL_TEST_HOOKS", "false");
+   Channel_Test_Hook_Source_Dir :=
+     "src/test_hooks/channel/disabled/";
+   case Channel_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Channel_Test_Hook_Source_Dir :=
+           "src/test_hooks/channel/enabled/";
+   end case;
+
+   type Subprocess_Test_Hooks_Type is ("false", "true");
+   Subprocess_Test_Hooks : Subprocess_Test_Hooks_Type :=
+     external ("FLYOLOGY_SUBPROCESS_TEST_HOOKS", "false");
+   Subprocess_Test_Hook_Source_Dir :=
+     "src/test_hooks/subprocess/disabled/";
+   case Subprocess_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Subprocess_Test_Hook_Source_Dir :=
+           "src/test_hooks/subprocess/enabled/";
+   end case;
+
+   type Structured_Server_Test_Hooks_Type is ("false", "true");
+   Structured_Server_Test_Hooks : Structured_Server_Test_Hooks_Type :=
+     external ("FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS", "false");
+   Structured_Server_Test_Hook_Source_Dir :=
+     "src/test_hooks/structured_server/disabled/";
+   case Structured_Server_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Structured_Server_Test_Hook_Source_Dir :=
+           "src/test_hooks/structured_server/enabled/";
+   end case;
+
+   type File_Watch_Test_Hooks_Type is ("false", "true");
+   File_Watch_Test_Hooks : File_Watch_Test_Hooks_Type :=
+     external ("FLYOLOGY_FILE_WATCH_TEST_HOOKS", "false");
+   File_Watch_Test_Hook_Source_Dir :=
+     "src/test_hooks/file_watch/disabled/";
+   case File_Watch_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         File_Watch_Test_Hook_Source_Dir :=
+           "src/test_hooks/file_watch/enabled/";
+   end case;
+
+   type Wall_Clock_Test_Hooks_Type is ("false", "true");
+   Wall_Clock_Test_Hooks : Wall_Clock_Test_Hooks_Type :=
+     external ("FLYOLOGY_WALL_CLOCK_TEST_HOOKS", "false");
+   Wall_Clock_Test_Hook_Source_Dir :=
+     "src/test_hooks/wall_clock/disabled/";
+   case Wall_Clock_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Wall_Clock_Test_Hook_Source_Dir :=
+           "src/test_hooks/wall_clock/enabled/";
+   end case;
+
+   type Socket_Test_Hooks_Type is ("false", "true");
+   Socket_Test_Hooks : Socket_Test_Hooks_Type :=
+     external ("FLYOLOGY_SOCKET_TEST_HOOKS", "false");
+   Socket_Test_Hook_Switch := "-DFLYOLOGY_SOCKET_TEST_HOOKS=0";
+   case Socket_Test_Hooks is
+      when "false" =>
+         null;
+      when "true" =>
+         Socket_Test_Hook_Switch := "-DFLYOLOGY_SOCKET_TEST_HOOKS=1";
+   end case;
+
+   for Library_Name use "Flyology";
+
+   case Flyology_Config.Alire_Host_OS is
+      when "linux" =>
+         for Source_Dirs use
+           ("src/", "src/native/", "src/platform/linux/", "config/",
+            Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir, Channel_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
+      when "macos" =>
+         for Source_Dirs use
+           ("src/", "src/native/", "src/platform/darwin/", "config/",
+            Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir, Channel_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
+      when others =>
+         for Source_Dirs use
+           ("src/", "src/native/", "config/",
+            Atomic_Store_Source_Dir, Adaptive_Pool_Test_Hook_Source_Dir,
+            Dynamic_Destroy_Test_Hook_Source_Dir,
+            Buffer_Test_Hook_Source_Dir, DNS_Test_Hook_Source_Dir,
+            TLS_Test_Hook_Source_Dir,
+            Connection_Test_Hook_Source_Dir, Worker_Pool_Test_Hook_Source_Dir,
+            Task_Lifecycle_Test_Hook_Source_Dir, Channel_Test_Hook_Source_Dir,
+            Subprocess_Test_Hook_Source_Dir, Structured_Server_Test_Hook_Source_Dir,
+            File_Watch_Test_Hook_Source_Dir, Wall_Clock_Test_Hook_Source_Dir);
+   end case;
+
+   type Documentation_Mode_Type is ("false", "true");
+   Documentation_Mode : Documentation_Mode_Type :=
+     external ("FLYOLOGY_DOCUMENTATION", "false");
+   case Documentation_Mode is
+      when "false" =>
+         null;
+      when "true" =>
+         for Languages use ("Ada");
+         --  Public API plus private specs needed to resolve its dependencies.
+         --  Private proof helpers exclude themselves from generated docs.
+         for Source_Files use
+           ("flyology.ads",
+            "flyology-capacity.ads",
+            "flyology-bounded_channels.ads",
+            "flyology-buffers.ads",
+            "flyology-buffers-domains.ads",
+            "flyology-buffers-drivers.ads",
+            "flyology-buffers-channels.ads",
+            "flyology-bytes.ads",
+            "flyology-cancellation.ads",
+            "flyology-channels.ads",
+            "flyology-channels-bounded.ads",
+            "flyology-data_structures.ads",
+            "flyology-data_structures-allocation_algorithms.ads",
+            "flyology-data_structures-allocation_algorithms-best_fit.ads",
+            "flyology-data_structures-allocation_algorithms-best_fit_kernel.ads",
+            "flyology-data_structures-allocation_algorithms-buddy.ads",
+            "flyology-data_structures-allocation_algorithms-buddy_kernel.ads",
+            "flyology-data_structures-allocation_algorithms-contract.ads",
+            "flyology-data_structures-allocation_algorithms-tlsf.ads",
+            "flyology-data_structures-allocation_algorithms-tlsf_kernel.ads",
+            "flyology-data_structures-allocation_pools.ads",
+            "flyology-data_structures-allocation_pools-adaptive.ads",
+            "flyology-data_structures-arenas.ads",
+            "flyology-data_structures-byte_strings.ads",
+            "flyology-data_structures-dynamic.ads",
+            "flyology-data_structures-dynamic-byte_strings.ads",
+            "flyology-data_structures-dynamic-hash_maps.ads",
+            "flyology-data_structures-dynamic-vectors.ads",
+            "flyology-data_structures-envelopes.ads",
+            "flyology-data_structures-handles.ads",
+            "flyology-data_structures-hash_maps.ads",
+            "flyology-data_structures-layouts.ads",
+            "flyology-data_structures-regions.ads",
+            "flyology-data_structures-rings.ads",
+            "flyology-data_structures-rings-mpmc.ads",
+            "flyology-data_structures-rings-spsc.ads",
+            "flyology-data_structures-slab_pools.ads",
+            "flyology-data_structures-storage_types.ads",
+            "flyology-data_structures-storage_types-elements.ads",
+            "flyology-data_structures-storage_types-immutable.ads",
+            "flyology-data_structures-storage_types-unsigned_64s.ads",
+            "flyology-data_structures-vectors.ads",
+            "flyology-debug_producer_selection.ads",
+            "flyology-dormancy.ads",
+            "flyology-execution_groups.ads",
+            "flyology-execution_groups-topology.ads",
+            "flyology-fairness.ads",
+            "flyology-io.ads",
+            "flyology-io-connections.ads",
+            "flyology-io-connections-drivers.ads",
+            "flyology-io-connections-tls.ads",
+            "flyology-io-dns.ads",
+            "flyology-io-dns-testing.ads",
+            "flyology-io-files.ads",
+            "flyology-io-files-transfers.ads",
+            "flyology-io-file_watches.ads",
+            "flyology-io-file_watches-recursive.ads",
+            "flyology-io-sockets.ads",
+            "flyology-io-socket_handoffs.ads",
+            "flyology-descriptor_handoffs.ads",
+            "flyology-structured_server_policy.ads",
+            "flyology-io-structured_servers.ads",
+            "flyology-io-tls.ads",
+            "flyology-io-tls-drivers.ads",
+            "flyology-io-tls-alpn.ads",
+            "flyology-io-tls-openssl.ads",
+            "flyology-io-timers.ads",
+            "flyology-timer_set_policy.ads",
+            "flyology-memory_regions.ads",
+            "flyology-operations.ads",
+            "flyology-operations-drivers.ads",
+            "flyology-shared_memory.ads",
+            "flyology-shared_memory-segments.ads",
+            "flyology-shared_memory-unix_sockets.ads",
+            "flyology-observability.ads",
+            "flyology-observability-stall_watchdogs.ads",
+            "flyology-native_executor_policy.ads",
+            "flyology-native_executors.ads",
+            "flyology-process_lifecycle.ads",
+            "flyology-process_generations.ads",
+            "flyology-process_generations-agents.ads",
+            "flyology-process_generations-command_lines.ads",
+            "flyology-process_generations-coordinators.ads",
+            "flyology-process_generations-messages.ads",
+            "flyology-process_generations-protocol.ads",
+            "flyology-process_generations-transport.ads",
+            "flyology-process_generation_policy.ads",
+            "flyology-subprocesses.ads",
+            "flyology-subprocesses-bootstrap.ads",
+            "flyology-subprocesses-capture.ads",
+            "flyology-supervision.ads",
+            "flyology-supervision-children.ads",
+            "flyology-supervision-adapters.ads",
+            "flyology-supervision-families.ads",
+            "flyology-supervision-input_task_generations.ads",
+            "flyology-supervision-input_children.ads",
+            "flyology-supervision-service_slots.ads",
+            "flyology-supervision-static.ads",
+            "flyology-supervision-task_generations.ads",
+             "flyology-task_scopes.ads",
+             "flyology-task_results.ads",
+             "flyology-wake_sources.ads",
+             "flyology-worker_pools.ads");
+   end case;
+   for Object_Dir use "obj/" & Flyology_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("FLYOLOGY_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Flyology_Config.Ada_Compiler_Switches
+        & ("-gnatyM110", "-gnatwJ");
+      for Default_Switches ("C") use
+        ("-std=c11", "-Wall", "-Wextra", TLS_Test_Hook_Switch,
+         Socket_Test_Hook_Switch);
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+   package Linker is
+      case Flyology_Config.Alire_Host_OS is
+         when "linux" =>
+            --  Keep compatibility with glibc releases where the dynamic
+            --  loader API is still provided by a separate libdl.
+            for Linker_Options use ("-ldl");
+         when others =>
+            null;
+      end case;
+   end Linker;
+
+   package Documentation is
+      --  flyology_allocators is a resolved dependency, so its project lives
+      --  in the Alire build tree rather than under this repository. Ask the
+      --  imported project where it is instead of naming a path that only
+      --  existed while the crate was pinned.
+      for Excluded_Project_Files use
+        ("config/flyology_config.gpr",
+         Flyology_Allocators'Project_Dir & "flyology_allocators.gpr");
+      for Resources_Dir ("html") use "docs/gnatdoc/html";
+   end Documentation;
+
+   package Format is
+      for Width ("Ada") use "110";
+      for Indentation ("Ada") use "3";
+      for Indentation_Continuation ("Ada") use "2";
+      for Indentation_Kind ("Ada") use "spaces";
+      for End_Of_Line ("Ada") use "lf";
+      for Charset ("Ada") use "utf-8";
+   end Format;
+
+end Flyology;

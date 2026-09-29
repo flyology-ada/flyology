@@ -1,0 +1,284 @@
+with Ada.Finalization;
+with Flyology;
+with Flyology.Memory_Regions;
+with Memory_Regions_Controlled_Allocations;
+with System.Storage_Elements;
+
+procedure Memory_Regions_Smoke is
+   package Regions renames Flyology.Memory_Regions;
+   package Storage renames System.Storage_Elements;
+
+   use type Regions.Region_Handle;
+   use type Storage.Storage_Count;
+
+   protected Results is
+      procedure Finalized;
+      procedure Cross_Task_Rejected;
+      procedure Lightweight_Passed;
+      function Finalization_Count return Natural;
+      function Cross_Task_Was_Rejected return Boolean;
+      function Lightweight_Was_Passed return Boolean;
+   private
+      Finalizations  : Natural := 0;
+      Cross_Rejected : Boolean := False;
+      Light_Passed   : Boolean := False;
+   end Results;
+
+   protected body Results is
+      procedure Finalized is
+      begin
+         Finalizations := Finalizations + 1;
+      end Finalized;
+
+      procedure Cross_Task_Rejected is
+      begin
+         Cross_Rejected := True;
+      end Cross_Task_Rejected;
+
+      procedure Lightweight_Passed is
+      begin
+         Light_Passed := True;
+      end Lightweight_Passed;
+
+      function Finalization_Count return Natural
+      is (Finalizations);
+      function Cross_Task_Was_Rejected return Boolean
+      is (Cross_Rejected);
+      function Lightweight_Was_Passed return Boolean
+      is (Light_Passed);
+   end Results;
+
+   procedure Note_Finalization (Value : Natural) is
+   begin
+      Results.Finalized;
+      if Value = 99 then
+         raise Constraint_Error with "injected region finalization failure";
+      end if;
+   end Note_Finalization;
+
+   procedure Check_Explicit_Release is
+      Pool : aliased Regions.Task_Pool;
+      type Integer_Access is access Integer;
+      for Integer_Access'Storage_Pool use Pool;
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+
+      Region           : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 128);
+      Number           : Integer_Access;
+      Object           : Allocations.Tracked_Access;
+      Sample           : Regions.Pool_Statistics;
+      Unnamed_Accepted : Boolean := False;
+   begin
+      begin
+         Object :=
+           new Allocations.Tracked'(Ada.Finalization.Controlled with 1);
+         Unnamed_Accepted := True;
+      exception
+         when Program_Error =>
+            null;
+      end;
+      if Unnamed_Accepted then
+         raise Program_Error with "unnamed region allocator was accepted";
+      end if;
+
+      Number := new (Region) Integer'(42);
+      Object := Allocations.Allocate (Region, 7);
+      if Number.all /= 42 or else Object.Value /= 7 then
+         raise Program_Error with "region allocator corrupted an object";
+      end if;
+
+      Sample := Regions.Statistics (Pool);
+      if Sample.Live_Regions /= 1
+        or else Sample.Consumed_Storage = 0
+        or else Sample.Reserved_Storage < Sample.Consumed_Storage
+      then
+         raise Program_Error with "invalid live-region accounting";
+      end if;
+
+      Regions.Release (Region);
+      if Region /= null or else Results.Finalization_Count /= 1 then
+         raise Program_Error with "explicit release did not finalize region";
+      end if;
+
+      Sample := Regions.Statistics (Pool);
+      if Sample.Live_Regions /= 0
+        or else Sample.Consumed_Storage /= 0
+        or else Sample.Reserved_Storage /= 0
+      then
+         raise Program_Error with "released region retained accounting";
+      end if;
+
+      Regions.Release (Region);
+   end Check_Explicit_Release;
+
+   procedure Check_Failing_Finalization is
+      Before : constant Natural := Results.Finalization_Count;
+      Pool   : aliased Regions.Task_Pool;
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+      Region : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 128);
+      Object : constant Allocations.Tracked_Access :=
+        Allocations.Allocate (Region, 99);
+      pragma Unreferenced (Object);
+      Failed : Boolean := False;
+      Sample : Regions.Pool_Statistics;
+   begin
+      begin
+         Regions.Release (Region);
+      exception
+         when others =>
+            Failed := True;
+            Region := null;
+      end;
+
+      if not Failed then
+         raise Program_Error with "finalization failure did not propagate";
+      elsif Results.Finalization_Count /= Before + 1 then
+         raise Program_Error with "failed release repeated finalization";
+      end if;
+
+      Sample := Regions.Statistics (Pool);
+      if Sample.Live_Regions /= 0
+        or else Sample.Consumed_Storage /= 0
+        or else Sample.Reserved_Storage /= 0
+      then
+         raise Program_Error with "failed finalization retained storage";
+      end if;
+   end Check_Failing_Finalization;
+
+   procedure Check_Pool_Finalization is
+      Before : constant Natural := Results.Finalization_Count;
+   begin
+      declare
+         Pool   : aliased Regions.Task_Pool;
+         package Allocations is new
+           Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+         Region : constant Regions.Region_Handle :=
+           Regions.Create_Region (Pool);
+         Object : constant Allocations.Tracked_Access :=
+           Allocations.Allocate (Region, 11);
+         pragma Unreferenced (Object);
+      begin
+         null;
+      end;
+
+      if Results.Finalization_Count /= Before + 1 then
+         raise Program_Error with "pool finalization did not release region";
+      end if;
+   end Check_Pool_Finalization;
+
+   procedure Check_Task_Finalization is
+      Before : constant Natural := Results.Finalization_Count;
+   begin
+      declare
+         task Native_Owner is
+            pragma Task_Info (Flyology.Native_Task);
+         end Native_Owner;
+
+         task body Native_Owner is
+            Pool   : aliased Regions.Task_Pool;
+            package Allocations is new
+              Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Allocations.Tracked_Access :=
+              Allocations.Allocate (Region, 12);
+            pragma Unreferenced (Object);
+         begin
+            null;
+         end Native_Owner;
+
+         task Lightweight_Owner is
+            pragma Task_Info (Flyology.Lightweight_Task);
+         end Lightweight_Owner;
+
+         task body Lightweight_Owner is
+            Pool   : aliased Regions.Task_Pool;
+            package Allocations is new
+              Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+            Region : constant Regions.Region_Handle :=
+              Regions.Create_Region (Pool);
+            Object : constant Allocations.Tracked_Access :=
+              Allocations.Allocate (Region, 13);
+            pragma Unreferenced (Object);
+         begin
+            null;
+         end Lightweight_Owner;
+      begin
+         null;
+      end;
+
+      if Results.Finalization_Count /= Before + 2 then
+         raise Program_Error
+           with
+             "task termination did not release native and lightweight regions";
+      end if;
+   end Check_Task_Finalization;
+
+   procedure Check_Cross_Task_Rejection is
+      Pool   : aliased Regions.Task_Pool;
+      type Integer_Access is access Integer;
+      for Integer_Access'Storage_Pool use Pool;
+      Region : Regions.Region_Handle := Regions.Create_Region (Pool);
+
+      task Intruder is
+         entry Done;
+      end Intruder;
+      task body Intruder is
+         Value : Integer_Access;
+         pragma Unreferenced (Value);
+      begin
+         begin
+            Value := new (Region) Integer'(99);
+         exception
+            when Regions.Ownership_Error =>
+               Results.Cross_Task_Rejected;
+         end;
+         accept Done;
+      end Intruder;
+   begin
+      Intruder.Done;
+      Regions.Release (Region);
+      if not Results.Cross_Task_Was_Rejected then
+         raise Program_Error with "cross-task region use was accepted";
+      end if;
+   end Check_Cross_Task_Rejection;
+
+   task Lightweight_Owner is
+      pragma Task_Info (Flyology.Lightweight_Task);
+      entry Done;
+   end Lightweight_Owner;
+
+   task body Lightweight_Owner is
+      Pool   : aliased Regions.Task_Pool;
+      package Allocations is new
+        Memory_Regions_Controlled_Allocations (Pool, Note_Finalization);
+      Region : Regions.Region_Handle :=
+        Regions.Create_Region (Pool, Chunk_Storage => 256);
+      Buffer : Allocations.Byte_Array_Access;
+   begin
+      Buffer := Allocations.Allocate_Buffer (Region, 1, 513, 'x');
+      if Buffer (Buffer'First) /= 'x'
+        or else Buffer (Buffer'Last) /= 'x'
+        or else Regions.Statistics (Pool).Live_Regions /= 1
+      then
+         raise Program_Error with "lightweight region allocation failed";
+      end if;
+      Regions.Release (Region);
+      Results.Lightweight_Passed;
+      accept Done;
+   end Lightweight_Owner;
+
+begin
+   Check_Explicit_Release;
+   Check_Failing_Finalization;
+   Check_Pool_Finalization;
+   Check_Task_Finalization;
+   Check_Cross_Task_Rejection;
+   Lightweight_Owner.Done;
+   if not Results.Lightweight_Was_Passed then
+      raise Program_Error with "lightweight region task did not complete";
+   end if;
+end Memory_Regions_Smoke;

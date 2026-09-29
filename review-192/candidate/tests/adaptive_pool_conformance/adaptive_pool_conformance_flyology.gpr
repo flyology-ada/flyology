@@ -1,0 +1,7 @@
+project Adaptive_Pool_Conformance_Flyology extends "flyology.gpr" is
+
+   for Object_Dir use "build/flyology/obj";
+   for Library_Dir use "build/flyology/lib";
+   for Create_Missing_Dirs use "True";
+
+end Adaptive_Pool_Conformance_Flyology;

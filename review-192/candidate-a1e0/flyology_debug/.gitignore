@@ -1,0 +1,10 @@
+/alire/
+/config/
+/lib/
+/obj/
+/examples/bin/
+/examples/obj/
+/benchmarks/bin/
+/benchmarks/obj/
+/tests/bin/
+/tests/obj/

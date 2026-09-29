@@ -1,0 +1,98 @@
+# Flyology
+
+> Flyology is an experimental project for contemporary systems programming in Ada. Its runtime, libraries, and tools focus on performance, interoperability, observability, and explicit control from task execution to application interfaces.
+
+Flyology is the umbrella project. Flyology Runtime is its core GNAT runtime extension. Some libraries require the runtime and use its task-aware I/O. Standalone libraries share the Flyology project identity but can be adopted without preparing or linking the runtime.
+
+## Project structure
+
+- **Core component:** Flyology Runtime provides native and lightweight task execution, task-aware I/O, and bounded systems building blocks.
+- **Requires Flyology Runtime:** Flyology HTTP, Flyology Postgres, and Flyology QUIC.
+- **Standalone:** Flyology Allocators, Flyology Bench, Flyology Cachelines, Flyology Debug, Flyology IRI, Flyology JSON, Flyology NUMA, Flyology RDF, Flyology SIMD, and Flyology TUI.
+
+The dependency categories describe adoption, not importance. Use each component's linked documentation for its compiler, platform, maturity, verification, and licensing boundaries.
+
+## Runtime vocabulary and boundaries
+
+Flyology Runtime uses the terms **lightweight task** and **native task**. Both remain ordinary Ada tasks. Lightweight tasks run cooperatively on event loops in execution groups; native tasks remain on operating-system threads. Both lanes retain Ada rendezvous, protected objects, exceptions, activation, masters, task identity, and synchronous control flow.
+
+Lightweight scheduling is cooperative, not preemptive. Flyology Runtime does not claim production qualification, universal portability, hard real-time behavior, or preemptive lightweight scheduling. Runtime preparation supports only the exact host and compiler release pairs documented by the project; do not infer support from the broader Alire dependency range.
+
+## Add Flyology Runtime
+
+Flyology is currently published through a separate Alire organization index. Keep the community index enabled for compiler and third-party dependencies, then add the Flyology index before it:
+
+```sh
+alr index --reset-community
+alr index --add=git+https://github.com/flyology-ada/alire-index.git \
+  --name=flyology --before=community
+alr with flyology
+```
+
+This adds the `flyology` crate and its runtime preparation. Standalone components use their own crate names and do not prepare Flyology Runtime. The Flyology index is a development channel, not a community-index release. When Flyology is available from the community index, remove the development index with `alr index --del flyology`.
+
+## Project documentation
+
+- [Project overview](https://flyology.org/): Project purpose, component map, adoption paths, and shared boundaries.
+- [Library directory](https://flyology.org/libraries/): Dependency category, Guide, API, website, and source links for each component.
+- [Complete crate index](https://crates.flyology.org/): Every package published through the Flyology Alire index, including versions, dependencies, availability rules, manifests, JSON records, and compiler builds.
+- [Development journal](https://flyology.org/journal/): Flyology project records and links to component journals.
+- [CI status](https://flyology.org/ci/): Live public status for CI on each organization's main branch and every open pull request.
+- [Source organization](https://github.com/flyology-ada): Repositories for Flyology Runtime and independently maintained libraries.
+
+## Flyology Runtime documentation
+
+- [Runtime overview](https://flyology.org/runtime/): Execution model, included building blocks, status, and runtime constraints.
+- [Runtime guide](https://flyology.org/guide/): Toolchain requirements, runtime preparation, task designation, and an index of core and focused chapters.
+- [Runtime architecture](https://flyology.org/architecture/): GNAT tasking integration, native and lightweight lanes, schedulers, pollers, stackful contexts, memory ownership, and lifecycle boundaries.
+- [Runtime API reference](https://flyology.org/api/): Generated reference for the main `flyology` crate. This is the API entry under the Runtime navigation, not an aggregate of every Flyology component.
+
+### Core runtime guide chapters
+
+- [Task stack sizing](https://flyology.org/guide/stacks/): Usable stack sizes, guard address space, pool classes, and measurement.
+- [Task memory](https://flyology.org/guide/task-memory/): Dormant stack reclamation and task-private region lifetimes.
+- [Execution groups](https://flyology.org/guide/execution-groups/): Automatic, shared, and dedicated placement, migration, and thread pins.
+- [Task-aware I/O](https://flyology.org/guide/task-aware-io/): Synchronous call semantics, raw and managed connection ownership, and pathname Unix sockets.
+- [Scoped operations](https://flyology.org/guide/scoped-operations/): Bounded completion sets, batches, gates, cancellation, result retention, and provider composition.
+- [Resource budgets](https://flyology.org/guide/resource-budgets/): Concurrency, memory, parallelism, deadlines, and cooperative CPU work.
+- [Runtime observability](https://flyology.org/guide/observability/): Snapshots, event-loop utilization, queue pressure, and memory measurements.
+- [Verification](https://flyology.org/guide/verification/): Behavioral tests, proofs, documentation checks, stress campaigns, and showcases.
+- [Execution constraints](https://flyology.org/guide/constraints/): Lightweight, native, and dedicated execution within current experimental limits.
+
+### Runtime topic guides
+
+- [Shared-memory segments](https://flyology.org/guide/shared-memory/): Anonymous, named POSIX, and file-backed storage; mapping and descriptor ownership; SCM_RIGHTS handoff; teardown; trust; blocking; and recovery limits.
+- [Relocatable data structures](https://flyology.org/guide/data-structures/): Caller-owned backing regions, address-independent layouts, selectable arena allocation, bounded containers, synchronization models, attachment, relocation, poisoning, and recovery boundaries.
+- [File watching](https://flyology.org/guide/file-watching/): Bounded file, directory, and recursive-tree registrations; task-aware waits; reconciliation; invalidation; and lost-event recovery.
+- [File-to-socket transfers](https://flyology.org/guide/file-transfers/): Positional regular-file transfers, buffer ownership, deadlines, cancellation, native sendfile, Linux lightweight SEND_ZC, and fallbacks.
+- [Native subprocesses](https://flyology.org/guide/subprocesses/): Native-task process creation, bounded capture, deadlines, cancellation, ownership, and teardown.
+- [Structured task supervision](https://flyology.org/guide/supervision/): Typed static trees, bounded dynamic families, readiness, generation-safe replacement, recovery, incident budgets, stopping, and event rings.
+- [Process upgrades](https://flyology.org/guide/process-upgrades/): Listener escrow, fresh-process topology reconstruction, cancellable canaries, compensation, promotion, drain, and fresh-process reversal.
+- [Timers and clock changes](https://flyology.org/guide/timers/): Relative, monotonic, bounded multi-deadline, and wall-clock timer behavior, including backward clock changes.
+- [Flyology CLI](https://flyology.org/guide/cli/): Aggregate command installation, project scaffolding profiles, optional agent and website setup, generated files, and extension-command dispatch.
+
+## Libraries that require Flyology Runtime
+
+- **Flyology HTTP:** [Website](https://http.flyology.org/), [Guide](https://http.flyology.org/guide/), [API](https://http.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-http). HTTP/1.1 clients and servers, with opt-in HTTP/2 and HTTP/3 engines and WebSocket support.
+- **Flyology Postgres:** [Website](https://postgres.flyology.org/), [Guide](https://postgres.flyology.org/guide/), [Protocol API](https://postgres.flyology.org/api/), [SQL API](https://postgres.flyology.org/sql-api/), [Source](https://github.com/flyology-ada/flyology-postgres). Client and server primitives for the Postgres frontend/backend protocol.
+- **Flyology QUIC:** [Source](https://github.com/flyology-ada/flyology-http/tree/main/flyology_quic). Experimental bounded QUIC transport with protocol state, streams, recovery, and congestion control. It does not currently publish a separate Guide or API site.
+
+## Standalone libraries
+
+- **Flyology Allocators:** [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_allocators). Caller-owned buddy, best-fit, TLSF, and slab/span allocation algorithms with no hosted operating-system dependency.
+- **Flyology Bench:** [Guide](https://flyology.org/guide/benchmarking/), [API](https://flyology.org/api/flyology_bench/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_bench). Adaptive microbenchmarking, balanced comparisons, diagnostics, baselines, and machine-readable reports.
+- **Flyology Cachelines:** [Guide](https://flyology.org/guide/cachelines/), [API](https://flyology.org/api/flyology_cachelines/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_cachelines). Cache-line-aware storage, ownership-aware groups, grouped arrays, and host cache queries.
+- **Flyology Debug:** [API](https://flyology.org/api/flyology_debug/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_debug). Bounded in-memory tracing, producer shards, retained batches, and persistent gauges.
+- **Flyology IRI:** [Guide](https://http.flyology.org/guide/iri/), [API](https://http.flyology.org/iri-api/), [Source](https://github.com/flyology-ada/flyology-http/tree/main/flyology_iri). Allocation-conscious URI, IRI, and WHATWG URL parsing.
+- **Flyology JSON:** [Website](https://json.flyology.org/), [Guide](https://json.flyology.org/guide/), [API](https://json.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-json). An incremental JSON parser and transactional streaming writer with a bounded, allocation-free core.
+- **Flyology NUMA:** [Guide](https://flyology.org/guide/numa/), [API](https://flyology.org/api/flyology_numa/), [Source](https://github.com/flyology-ada/flyology/tree/main/flyology_numa). Memory-node reporting, memory placement on a chosen node, and node-bound storage pools.
+- **Flyology RDF:** [Website](https://rdf.flyology.org/), [Guide](https://rdf.flyology.org/guide/), [API](https://rdf.flyology.org/api/), [Notation3 API](https://rdf.flyology.org/n3-api/), [SPARQL API](https://rdf.flyology.org/sparql-api/), [Source](https://github.com/flyology-ada/flyology-rdf). RDF 1.2 terms, streaming Turtle, TriG, N-Triples and N-Quads parsing, RDFC-1.0 dataset canonicalization, Notation3, and SPARQL 1.1 query syntax.
+- **Flyology SIMD:** [Website](https://simd.flyology.org/), [Guide](https://simd.flyology.org/guide/), [API](https://simd.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-simd). Portable, strongly typed SIMD foundations for Ada.
+- **Flyology TUI:** [Website](https://tui.flyology.org/), [Guide](https://tui.flyology.org/guide/), [API](https://tui.flyology.org/api/), [Source](https://github.com/flyology-ada/flyology-tui). Typed, declarative terminal user-interface toolkit for Ada.
+
+## Project sources
+
+- [README](https://raw.githubusercontent.com/flyology-ada/flyology/main/README.md): Detailed user-facing architecture, configuration, APIs, examples, constraints, and verification commands.
+- [Runtime and bundled-library source](https://github.com/flyology-ada/flyology): Ada sources, runtime integration, standalone Bench, Cachelines, and Debug crates, tests, proofs, scripts, showcases, and website sources.
+- [Supported runtime patch matrix](https://raw.githubusercontent.com/flyology-ada/flyology/main/runtime/patches/README.md): Exact verified host, compiler, and GNAT runtime patch families.
+- [Alire crate manifest](https://raw.githubusercontent.com/flyology-ada/flyology/main/alire.toml): Package metadata and dependency constraints; these constraints are broader than the verified Runtime matrix.

@@ -1,0 +1,449 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-taprop.adb
++++ b/s-taprop.adb
+@@ -36,0 +37,3 @@
++with System.Flyology.Default_Execution;
++with System.Flyology.Linux_Models;
++with System.Flyology.Scheduler;
+@@ -196,6 +197,108 @@
+   pragma Import
+     (C, GNAT_pthread_condattr_setup, "__gnat_pthread_condattr_setup");
+
++   function Flyology_Pthread_Stack_Min return C.size_t;
++   pragma Import
++     (C,
++      Flyology_Pthread_Stack_Min,
++      "flyology_linux_pthread_stack_min");
++
++   function Lightweight_Initialize (Environment : System.Address) return C.int
++     renames System.Flyology.Scheduler.Initialize;
++
++   function Lightweight_Create
++     (T          : System.Address;
++      Stack_Size : C.size_t;
++      Priority   : C.int;
++      Wrapper    : System.Address;
++      Group      : C.int) return C.int
++     renames System.Flyology.Scheduler.Create;
++
++   function Lightweight_Is_Task (T : System.Address) return C.int
++     renames System.Flyology.Scheduler.Is_Lightweight_Task;
++
++   function Lightweight_Current return System.Address
++     renames System.Flyology.Scheduler.Current_Task;
++
++   function Lightweight_Task_Thread
++     (T : System.Address) return OSI.Thread_Id
++     renames System.Flyology.Scheduler.Task_Thread;
++
++   function Lightweight_Sleep
++     (Task_Lock : System.Address;
++      Deadline  : Duration;
++      Timed_Out : access C.int) return C.int
++     renames System.Flyology.Scheduler.Sleep;
++
++   function Lightweight_Wake (T : System.Address) return C.int
++     renames System.Flyology.Scheduler.Wake;
++
++   function Lightweight_Yield return C.int
++     renames System.Flyology.Scheduler.Yield;
++
++   function Lightweight_Set_Priority
++     (T                   : System.Address;
++      Priority            : C.int;
++      Loss_Of_Inheritance : C.int) return C.int
++     renames System.Flyology.Scheduler.Set_Priority;
++
++   function Lightweight_Destroy (T : System.Address) return C.int
++     renames System.Flyology.Scheduler.Destroy;
++
++   function Lightweight_File_IO
++     (Descriptor  : C.int;
++      Buffer      : System.Address;
++      Length      : C.size_t;
++      Offset      : C.long_long;
++      For_Write   : C.int;
++      Cancel_FD   : C.int;
++      Transferred : access C.long_long;
++      Error_Code  : access C.int;
++      Cancelled   : access C.int) return C.int;
++   pragma Export
++     (C, Lightweight_File_IO, "flyology_runtime_file_io");
++
++   function Lightweight_File_IO
++     (Descriptor  : C.int;
++      Buffer      : System.Address;
++      Length      : C.size_t;
++      Offset      : C.long_long;
++      For_Write   : C.int;
++      Cancel_FD   : C.int;
++      Transferred : access C.long_long;
++      Error_Code  : access C.int;
++      Cancelled   : access C.int) return C.int
++   is
++      Self_ID : constant Task_Id := Self;
++      Result  : C.int;
++   begin
++      Write_Lock (Self_ID);
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         Unlock (Self_ID);
++         raise Standard'Abort_Signal;
++      end if;
++
++      Result :=
++        System.Flyology.Scheduler.File_IO
++          (Descriptor,
++           Buffer,
++           Length,
++           Offset,
++           For_Write,
++           Cancel_FD,
++           Self_ID.Common.LL.L'Address,
++           Transferred,
++           Error_Code,
++           Cancelled);
++
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         Unlock (Self_ID);
++         raise Standard'Abort_Signal;
++      end if;
++      Unlock (Self_ID);
++      return Result;
++   end Lightweight_File_IO;
++
++   function Is_Lightweight_Task (T : Task_Id) return Boolean is
++     (Lightweight_Is_Task (To_Address (T)) /= 0);
++
++   function Lightweight_Deadline
++     (Time : Duration; Mode : ST.Delay_Modes) return Duration;
++
+    function GNAT_has_cap_sys_nice return C.int;
+    pragma Import
+      (C, GNAT_has_cap_sys_nice, "__gnat_has_cap_sys_nice");
+@@ -334,12 +437,22 @@
+ 
+    function Get_Thread_Id (T : ST.Task_Id) return OSI.Thread_Id is
+    begin
+-      return T.Common.LL.Thread;
++      return
++        (if Is_Lightweight_Task (T)
++         then Lightweight_Task_Thread (To_Address (T))
++         else T.Common.LL.Thread);
+    end Get_Thread_Id;
+ 
+    ----------
+    -- Self --
+    ----------
+ 
+-   function Self return Task_Id renames Specific.Self;
++   function Self return Task_Id is
++      Lightweight_Self : constant System.Address := Lightweight_Current;
++   begin
++      return
++        (if Lightweight_Self = System.Null_Address
++         then Specific.Self
++         else To_Task_Id (Lightweight_Self));
++   end Self;
+ 
+@@ -587,15 +700,25 @@
+    is
+       pragma Unreferenced (Reason);
+ 
+-      Result : C.int;
++      Result  : C.int;
++      Ignored : aliased C.int;
+ 
+    begin
+       pragma Assert (Self_ID = Self);
+ 
+-      Result :=
+-        pthread_cond_wait
+-          (cond  => Self_ID.Common.LL.CV'Access,
+-           mutex => Self_ID.Common.LL.L'Access);
++      if Is_Lightweight_Task (Self_ID) then
++         Result :=
++           Lightweight_Sleep
++             (Self_ID.Common.LL.L'Address, -1.0, Ignored'Access);
++         if Result /= 0 then
++            raise Program_Error with "Flyology sleep failed";
++         end if;
++      else
++         Result :=
++           pthread_cond_wait
++             (cond  => Self_ID.Common.LL.CV'Access,
++              mutex => Self_ID.Common.LL.L'Access);
++      end if;
+ 
+       --  EINTR is not considered a failure
+ 
+@@ -616,7 +739,33 @@
+       Mode     : ST.Delay_Modes;
+       Reason   : System.Tasking.Task_States;
+       Timedout : out Boolean;
+-      Yielded  : out Boolean) renames Monotonic.Timed_Sleep;
++      Yielded  : out Boolean)
++   is
++      Result       : C.int;
++      Lightweight_Result : aliased C.int;
++   begin
++      if not Is_Lightweight_Task (Self_ID) then
++         Monotonic.Timed_Sleep
++           (Self_ID, Time, Mode, Reason, Timedout, Yielded);
++         return;
++      end if;
++
++      Timedout := True;
++      Yielded := False;
++      if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++         return;
++      end if;
++
++      Result :=
++        Lightweight_Sleep
++          (Self_ID.Common.LL.L'Address,
++           Lightweight_Deadline (Time, Mode),
++           Lightweight_Result'Access);
++      if Result /= 0 then
++         raise Program_Error with "Flyology timed sleep failed";
++      end if;
++      Timedout := Lightweight_Result /= 0;
++   end Timed_Sleep;
+ 
+    -----------------
+    -- Timed_Delay --
+@@ -628,7 +777,65 @@
+    procedure Timed_Delay
+      (Self_ID : Task_Id;
+       Time    : Duration;
+-      Mode    : ST.Delay_Modes) renames Monotonic.Timed_Delay;
++      Mode    : ST.Delay_Modes)
++   is
++      Deadline     : Duration;
++      Lightweight_Result : aliased C.int;
++      Result       : C.int;
++   begin
++      if not Is_Lightweight_Task (Self_ID) then
++         Monotonic.Timed_Delay (Self_ID, Time, Mode);
++         return;
++      end if;
++
++      Write_Lock (Self_ID);
++      Deadline := Lightweight_Deadline (Time, Mode);
++
++      if Deadline > Monotonic.Monotonic_Clock
++        and then Self_ID.Pending_ATC_Level >= Self_ID.ATC_Nesting_Level
++      then
++         Self_ID.Common.State := Delay_Sleep;
++         loop
++            Result :=
++              Lightweight_Sleep
++                (Self_ID.Common.LL.L'Address,
++                 Deadline,
++                 Lightweight_Result'Access);
++            if Result /= 0 then
++               raise Program_Error with "Flyology timed delay failed";
++            end if;
++            exit when Lightweight_Result /= 0
++              or else Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level;
++         end loop;
++         Self_ID.Common.State := Runnable;
++      end if;
++
++      Unlock (Self_ID);
++      Result := Lightweight_Yield;
++      if Result /= 0 then
++         raise Program_Error with "Flyology delay yield failed";
++      end if;
++   end Timed_Delay;
++
++   function Lightweight_Deadline
++     (Time : Duration; Mode : ST.Delay_Modes) return Duration
++   is
++      Now : constant Duration := Monotonic.Monotonic_Clock;
++   begin
++      if Mode = Relative then
++         return Duration'Min (Time, Max_Sensible_Delay) + Now;
++         pragma Warnings (Off);
++      elsif Mode = Absolute_RT
++        or else OSC.CLOCK_RT_Ada = OSC.CLOCK_REALTIME
++      then
++         pragma Warnings (On);
++         return Duration'Min (Now + Max_Sensible_Delay, Time);
++      else
++         return Duration'Min
++           (Now + Max_Sensible_Delay,
++            Time + Now - OS_Primitives.Clock);
++      end if;
++   end Lightweight_Deadline;
+ 
+    ---------------------
+    -- Monotonic_Clock --
+@@ -650,7 +857,14 @@
+       pragma Unreferenced (Reason);
+       Result : C.int;
+    begin
+-      Result := pthread_cond_signal (T.Common.LL.CV'Access);
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Wake (To_Address (T));
++         if Result /= 0 then
++            raise Program_Error with "Flyology wake failed";
++         end if;
++      else
++         Result := pthread_cond_signal (T.Common.LL.CV'Access);
++      end if;
+       pragma Assert (Result = 0);
+    end Wakeup;
+ 
+@@ -660,10 +874,16 @@
+ 
+    procedure Yield (Do_Yield : Boolean := True) is
+       Result : C.int;
+-      pragma Unreferenced (Result);
+    begin
+       if Do_Yield then
+-         Result := sched_yield;
++         if Lightweight_Current /= System.Null_Address then
++            Result := Lightweight_Yield;
++            if Result /= 0 then
++               raise Program_Error with "Flyology yield failed";
++            end if;
++         else
++            Result := sched_yield;
++         end if;
+       end if;
+    end Yield;
+ 
+@@ -675,8 +895,6 @@
+      (T                   : Task_Id;
+       Prio                : Any_Priority;
+       Loss_Of_Inheritance : Boolean := False)
+    is
+-      pragma Unreferenced (Loss_Of_Inheritance);
+-
+       Result : C.int;
+       Param  : aliased struct_sched_param;
+@@ -692,6 +910,18 @@
+    begin
+       T.Common.Current_Priority := Prio;
+ 
++      if Is_Lightweight_Task (T) then
++         Result :=
++           Lightweight_Set_Priority
++             (To_Address (T),
++              C.int (Prio),
++              Boolean'Pos (Loss_Of_Inheritance));
++         if Result /= 0 then
++            raise Program_Error with "Flyology priority update failed";
++         end if;
++         return;
++      end if;
++
+       Param.sched_priority := Prio_To_Linux_Prio (Prio);
+ 
+       if Dispatching_Policy = 'R'
+@@ -806,1 +1036,2 @@
+       if Use_Alternate_Stack
++        and then not Is_Lightweight_Task (Self_ID)
+@@ -824,7 +1054,8 @@
+    -- Is_Valid_Task --
+    -------------------
+ 
+-   function Is_Valid_Task return Boolean renames Specific.Is_Valid_Task;
++   function Is_Valid_Task return Boolean is
++     (Lightweight_Current /= System.Null_Address
++      or else Specific.Is_Valid_Task);
+ 
+    -----------------------------
+    -- Register_Foreign_Thread --
+@@ -906,6 +1137,18 @@
+       use type Multiprocessors.CPU_Range, Interfaces.C.size_t;
+ 
+    begin
++      if (T.Common.Task_Info = null
++          and then System.Flyology.Default_Execution.Lightweight)
++        or else
++          T.Common.Task_Info =
++            System.Flyology.Linux_Models.Event_Loop_Attributes'Access
++      then
++         Result :=
++           Lightweight_Create
++             (To_Address (T),
++              C.size_t (Stack_Size),
++              C.int (Priority),
++              Wrapper,
++              (if C.int (T.Common.Base_CPU) = 0
++               then -1
++               else C.int (T.Common.Base_CPU)));
++         Succeeded := Result = 0;
++         return;
++      end if;
++
+       --  Check whether both Dispatching_Domain and CPU are specified for
+       --  the task, and the CPU value is not contained within the range of
+       --  processors for the domain.
+@@ -928,1 +1171,9 @@
+-      Adjusted_Stack_Size := C.size_t (Stack_Size + Alternate_Stack_Size);
++      --  GNAT 13 and 14 use a 16 KiB minimum on every Linux target, while
++      --  glibc requires 128 KiB on AArch64. Clamp against the active libc so
++      --  pthread_attr_setstacksize cannot reject an otherwise valid native
++      --  task. This is a no-op when GNAT already requests enough space.
++      Adjusted_Stack_Size :=
++        C.size_t'Max
++          (C.size_t (Stack_Size + Alternate_Stack_Size),
++           Flyology_Pthread_Stack_Min);
+@@ -1054,6 +1297,13 @@
+       Result : C.int;
+ 
+    begin
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Destroy (To_Address (T));
++         if Result /= 0 then
++            raise Program_Error with "Flyology task destruction failed";
++         end if;
++      end if;
++
+       Result := pthread_mutex_destroy (T.Common.LL.L'Access);
+       pragma Assert (Result = 0);
+ 
+@@ -1088,7 +1338,12 @@
+       --  returns ESRCH, so we don't consider that to be an error.
+ 
+    begin
+-      if Abort_Handler_Installed then
++      if Is_Lightweight_Task (T) then
++         Result := Lightweight_Wake (To_Address (T));
++         if Result /= 0 then
++            raise Program_Error with "Flyology abort wake failed";
++         end if;
++      elsif Abort_Handler_Installed then
+          Result :=
+            pthread_kill
+              (T.Common.LL.Thread,
+@@ -1257,6 +1512,18 @@
+ 
+       Enter_Task (Environment_Task);
+ 
++      Result := Lightweight_Initialize (To_Address (Environment_Task));
++      if Result /= 0 then
++         raise Program_Error with "Flyology initialization failed";
++      end if;
++
+       if State
+           (System.Interrupt_Management.Abort_Task_Interrupt) /= Default
+       then
+@@ -1288,6 +1572,11 @@
+    procedure Set_Task_Affinity (T : ST.Task_Id) is
+       use type Multiprocessors.CPU_Range;
+-
++
+    begin
++      --  Dispatching-domain creation reapplies affinity without passing
++      --  through Unchecked_Set_Affinity. A lightweight task shares its
++      --  event-loop pthread with its group, so keep that path inert too.
++      if Is_Lightweight_Task (T) then
++         return;
++      end if;
++
+       --  Do nothing if there is no support for setting affinities or the
+       --  underlying thread has not yet been created. If the thread has not

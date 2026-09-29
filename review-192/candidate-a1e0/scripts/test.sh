@@ -1,0 +1,1262 @@
+#!/bin/sh
+set -eu
+
+project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+development_alr="$project_root/scripts/alr-development.sh"
+base_alr=${FLYOLOGY_BASE_ALR:-$("$project_root/scripts/find-alr.sh")}
+
+"$project_root/scripts/prepare-atomic-store-config.sh" "$base_alr" >/dev/null
+
+if [ "${FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE:-0}" != 1 ]; then
+  FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE=1
+  export FLYOLOGY_TEST_IN_DEVELOPMENT_WORKSPACE
+  exec "$development_alr" exec -- "$0"
+fi
+
+compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$development_alr")
+case "$compiler_release" in
+  13.2.2|14.1.3|14.2.1)
+    atomic_store_family=gnat-13-14
+    controlled_subpool_family=affected
+    ;;
+  15.1.2)
+    atomic_store_family=gnat-15-plus
+    controlled_subpool_family=affected
+    ;;
+  15.3.1|16.1.0|16.2.0)
+    atomic_store_family=gnat-15-plus
+    controlled_subpool_family=corrected
+    ;;
+  *)
+    printf '%s\n' "unsupported atomic-store compiler release: $compiler_release" >&2
+    exit 1
+    ;;
+esac
+
+test_subdir=behavioral
+connection_test_subdir=behavioral-connection-hooks
+worker_pool_test_subdir=behavioral-worker-pool-hooks
+task_lifecycle_test_subdir=behavioral-task-lifecycle-hooks
+channel_test_subdir=behavioral-channel-hooks
+structured_server_test_subdir=behavioral-structured-server-hooks
+wall_clock_test_subdir=behavioral-wall-clock-hooks
+socket_test_subdir=behavioral-socket-hooks
+subprocess_test_subdir=behavioral-subprocess-hooks
+file_watch_test_subdir=behavioral-file-watch-hooks
+destroy_contention_test_subdir=behavioral-destroy-contention-hooks
+test_bin="$project_root/tests/bin/$test_subdir"
+connection_test_bin="$project_root/tests/bin/$connection_test_subdir"
+worker_pool_test_bin="$project_root/tests/bin/$worker_pool_test_subdir"
+task_lifecycle_test_bin="$project_root/tests/bin/$task_lifecycle_test_subdir"
+channel_test_bin="$project_root/tests/bin/$channel_test_subdir"
+wall_clock_test_bin="$project_root/tests/bin/$wall_clock_test_subdir"
+socket_test_bin="$project_root/tests/bin/$socket_test_subdir"
+subprocess_test_bin="$project_root/tests/bin/$subprocess_test_subdir"
+file_watch_test_bin="$project_root/tests/bin/$file_watch_test_subdir"
+destroy_contention_test_bin="$project_root/tests/bin/$destroy_contention_test_subdir"
+test_temp_root=$(mktemp -d "${TMPDIR:-/tmp}/flyology-tests.XXXXXX")
+FLYOLOGY_TEST_TEMP_ROOT=$test_temp_root
+export FLYOLOGY_TEST_TEMP_ROOT
+
+#  The suite controls the prepared fallback and launch-time override
+#  independently so an ambient user setting cannot change test topology.
+unset FLYOLOGY_LOOP_POOL_SIZE || :
+
+cleanup_test_temp () {
+  rm -f -- \
+    "$test_temp_root/file-transfers-smoke.data" \
+    "$test_temp_root/operations-finalize-read-first.data" \
+    "$test_temp_root/operations-finalize-write-first.data"
+  rmdir -- "$test_temp_root" 2>/dev/null || true
+}
+
+run_independent_alire_workspace () {
+  env \
+    -u ALIRE \
+    -u FLYOLOGY_ALIRE_PREFIX \
+    -u FLYOLOGY_ALLOCATORS_ALIRE_PREFIX \
+    -u FLYOLOGY_DEVELOPMENT_WORKSPACE_ALIRE_PREFIX \
+    -u FLYOLOGY_ROOT \
+    -u GNAT_FLYOLOGY_NATIVE_ALIRE_PREFIX \
+    -u GNAT_NATIVE_ALIRE_PREFIX \
+    -u GPRBUILD_ALIRE_PREFIX \
+    -u GPR_CONFIG \
+    -u GPR_PROJECT_PATH \
+    ALR="$base_alr" \
+    "$@"
+}
+
+trap cleanup_test_temp EXIT
+trap 'exit 1' HUP INT TERM
+
+cd "$project_root"
+
+"$project_root/scripts/test-ci-triggers.sh"
+"$project_root/scripts/test-alire-runtime-matrix-enumeration.sh"
+python3 "$project_root/scripts/test-tlc-release-policy.py"
+"$project_root/scripts/test-run-with-timeout.sh"
+"$project_root/scripts/test-compiler-identities.sh"
+"$project_root/scripts/test-atomic-store-entrypoints.sh"
+"$project_root/scripts/test-gnatdoc-log.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_cachelines/scripts/test.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_numa/scripts/test.sh"
+run_independent_alire_workspace \
+  "$project_root/flyology_allocators/scripts/test.sh"
+
+#  DNS lifecycle regressions observe the receive-loop boundary. The project
+#  default is false, so normal builds compile the observation calls away.
+FLYOLOGY_DNS_TEST_HOOKS=true
+export FLYOLOGY_DNS_TEST_HOOKS
+
+run_gprbuild () {
+  if [ "$(uname -s)" = Darwin ]; then
+    compiler_sysroot=$("$development_alr" exec -- gcc -print-sysroot)
+    if [ -z "$compiler_sysroot" ] || [ ! -d "$compiler_sysroot" ]; then
+      current_sysroot=$(xcrun --sdk macosx --show-sdk-path)
+      "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@" \
+        -largs "-Wl,-syslibroot,$current_sysroot" -nodefaultrpaths
+      return
+    fi
+    "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@" -largs -nodefaultrpaths
+    return
+  fi
+  "$development_alr" exec -- env -u GPR_CONFIG gprbuild "$@"
+}
+
+assert_archive_excludes () {
+  archive=$1
+  pattern=$2
+  failure=$3
+  if ! archive_symbols=$(nm -g "$archive"); then
+    printf '%s\n' "failed to inspect production archive: $archive" >&2
+    exit 1
+  fi
+  if printf '%s\n' "$archive_symbols" | grep -Ei "$pattern" >/dev/null; then
+    printf '%s\n' "$failure" >&2
+    exit 1
+  fi
+}
+
+assert_archive_includes () {
+  archive=$1
+  symbol=$2
+  if ! nm -g "$archive" | awk '{ print $NF }' | \
+       sed 's/^_//' | grep -Fx "$symbol" >/dev/null
+  then
+    printf '%s\n' "production archive omits required symbol: $symbol" >&2
+    exit 1
+  fi
+}
+
+compile_test_mains () {
+  test_build_subdir=$1
+  test_mains=$2
+  set --
+  test_count=0
+  for test_main in $test_mains; do
+    set -- "$@" "$test_main.adb"
+    test_count=$((test_count + 1))
+  done
+  printf '%s\n' "test: COMPILE $test_count programs"
+  run_gprbuild \
+    --RTS="$project_root/build/rts" \
+    --subdirs="$test_build_subdir" \
+    -f -c -r -p -j0 \
+    -P tests/runtime_smoke.gpr \
+    "$@"
+}
+
+link_test_mains () {
+  test_build_subdir=$1
+  test_rts=$2
+  test_mains=$3
+  set --
+  test_count=0
+  for test_main in $test_mains; do
+    set -- "$@" "$test_main.adb"
+    test_count=$((test_count + 1))
+  done
+  printf '%s\n' "test: LINK $test_count programs"
+  run_gprbuild \
+    --RTS="$test_rts" \
+    --subdirs="$test_build_subdir" \
+    -f -b -l -p -j0 \
+    -P tests/runtime_smoke.gpr \
+    "$@"
+}
+
+#  The controller test child lives under tests. Verify that the production
+#  archive contains neither that child, controller observers, nor OpenSSL
+#  lifetime telemetry.
+FLYOLOGY_TLS_TEST_HOOKS=false
+export FLYOLOGY_TLS_TEST_HOOKS
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=false
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=false
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+FLYOLOGY_CHANNEL_TEST_HOOKS=false
+export FLYOLOGY_CHANNEL_TEST_HOOKS
+FLYOLOGY_BUFFER_TEST_HOOKS=false
+export FLYOLOGY_BUFFER_TEST_HOOKS
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=false
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+"$development_alr" build
+"$project_root/scripts/check-atomic-store-selection.sh" \
+  "$compiler_release" "$atomic_store_family"
+"$project_root/scripts/check-controlled-subpool-selection.sh" \
+  "$compiler_release" "$controlled_subpool_family"
+"$project_root/scripts/check-buffer-domain-commit-seam.sh"
+"$project_root/scripts/check-shared-memory-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
+"$project_root/scripts/check-atomic-store-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a" "$atomic_store_family"
+assert_archive_includes \
+  "$project_root/lib/libFlyology.a" flyology_socket_unix_path_max
+assert_archive_includes \
+  "$project_root/lib/libFlyology.a" flyology_socket_pack_unix_path
+"$project_root/scripts/check-subprocess-c-boundary.sh" \
+  "$project_root/lib/libFlyology.a"
+mkdir -p "$project_root/build/tests"
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  "$project_root/tests/probes/atomic_store_abi_probe.c" \
+  "$project_root/src/atomic_stores/gnat-13-14/flyology_atomic_stores.c" \
+  -o "$project_root/build/tests/atomic_store_abi_probe"
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$project_root/build/tests/atomic_store_abi_probe"
+cc -std=c11 -Wall -Wextra -Werror \
+  "$project_root/tests/probes/shared_memory_abi_probe.c" \
+  "$project_root/src/native/flyology_shared_memory.c" \
+  -o "$project_root/build/tests/shared_memory_abi_probe"
+"$project_root/build/tests/shared_memory_abi_probe"
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  "$project_root/tests/probes/unix_socket_abi_probe.c" \
+  "$project_root/src/native/flyology_sockets.c" \
+  -o "$project_root/build/tests/unix_socket_abi_probe"
+"$project_root/build/tests/unix_socket_abi_probe"
+cc -std=c11 -Wall -Wextra -Werror \
+  "$project_root/tests/probes/subprocess_abi_probe.c" \
+  "$project_root/src/native/flyology_subprocesses.c" \
+  -pthread \
+  -o "$project_root/build/tests/subprocess_abi_probe"
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$project_root/build/tests/subprocess_abi_probe"
+assert_archive_excludes \
+  "$project_root/lib/libFlyology.a" \
+  'flyology_disabled_hook_must_be_elided_(adaptive_pool|buffer|task_lifecycle)_|flyology__adaptive_pool_test_hooks__(reset|record_chunk_state|chunk_is_live)|flyology__buffer_test_hooks__(arm_|consume_|note_|live_)|flyology__task_lifecycle_test_hooks__(arm|barrier|consume_admission_signal_interrupted|consume_family_manager_failure|consume_prepared_generation_final|force_next_family_manager_failure|force_next_prepared_generation_final|interrupt_next_admission_signal|note_reference_(acquired|released)|outstanding_references|reached|release|reset)$|flyology__task_lifecycle_testing__|flyology__io__tls__(testing|test_barrier_)|operation_is_active|queued_acquisitions|close_is_in_progress|generation_state|flyology_tls_openssl_live_modules|flyology_test_context_(probe|callback)|flyology_test_worker_|flyology_test_structured_server_|flyology_test_tls_barrier_|flyology_test_socket_|flyology_test_subprocess_fail_reaper|flyology_test_file_watch_' \
+  "production library exposes test-only symbols"
+FLYOLOGY_TLS_TEST_HOOKS=true
+export FLYOLOGY_TLS_TEST_HOOKS
+"$development_alr" build
+assert_archive_excludes \
+  "$project_root/lib/libFlyology.a" \
+  'test_waiting_operations|test_operation_active|test_close_requested' \
+  "production library exposes connection-controller test symbols"
+FLYOLOGY_BUFFER_TEST_HOOKS=true
+export FLYOLOGY_BUFFER_TEST_HOOKS
+
+"$project_root/scripts/test-gnat13-runtime-warnings.sh" --compiler-only
+FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+"$project_root/scripts/test-gnat13-runtime-warnings.sh" --prepared-runtime
+
+task_attribute_compiler_prefix=$("$project_root/scripts/gnat-native-prefix.sh" "$base_alr")
+task_attribute_krunched_name=$(
+  "$task_attribute_compiler_prefix/bin/gnatkr" system-flyology-task_attribute_abi.ads
+)
+if [ "$task_attribute_krunched_name" != s-ftatab.ads ]; then
+  printf '%s\n' \
+    "compiler krunches System.Flyology.Task_Attribute_ABI as $task_attribute_krunched_name" >&2
+  exit 1
+fi
+task_attribute_compiler_release=$("$project_root/scripts/gnat-native-release.sh" "$base_alr")
+# Mirror prepare-rts.sh's fail-closed task-attribute representation selection.
+case "$task_attribute_compiler_release" in
+  13.2.2)
+    task_attribute_compat_family=gnat-13
+    ;;
+  14.1.3|14.2.1|15.1.2|15.3.1|16.1.0|16.2.0)
+    task_attribute_compat_family=gnat-14-16
+    ;;
+  *)
+    printf '%s\n' \
+      "test has no task-attribute ABI expectation for GNAT $task_attribute_compiler_release" >&2
+    exit 1
+    ;;
+esac
+if ! cmp -s \
+  "$project_root/runtime/compat/$task_attribute_compat_family/s-ftatab.adb" \
+  "$project_root/build/rts/adainclude/s-ftatab.adb"
+then
+  printf '%s\n' \
+    "prepared runtime selected the wrong task-attribute ABI adapter" >&2
+  exit 1
+fi
+if ! ar -t "$project_root/build/rts/adalib/libgnarl.a" | grep -Fx s-ftatab.o >/dev/null; then
+  printf '%s\n' "prepared runtime omitted the task-attribute ABI adapter" >&2
+  exit 1
+fi
+
+if [ "$(uname -s)" = Linux ]; then
+  runtime_archive="$project_root/build/rts/adalib/libgnarl.a"
+  poller_object_dir="$project_root/build/tests/poller-policy-symbols"
+  if ! ar -t "$runtime_archive" | grep '^s-flypol[.]o$' >/dev/null; then
+    printf '%s\n' "production runtime omitted s-flypol.o" >&2
+    exit 1
+  fi
+  mkdir -p "$poller_object_dir"
+  (
+    cd "$poller_object_dir"
+    ar -x "$runtime_archive" s-flypol.o
+  )
+  "$project_root/scripts/check-linux-poller-policy-inlining.sh" \
+    "$poller_object_dir/s-flypol.o"
+fi
+
+if FLYOLOGY_LOOP_POOL_SIZE=0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "invalid zero-sized event-loop pool was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_PLACEMENT=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown event-loop placement policy was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_SANITIZER=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown sanitizer configuration was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_TEST_DENY_IO_URING=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown io_uring test denial setting was accepted" >&2
+  exit 1
+fi
+if [ "$(uname -s)" = Darwin ]; then
+  if missing_patch_error=$(FLYOLOGY_TEST_MISSING_MONOTONIC_PATCH=1 \
+    "$project_root/scripts/prepare-rts.sh" 2>&1)
+  then
+    printf '%s\n' "missing Darwin monotonic patch was accepted" >&2
+    exit 1
+  fi
+  case "$missing_patch_error" in
+    *"required Darwin monotonic patch is missing"*) ;;
+    *)
+      printf '%s\n' \
+        "missing Darwin monotonic patch had no clear diagnostic" >&2
+      exit 1
+      ;;
+  esac
+fi
+if FLYOLOGY_LOOP_PLACEMENT=unknown \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "unknown loop-thread placement was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_LOOP_PLACEMENT=none FLYOLOGY_LOOP_PLACEMENT_MAP=0:0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "loop-thread map without a policy was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "zero Darwin advisory tag was accepted" >&2
+  exit 1
+fi
+if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:1,0:2 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+then
+  printf '%s\n' "duplicate loop-thread map group was accepted" >&2
+  exit 1
+fi
+case "$(uname -s):$(uname -m)" in
+  Linux:*)
+    if placement_error=$(FLYOLOGY_LOOP_PLACEMENT=strict \
+      FLYOLOGY_LOOP_PLACEMENT_MAP=0:2147483647 \
+      "$project_root/scripts/prepare-rts.sh" 2>&1)
+    then
+      printf '%s\n' "unavailable Linux placement CPU was accepted" >&2
+      exit 1
+    fi
+    case "$placement_error" in
+      *"outside this process's allowed Linux set"*) ;;
+      *)
+        printf '%s\n' "unavailable Linux CPU had no clear diagnostic" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  Darwin:arm64)
+    if FLYOLOGY_LOOP_PLACEMENT=advisory FLYOLOGY_LOOP_PLACEMENT_MAP=0:1 \
+      "$project_root/scripts/prepare-rts.sh" >/dev/null 2>&1
+    then
+      printf '%s\n' "unsupported arm64 Darwin affinity tag was accepted" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+#  Runtime patch application must not depend on the caller's working
+#  directory. The showcase crate invokes preparation as an Alire pre-build
+#  action, so verify a nested invocation retains a patched GNARL bridge.
+(
+  cd "$project_root/showcases"
+  FLYOLOGY_DEFAULT=native \
+    "$project_root/scripts/prepare-rts.sh" >/dev/null
+)
+if ! nm -g "$project_root/build/rts/adalib/libgnarl.a" | \
+     grep 'flyology_runtime_file_io' >/dev/null
+then
+  printf '%s\n' "nested RTS preparation omitted the Flyology file-I/O bridge" >&2
+  exit 1
+fi
+
+if [ "$(uname -s)" = Linux ]; then
+  mkdir -p "$project_root/build/tests"
+  cc -Wall -Wextra -Werror \
+    "$project_root/tests/probes/linux_abi_probe.c" \
+    "$project_root/runtime/native/platform.c" \
+    -pthread \
+    -o "$project_root/build/tests/linux_syscall_probe"
+  "$project_root/build/tests/linux_syscall_probe"
+elif [ "$(uname -s)" = Darwin ]; then
+  mkdir -p "$project_root/build/tests"
+  cc -std=c11 -Wall -Wextra -Werror \
+    "$project_root/tests/probes/darwin_monotonic_probe.c" \
+    "$project_root/runtime/native/platform.c" \
+    -pthread \
+    -o "$project_root/build/tests/darwin_monotonic_probe"
+  "$project_root/build/tests/darwin_monotonic_probe"
+fi
+
+ordinary_mains='cancellation_wake_smoke
+unix_stream_socket_smoke
+buffer_channel_cancel_smoke
+buffer_channel_operations_smoke
+buffer_domains_smoke
+buffer_domain_reservations_smoke
+buffers_smoke
+channel_reentrancy_child
+channel_operations_smoke
+channel_retention_smoke
+closed_descriptor_wait_smoke
+connection_admission_smoke
+connection_close_abort_smoke
+connection_driver_smoke
+connection_driver_tls_smoke
+connection_lifecycle_smoke
+managed_connection_connect_smoke
+connection_operations_smoke
+connection_state_model
+connection_tls_upgrade_smoke
+concurrency_primitives_smoke
+context_abi_matrix
+data_structures_concurrency_smoke
+data_structures_smoke
+datagram_io_smoke
+deadline_clamp_smoke
+descriptor_ownership_smoke
+dns_child_capacity_smoke
+dns_smoke
+dns_parser_smoke
+dns_parser_matrix
+dns_resilience_smoke
+dormancy_smoke
+execution_groups_smoke
+exception_traceback_smoke
+fairness_smoke
+fiber_trampoline_abort_smoke
+fiber_trampoline_smoke
+file_cancellation_smoke
+file_transfers_smoke
+file_watches_recursive_smoke
+file_watches_recovery_smoke
+file_watches_smoke
+files_smoke
+flyology-counter_policy_smoke
+flyology-atomic_store_publication_smoke
+flyology-file_transfer_policy-smoke
+flyology-socket_policy-smoke
+flyology-tls_openssl_policy-smoke
+flyology-structured_server_policy-smoke
+flyology-supervision-static_smoke
+flyology-supervision-handle_smoke
+flyology-supervision-families_smoke
+flyology-supervision-restart_window_smoke
+prepared_admissions_smoke
+prepared_admission_observation_smoke
+prepared_admission_immediate_abort_smoke
+prepared_admission_observation_fanout_smoke
+prepared_admission_abort_smoke
+prepared_admission_persistent_abort_smoke
+prepared_admission_blocked_observation_smoke
+prepared_admission_cancellation_smoke
+prepared_admission_generation_smoke
+flyology-supervision-families_shutdown_smoke
+flyology-supervision-nested_family_restart_smoke
+flyology-supervision-nested_static_shutdown_smoke
+flyology-supervision-adapters_smoke
+flyology-supervision-adapters_exit_smoke
+flyology-supervision-service_slots_smoke
+flyology-supervision-subprocess_smoke
+flyology-supervision-task_generations_smoke
+flyology-supervision_policy-smoke
+flyology-wall_clock_native_policy-smoke
+flyology-wall_clock_policy-smoke
+flyology-wall_clock_waits-smoke
+guide_utilization_example
+io_smoke
+io_starvation_smoke
+lazy_event_start_smoke
+lifecycle_smoke
+lifecycle_churn_smoke
+loop_thread_placement_smoke
+memory_regions_smoke
+native_executor_library_finalize_smoke
+native_executor_local_finalize_smoke
+observability_native_smoke
+observability_smoke
+observability_utilization_smoke
+operations_smoke
+operations_finalize_smoke
+operation_gates_smoke
+operation_composition_smoke
+operation_return_boundary_smoke
+poller_policy_smoke
+priority_semantics_smoke
+process_exit_live_task_smoke
+process_exec_child_smoke
+process_bootstrap_smoke
+flyology-process_generation_policy-smoke
+process_generation_messages_smoke
+process_generation_protocol_smoke
+process_generation_transport_smoke
+process_generation_coordinator_smoke
+process_lifecycle_smoke
+protected_action_blocking_smoke
+ready_queue_smoke
+runtime_smoke
+semantic_parity_smoke
+shared_memory_smoke
+shared_memory_child
+stack_guard_violation_child
+stack_guard_smoke
+stack_overflow_child
+stack_overflow_smoke
+stack_pool_smoke
+stack_size_limits_child
+stack_size_limits_smoke
+stack_size_parity_smoke
+socket_handoff_smoke
+suspension_object_smoke
+task_scope_faults_smoke
+task_scopes_smoke
+task_results_smoke
+task_result_attach_abort_smoke
+task_result_abandon_smoke
+task_cpu_inheritance_smoke
+stall_watchdog_native_smoke
+stall_watchdog_smoke
+structured_server_smoke
+structured_server_reset_smoke
+structured_server_tls_smoke
+subprocess_fixture
+subprocess_smoke
+thread_affinity_smoke
+timer_heap_smoke
+timer_set_smoke
+tls_smoke
+tls_operations_smoke
+tls_alpn_smoke
+tls_state_model
+tls_take_abort
+tcp_native_smoke
+wake_source_state_model
+wait_any_smoke
+wall_clock_wait_smoke'
+
+pool_mains='loop_pool_smoke
+pool_growth_smoke
+pool_reduction_inert_smoke
+pool_reduction_smoke
+topology_smoke
+semantic_conformance_matrix
+semantic_termination_matrix'
+
+fault_mains='accept_transient_smoke
+connect_transient_smoke
+create_finalize_race_smoke
+library_finalize_exception_runtime_smoke
+library_finalize_runtime_smoke
+pool_reduction_claim_smoke
+pool_reduction_cross_to_shard_smoke
+structured_server_reuse_smoke
+task_result_publication_smoke
+fault_injection_smoke'
+
+connection_hook_mains='connection_admission_smoke
+connection_close_abort_smoke
+connection_state_model
+connection_tls_upgrade_smoke
+managed_connection_connect_smoke
+descriptor_ownership_smoke'
+
+worker_pool_hook_mains='concurrency_primitives_smoke
+task_scope_faults_smoke'
+
+task_lifecycle_hook_mains='flyology-supervision-static_smoke
+flyology-supervision-families_smoke
+flyology-supervision-restart_window_smoke
+prepared_admission_observation_smoke
+prepared_admission_immediate_abort_smoke
+prepared_admission_abort_smoke
+prepared_admission_persistent_abort_smoke
+prepared_admission_cancellation_smoke
+prepared_admission_generation_smoke
+task_result_attach_abort_smoke'
+
+channel_hook_mains=channel_operations_smoke
+
+structured_server_hook_mains=structured_server_abort_smoke
+
+wall_clock_hook_mains=flyology-wall_clock_testing-smoke
+
+socket_hook_mains=socket_preparation_smoke
+
+subprocess_hook_mains='subprocess_fixture
+subprocess_smoke'
+
+file_watch_hook_mains=file_watches_recovery_smoke
+
+destroy_contention_hook_mains=data_structures_destroy_contention_smoke
+
+ordinary_unhooked_mains=
+for test_main in $ordinary_mains; do
+  case "$test_main" in
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke|concurrency_primitives_smoke|task_scope_faults_smoke|flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke|channel_operations_smoke|subprocess_smoke|file_watches_recovery_smoke)
+      ;;
+    *)
+      ordinary_unhooked_mains="$ordinary_unhooked_mains
+$test_main"
+      ;;
+  esac
+done
+
+all_test_mains="default_policy_smoke
+interrupt_service_native_smoke
+$ordinary_unhooked_mains
+process_generation_agent_v1
+process_generation_agent_v2
+$pool_mains
+loop_thread_project_placement_smoke
+$fault_mains"
+if [ "$(uname -s)" = Linux ]; then
+  all_test_mains="$all_test_mains
+lightweight_affinity_smoke
+linux_poller_cloexec_smoke
+linux_abort_readiness_waiter_smoke
+linux_poller_fairness_smoke
+native_cpu_activation_failure_smoke"
+fi
+
+#  Compile each hook configuration into its own object directory. The hook
+#  projects add different native controller objects, so combining them changes
+#  the link closure and runtime behavior of otherwise unrelated tests. The
+#  alternate RTS configurations change only private runtime policy units and
+#  replace the contents of the same build/rts path. A fresh binder pass checks
+#  each compiled ALI closure against the selected RTS before linking.
+unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
+unset FLYOLOGY_CHANNEL_TEST_HOOKS || :
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS || :
+unset FLYOLOGY_SOCKET_TEST_HOOKS || :
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS || :
+compile_test_mains "$test_subdir" "$all_test_mains"
+
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+compile_test_mains "$connection_test_subdir" "$connection_hook_mains"
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
+
+FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+compile_test_mains "$worker_pool_test_subdir" "$worker_pool_hook_mains"
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+compile_test_mains "$task_lifecycle_test_subdir" "$task_lifecycle_hook_mains"
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+
+FLYOLOGY_CHANNEL_TEST_HOOKS=true
+export FLYOLOGY_CHANNEL_TEST_HOOKS
+compile_test_mains "$channel_test_subdir" "$channel_hook_mains"
+unset FLYOLOGY_CHANNEL_TEST_HOOKS
+
+FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
+export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+compile_test_mains \
+  "$structured_server_test_subdir" "$structured_server_hook_mains"
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+
+FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
+export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+compile_test_mains "$wall_clock_test_subdir" "$wall_clock_hook_mains"
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+
+FLYOLOGY_SOCKET_TEST_HOOKS=true
+export FLYOLOGY_SOCKET_TEST_HOOKS
+compile_test_mains "$socket_test_subdir" "$socket_hook_mains"
+unset FLYOLOGY_SOCKET_TEST_HOOKS
+
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=true
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+compile_test_mains "$subprocess_test_subdir" "$subprocess_hook_mains"
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
+
+FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
+export FLYOLOGY_FILE_WATCH_TEST_HOOKS
+compile_test_mains "$file_watch_test_subdir" "$file_watch_hook_mains"
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
+
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=true
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+compile_test_mains \
+  "$destroy_contention_test_subdir" "$destroy_contention_hook_mains"
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+
+FLYOLOGY_DEFAULT=lightweight "$project_root/scripts/prepare-rts.sh" >/dev/null
+link_test_mains \
+  "$test_subdir" "$project_root/build/rts" \
+  "default_policy_smoke interrupt_service_native_smoke"
+"$test_bin/default_policy_smoke" lightweight
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+  "$test_bin/interrupt_service_native_smoke"
+
+FLYOLOGY_DEFAULT=native "$project_root/scripts/prepare-rts.sh" >/dev/null
+native_mains="default_policy_smoke
+$ordinary_unhooked_mains
+process_generation_agent_v1
+process_generation_agent_v2"
+if [ "$(uname -s)" = Linux ]; then
+  native_mains="$native_mains
+lightweight_affinity_smoke
+linux_poller_cloexec_smoke
+native_cpu_activation_failure_smoke"
+fi
+link_test_mains "$test_subdir" "$project_root/build/rts" "$native_mains"
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/lightweight_affinity_smoke"
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/linux_poller_cloexec_smoke"
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/native_cpu_activation_failure_smoke"
+fi
+"$project_root/scripts/check-development-allocator-link.sh" \
+  "$test_bin/data_structures_smoke" "$atomic_store_family"
+
+#  The website's process-upgrade example is the source of truth for its
+#  coordinator block. Extract it without rewriting, compose a temporary mini
+#  showcase, and exercise both the promotion and cancellation decisions.
+FLYOLOGY_GUIDE_EXAMPLE_REUSE_BUILD=1 \
+  "$project_root/scripts/check-process-upgrade-guide-example.sh"
+
+#  On Darwin/AArch64 GNAT routes nested-subprogram callbacks through libgcc's
+#  heap trampolines, whose per-pthread cursor corrupts callbacks that outlive a
+#  fiber suspension. Flyology's strong definitions must reach the executable
+#  instead of libgcc's weak ones, so confirm the linked helper reaches the
+#  scheduler's per-fiber cursor rather than silently reverting.
+if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then
+  trampoline_binary="$test_bin/fiber_trampoline_smoke"
+  if ! trampoline_text=$(objdump -d --macho "$trampoline_binary"); then
+    printf '%s\n' \
+      "failed to inspect trampoline helpers: $trampoline_binary" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$trampoline_text" |
+    awk '/^___gcc_nested_func_ptr_created:/, /^___gcc_nested_func_ptr_deleted:/' |
+    grep 'flyology_runtime_current_trampoline_control_slot' >/dev/null
+  then
+    printf '%s\n' \
+      "linked __gcc_nested_func_ptr_created is not Flyology's definition" \
+      "lightweight-task callbacks would share one cursor per event thread" >&2
+    exit 1
+  fi
+fi
+
+FLYOLOGY_CONNECTION_TEST_HOOKS=true
+export FLYOLOGY_CONNECTION_TEST_HOOKS
+link_test_mains \
+  "$connection_test_subdir" "$project_root/build/rts" "$connection_hook_mains"
+unset FLYOLOGY_CONNECTION_TEST_HOOKS
+
+FLYOLOGY_WORKER_POOL_TEST_HOOKS=true
+export FLYOLOGY_WORKER_POOL_TEST_HOOKS
+link_test_mains \
+  "$worker_pool_test_subdir" "$project_root/build/rts" \
+  "$worker_pool_hook_mains"
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS
+
+FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS=true
+export FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+link_test_mains \
+  "$task_lifecycle_test_subdir" "$project_root/build/rts" \
+  "$task_lifecycle_hook_mains"
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS
+
+FLYOLOGY_CHANNEL_TEST_HOOKS=true
+export FLYOLOGY_CHANNEL_TEST_HOOKS
+link_test_mains \
+  "$channel_test_subdir" "$project_root/build/rts" "$channel_hook_mains"
+unset FLYOLOGY_CHANNEL_TEST_HOOKS
+
+FLYOLOGY_WALL_CLOCK_TEST_HOOKS=true
+export FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+link_test_mains \
+  "$wall_clock_test_subdir" "$project_root/build/rts" \
+  "$wall_clock_hook_mains"
+unset FLYOLOGY_WALL_CLOCK_TEST_HOOKS
+
+FLYOLOGY_SOCKET_TEST_HOOKS=true
+export FLYOLOGY_SOCKET_TEST_HOOKS
+link_test_mains \
+  "$socket_test_subdir" "$project_root/build/rts" "$socket_hook_mains"
+unset FLYOLOGY_SOCKET_TEST_HOOKS
+
+FLYOLOGY_SUBPROCESS_TEST_HOOKS=true
+export FLYOLOGY_SUBPROCESS_TEST_HOOKS
+link_test_mains \
+  "$subprocess_test_subdir" "$project_root/build/rts" \
+  "$subprocess_hook_mains"
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS
+
+FLYOLOGY_FILE_WATCH_TEST_HOOKS=true
+export FLYOLOGY_FILE_WATCH_TEST_HOOKS
+link_test_mains \
+  "$file_watch_test_subdir" "$project_root/build/rts" \
+  "$file_watch_hook_mains"
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS
+
+FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS=true
+export FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+link_test_mains \
+  "$destroy_contention_test_subdir" "$project_root/build/rts" \
+  "$destroy_contention_hook_mains"
+unset FLYOLOGY_ADAPTIVE_POOL_TEST_HOOKS
+
+"$test_bin/default_policy_smoke" native
+"$wall_clock_test_bin/flyology-wall_clock_testing-smoke"
+"$socket_test_bin/socket_preparation_smoke"
+"$destroy_contention_test_bin/data_structures_destroy_contention_smoke"
+
+for test_main in $ordinary_mains; do
+  printf '%s\n' "test: BEGIN $test_main"
+  case "$test_main" in
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke|descriptor_ownership_smoke)
+      current_test_bin=$connection_test_bin
+      ;;
+    concurrency_primitives_smoke|task_scope_faults_smoke)
+      current_test_bin=$worker_pool_test_bin
+      ;;
+    flyology-supervision-static_smoke|flyology-supervision-families_smoke|flyology-supervision-restart_window_smoke|prepared_admission_observation_smoke|prepared_admission_immediate_abort_smoke|prepared_admission_abort_smoke|prepared_admission_persistent_abort_smoke|prepared_admission_cancellation_smoke|prepared_admission_generation_smoke|task_result_attach_abort_smoke)
+      current_test_bin=$task_lifecycle_test_bin
+      ;;
+    channel_operations_smoke)
+      current_test_bin=$channel_test_bin
+      ;;
+    subprocess_smoke)
+      current_test_bin=$subprocess_test_bin
+      ;;
+    file_watches_recovery_smoke)
+      current_test_bin=$file_watch_test_bin
+      ;;
+    *)
+      current_test_bin=$test_bin
+      ;;
+  esac
+  case "$test_main" in
+    channel_reentrancy_child)
+      #  A native task self-deadlocks on the object's own mutex, so the child
+      #  must still be blocked at that boundary. A lightweight task would
+      #  deadlock its whole execution group, so the runtime detects the
+      #  bounded error instead and the child asserts Program_Error itself.
+      "$project_root/scripts/expect-blocked.sh" 1 \
+        "$current_test_bin/$test_main" native
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$current_test_bin/$test_main" lightweight
+      ;;
+    dns_child_capacity_smoke|dns_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$current_test_bin/$test_main"
+      ;;
+    dns_parser_matrix)
+      "$project_root/scripts/run-with-timeout.sh" 20 \
+        "$current_test_bin/$test_main"
+      ;;
+    dns_resilience_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 60 \
+        "$current_test_bin/$test_main"
+      ;;
+    process_lifecycle_smoke|process_exit_live_task_smoke|native_executor_library_finalize_smoke|native_executor_local_finalize_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 10 \
+        "$current_test_bin/$test_main"
+      ;;
+    connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke)
+      "$project_root/scripts/run-with-timeout.sh" 30 \
+        "$current_test_bin/$test_main"
+      ;;
+    tls_smoke)
+      tls_library_dir=${FLYOLOGY_TEST_OPENSSL_DIR:-}
+      if [ -z "$tls_library_dir" ] && command -v pkg-config >/dev/null 2>&1; then
+        tls_library_dir=$(pkg-config --variable=libdir openssl 2>/dev/null || :)
+      fi
+      if [ -n "$tls_library_dir" ]; then
+        tls_mismatch_dir="$project_root/build/tests/tls-mismatch"
+        mkdir -p "$tls_mismatch_dir"
+        case "$(uname -s)" in
+          Darwin)
+            cc -std=c11 -Wall -Wextra -Werror -dynamiclib \
+              "$project_root/tests/fixtures/tls/mismatched_crypto.c" \
+              -o "$tls_mismatch_dir/libcrypto.3.dylib"
+            ln -sf "$tls_library_dir/libssl.3.dylib" \
+              "$tls_mismatch_dir/libssl.3.dylib"
+            ;;
+          Linux)
+            cc -std=c11 -Wall -Wextra -Werror -shared -fPIC \
+              -Wl,-soname,libcrypto.so.3 \
+              "$project_root/tests/fixtures/tls/mismatched_crypto.c" \
+              -o "$tls_mismatch_dir/libcrypto.so.3"
+            ln -sf "$tls_library_dir/libssl.so.3" \
+              "$tls_mismatch_dir/libssl.so.3"
+            ;;
+        esac
+        FLYOLOGY_TEST_OPENSSL_DIR="$tls_library_dir" \
+        FLYOLOGY_TEST_OPENSSL_MISMATCH_DIR="$tls_mismatch_dir" \
+          "$project_root/scripts/run-with-timeout.sh" 90 \
+          "$current_test_bin/$test_main"
+      else
+        "$project_root/scripts/run-with-timeout.sh" 90 \
+          "$current_test_bin/$test_main"
+      fi
+      ;;
+    tls_state_model)
+      "$project_root/scripts/run-with-timeout.sh" 30 \
+        "$current_test_bin/$test_main"
+      ;;
+    *)
+      "$project_root/scripts/run-with-timeout.sh" 60 \
+        "$current_test_bin/$test_main"
+      ;;
+  esac
+  printf '%s\n' "test: PASS $test_main"
+done
+
+#  Exercise the startup override against the compatibility fallback already
+#  prepared for the ordinary suite. This verifies both the reported size and
+#  actual automatic placement without rebuilding the RTS.
+link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
+FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/loop_pool_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_inert_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 "$test_bin/topology_smoke"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_conformance_matrix"
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_termination_matrix"
+
+for invalid_pool_size in '' 0 129 invalid; do
+  if FLYOLOGY_LOOP_POOL_SIZE=$invalid_pool_size \
+    "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/loop_pool_smoke" >/dev/null 2>&1
+  then
+    printf '%s\n' \
+      "invalid startup event-loop pool size was accepted: $invalid_pool_size" \
+      >&2
+    exit 1
+  fi
+done
+
+#  Preserve coverage of the prepared fallback when no startup override is
+#  present. The compatibility fallback remains one lazily created loop.
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=3 \
+FLYOLOGY_PLACEMENT=round_robin \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+link_test_mains "$test_subdir" "$project_root/build/rts" "$pool_mains"
+"$test_bin/loop_pool_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_inert_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_smoke"
+"$test_bin/topology_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_conformance_matrix"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/semantic_termination_matrix"
+
+#  Exercise a compiled project-level policy independently from the public
+#  pre-start API. Darwin tags are advisory; Linux masks are strict and use the
+#  first CPU from this process's allowed set.
+case "$(uname -s)" in
+  Darwin)
+    if [ "$(uname -m)" = arm64 ]; then
+      loop_placement=none
+    else
+      loop_placement=advisory
+      loop_placement_value=77
+    fi
+    ;;
+  Linux)
+    loop_placement=strict
+    loop_placement_value=$(awk '/Cpus_allowed_list:/ {
+      split($2, ranges, ","); split(ranges[1], first, "-"); print first[1]; exit
+    }' /proc/self/status)
+    ;;
+esac
+if [ "$loop_placement" != none ]; then
+  FLYOLOGY_DEFAULT=native \
+  FLYOLOGY_LOOP_PLACEMENT="$loop_placement" \
+  FLYOLOGY_LOOP_PLACEMENT_MAP="6:$loop_placement_value" \
+    "$project_root/scripts/prepare-rts.sh" >/dev/null
+  link_test_mains \
+    "$test_subdir" "$project_root/build/rts" \
+    loop_thread_project_placement_smoke
+  "$test_bin/loop_thread_project_placement_smoke"
+fi
+
+#  Transient accept behavior depends on errno results that are difficult to
+#  produce deterministically from a client. Exercise the production retry,
+#  deadline, cancellation, and structural-error paths through the test-only C
+#  seam, with an outer timeout so a retry regression cannot hang CI.
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=1 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+if [ "$(uname -s)" = Linux ]; then
+  fault_mains="$fault_mains
+linux_abort_readiness_waiter_smoke
+linux_poller_fairness_smoke"
+fi
+link_test_mains "$test_subdir" "$project_root/build/rts" "$fault_mains"
+FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS=true
+export FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+link_test_mains \
+  "$structured_server_test_subdir" "$project_root/build/rts" \
+  "$structured_server_hook_mains"
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/accept_transient_smoke"
+#  A foreign thread creating a task while the environment task finalizes must
+#  be refused, not admitted into a stopped group. The unfixed scheduler aborts
+#  here on its stop invariant, so the timeout also bounds a regression.
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/create_finalize_race_smoke"
+#  The post-Ada-finalization verifier requires exactly one library-object
+#  finalizer event followed by exactly one scheduler-finalizer event.
+"$project_root/scripts/run-with-timeout.sh" 10 \
+  "$test_bin/library_finalize_runtime_smoke"
+#  A saved exception from a controlled library finalizer must propagate after
+#  scheduler teardown. The atexit marker proves the exceptional path retained
+#  the same exactly-once ordering instead of merely producing a nonzero exit.
+if exceptional_finalize_output=$(\
+  "$project_root/scripts/run-with-timeout.sh" 10 \
+    "$test_bin/library_finalize_exception_runtime_smoke" 2>&1); then
+  printf '%s\n' \
+    "library_finalize_exception_runtime_smoke unexpectedly succeeded" >&2
+  exit 1
+fi
+case "$exceptional_finalize_output" in
+  *"raised PROGRAM_ERROR : finalize/adjust raised exception"*) ;;
+  *)
+    printf '%s\n' "$exceptional_finalize_output" >&2
+    printf '%s\n' \
+      "library_finalize_exception_runtime_smoke lost the original exception" >&2
+    exit 1
+    ;;
+esac
+case "$exceptional_finalize_output" in
+  *"Flyology exceptional finalization-order test passed"*) ;;
+  *)
+    printf '%s\n' "$exceptional_finalize_output" >&2
+    printf '%s\n' \
+      "library_finalize_exception_runtime_smoke missed scheduler teardown" >&2
+    exit 1
+    ;;
+esac
+#  Hold an automatic creator between its round-robin claim and group startup;
+#  reduction must retain that claim until the released task drains to group 0.
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_claim_smoke"
+#  Hold a shard crossing after target preparation while a reduction cuts the
+#  pool below the target. The topology-locked migration commit must reject the
+#  now-stale target without moving the task out of automatic management.
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/pool_reduction_cross_to_shard_smoke"
+#  Allocation failure after automatic placement must not retain the creation
+#  or placement claims that keep later pool reduction and growth coherent.
+for allocation_case in group-storage-allocation fiber-storage-allocation context-storage-allocation; do
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    "$allocation_case"
+done
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/connect_transient_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/structured_server_reuse_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/task_result_publication_smoke"
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$test_bin/fault_injection_smoke" \
+  scoped-file-saturation
+"$project_root/scripts/run-with-timeout.sh" 30 \
+  "$project_root/tests/bin/$structured_server_test_subdir/structured_server_abort_smoke"
+
+#  A capable Linux host must prove both initialization-fallback boundaries in
+#  fresh processes.  Forced-native runs cannot reach these post-setup seams.
+if [ "$(uname -s)" = Linux ] && \
+   [ "${FLYOLOGY_EXPECT_FILE_BACKEND:-}" = io-uring ]
+then
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-probe-fallback
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-post-setup-fallback
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-uring-last-fiber
+fi
+
+#  The two Linux file backends answer cancellation through different kernel
+#  contracts, so the backend cancellation case runs against whichever one this
+#  configuration selected rather than against io_uring alone.
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 30 \
+    "$test_bin/fault_injection_smoke" \
+    file-backend-cancel
+fi
+
+#  Pin Linux descriptor-event translation while a native abort targets another
+#  waiter, then exercise the batch boundary with a queued file completion,
+#  socket readiness, and a cross-thread eventfd wake. Both deterministic cases
+#  run against io_uring and the forced native-AIO lane.
+if [ "$(uname -s)" = Linux ]; then
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    "$test_bin/linux_abort_readiness_waiter_smoke"
+  "$project_root/scripts/run-with-timeout.sh" 60 \
+    "$test_bin/linux_poller_fairness_smoke"
+fi
+
+unset FLYOLOGY_CONNECTION_TEST_HOOKS || :
+unset FLYOLOGY_WORKER_POOL_TEST_HOOKS || :
+unset FLYOLOGY_TASK_LIFECYCLE_TEST_HOOKS || :
+unset FLYOLOGY_CHANNEL_TEST_HOOKS || :
+unset FLYOLOGY_STRUCTURED_SERVER_TEST_HOOKS || :
+unset FLYOLOGY_SOCKET_TEST_HOOKS || :
+unset FLYOLOGY_SUBPROCESS_TEST_HOOKS || :
+unset FLYOLOGY_FILE_WATCH_TEST_HOOKS || :
+unset FLYOLOGY_BUFFER_TEST_HOOKS || :
+
+#  Leave the worktree with the documented compatibility configuration.
+FLYOLOGY_DEFAULT=native \
+FLYOLOGY_LOOP_POOL_SIZE=1 \
+FLYOLOGY_TEST_FAULTS=0 \
+  "$project_root/scripts/prepare-rts.sh" >/dev/null
+
+#  A Connection that names its Server borrows it under Ada's accessibility
+#  rules. Compile the fixture that outlives its admission controller and fail
+#  if the compiler accepts it; the guarantee is compile-time only, so no
+#  behavioral program can observe it.
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -c -q -p \
+  -P tests/fixtures/lifetime/lifetime_rejection.gpr >/dev/null 2>&1
+then
+  printf '%s\n' \
+    "connection outliving its bound server was accepted" >&2
+  exit 1
+fi
+
+#  A domain-bound buffer cannot outlive the heterogeneous storage catalogue
+#  needed by its finalizer. The access discriminant makes this a compile-time
+#  rule rather than a cleanup convention.
+if buffer_lifetime_diagnostic=$(run_gprbuild \
+     --RTS="$project_root/build/rts" \
+     -c -q -p \
+     -P tests/fixtures/buffer_domain_lifetime/buffer_domain_lifetime_rejection.gpr \
+     2>&1)
+then
+  printf '%s\n' "buffer outliving its domain was accepted" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$buffer_lifetime_diagnostic" | \
+     grep -F "prefix of attribute has deeper level than allocator type" >/dev/null
+then
+  printf '%s\n' "buffer lifetime fixture failed for an unexpected reason" >&2
+  printf '%s\n' "$buffer_lifetime_diagnostic" >&2
+  exit 1
+fi
+
+#  A scoped prepared-admission observer borrows both its Family provider and
+#  Completion_Set through access discriminants. Prove each lifetime dimension
+#  independently so neither can be weakened into a documentation convention.
+for lifetime_main in operation_outlives_family.adb operation_outlives_set.adb; do
+  if prepared_lifetime_diagnostic=$(run_gprbuild \
+       --RTS="$project_root/build/rts" \
+       -c -q -p \
+       -P tests/fixtures/prepared_admission_lifetime/prepared_admission_lifetime_rejection.gpr \
+       "$lifetime_main" 2>&1)
+  then
+    printf '%s\n' "prepared observer lifetime fixture was accepted: $lifetime_main" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$prepared_lifetime_diagnostic" | \
+       grep -F "prefix of attribute has deeper level than allocator type" >/dev/null
+  then
+    printf '%s\n' "prepared observer lifetime fixture failed unexpectedly: $lifetime_main" >&2
+    printf '%s\n' "$prepared_lifetime_diagnostic" >&2
+    exit 1
+  fi
+done
+
+#  A supervisor control task must name one exact shared execution group. CPU
+#  value zero means automatic placement in Ada, so require the public generic
+#  subtype to reject it before a manager task can activate.
+control_group_rejection_project="$project_root/tests/fixtures/\
+supervision_control_group/\
+supervision_control_group_rejection.gpr"
+if run_gprbuild \
+  --RTS="$project_root/build/rts" \
+  -f -c -q -p \
+  -P "$control_group_rejection_project" >/dev/null 2>&1
+then
+  printf '%s\n' \
+    "automatic supervisor control-group placement was accepted" >&2
+  exit 1
+fi
+
+#  Prove that a separate Alire workspace can locate the crate, prepare its own
+#  runtime outside the dependency checkout, and build against only public GPR
+#  and Ada interfaces.
+run_independent_alire_workspace \
+  "$project_root/scripts/test-external-consumer.sh"

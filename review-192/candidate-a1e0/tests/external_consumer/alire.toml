@@ -1,0 +1,10 @@
+name = "flyology_external_consumer"
+description = "Out-of-tree Alire consumer smoke for Flyology"
+version = "0.1.1-dev"
+
+authors = ["Flyology maintainers"]
+maintainers = ["Flyology maintainers <noreply@example.com>"]
+maintainers-logins = ["yrashk"]
+licenses = "MIT OR Apache-2.0 WITH LLVM-exception"
+executables = ["external_consumer"]
+project-files = ["external_consumer.gpr"]

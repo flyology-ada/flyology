@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/a-sytaco.adb
++++ b/a-sytaco.adb
+@@ -34,2 +34,3 @@
+-with System.Tasking;
+-with System.Task_Primitives.Operations;
++with System.Soft_Links;
++with System.Task_Primitives.Operations;
++use System.Task_Primitives.Operations;
+@@ -37,3 +38,7 @@
+ is
++   use type System.Tasking.Task_Id;
++
++   package SSL renames System.Soft_Links;
+@@ -45,4 +50,6 @@
+    procedure Initialize (S : in out Suspension_Object) is
+    begin
+-      System.Task_Primitives.Operations.Initialize (S.SO);
++      --  The lock is a component of this controlled object and never
++      --  escapes it. Legacy Initialize_Lock performs an internal access
++      --  conversion that otherwise applies an incorrect dynamic-level check.
++      Initialize_Lock (S.L'Unrestricted_Access, PO_Level);
++      S.State := False;
++      S.Suspended_Task := null;
+    end Initialize;
+@@ -54,4 +61,4 @@
+    procedure Finalize (S : in out Suspension_Object) is
+    begin
+-      System.Task_Primitives.Operations.Finalize (S.SO);
++      Finalize_Lock (S.L'Unrestricted_Access);
+    end Finalize;
+@@ -63,4 +70,4 @@
+    function Current_State (S : Suspension_Object) return Boolean is
+    begin
+-      return System.Task_Primitives.Operations.Current_State (S.SO);
++      return S.State;
+    end Current_State;
+@@ -72,4 +79,8 @@
+    procedure Set_False (S : in out Suspension_Object) is
+    begin
+-      System.Task_Primitives.Operations.Set_False (S.SO);
++      SSL.Abort_Defer.all;
++      Write_Lock (S.L'Unrestricted_Access);
++      S.State := False;
++      Unlock (S.L'Unrestricted_Access);
++      SSL.Abort_Undefer.all;
+    end Set_False;
+@@ -81,4 +92,24 @@
+    procedure Set_True (S : in out Suspension_Object) is
++      Suspended_Task : System.Tasking.Task_Id := null;
+    begin
+-      System.Task_Primitives.Operations.Set_True (S.SO);
++      SSL.Abort_Defer.all;
++      Write_Lock (S.L'Unrestricted_Access);
++
++      if S.Suspended_Task /= null then
++         Suspended_Task := S.Suspended_Task;
++         S.Suspended_Task := null;
++      else
++         S.State := True;
++      end if;
++
++      Unlock (S.L'Unrestricted_Access);
++
++      if Suspended_Task /= null then
++         Write_Lock (Suspended_Task);
++         Wakeup (Suspended_Task, System.Tasking.Delay_Sleep);
++         Unlock (Suspended_Task);
++      end if;
++
++      SSL.Abort_Undefer.all;
+    end Set_True;
+@@ -90,2 +121,3 @@
+    procedure Suspend_Until_True (S : in out Suspension_Object) is
++      Self_ID : constant System.Tasking.Task_Id := Self;
+    begin
+@@ -103,1 +135,48 @@
+-      System.Task_Primitives.Operations.Suspend_Until_True (S.SO);
++      SSL.Abort_Defer.all;
++      Write_Lock (S.L'Unrestricted_Access);
++
++      if S.Suspended_Task /= null then
++         Unlock (S.L'Unrestricted_Access);
++         SSL.Abort_Undefer.all;
++         raise Program_Error;
++      elsif S.State then
++         S.State := False;
++         Unlock (S.L'Unrestricted_Access);
++         SSL.Abort_Undefer.all;
++      else
++         Write_Lock (Self_ID);
++
++         if Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++            Unlock (Self_ID);
++            Unlock (S.L'Unrestricted_Access);
++            SSL.Abort_Undefer.all;
++            return;
++         end if;
++
++         S.Suspended_Task := Self_ID;
++         Unlock (S.L'Unrestricted_Access);
++         --  Legacy GNARL has no Suspension_Object_Sleep state. Delay_Sleep
++         --  is the nearest wakeable state: Locked_Abort_To_Level wakes it,
++         --  whereas Runnable would leave a native waiter in pthread wait.
++         Self_ID.Common.State := System.Tasking.Delay_Sleep;
++
++         loop
++            Sleep (Self_ID, System.Tasking.Delay_Sleep);
++            Write_Lock (S.L'Unrestricted_Access);
++
++            if S.Suspended_Task /= Self_ID then
++               exit;
++            elsif Self_ID.Pending_ATC_Level < Self_ID.ATC_Nesting_Level then
++               S.Suspended_Task := null;
++               exit;
++            end if;
++
++            Unlock (S.L'Unrestricted_Access);
++         end loop;
++
++         Self_ID.Common.State := System.Tasking.Runnable;
++         Unlock (S.L'Unrestricted_Access);
++         Unlock (Self_ID);
++         SSL.Abort_Undefer.all;
++      end if;
+    end Suspend_Until_True;
