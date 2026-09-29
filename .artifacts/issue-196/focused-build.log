@@ -1,0 +1,244 @@
+Setup
+   [mkdir]        object directory for project Runtime_Smoke
+   [mkdir]        exec directory for project Runtime_Smoke
+Compile
+   [Ada]          finished_fiber_stack_smoke.adb
+   [Ada]          flyology_allocators-atomics.adb
+flyology_allocators-atomics.adb:1:06: warning: "System.Atomic_Primitives" is an internal GNAT unit [-gnatwi]
+flyology_allocators-atomics.adb:1:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology_allocators-layouts.adb
+   [Ada]          flyology_allocators-storage.adb
+   [Ada]          flyology_allocators-allocation_algorithms-best_fit_kernel.adb
+   [Ada]          flyology_allocators-allocation_algorithms-slab_span_kernel.adb
+   [Ada]          flyology_allocators-waits.adb
+   [Ada]          flyology_allocators-allocation_algorithms-tlsf_kernel.adb
+   [Ada]          flyology_allocators-allocation_algorithms.ads
+   [Ada]          flyology_allocators-allocation_algorithms-contract.ads
+   [Ada]          flyology_allocators-allocation_algorithms-buddy.ads
+   [Ada]          flyology_allocators-allocation_algorithms-tlsf.ads
+   [Ada]          flyology_allocators-regions.adb
+   [Ada]          flyology_allocators-policy.adb
+   [Ada]          flyology_allocators-arenas.ads
+   [Ada]          flyology_allocators-allocation_algorithms-buddy_kernel.adb
+   [Ada]          flyology_allocators.adb
+   [Ada]          flyology_allocators-allocation_algorithms-slab_span.ads
+   [Ada]          flyology_allocators-allocation_algorithms-best_fit.ads
+   [Ada]          flyology-wall_clock_testing.ads
+   [Ada]          flyology-wall_clock_io_testing.ads
+   [Ada]          flyology-file_watch_test_hooks.ads
+   [Ada]          flyology-structured_server_test_hooks.ads
+   [Ada]          flyology-subprocess_test_hooks.ads
+   [Ada]          flyology-channel_test_hooks.ads
+   [Ada]          flyology-task_lifecycle_test_hooks.ads
+   [Ada]          flyology-worker_pool_test_hooks.ads
+   [Ada]          flyology-connection_test_hooks.ads
+   [Ada]          flyology-tls_test_hooks.ads
+   [Ada]          flyology-dns_test_observations.ads
+   [Ada]          flyology-buffer_test_hooks.ads
+   [Ada]          flyology-dynamic_destroy_test_hooks.ads
+   [Ada]          flyology-adaptive_pool_test_hooks.ads
+   [Ada]          flyology-atomic_primitives.adb
+flyology-atomic_primitives.adb:1:06: warning: "System.Atomic_Primitives" is an internal GNAT unit [-gnatwi]
+flyology-atomic_primitives.adb:1:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology_config.ads
+   [Ada]          flyology-data_structures-clock_abi.ads
+   [Ada]          flyology.ads
+   [Ada]          flyology-shared_memory_native.adb
+   [Ada]          flyology-wall_clock_native.adb
+flyology-wall_clock_native.adb:4:06: warning: "System.OS_Constants" is an internal GNAT unit [-gnatwi]
+flyology-wall_clock_native.adb:4:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-wake_sources.adb
+flyology-wake_sources.adb:3:06: warning: "System.OS_Constants" is an internal GNAT unit [-gnatwi]
+flyology-wake_sources.adb:3:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-sendfile_bridge.adb
+   [Ada]          flyology-file_watch_native.adb
+   [Ada]          flyology-io-files-transfers.adb
+flyology-io-files-transfers.adb:8:06: warning: "System.OS_Constants" is an internal GNAT unit [-gnatwi]
+flyology-io-files-transfers.adb:8:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-observability.adb
+   [Ada]          flyology-operations.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-slab_span_kernel.ads
+   [Ada]          flyology-channels-bounded.adb
+   [Ada]          flyology-observability-stall_watchdogs.adb
+   [Ada]          flyology-io-dns-testing.adb
+   [Ada]          flyology-debug_producer_selection.adb
+   [Ada]          flyology-io-dns.adb
+   [Ada]          flyology-io-file_watches-recursive.adb
+   [Ada]          flyology-tls_policy.adb
+   [Ada]          flyology-supervision-task_generations.adb
+   [Ada]          flyology-process_generations-command_lines.adb
+   [Ada]          flyology-timer_set_policy.adb
+   [Ada]          flyology-shared_memory_policy.adb
+   [Ada]          flyology-placement_policy.adb
+   [Ada]          flyology-task_results.adb
+flyology-task_results.adb:5:06: warning: "System.Soft_Links" is an internal GNAT unit [-gnatwi]
+flyology-task_results.adb:5:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-supervision.adb
+   [Ada]          flyology-process_generations.ads
+   [Ada]          flyology-data_structures-allocation_algorithms-tlsf_kernel.ads
+   [Ada]          flyology-supervision-input_task_generations.adb
+   [Ada]          flyology-data_structures-atomics.adb
+flyology-data_structures-atomics.adb:2:06: warning: "System.Atomic_Primitives" is an internal GNAT unit [-gnatwi]
+flyology-data_structures-atomics.adb:2:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-data_structures-policy.adb
+   [Ada]          flyology-buffers-drivers.adb
+   [Ada]          flyology-data_structures-storage_types.ads
+   [Ada]          flyology-connection_policy.adb
+   [Ada]          flyology-data_structures-envelopes.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-best_fit_kernel.ads
+   [Ada]          flyology-process_generations-protocol.adb
+   [Ada]          flyology-file_transfer_policy.adb
+   [Ada]          flyology-data_structures-storage_types-unsigned_64s.adb
+   [Ada]          flyology-shared_memory-unix_sockets.adb
+   [Ada]          flyology-data_structures-storage_types-immutable.adb
+   [Ada]          flyology-bytes.adb
+   [Ada]          flyology-data_structures-byte_strings.adb
+   [Ada]          flyology-io-sockets-gnat_adapters.adb
+   [Ada]          flyology-channels.ads
+   [Ada]          flyology-socket_policy.adb
+   [Ada]          flyology-io-tls.adb
+   [Ada]          flyology-io-files.adb
+flyology-io-files.adb:6:06: warning: "System.OS_Constants" is an internal GNAT unit [-gnatwi]
+flyology-io-files.adb:6:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-process_generations-transport.adb
+   [Ada]          flyology-task_scopes.adb
+   [Ada]          flyology-execution_groups-topology.adb
+   [Ada]          flyology-dns_policy.adb
+   [Ada]          flyology-supervision-input_children.adb
+   [Ada]          flyology-supervision-static.adb
+   [Ada]          flyology-io-tls_driver.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-buddy.ads
+   [Ada]          flyology-data_structures-dynamic.ads
+   [Ada]          flyology-file_timeout_policy.adb
+   [Ada]          flyology-shared_memory-segments.adb
+   [Ada]          flyology-supervision_policy.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-best_fit.ads
+   [Ada]          flyology-subprocesses-capture.adb
+   [Ada]          flyology-worker_pools.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-adapter.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-tlsf.ads
+   [Ada]          flyology-native_executor_policy.adb
+   [Ada]          flyology-buffers.adb
+   [Ada]          flyology-file_open_policy.adb
+   [Ada]          flyology-data_structures-clock_policy.adb
+   [Ada]          flyology-native_executors.adb
+   [Ada]          flyology-process_generations-coordinators.adb
+   [Ada]          flyology-tls_openssl_raw.adb
+   [Ada]          flyology-operations-drivers.adb
+   [Ada]          flyology-structured_server_policy.adb
+   [Ada]          flyology-process_lifecycle.adb
+   [Ada]          flyology-buffers-domains.adb
+   [Ada]          flyology-data_structures-storage_types-elements.adb
+   [Ada]          flyology-io-tls-openssl.adb
+   [Ada]          flyology-process_generation_policy.adb
+   [Ada]          flyology-tls_openssl_policy.adb
+   [Ada]          flyology-io-file_watches.adb
+   [Ada]          flyology-io-connections-tls.adb
+   [Ada]          flyology-data_structures-dynamic-hash_maps.adb
+   [Ada]          flyology-wait_policy.adb
+   [Ada]          flyology-data_structures.adb
+   [Ada]          flyology-data_structures-vectors.adb
+   [Ada]          flyology-topology_policy.adb
+   [Ada]          flyology-process_generations-agents.adb
+   [Ada]          flyology-data_structures-slab_pools-validation.adb
+   [Ada]          flyology-subprocesses-bootstrap.adb
+   [Ada]          flyology-capacity.adb
+   [Ada]          flyology-data_structures-slab_pools.adb
+   [Ada]          flyology-io-timers.adb
+   [Ada]          flyology-subprocesses.adb
+   [Ada]          flyology-io-connections.adb
+flyology-io-connections.adb:10:06: warning: "System.Soft_Links" is an internal GNAT unit [-gnatwi]
+flyology-io-connections.adb:10:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-data_structures-allocation_pools.ads
+   [Ada]          flyology-io-tls-alpn.adb
+   [Ada]          flyology-shared_memory.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-buddy_kernel.ads
+   [Ada]          flyology-data_structures-regions.adb
+   [Ada]          flyology-capacity_policy.adb
+   [Ada]          flyology-data_structures-dynamic-byte_strings.adb
+   [Ada]          flyology-fairness.adb
+   [Ada]          flyology-buffers-channels.adb
+   [Ada]          flyology-io-tls-drivers.adb
+   [Ada]          flyology-channel_policy.adb
+   [Ada]          flyology-cancellation.adb
+   [Ada]          flyology-data_structures-layouts.adb
+   [Ada]          flyology-time_math.adb
+   [Ada]          flyology-supervision-families.adb
+flyology-supervision-families.adb:677:35: (style) space required [-gnatyt]
+flyology-supervision-families.adb:1787:35: (style) space required [-gnatyt]
+flyology-supervision-families.adb:1843:43: (style) space required [-gnatyt]
+flyology-supervision-families.adb:1912:26: (style) space required [-gnatyt]
+   [Ada]          flyology-io-socket_handoffs.adb
+   [Ada]          flyology-worker_pool_policy.adb
+   [Ada]          flyology-process_generations-messages.adb
+   [Ada]          flyology-memory_regions.adb
+   [Ada]          flyology-wall_clock_policy.adb
+   [Ada]          flyology-descriptor_handoffs.adb
+   [Ada]          flyology-data_structures-handles.ads
+   [Ada]          flyology-supervision-children.adb
+   [Ada]          flyology-data_structures-allocation_algorithms.ads
+   [Ada]          flyology-data_structures-hash_maps.adb
+   [Ada]          flyology-data_structures-rings-spsc.adb
+   [Ada]          flyology-data_structures-rings.ads
+   [Ada]          flyology-data_structures-storage.adb
+   [Ada]          flyology-data_structures-allocation_algorithms-slab_span.ads
+   [Ada]          flyology-wall_clock_native_policy.adb
+   [Ada]          flyology-dormancy.adb
+   [Ada]          flyology-wall_clock_waits.adb
+   [Ada]          flyology-data_structures-allocation_pools-adaptive.adb
+flyology-data_structures-allocation_pools-adaptive.adb:6:06: warning: "System.Soft_Links" is an internal GNAT unit [-gnatwi]
+flyology-data_structures-allocation_pools-adaptive.adb:6:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-io-connections-drivers.adb
+   [Ada]          flyology-io.adb
+flyology-io.adb:6:06: warning: "System.OS_Constants" is an internal GNAT unit [-gnatwi]
+flyology-io.adb:6:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-memory_operations.adb
+   [Ada]          flyology-supervision-families-prepared_admissions.adb
+   [Ada]          flyology-io-structured_servers.adb
+   [Ada]          flyology-execution_groups.adb
+   [Ada]          flyology-io-sockets.adb
+flyology-io-sockets.adb:10:06: warning: "System.Atomic_Primitives" is an internal GNAT unit [-gnatwi]
+flyology-io-sockets.adb:10:06: warning: use of this unit is non-portable and version-dependent [-gnatwi]
+   [Ada]          flyology-data_structures-allocation_algorithms-contract.ads
+   [Ada]          flyology-data_structures-waits.adb
+   [Ada]          flyology-data_structures-arenas.ads
+   [Ada]          flyology-buffers-domains-drivers.adb
+   [Ada]          flyology-supervision-service_slots.adb
+   [Ada]          flyology-supervision-adapters.adb
+   [Ada]          flyology-data_structures-rings-mpmc.adb
+   [Ada]          flyology-counter_policy.adb
+   [Ada]          flyology-task_scope_policy.adb
+   [Ada]          flyology-bounded_channels.adb
+   [Ada]          flyology-data_structures-dynamic-vectors.adb
+   [C]            linux_poller_cloexec_probe.c
+   [C]            worker_pool_test_hooks.c
+   [C]            flyology_tls_test.c
+   [C]            shared_memory_test.c
+   [C]            stack_guard_probe.c
+   [C]            fd_count.c
+   [C]            connection_test_hooks.c
+   [C]            create_race_probe.c
+   [C]            stack_size_probe.c
+   [C]            subprocess_test.c
+   [C]            thread_tls_probe.c
+   [C]            process_lifecycle_probe.c
+   [C]            tcp_reset.c
+   [C]            context_abi_probe.c
+   [C]            file_watch_test_hooks.c
+   [C]            data_structures_mapping.c
+   [C]            structured_server_test_hooks.c
+   [Ada]          finished_library_tasks.adb
+Build Libraries
+   [gprlib]       flyology_allocators.lexch
+   [gprlib]       Flyology.lexch
+   [archive]      libflyology_allocators.a
+   [index]        libflyology_allocators.a
+   [archive]      libFlyology.a
+   [index]        libFlyology.a
+Bind
+   [gprbind]      finished_fiber_stack_smoke.bexch
+   [Ada]          finished_fiber_stack_smoke.ali
+Link
+   [archive]      libruntime_smoke.a
+   [index]        libruntime_smoke.a
+   [link]         finished_fiber_stack_smoke.adb
