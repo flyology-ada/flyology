@@ -2,12 +2,17 @@ with Ada.Finalization;
 with Ada.Unchecked_Deallocation;
 with Flyology;
 with Flyology.Observability;
+with System;
+with System.Storage_Elements;
+with System.Storage_Pools;
 
 procedure Lifecycle_Churn_Smoke is
    package Observation renames Flyology.Observability;
 
    use type Flyology.Observability.Counter;
    use type Flyology.Observability.Task_Instance_Id;
+   use type System.Address;
+   use type System.Storage_Elements.Storage_Count;
 
    Churn_Count           : constant := 1_000;
    --  This test exercises deeper GNARL finalization paths, not the minimum
@@ -15,6 +20,91 @@ procedure Lifecycle_Churn_Smoke is
    --  Stack_Size_Parity_Smoke retains the separate 16 KiB coverage.
    Lifecycle_Stack_Bytes : constant := 64 * 1_024;
    type Boolean_Array is array (Positive range <>) of Boolean;
+
+   package Storage_Elements renames System.Storage_Elements;
+   package Storage_Pools renames System.Storage_Pools;
+
+   --  Keep one test-only slot so every sequential task allocation has the
+   --  same object address independently of the system allocator.
+   Instance_Slot_Bytes  : constant Storage_Elements.Storage_Count :=
+     64 * 1_024;
+   Instance_Slot        :
+     aliased Storage_Elements.Storage_Array (1 .. Instance_Slot_Bytes)
+   with Alignment => 64;
+   Instance_Slot_In_Use : Boolean := False;
+   Instance_Object_Size : Storage_Elements.Storage_Count := 0;
+
+   type Reusing_Storage_Pool is new Storage_Pools.Root_Storage_Pool
+   with null record;
+
+   overriding
+   procedure Allocate
+     (Pool                     : in out Reusing_Storage_Pool;
+      Storage_Address          : out System.Address;
+      Size_In_Storage_Elements : Storage_Elements.Storage_Count;
+      Alignment                : Storage_Elements.Storage_Count);
+
+   overriding
+   procedure Deallocate
+     (Pool                     : in out Reusing_Storage_Pool;
+      Storage_Address          : System.Address;
+      Size_In_Storage_Elements : Storage_Elements.Storage_Count;
+      Alignment                : Storage_Elements.Storage_Count);
+
+   overriding
+   function Storage_Size
+     (Pool : Reusing_Storage_Pool) return Storage_Elements.Storage_Count;
+
+   overriding
+   procedure Allocate
+     (Pool                     : in out Reusing_Storage_Pool;
+      Storage_Address          : out System.Address;
+      Size_In_Storage_Elements : Storage_Elements.Storage_Count;
+      Alignment                : Storage_Elements.Storage_Count)
+   is
+      pragma Unreferenced (Pool);
+   begin
+      if Instance_Slot_In_Use
+        or else Size_In_Storage_Elements > Instance_Slot_Bytes
+        or else Alignment > Instance_Slot'Alignment
+      then
+         raise Storage_Error
+           with "task object does not fit the reusable test slot";
+      end if;
+      Instance_Slot_In_Use := True;
+      Instance_Object_Size := Size_In_Storage_Elements;
+      Storage_Address := Instance_Slot'Address;
+   end Allocate;
+
+   overriding
+   procedure Deallocate
+     (Pool                     : in out Reusing_Storage_Pool;
+      Storage_Address          : System.Address;
+      Size_In_Storage_Elements : Storage_Elements.Storage_Count;
+      Alignment                : Storage_Elements.Storage_Count)
+   is
+      pragma Unreferenced (Pool, Alignment);
+   begin
+      if not Instance_Slot_In_Use
+        or else Storage_Address /= Instance_Slot'Address
+        or else Size_In_Storage_Elements /= Instance_Object_Size
+      then
+         raise Program_Error with "unexpected reusable test-slot deallocation";
+      end if;
+      Instance_Slot_In_Use := False;
+      Instance_Object_Size := 0;
+   end Deallocate;
+
+   overriding
+   function Storage_Size
+     (Pool : Reusing_Storage_Pool) return Storage_Elements.Storage_Count
+   is
+      pragma Unreferenced (Pool);
+   begin
+      return Instance_Slot_Bytes;
+   end Storage_Size;
+
+   Instance_Pool : Reusing_Storage_Pool;
 
    protected State is
       procedure Ran (Index : Positive);
@@ -236,23 +326,32 @@ procedure Lifecycle_Churn_Smoke is
    end Instance_Task;
 
    type Instance_Access is access Instance_Task;
+   for Instance_Access'Storage_Pool use Instance_Pool;
    procedure Free_Instance is new
      Ada.Unchecked_Deallocation (Instance_Task, Instance_Access);
 
    procedure Check_Task_Instances is
-      type Instance_Array is array (Positive range <>) of Observation.Task_Instance_Id;
+      type Instance_Array is
+        array (Positive range <>) of Observation.Task_Instance_Id;
 
       Instances : Instance_Array (1 .. Churn_Count) :=
         (others => Observation.No_Task_Instance);
       Items     : Observation.Task_Snapshot_Array (1 .. 1);
       Count     : Natural;
       Total     : Observation.Counter;
+      Address   : System.Address := System.Null_Address;
    begin
       for Attempt in Instances'Range loop
          declare
             Item             : Instance_Access := new Instance_Task;
             Current_Instance : Observation.Task_Instance_Id;
          begin
+            if Attempt = Instances'First then
+               Address := Item.all'Address;
+            elsif Item.all'Address /= Address then
+               raise Program_Error
+                 with "reusable task-object slot changed address";
+            end if;
             while not Item.all'Terminated loop
                delay 0.000_1;
             end loop;
