@@ -30,6 +30,7 @@ package body Library_Finalize_Runtime_Fixture is
    begin
       if Armed then
          Note_Library_Finalize;
+         raise Program_Error with "review-only exceptional library finalizer";
       end if;
    end Finalize;
 
