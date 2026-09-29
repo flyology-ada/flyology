@@ -110,13 +110,50 @@ FLYOLOGY_RTS_DIR="$consumer_root/standalone-rts" \
 assert_patched_core "$consumer_root/standalone-rts" standalone
 
 git init -q "$consumer_root"
-printf '%s\n' "outer worktree contents must remain unchanged" \
+outer_sentinel_value="outer worktree contents must remain unchanged"
+printf '%s\n' "$outer_sentinel_value" \
   >"$consumer_root/outer-worktree-sentinel"
 consumer_worktree=$(git -C "$pin_root" rev-parse --show-toplevel)
 consumer_worktree=$(CDPATH= cd -- "$consumer_worktree" && pwd -P)
 canonical_consumer_root=$(CDPATH= cd -- "$consumer_root" && pwd -P)
 if [ "$consumer_worktree" != "$canonical_consumer_root" ]; then
   printf '%s\n' "Flyology path pin is not nested below the consumer worktree" >&2
+  exit 1
+fi
+
+#  Exercise the production patch command with a traversal patch. Even inside
+#  an enclosing worktree, Git must reject the path before it can modify the
+#  worktree sentinel outside the generated include directory.
+escape_pin_root="$consumer_root/escape-pin"
+cp -R "$pin_root" "$escape_pin_root"
+case "$(uname -s)" in
+  Darwin) escape_platform=darwin ;;
+  Linux) escape_platform=linux ;;
+  *)
+    printf '%s\n' "unsupported patch-escape test host: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+escape_patch="$escape_pin_root/runtime/patches/gnat-13-16/$escape_platform/s-taprop.adb.patch"
+printf '%s\n' \
+  'diff --git a/../../../../outer-worktree-sentinel b/../../../../outer-worktree-sentinel' \
+  '--- a/../../../../outer-worktree-sentinel' \
+  '+++ b/../../../../outer-worktree-sentinel' \
+  '@@ -1 +1 @@' \
+  '-outer worktree contents must remain unchanged' \
+  '+runtime patch escaped generated directory' >"$escape_patch"
+if ALR="$alr" \
+  FLYOLOGY_RTS_DIR="$escape_pin_root/build/escape-rts" \
+  "$escape_pin_root/scripts/prepare-rts.sh" \
+  >"$consumer_root/patch-escape.log" 2>&1
+then
+  printf '%s\n' "runtime preparation accepted a traversal patch" >&2
+  exit 1
+fi
+if [ "$(sed -n '1p' "$consumer_root/outer-worktree-sentinel")" != \
+  "$outer_sentinel_value" ]
+then
+  printf '%s\n' "runtime patch escaped into the enclosing worktree" >&2
   exit 1
 fi
 

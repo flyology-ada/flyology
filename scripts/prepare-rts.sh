@@ -540,16 +540,17 @@ compile_runtime_ada () {
 
 apply_runtime_patch () {
   selected_patch=$1
+  generated_include_parent=$(dirname -- "$generated_include")
 
   #  --directory is interpreted through any enclosing Git worktree, even for
   #  an absolute target, and a prefix mismatch is only a successful "Skipped
   #  patch" diagnostic. Apply from the generated copy in explicit non-index
-  #  mode and stop repository discovery at that directory.
+  #  mode and stop repository discovery before its parent is inspected.
   (
     cd "$generated_include"
-    GIT_CEILING_DIRECTORIES="$generated_include" \
+    GIT_CEILING_DIRECTORIES="$generated_include_parent" \
       git apply --no-index --recount --unidiff-zero --ignore-space-change \
-        --unsafe-paths "$selected_patch"
+        "$selected_patch"
   )
 }
 
