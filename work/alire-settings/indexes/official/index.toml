@@ -1,0 +1,4 @@
+name = "official"
+priority = 2
+url = "git+https://github.com/alire-project/alire-index"
+

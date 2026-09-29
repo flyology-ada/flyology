@@ -1,0 +1,13 @@
+[index]
+auto_update_asked = true
+
+[toolchain]
+assistant = false
+
+[toolchain.external]
+gnat = false
+gprbuild = false
+
+[toolchain.use]
+gnat = "gnat_flyology_native=16.2.0-patchset.1.1.0"
+gprbuild = "gprbuild=26.0.1"

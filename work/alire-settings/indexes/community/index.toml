@@ -1,0 +1,4 @@
+name = "community"
+priority = 6
+url = "git+https://github.com/alire-project/alire-index#stable-1.4.0"
+

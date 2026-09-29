@@ -1,0 +1,4 @@
+name = "flyology"
+priority = 1
+url = "git+https://github.com/flyology-ada/alire-index.git"
+

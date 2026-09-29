@@ -1,0 +1,4 @@
+name = "allocator_release"
+priority = 7
+url = "git+https://github.com/yrashk/alire-index.git#3cb1e5d6763274bef5825c1f7e7dbed212c3ac81"
+

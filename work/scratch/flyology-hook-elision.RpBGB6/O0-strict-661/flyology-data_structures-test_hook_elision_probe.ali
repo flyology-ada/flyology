@@ -1,0 +1,159 @@
+V "GNAT Lib v16"
+M P W=8
+A -O0
+A -fno-inline
+A -fno-inline-functions
+A -fno-tree-dce
+A -fno-dce
+A -gnatW8
+A -mmacosx-version-min=26.0.0
+A -mcpu=apple-m1
+A -mlittle-endian
+A -mabi=lp64
+A -fPIC
+P ZX
+
+RN
+
+U flyology.data_structures.test_hook_elision_probe%b  flyology-data_structures-test_hook_elision_probe.adb  ebf96a1d NE OO SU
+W flyology%s		flyology.ads		flyology.ali
+W flyology.adaptive_pool_test_hooks%s  flyology-adaptive_pool_test_hooks.ads  flyology-adaptive_pool_test_hooks.ali
+W flyology.buffer_test_hooks%s  flyology-buffer_test_hooks.adb  flyology-buffer_test_hooks.ali
+W flyology.channel_test_hooks%s  flyology-channel_test_hooks.ads  flyology-channel_test_hooks.ali
+W flyology.connection_test_hooks%s  flyology-connection_test_hooks.adb  flyology-connection_test_hooks.ali
+W flyology.data_structures%s  flyology-data_structures.adb  flyology-data_structures.ali
+W flyology.data_structures.guard_test_hooks%s  flyology-data_structures-guard_test_hooks.ads  flyology-data_structures-guard_test_hooks.ali
+W flyology.dns_test_observations%s  flyology-dns_test_observations.adb  flyology-dns_test_observations.ali
+W flyology.dynamic_destroy_test_hooks%s  flyology-dynamic_destroy_test_hooks.ads  flyology-dynamic_destroy_test_hooks.ali
+W flyology.file_watch_test_hooks%s  flyology-file_watch_test_hooks.adb  flyology-file_watch_test_hooks.ali
+W flyology.structured_server_test_hooks%s  flyology-structured_server_test_hooks.ads  flyology-structured_server_test_hooks.ali
+W flyology.subprocess_test_hooks%s  flyology-subprocess_test_hooks.ads  flyology-subprocess_test_hooks.ali
+W flyology.task_lifecycle_test_hooks%s  flyology-task_lifecycle_test_hooks.adb  flyology-task_lifecycle_test_hooks.ali
+W flyology.tls_test_hooks%s  flyology-tls_test_hooks.ads  flyology-tls_test_hooks.ali
+W flyology.wall_clock_io_testing%s  flyology-wall_clock_io_testing.ads  flyology-wall_clock_io_testing.ali
+W flyology.wall_clock_testing%s  flyology-wall_clock_testing.ads  flyology-wall_clock_testing.ali
+W flyology.worker_pool_test_hooks%s  flyology-worker_pool_test_hooks.ads  flyology-worker_pool_test_hooks.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+
+U flyology.data_structures.test_hook_elision_probe%s  flyology-data_structures-test_hook_elision_probe.ads  03adb843 EE NE OO SU
+W flyology.data_structures%s  flyology-data_structures.adb  flyology-data_structures.ali
+
+D ada.ads		19700101000000 76789da1 ada%s
+D a-unccon.ads		19700101000000 0e9b276f ada.unchecked_conversion%s
+D flyology.ads		20260920195154 3ef168e6 flyology%s
+D flyology-adaptive_pool_test_hooks.ads  20260920195154 9abe5ccf flyology.adaptive_pool_test_hooks%s
+D flyology-buffer_test_hooks.ads  20260920195154 8950ed98 flyology.buffer_test_hooks%s
+D flyology-channel_test_hooks.ads  20260920195154 2614d369 flyology.channel_test_hooks%s
+D flyology-connection_test_hooks.ads  20260920195154 60619f02 flyology.connection_test_hooks%s
+D flyology-data_structures.ads  20260920195154 980b0371 flyology.data_structures%s
+D flyology-data_structures-guard_test_hooks.ads  20260920195154 b15cb445 flyology.data_structures.guard_test_hooks%s
+D flyology-data_structures-layouts.ads  20260920195154 247d8790 flyology.data_structures.layouts%s
+D flyology-data_structures-test_hook_elision_probe.ads  20260920195154 9ba6bb32 flyology.data_structures.test_hook_elision_probe%s
+D flyology-data_structures-test_hook_elision_probe.adb  20260920195154 764df1a6 flyology.data_structures.test_hook_elision_probe%b
+D flyology-dns_test_observations.ads  20260920195154 620af04c flyology.dns_test_observations%s
+D flyology-dynamic_destroy_test_hooks.ads  20260920195154 368bf278 flyology.dynamic_destroy_test_hooks%s
+D flyology-file_watch_test_hooks.ads  20260920195154 db333c5a flyology.file_watch_test_hooks%s
+D flyology-structured_server_test_hooks.ads  20260920195154 1497ce00 flyology.structured_server_test_hooks%s
+D flyology-subprocess_test_hooks.ads  20260920195154 88212de9 flyology.subprocess_test_hooks%s
+D flyology-task_lifecycle_test_hooks.ads  20260920195154 1747710c flyology.task_lifecycle_test_hooks%s
+D flyology-tls_test_hooks.ads  20260920195154 a875b945 flyology.tls_test_hooks%s
+D flyology-wall_clock_io_testing.ads  20260920195154 233e7e28 flyology.wall_clock_io_testing%s
+D flyology-wall_clock_testing.ads  20260920195154 77a00951 flyology.wall_clock_testing%s
+D flyology-worker_pool_test_hooks.ads  20260920195154 c1a030a0 flyology.worker_pool_test_hooks%s
+D interfac.ads		19700101000000 9111f9c1 interfaces%s
+D i-c.ads		19700101000000 dbdd3be7 interfaces.c%s
+D system.ads		19700101000000 8a611ac3 system%s
+D s-exctab.ads		19700101000000 91bef6ef system.exception_table%s
+D s-parame.ads		19700101000000 a1aeab5c system.parameters%s
+D s-stalib.ads		19700101000000 1c9580f6 system.standard_library%s
+D s-tasinf.ads		19700101000000 801abd01 system.task_info%s
+G a e
+G c Z s b [test_hook_elision_probe flyology__data_structures 1 44 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [arm_next_acquisition_near_exhaustion flyology__buffer_test_hooks 9 14 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [reset flyology__dns_test_observations 12 14 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [barrier flyology__connection_test_hooks 12 14 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [reset_scheduler_waiter_work flyology__connection_test_hooks 18 14 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [scheduler_waiter_work flyology__connection_test_hooks 21 13 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [barrier flyology__task_lifecycle_test_hooks 41 14 none]
+G r c none [test_hook_elision_probe flyology__data_structures 1 44 none] [consume_events_lost flyology__file_watch_test_hooks 9 13 none]
+X 3 flyology.ads
+11K9*Flyology 33e13 11|1r19 12|1r6 2r6 3r6 4r6 5r6 6r6 7r6 8r6 9r6 10r6 11r6
+. 12r6 13r6 14r6 15r6 18r11 23r7 24r7 26r7 27r7 29r7 30r7 32r7 33r7 35r7
+. 36r7 38r7 39r7 41r7 42r7 44r7 45r7 46r7 48r9 50r7 51r7 53r7 54r7 55r10
+. 57r7 58r19 60r7 61r7 63r7 64r19 66r7 67r7 69r7 70r7 72r5
+X 4 flyology-adaptive_pool_test_hooks.ads
+5K26*Adaptive_Pool_Test_Hooks 25e38 12|1w15 23r16 24r16
+12b4*Enabled{boolean} 12|23r41
+14U14*Reset 12|24s41
+X 5 flyology-buffer_test_hooks.ads
+2K26*Buffer_Test_Hooks 67e31 12|3w15 26r16 27r16
+7b4*Enabled{boolean} 12|26r34
+9U14*Arm_Next_Acquisition_Near_Exhaustion 12|27s34
+X 6 flyology-channel_test_hooks.ads
+5K26*Channel_Test_Hooks 49e32 12|4w15 29r16 30r16
+11b4*Enabled{boolean} 12|29r35
+17U14*Before_Send_Barrier 12|30s35
+X 7 flyology-connection_test_hooks.ads
+5K26*Connection_Test_Hooks 24e35 12|2w15 44r16 45r16 46r16 48r18
+10b4*Enabled{boolean} 12|44r38
+12U14*Barrier 12|45s38
+18U14*Reset_Scheduler_Waiter_Work 12|46s38
+21V13*Scheduler_Waiter_Work{24|71M9} 12|48s40
+X 8 flyology-data_structures.ads
+15K18*Data_Structures 136e29 11|1r28 12|7r15 18r20 38r16 39r16 72r14
+X 9 flyology-data_structures-guard_test_hooks.ads
+4K42*Guard_Test_Hooks 16e46 12|7w31 38r32 39r32
+8b4*Enabled{boolean} 12|38r49
+10U14*Reset 12|39s49
+X 11 flyology-data_structures-test_hook_elision_probe.ads
+1U44*Test_Hook_Elision_Probe 8|15k18 12|18b36 72l30 72t53
+X 12 flyology-data_structures-test_hook_elision_probe.adb
+20b4 Observed{boolean} 47m7 58m7 64m7
+X 13 flyology-dns_test_observations.ads
+4K26*DNS_Test_Observations 12|5w15 32r16 33r16 13|20e35
+9b4*Enabled{boolean} 12|32r38
+12U14*Reset 12|33s38
+X 14 flyology-dynamic_destroy_test_hooks.ads
+5K26*Dynamic_Destroy_Test_Hooks 12|6w15 35r16 36r16 14|24e40
+11b4*Enabled{boolean} 12|35r43
+13U14*Reset 12|36s43
+X 15 flyology-file_watch_test_hooks.ads
+3K26*File_Watch_Test_Hooks 12|8w15 63r16 64r28 15|12e35
+7b4*Enabled{boolean} 12|63r38
+9V13*Consume_Events_Lost{boolean} 12|64s50
+X 16 flyology-structured_server_test_hooks.ads
+6K26*Structured_Server_Test_Hooks 12|9w15 60r16 61r16 16|18e42
+11b4*Enabled{boolean} 12|60r45
+13U14*Barrier 12|61s45
+X 17 flyology-subprocess_test_hooks.ads
+5K26*Subprocess_Test_Hooks 12|10w15 57r16 58r28 17|21e35
+10b4*Enabled{boolean} 12|57r38
+12V13*Fail_Reaper_Allocation{boolean} 12|58s50
+X 18 flyology-task_lifecycle_test_hooks.ads
+3K26*Task_Lifecycle_Test_Hooks 12|11w15 53r16 54r16 55r19 18|58e39
+9b4*Enabled{boolean} 12|53r42
+12n7*Static_Monitor_Registered{11E9} 12|55r45
+41U14*Barrier 12|54s42
+X 19 flyology-tls_test_hooks.ads
+4K26*TLS_Test_Hooks 12|12w15 41r16 42r16 19|28e28
+9b4*Enabled{boolean} 12|41r31
+15U14*Reset 12|42s31
+X 20 flyology-wall_clock_io_testing.ads
+6K26*Wall_Clock_IO_Testing 12|13w15 69r16 70r16 20|26e35
+12b4*Enabled{boolean} 12|69r38
+16U14*Reset 12|70s38
+X 21 flyology-wall_clock_testing.ads
+6K26*Wall_Clock_Testing 12|14w15 66r16 67r16 21|63e32
+12b4*Enabled{boolean} 12|66r35
+20U14*Note_Sample 12|67s35
+X 22 flyology-worker_pool_test_hooks.ads
+5K26*Worker_Pool_Test_Hooks 12|15w15 50r16 51r16 22|36e36
+11b4*Enabled{boolean} 12|50r39
+23U14*Run_Claim_Barrier 12|51s39
+X 23 interfac.ads
+47K9*Interfaces 12|16r6 19r13 23|247e15
+X 24 i-c.ads
+33K20*C 12|16w17 19r24 24|605e17
+71M9*unsigned 12|19r26
+
