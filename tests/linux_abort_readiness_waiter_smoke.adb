@@ -27,14 +27,22 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       protected Observation is
          procedure Note_First_Return;
          procedure Note_Second_Return;
+         procedure Request_Replacement_Wait;
+         procedure Claim_Replacement_Wait (Claimed : out Boolean);
+         procedure Note_Replacement_Result (Ready : Boolean);
          procedure Stop_Runner;
          function First_Returned return Boolean;
          function Second_Returned return Boolean;
+         function Replacement_Finished return Boolean;
+         function Replacement_Ready return Boolean;
          function Runner_Stopped return Boolean;
       private
-         First_Done  : Boolean := False;
-         Second_Done : Boolean := False;
-         Stop        : Boolean := False;
+         First_Done       : Boolean := False;
+         Second_Done      : Boolean := False;
+         Replacement_Run  : Boolean := False;
+         Replacement_Done : Boolean := False;
+         Replacement_Woke : Boolean := False;
+         Stop             : Boolean := False;
       end Observation;
 
       protected body Observation is
@@ -48,6 +56,23 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
             Second_Done := True;
          end Note_Second_Return;
 
+         procedure Request_Replacement_Wait is
+         begin
+            Replacement_Run := True;
+         end Request_Replacement_Wait;
+
+         procedure Claim_Replacement_Wait (Claimed : out Boolean) is
+         begin
+            Claimed := Replacement_Run;
+            Replacement_Run := False;
+         end Claim_Replacement_Wait;
+
+         procedure Note_Replacement_Result (Ready : Boolean) is
+         begin
+            Replacement_Done := True;
+            Replacement_Woke := Ready;
+         end Note_Replacement_Result;
+
          procedure Stop_Runner is
          begin
             Stop := True;
@@ -58,6 +83,12 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
 
          function Second_Returned return Boolean
          is (Second_Done);
+
+         function Replacement_Finished return Boolean
+         is (Replacement_Done);
+
+         function Replacement_Ready return Boolean
+         is (Replacement_Woke);
 
          function Runner_Stopped return Boolean
          is (Stop);
@@ -109,17 +140,38 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       type Target_Waiter_Access is access Target_Waiter;
       Target_Task : Target_Waiter_Access := null;
 
-      task Runner is
+      --  The scheduler promotes zero-delay timers every 64 dispatches. Keep
+      --  one more runner ready so readiness is collected by its ready-work
+      --  polling path; change this fixture if that maintenance interval moves.
+      Ready_Runner_Count : constant Positive := 65;
+
+      --  Runners are allocated only after the descriptor waits register.
+      --  Priority 20 then remains below the target's 25 while outranking the
+      --  canceled backlog's 10 during the bounded-drain scheduling window.
+      task type Runner is
          pragma Task_Info (Flyology.Lightweight_Task);
-         pragma Priority (1);
+         pragma Priority (20);
       end Runner;
 
       task body Runner is
+         Claimed : Boolean;
       begin
-         while not Observation.Runner_Stopped loop
+         loop
+            Observation.Claim_Replacement_Wait (Claimed);
+            if Claimed then
+               Observation.Note_Replacement_Result
+                 (Flyology.IO.Wait
+                    (Sockets.Native_Descriptor (Target), Flyology.IO.For_Read, 0.500));
+               exit;
+            end if;
+            exit when Observation.Runner_Stopped;
             delay 0.0;
          end loop;
       end Runner;
+
+      type Runner_Access is access Runner;
+      type Runner_Array is array (1 .. Ready_Runner_Count) of Runner_Access;
+      Runners : Runner_Array := [others => null];
 
       procedure Await
         (Condition : not null access function return Boolean; Failure : String)
@@ -144,6 +196,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
 
       function Budget_Parked return Boolean
       is (Fault_Control.Descriptor_Cancel_Budget_Parked);
+
+      function Replacement_Finished return Boolean
+      is (Observation.Replacement_Finished);
 
       function Target_Terminated return Boolean
       is (Target_Task /= null and then Target_Task'Terminated);
@@ -218,6 +273,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       Await
         (All_Registered'Access,
          "65 descriptor waiters did not reach the poller");
+      for Index in Runners'Range loop
+         Runners (Index) := new Runner;
+      end loop;
       Sockets.Send_Socket (Target_Peer, Payload, Last);
       if Last /= Payload'Last then
          raise Program_Error with "readiness signal was short";
@@ -246,6 +304,7 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
            with
              "bounded cancellation drain did not process exactly 64 waiters";
       end if;
+      Observation.Request_Replacement_Wait;
       Fault_Control.Release_Descriptor_Cancel_Budget;
 
       Await
@@ -253,6 +312,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
          "65th cancellation target did not terminate");
       Await
         (Backlog_Terminated'Access, "cancellation backlog did not terminate");
+      Await
+        (Replacement_Finished'Access,
+         "replacement readiness waiter did not finish");
       Observation.Stop_Runner;
 
       if Fault_Control.Poller_Cancel_During_Translation_Count /= 0 then
@@ -270,6 +332,9 @@ procedure Linux_Abort_Readiness_Waiter_Smoke is
       elsif Observation.Second_Returned then
          raise Program_Error
            with "stale cancellation reached a replacement wait generation";
+      elsif not Observation.Replacement_Ready then
+         raise Program_Error
+           with "budget-deferred cancellation suppressed the replacement kernel watch";
       end if;
       Cleanup;
    exception

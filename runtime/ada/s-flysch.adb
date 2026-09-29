@@ -555,7 +555,10 @@ package body System.Flyology.Scheduler is
    function IO_Bucket_For (Descriptor : C.int) return IO_Bucket_Index;
    function Active_IO_Link (Item : not null Fiber_Access; Kind : IO_Link_Kind) return IO_Wait_Link_Access;
    function IO_Interest_Registered_Locked
-     (Group : not null Loop_Group_Access; Descriptor : C.int; Interest : Pollers.Interest) return Boolean;
+     (Group                        : not null Loop_Group_Access;
+      Descriptor                   : C.int;
+      Interest                     : Pollers.Interest;
+      Include_Queued_Cancellations : Boolean := True) return Boolean;
    procedure Register_IO_Wait_Locked
      (Group      : not null Loop_Group_Access;
       Item       : not null Fiber_Access;
@@ -1208,7 +1211,10 @@ package body System.Flyology.Scheduler is
    end Active_IO_Link;
 
    function IO_Interest_Registered_Locked
-     (Group : not null Loop_Group_Access; Descriptor : C.int; Interest : Pollers.Interest) return Boolean
+     (Group                        : not null Loop_Group_Access;
+      Descriptor                   : C.int;
+      Interest                     : Pollers.Interest;
+      Include_Queued_Cancellations : Boolean) return Boolean
    is
       Position : IO_Wait_Link_Access := Group.IO_Waiters (IO_Bucket_For (Descriptor));
    begin
@@ -1216,6 +1222,8 @@ package body System.Flyology.Scheduler is
          if Position.Registered
            and then Position.Descriptor = Descriptor
            and then Position.Interest = Interest
+           and then (Include_Queued_Cancellations
+                     or else (Position.Owner /= null and then not Position.Owner.Descriptor_Cancel_Queued))
          then
             return True;
          end if;
@@ -3725,7 +3733,13 @@ package body System.Flyology.Scheduler is
             if Request.Descriptor < 0 or else Request.For_Write not in 0 | 1 then
                return False;
             end if;
-            Needs_Kernel_Watch := not IO_Interest_Registered_Locked (Group, Request.Descriptor, Interest);
+            --  A queued cancellation retains its scheduler link until the
+            --  bounded drain reaches it, but a delivered one-shot may already
+            --  have consumed its kernel interest. Such a link cannot cover a
+            --  new waiter's arm.
+            Needs_Kernel_Watch :=
+              not IO_Interest_Registered_Locked
+                    (Group, Request.Descriptor, Interest, Include_Queued_Cancellations => False);
             if Needs_Kernel_Watch then
                for Planned in 1 .. Kernel_Watch_Count loop
                   if Kernel_Watches (Planned).Descriptor = Request.Descriptor
