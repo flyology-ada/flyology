@@ -1,0 +1,20 @@
++===========================GNAT BUG DETECTED==============================+
+| 13.3.0 (x86_64-linux-gnu) in fold_convert_loc, at fold-const.cc:2505     |
+| Error detected at protected_duration_validity.adb:17:21                  |
+| Compiling protected_duration_validity.adb                                |
+| Please submit a bug report; see https://gcc.gnu.org/bugs/ .              |
+| Use a subject line meaningful to you and us to track the bug.            |
+| Include the entire contents of this bug box in the report.               |
+| Include the exact command that you entered.                              |
+| Also include sources listed below.                                       |
++==========================================================================+
+
+Please include these source files with error report
+Note that list may not be accurate in some cases,
+so please double check that the problem can still
+be reproduced with the set of files listed.
+Consider also -gnatd.n switch (see debug.adb).
+
+protected_duration_validity.adb
+
+compilation abandoned

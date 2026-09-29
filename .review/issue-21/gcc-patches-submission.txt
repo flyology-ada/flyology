@@ -1,0 +1,126 @@
+DRAFT — human review and upstream gates pending; do not send as-is.
+
+To: gcc-patches@gcc.gnu.org
+Subject: [PATCH] ada: Remove stale validity raises from automatic lock-free bodies
+
+An automatically selected lock-free protected body is analyzed before its
+protected type is marked lock-free. The original statements can therefore
+contain compiler-generated invalid-data validity raises. They remain when
+the statements are copied into the generated lock-free body, although direct
+analysis of an explicitly lock-free body suppresses those checks.
+
+On x86-64 Linux, the added protected Duration round-trip test rejects a
+valid negative value at -O0 -gnatVa and aborts in fold_convert_loc at
+-O2 -gnatVa. Remove only generated CE_Invalid_Data raises while traversing
+the copied statements. Source raise statements and other checks remain.
+
+The test is an executable gnat.dg case with -O2 -gnatVa. It fails before
+the patch and runs successfully afterward on x86-64 Linux. The standalone
+patch applies with zero fuzz to the pinned GCC 13.2.0, 14.2.0, 15.3.0,
+16.1.0, and 16.2.0 sources and to gcc-mirror/gcc master at
+56de4652dbfc3a79ee4946f0274aba115bd83ccb (2026-09-22).
+
+Published patchset CI exercises unpatched and patched Linux x86-64, Linux
+AArch64, and macOS AArch64 compilers. Its GCC 16.2.0 x86-64 job records the
+before/after behavior:
+https://github.com/flyology-ada/gnat-patches/actions/runs/35117276018/job/104866768180
+
+A direct unpatched Ubuntu GCC 13.3.0 x86-64 reproduction with
+`gcc-13 -c -O2 -gnatVa protected_duration_validity.adb` also exits with status
+1 and prints the complete GNAT bug box naming fold_convert_loc at
+fold-const.cc:2505. The raw diagnostic and full `gcc-13 -v` output are retained
+with the local submission package.
+
+Testing still required for an upstream submission: bootstrap an otherwise
+unmodified GCC tree with this patch alone, then compare the Ada and gnat.dg
+testsuite results before and after. The published patchset CI builds with
+--disable-bootstrap and contains other independent patches, so it does not
+meet GCC's exact-change bootstrap and regression-test requirement.
+
+gcc/ada/ChangeLog:
+
+	* exp_ch9.adb (Build_Lock_Free_Unprotected_Subprogram_Body): Remove
+	stale compiler-generated invalid-data raises from the copied body.
+
+gcc/testsuite/ChangeLog:
+
+	* gnat.dg/protected_duration_validity.adb: New executable regression.
+
+The related Flyology report is https://github.com/flyology-ada/flyology/issues/21 .
+The published patch bundle is
+https://gnat-patches.flyology.org/bundles/protected-duration-validity/ .
+Add the GCC Bugzilla PR reference after filing, and add the human author's
+required DCO sign-off or identify an existing FSF assignment before sending.
+
+PROVENANCE BLOCKER: the commit that introduced both this compiler patch and
+test, 75f928b63f34b79f95f294d635e9f0b9fe95f497, records
+`Co-Authored-By: Claude Opus 5 (1M context)`. GCC's current AI policy declines
+legally significant LLM-generated or LLM-derived compiler code. Do not send
+this draft until a human has established the exact provenance of the compiler
+hunk and confirmed that it is eligible for contribution. If the test used LLM
+assistance, the permitted testsuite exception requires the appropriate
+`Assisted-by` trailer and human review. Only the human contributor may add a
+DCO `Signed-off-by` line.
+
+---
+diff --git a/gcc/ada/exp_ch9.adb b/gcc/ada/exp_ch9.adb
+--- a/gcc/ada/exp_ch9.adb
++++ b/gcc/ada/exp_ch9.adb
+@@ -2769,6 +2769,21 @@ package body Exp_Ch9 is
+             --  Start of processing for Process_Node
+ 
+             begin
++               --  Validity checks are suppressed while an explicitly
++               --  lock-free protected subprogram is analyzed directly.
++               --  When the implementation is selected automatically the
++               --  checks have already been inserted in the original
++               --  statements before they are copied here, so drop those
++               --  stale checks from the generated lock-free body.
++
++               if Nkind (N) = N_Raise_Constraint_Error
++                 and then RT_Exception_Code'Val (UI_To_Int (Reason (N))) =
++                            CE_Invalid_Data
++               then
++                  Rewrite (N, Make_Null_Statement (Sloc (N)));
++                  return Skip;
++               end if;
++
+                --  Wrap each return and raise statement that appear inside a
+                --  procedure. Skip the last return statement which is added by
+                --  default since it is transformed into an exit statement.
+diff --git a/gcc/testsuite/gnat.dg/protected_duration_validity.adb b/gcc/testsuite/gnat.dg/protected_duration_validity.adb
+new file mode 100644
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/protected_duration_validity.adb
+@@ -0,0 +1,31 @@
++--  { dg-do run }
++--  { dg-options "-O2 -gnatVa" }
++
++with Ada.Text_IO; use Ada.Text_IO;
++
++procedure Protected_Duration_Validity is
++   protected Control is
++      procedure Set (Value : Duration);
++      function Get return Duration;
++   private
++      Current : Duration := 0.0;
++   end Control;
++
++   protected body Control is
++      procedure Set (Value : Duration) is
++      begin
++         Current := Value;
++      end Set;
++
++      function Get return Duration is
++      begin
++         return Current;
++      end Get;
++   end Control;
++begin
++   Control.Set (-1.0);
++   if Control.Get /= -1.0 then
++      raise Program_Error with "protected Duration round trip failed";
++   end if;
++   Put_Line ("PASS protected Duration validity");
++end Protected_Duration_Validity;

@@ -1,0 +1,61 @@
+diff --git a/gcc/ada/exp_ch9.adb b/gcc/ada/exp_ch9.adb
+--- a/gcc/ada/exp_ch9.adb
++++ b/gcc/ada/exp_ch9.adb
+@@ -2769,6 +2769,21 @@ package body Exp_Ch9 is
+             --  Start of processing for Process_Node
+ 
+             begin
++               --  Validity checks are suppressed while an explicitly
++               --  lock-free protected subprogram is analyzed directly.
++               --  When the implementation is selected automatically the
++               --  checks have already been inserted in the original
++               --  statements before they are copied here, so drop those
++               --  stale checks from the generated lock-free body.
++
++               if Nkind (N) = N_Raise_Constraint_Error
++                 and then RT_Exception_Code'Val (UI_To_Int (Reason (N))) =
++                            CE_Invalid_Data
++               then
++                  Rewrite (N, Make_Null_Statement (Sloc (N)));
++                  return Skip;
++               end if;
++
+                --  Wrap each return and raise statement that appear inside a
+                --  procedure. Skip the last return statement which is added by
+                --  default since it is transformed into an exit statement.
+diff --git a/gcc/testsuite/gnat.dg/protected_duration_validity.adb b/gcc/testsuite/gnat.dg/protected_duration_validity.adb
+new file mode 100644
+--- /dev/null
++++ b/gcc/testsuite/gnat.dg/protected_duration_validity.adb
+@@ -0,0 +1,31 @@
++--  { dg-do run }
++--  { dg-options "-O2 -gnatVa" }
++
++with Ada.Text_IO; use Ada.Text_IO;
++
++procedure Protected_Duration_Validity is
++   protected Control is
++      procedure Set (Value : Duration);
++      function Get return Duration;
++   private
++      Current : Duration := 0.0;
++   end Control;
++
++   protected body Control is
++      procedure Set (Value : Duration) is
++      begin
++         Current := Value;
++      end Set;
++
++      function Get return Duration is
++      begin
++         return Current;
++      end Get;
++   end Control;
++begin
++   Control.Set (-1.0);
++   if Control.Get /= -1.0 then
++      raise Program_Error with "protected Duration round trip failed";
++   end if;
++   Put_Line ("PASS protected Duration validity");
++end Protected_Duration_Validity;
