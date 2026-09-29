@@ -38,8 +38,14 @@ FLYOLOGY_LOOP_POOL_SIZE="$loops" \
 FLYOLOGY_PLACEMENT=round_robin \
   "$project_root/scripts/prepare-rts.sh" >/dev/null
 rts="$project_root/build/rts"
-if [ ! -f "$rts/.flyology-rts-root" ]; then
-  printf '%s\n' "refusing to benchmark without Flyology custom RTS marker: $rts/.flyology-rts-root" >&2
+marker_value='Flyology prepared RTS version 1'
+if [ ! -f "$rts/.flyology-rts-root" ] \
+  || [ "$(sed -n '1p' "$rts/.flyology-rts-root")" != "$marker_value" ] \
+  || [ ! -f "$rts/adalib/libgnat.a" ] \
+  || [ ! -f "$rts/adalib/libgnarl.a" ] \
+  || [ ! -f "$rts/adainclude/s-stalib.adb" ]; then
+  printf '%s\n' \
+    "refusing to benchmark without a complete marker-verified Flyology RTS: $rts" >&2
   exit 1
 fi
 

@@ -3158,10 +3158,19 @@ native client with an optimized build and a 16-loop prepared runtime. It
 reports round trips per second and test-only nonblocking descriptor setup
 attempts; the counter is absent from normal library builds.
 
+The synchronization benchmark compares raw atomic controls, protected
+functions and procedures, short and long actions, conditional/timed/requeued
+entries, contended entries, and rendezvous across native, lightweight, and
+mixed callers. Set `FLYOLOGY_LOOP_POOL_SIZE` to reproduce a chosen loop count.
+Its runner requires the exact Flyology RTS marker and a complete runtime tree;
+the protected-object investigation is recorded in
+[`benchmarks/protected-object-notebook.md`](benchmarks/protected-object-notebook.md).
+
 The TCP readiness benchmark is a persistent HTTP/1.1 request/reply fixture for
 the lightweight socket path. Its runner prepares an optimized custom RTS,
-refuses to build or run without the Flyology RTS ownership marker, and records
-`oha` JSON plus server and client `/usr/bin/time -lp` resource data. The
+refuses to build or run without the exact Flyology RTS ownership marker and a
+complete runtime tree, and records `oha` JSON plus server and client
+`/usr/bin/time -lp` resource data. The
 adjacent optimization record is in
 [`benchmarks/lightweight-readiness-notebook.md`](benchmarks/lightweight-readiness-notebook.md).
 
