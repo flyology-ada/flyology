@@ -2445,6 +2445,10 @@ package body System.Flyology.Scheduler is
          return;
       end if;
 
+      if Faults.Enabled then
+         Faults.Note_Scheduler_Finalize;
+      end if;
+
       --  Prevent creation before inspecting the registry. GNARL calls this
       --  only after global tasks and controlled library objects have been
       --  finalized; taking every shard makes an unexpected live operation

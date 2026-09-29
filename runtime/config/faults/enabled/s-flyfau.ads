@@ -103,6 +103,8 @@ package System.Flyology.Faults is
    function Pause_Final_Reaper return Boolean;
    procedure Release_Final_Reaper;
 
+   procedure Note_Scheduler_Finalize;
+
    --  Create/Finalize rendezvous. Pause_Create_Registration parks a creating
    --  thread that already passed the unlocked lifecycle guard and returns
    --  False if finalization never arrives. Note_Create_Registering reports
