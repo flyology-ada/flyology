@@ -515,6 +515,7 @@ guide_utilization_example
 io_smoke
 io_starvation_smoke
 lazy_event_start_smoke
+library_finalize_exception_smoke
 library_finalize_runtime_smoke
 lifecycle_smoke
 lifecycle_churn_smoke
@@ -902,6 +903,25 @@ for test_main in $ordinary_mains; do
     process_lifecycle_smoke|process_exit_live_task_smoke|native_executor_library_finalize_smoke|native_executor_local_finalize_smoke)
       "$project_root/scripts/run-with-timeout.sh" 10 \
         "$current_test_bin/$test_main"
+      ;;
+    library_finalize_exception_smoke)
+      finalization_error_log="$project_root/build/tests/library-finalize-exception.log"
+      set +e
+      "$project_root/scripts/run-with-timeout.sh" 10 \
+        "$current_test_bin/$test_main" >"$finalization_error_log" 2>&1
+      finalization_status=$?
+      set -e
+      if [ "$finalization_status" -ne 1 ] \
+        || ! grep -F \
+          "adjust/finalize raised PROGRAM_ERROR: issue 158 finalization sentinel" \
+          "$finalization_error_log" >/dev/null
+      then
+         cat "$finalization_error_log" >&2
+         printf '%s\n' \
+           "exceptional library finalization returned $finalization_status instead of preserving its failure" \
+           >&2
+         exit 1
+      fi
       ;;
     connection_admission_smoke|connection_close_abort_smoke|connection_state_model|connection_tls_upgrade_smoke|managed_connection_connect_smoke)
       "$project_root/scripts/run-with-timeout.sh" 30 \

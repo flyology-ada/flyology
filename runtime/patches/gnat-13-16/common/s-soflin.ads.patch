@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/s-soflin.ads
++++ b/s-soflin.ads
+@@ -229,0 +230,7 @@
++   Library_Finalization_Handler : No_Param_Proc := Abort_Defer_NT'Access;
++   pragma Suppress (Access_Check, Library_Finalization_Handler);
++   --  Called by Reraise_Library_Exception_If_Any after the binder has
++   --  finalized every library object and before it propagates a saved
++   --  finalization error. The tasking runtime replaces this no-op with its
++   --  own completion handler. The callback must not propagate an exception,
++   --  so it cannot replace the binder's saved error.

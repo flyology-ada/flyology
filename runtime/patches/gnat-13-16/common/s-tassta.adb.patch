@@ -2,7 +2,7 @@
 # Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
 --- a/s-tassta.adb
 +++ b/s-tassta.adb
-@@ -43,0 +44,2 @@
+@@ -43,0 +45,2 @@
 +with System.Flyology.Scheduler;
 +with System.Flyology.Task_Results;
 @@ -468,6 +493,9 @@
@@ -98,19 +98,11 @@
 -      if Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
 +      if not Is_Lightweight
 +        and then Base_CPU /= System.Multiprocessors.Not_A_Specific_CPU
-@@ -888,5 +937,12 @@
-       --  Finalize all library-level controlled objects
-
-       if not SSL."=" (SSL.Finalize_Library_Objects, null) then
-          SSL.Finalize_Library_Objects.all;
-       end if;
-+
-+      --  GNARL has completed global tasks and library objects. Flyology may
-+      --  now join quiescent event-loop threads; if an unexpected fiber is
-+      --  still live, the scheduler records deferred cleanup and leaves the
-+      --  resources to process exit instead of racing that task.
-+      System.Flyology.Scheduler.Finalize;
-@@ -916,18 +972,22 @@
+@@ -905,0 +955,1 @@
+       SSL.Check_Abort_Status := SSL.Check_Abort_Status_NT'Access;
+       SSL.Get_Stack_Info     := SSL.Get_Stack_Info_NT'Access;
++      SSL.Library_Finalization_Handler := SSL.Abort_Defer_NT'Access;
+@@ -916,18 +997,22 @@
     procedure Free_Task (T : Task_Id) is
 -      Self_Id : constant Task_Id := Self;
 +      Self_Id        : constant Task_Id := Self;
@@ -184,3 +176,7 @@
 +      System.Flyology.Task_Results.Release_Task_Result (Result_Storage);
        System.Task_Primitives.Operations.Finalize_TCB (T);
     end Vulnerable_Free_Task;
+@@ -2042,0 +2121,2 @@
+    SSL.Adafinal := Finalize_Global_Tasks'Access;
++   SSL.Library_Finalization_Handler :=
++     System.Flyology.Scheduler.Finalize'Access;

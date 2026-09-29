@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH GCC-exception-3.1
+# Contains patch context derived from the GCC GNAT runtime; see ../../LICENSE.
+--- a/a-except.adb
++++ b/a-except.adb
+@@ -1738,0 +1739,4 @@
++      --  Complete runtime cleanup after the binder has finalized every
++      --  library object and before a saved finalization error is propagated.
++      Library_Finalization_Handler.all;
++

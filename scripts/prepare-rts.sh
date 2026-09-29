@@ -482,6 +482,8 @@ fi
 task_state_patch="$patch_root/common/s-tassta.adb.patch"
 blocking_detection_patch="$patch_root/common/s-taskin.adb.patch"
 interrupt_service_patch="$patch_root/common/s-interr.adb.patch"
+library_exception_patch="$patch_root/common/a-except.adb.patch"
+soft_links_patch="$patch_root/common/s-soflin.ads.patch"
 legacy_suspension_body_patch="$patch_root/legacy/a-sytaco.adb.patch"
 case "$compiler_release" in
   13.2.2|14.1.3|14.2.1)
@@ -565,6 +567,8 @@ fi
 apply_runtime_patch "$task_state_patch"
 apply_runtime_patch "$blocking_detection_patch"
 apply_runtime_patch "$interrupt_service_patch"
+apply_runtime_patch "$library_exception_patch"
+apply_runtime_patch "$soft_links_patch"
 if [ "$compat_family" = gnat-legacy ]; then
   apply_runtime_patch "$legacy_suspension_spec_patch"
   apply_runtime_patch "$legacy_suspension_body_patch"
@@ -576,8 +580,16 @@ require_generated_text \
   "task-primitives scheduler"
 require_generated_text \
   "$generated_include/s-tassta.adb" \
-  "System.Flyology.Scheduler.Finalize;" \
+  "System.Flyology.Scheduler.Finalize'Access;" \
   "task-stages finalization"
+require_generated_text \
+  "$generated_include/a-except.adb" \
+  "Library_Finalization_Handler.all;" \
+  "library-finalization completion"
+require_generated_text \
+  "$generated_include/s-soflin.ads" \
+  "Library_Finalization_Handler : No_Param_Proc" \
+  "library-finalization soft link"
 require_generated_text \
   "$generated_include/s-tassta.adb" \
   "System.Flyology.Task_Results.Publish" \
@@ -652,6 +664,11 @@ compile_upstream_runtime_ada () {
   fi
 }
 
+compile_upstream_runtime_ada \
+  -I "$generated_include" \
+  "$generated_include/s-soflin.adb" \
+  "$generated_include/a-except.adb"
+
 #  The explicit Task_Info pragmas in the patched interrupt service are the
 #  supported designation mechanism, but current GNAT diagnoses that mechanism
 #  as obsolete. Suppress only that warning for this one patched unit.
@@ -704,6 +721,7 @@ if [ "$compat_family" = gnat-legacy ]; then
 fi
 
 cp \
+  a-except.ali s-soflin.ali \
   s-fltiab.ali s-fldeex.ali s-flpoco.ali s-flplco.ali s-flyolo.ali s-ftrepo.ali s-ftatab.ali \
   s-fltare.ali s-flstpo.ali s-flycon.ali \
   s-flyasa.ali \
@@ -742,6 +760,9 @@ ar -r "$generated_lib/libgnarl.a" \
   context_switch.o \
   platform.o \
   heap_trampoline.o
+ar -r "$generated_lib/libgnat.a" \
+  a-except.o \
+  s-soflin.o
 if [ "$compat_family" = gnat-legacy ]; then
   ar -r "$generated_lib/libgnarl.a" a-sytaco.o
 fi
@@ -798,12 +819,22 @@ verification_root="$build_root/patch-verification"
 mkdir "$verification_root"
 (
   cd "$verification_root"
+  ar -x "$generated_lib/libgnat.a" \
+    a-except.o s-soflin.o
   ar -x "$generated_lib/libgnarl.a" \
     s-taprop.o s-interr.o s-taskin.o s-tassta.o
   if [ "$compat_family" = gnat-legacy ]; then
     ar -x "$generated_lib/libgnarl.a" a-sytaco.o
   fi
 )
+require_archived_symbol \
+  "$verification_root/a-except.o" \
+  system__soft_links__library_finalization_handler \
+  "library-finalization completion"
+require_archived_symbol \
+  "$verification_root/s-soflin.o" \
+  system__soft_links__library_finalization_handler \
+  "library-finalization soft link"
 require_archived_symbol \
   "$verification_root/s-taprop.o" \
   system__flyology__scheduler__create \
@@ -856,6 +887,10 @@ printf '%s\n' "Flyology patched core manifest version 1" \
   >"$patched_core_manifest"
 record_patched_core source adainclude/s-taprop.adb \
   "$generated_include/s-taprop.adb"
+record_patched_core source adainclude/a-except.adb \
+  "$generated_include/a-except.adb"
+record_patched_core source adainclude/s-soflin.ads \
+  "$generated_include/s-soflin.ads"
 record_patched_core source adainclude/s-tassta.adb \
   "$generated_include/s-tassta.adb"
 record_patched_core source adainclude/s-taskin.adb \
@@ -874,6 +909,10 @@ if [ "$compat_family" = gnat-legacy ]; then
 fi
 record_patched_core archive adalib/libgnarl.a:s-taprop.o \
   "$verification_root/s-taprop.o"
+record_patched_core archive adalib/libgnat.a:a-except.o \
+  "$verification_root/a-except.o"
+record_patched_core archive adalib/libgnat.a:s-soflin.o \
+  "$verification_root/s-soflin.o"
 record_patched_core archive adalib/libgnarl.a:s-tassta.o \
   "$verification_root/s-tassta.o"
 record_patched_core archive adalib/libgnarl.a:s-taskin.o \
